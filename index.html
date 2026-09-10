@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <title>배송 동선 PRO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
+    
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .pt-safe { padding-top: max(1.5rem, env(safe-area-inset-top)); }
+        .pb-safe { padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
+        .tag-scroll-container { display: flex; gap: 0.375rem; overflow-x: auto; white-space: nowrap; padding-bottom: 0.25rem; }
+        
+        .sortable-drag {
+            opacity: 0.95 !important; transform: scale(1.02);
+            box-shadow: 0 15px 30px rgba(0,0,0,0.15) !important;
+            background-color: #ffffff; z-index: 9999 !important;
+            border-radius: 0.75rem; cursor: grabbing !important;
+        }
+        .sortable-ghost { opacity: 0.3; background-color: #f8fafc; border: 2px dashed #cbd5e1; }
+        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+
+    <!-- 🌟 모듈 파일들을 가져와서 연결하는 메인 진입점 스크립트 -->
+    <script type="module">
+        import { initApp, optimizeRouteAction, getOrCreateDeviceId, getDeviceRealGPS } from './js/app.js';
+        import { firebaseVerifyLicense, firebaseStartTrial, getMemosFromFirestore, getBatchMemosFromFirestore, saveMemoToFirestore, likeMemoInFirestore, reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto } from './js/api.js';
+        import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic } from './js/utils.js';
+
+        // Kakao SDK 초기화
+        const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
+        if (!Kakao.isInitialized()) { Kakao.init(KAKAO_JS_KEY); }
+
+        // HTML 내부의 인라인 onclick 이벤트들이 인식할 수 있도록 주요 함수들을 window 전역에 등록
+        window.optimizeRoute = optimizeRouteAction;
+        
+        // 앱 실행
+        window.onload = () => {
+            initApp();
+        };
+    </script>
+</head>
+<body class="bg-gray-100 h-[100dvh] flex flex-col overflow-hidden relative">
+
+    <!-- 사전 부팅 보안 화면 -->
+    <div id="boot-screen" class="fixed inset-0 bg-slate-900 z-[200] flex flex-col items-center justify-center p-6 text-center">
+        <div class="w-16 h-16 bg-blue-600/20 text-blue-500 rounded-3xl flex items-center justify-center text-3xl mb-4 animate-pulse">
+            <i class="fa-solid fa-truck-fast"></i>
+        </div>
+        <div class="flex items-center gap-2 text-white text-base font-black mb-1">
+            <i class="fa-solid fa-circle-notch fa-spin text-blue-500"></i>
+            <span>라이선스 보안 검증 중...</span>
+        </div>
+        <p class="text-xs text-gray-400 font-semibold">서버와 통신하여 계정 상태를 확인하고 있습니다.</p>
+    </div>
+
+    <!-- 알림 긴급 팝업 모달 -->
+    <div id="dispatch-alert-modal" class="hidden fixed inset-0 bg-black/75 z-[250] flex items-center justify-center p-5 backdrop-blur-sm animate-slide-up">
+        <div id="dispatch-alert-box" class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border-2 border-blue-500 text-center">
+            <div id="dispatch-alert-icon-box" class="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 shadow-inner animate-bounce">
+                <i class="fa-solid fa-bell"></i>
+            </div>
+            <span id="dispatch-alert-badge" class="bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">회사 알림</span>
+            <h3 class="text-base font-black text-gray-900 mt-2 mb-1" id="dispatch-alert-time">수신 시간</h3>
+            <div class="bg-slate-50 border border-gray-200 rounded-2xl p-4 my-3 text-left shadow-inner">
+                <p id="dispatch-alert-content" class="text-sm font-bold text-gray-800 whitespace-pre-line leading-relaxed"></p>
+            </div>
+            <button onclick="document.getElementById('dispatch-alert-modal').classList.add('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-xl shadow-lg transition active:scale-95 text-sm">
+                확인했습니다
+            </button>
+        </div>
+    </div>
+
+    <!-- 1. 메인 인증 화면 -->
+    <div id="auth-screen" class="hidden fixed inset-0 bg-gray-50 z-50 flex flex-col items-center justify-center p-6">
+        <div class="w-full max-w-sm bg-white border border-gray-200 rounded-3xl p-8 shadow-2xl text-center relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
+            <i class="fa-solid fa-truck-fast text-5xl text-blue-600 mb-4 mt-2"></i>
+            <h2 class="text-2xl font-black text-gray-900 mb-1 tracking-tight">배송 동선 PRO</h2>
+            <p class="text-xs text-gray-500 mb-6 font-semibold">발급받은 키와 본인 휴대폰 번호를 입력해 주세요.</p>
+            
+            <div class="space-y-3 mb-5 text-left">
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-400 mb-1 pl-1">라이선스 키</label>
+                    <input type="text" id="license-input" placeholder="예: 7K9A-4M2X" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl p-3.5 text-center font-mono outline-none uppercase font-bold transition">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-gray-400 mb-1 pl-1">본인 휴대폰 번호 <span class="text-red-500 font-black">*필수</span></label>
+                    <input type="tel" id="auth-phone-input" placeholder="예: 010-1234-5678" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-xl p-3.5 text-center outline-none font-bold transition">
+                </div>
+            </div>
+            
+            <button id="verify-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-black rounded-xl text-base px-5 py-3.5 text-center shadow-lg transition active:scale-95">
+                인증하고 시작하기
+            </button>
+            <p id="auth-message" class="text-red-500 text-xs mt-3 font-bold min-h-[16px] whitespace-pre-line"></p>
+        </div>
+    </div>
+
+    <!-- 2. 메인 앱 영역 (UI 뼈대) -->
+    <div id="main-app" class="hidden flex-col h-full w-full">
+        <header class="bg-white px-4 pt-safe pb-2.5 shadow-sm z-20 flex-none border-b border-gray-100 relative">
+            <div class="flex flex-col gap-1.5">
+                <div class="flex items-center justify-between">
+                    <h1 class="text-lg font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink-0">
+                        <i class="fa-solid fa-route text-blue-600 text-base"></i> 배송 동선 PRO
+                    </h1>
+                </div>
+                <div class="flex justify-between items-center mt-0.5">
+                    <span id="license-expire-badge" class="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-black shadow-xs">
+                        사용기한: 확인중...
+                    </span>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto px-4 py-3 hide-scrollbar bg-gray-100 relative">
+            <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px]">
+                <li id="empty-state" class="text-center text-gray-400 py-16 no-drag">
+                    <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
+                    <p class="font-medium text-sm">주소지를 스캔하면 동선이 생성됩니다.</p>
+                </li>
+            </ul>
+        </main>
+    </div>
+
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black bg-opacity-50 z-[120] flex items-center justify-center backdrop-blur-sm">
+        <div class="bg-white p-6 rounded-2xl flex flex-col items-center shadow-xl min-w-[150px]">
+            <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-4"></i>
+            <p id="loading-text" class="text-gray-800 font-bold text-sm mt-3">요청 처리 중...</p>
+        </div>
+    </div>
+</body>
+</html>

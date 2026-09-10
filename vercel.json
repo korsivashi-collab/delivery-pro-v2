@@ -1,0 +1,26 @@
+{
+  "redirects": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "mtsk.co.kr"
+        }
+      ],
+      "destination": "/admin.html",
+      "permanent": false
+    },
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mtsk.co.kr"
+        }
+      ],
+      "destination": "/admin.html",
+      "permanent": false
+    }
+  ]
+}
