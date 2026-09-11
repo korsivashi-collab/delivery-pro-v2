@@ -2076,7 +2076,6 @@ window.closeExcelExportModal = function() {
     document.getElementById('excel-export-modal').classList.add('hidden');
 };
 
-// 🌟 2. 설정된 기간과 다중 시트 기반으로 엑셀 통합 다운로드 실행
 window.executeExcelExport = function() {
     const startDateStr = document.getElementById('export-start-date').value;
     const endDateStr = document.getElementById('export-end-date').value;
@@ -2098,7 +2097,7 @@ window.executeExcelExport = function() {
     const wb = XLSX.utils.book_new();
     let hasData = false;
 
-    // 시트 1: [배송 완료] 데이터
+    // --- 시트 1: [배송 완료] 데이터 ---
     if (isCompleted) {
         const targetCompletions = allCompletions.filter(c => {
             if (!c.completedAt) return false;
@@ -2118,6 +2117,88 @@ window.executeExcelExport = function() {
                     idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
                 ]);
             });
+
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
+        }
+    }
+
+    // --- 시트 2: [대기 동선] 데이터 ---
+    if (isPending) {
+        let pendingList = [];
+        for (const devId in activeRoutes) {
+            if (!visibleDeviceIds.includes(devId)) continue;
+            const driver = activeRoutes[devId];
+            if (!driver || !driver.updatedAt) continue;
+
+            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
+                const dests = driver.destinations || [];
+                dests.forEach(d => {
+                    const isDone = allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
+                    if (!isDone) {
+                        pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
+                    }
+                });
+            }
+        }
+
+        if (pendingList.length > 0) {
+            hasData = true;
+            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
+            pendingList.forEach((p, idx) => {
+                const dt = new Date(p.updatedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
+            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
+        }
+    }
+
+    // --- 시트 3: [배송 취소] 데이터 ---
+    if (isCanceled) {
+        const targetCanceled = allCompletions.filter(c => {
+            if (!c.completedAt) return false;
+            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
+            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
+            return matchesDev && inRange && isCancelTag;
+        }).sort((a, b) => a.completedAt - b.completedAt);
+
+        hasData = true;
+        const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
+
+        if (targetCanceled.length > 0) {
+            targetCanceled.forEach((c, idx) => {
+                const dt = new Date(c.completedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음'
+                ]);
+            });
+        } else {
+            excelData.push(["", "", "", "선택하신 기간 내에 발생한 배송 취소/반품 내역이 없습니다.", "", "", ""]);
+        }
+
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
+        XLSX.utils.book_append_sheet(wb, ws, "배송취소");
+    }
+
+    if (!hasData) {
+        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
+        return;
+    }
+
+    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
+    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
+    window.closeExcelExportModal();
+};
 
             const ws = XLSX.utils.aoa_to_sheet(excelData);
             ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
