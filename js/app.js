@@ -83,6 +83,9 @@ export async function initApp() {
     startGpsWatcher();
     checkUnreadNotices();
     
+    // 🌟 누락되었던 카메라/스캔 기능 초기화 함수 호출!
+    initCameraScan();
+    
     const savedKey = localStorage.getItem('deliveryProKey');
     const savedPhone = localStorage.getItem('deliveryProUserPhone');
     const bootScreen = document.getElementById('boot-screen');
@@ -197,7 +200,6 @@ function updatePhotoCompButtonState(isLinked) {
     }
 }
 
-// 🌟 누락되었던 인증 및 체험 처리 함수 본체들
 export async function verifyLicense() {
     const keyInput = (document.getElementById('license-input')?.value || '').trim().toUpperCase();
     const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
@@ -468,7 +470,6 @@ export function clearLocalNotices() {
     checkUnreadNotices();
 }
 
-// 🌟 누락되었던 헬퍼 함수: 이력 청소 및 스와이프 초기화
 function cleanOldHistory() {
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
     let sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
@@ -1215,26 +1216,39 @@ export async function restoreHistoryItem(timestamp) {
     }
 }
 
+// 🌟 [추가/수정됨] 주소 직접 수정 시 커스텀 모달(promptAddressCustom) 호출 적용
 export async function editDestinationAddress(id) {
     const item = destinations.find(d => d.id === id); if (!item) return;
-    const newAddr = prompt("수정할 주소를 입력하세요:", item.address);
-    if (!newAddr || newAddr.trim() === item.address) return;
+    
+    // 기본 브라우저 prompt가 아닌, 예쁜 커스텀 모달 호출
+    const result = await promptAddressCustom("", item.address, item.phone || "", true); 
+    if (!result) return;
+    
+    const newAddr = result.address; 
+    const newPhone = result.phone;
+    let addrChanged = newAddr !== item.address; 
+    let phoneChanged = newPhone !== (item.phone || "");
+    if (!addrChanged && !phoneChanged) return;
 
-    showLoading("수정된 주소 확인 중...");
-    try {
-        const coords = await geocodeAddress(newAddr.trim());
-        if (coords) { 
-            item.address = coords.address_name || newAddr.trim(); 
-            item.lat = coords.lat; 
-            item.lng = coords.lng; 
-            saveActiveData(); 
-            renderList();
+    if (addrChanged) {
+        showLoading("수정된 주소 확인 중...");
+        try {
+            const coords = await geocodeAddress(newAddr.trim());
+            if (coords) { 
+                item.address = coords.address_name || newAddr.trim(); 
+                item.lat = coords.lat; 
+                item.lng = coords.lng; 
+            }
+        } catch (e) { 
+            alert("수정된 주소를 지도에서 찾을 수 없습니다."); 
+            hideLoading(); return; 
+        } finally { 
+            hideLoading(); 
         }
-    } catch (e) { 
-        alert("수정된 주소를 지도에서 찾을 수 없습니다."); 
-    } finally { 
-        hideLoading(); 
     }
+    item.phone = newPhone; 
+    saveActiveData(); 
+    renderList();
 }
 
 function showLoading(text) { 
@@ -1269,6 +1283,141 @@ export async function logout() {
     clearAuthStorage();
     window.location.reload();
 }
+
+// 🌟 [추가됨] OCR 스캔 및 카메라 이벤트 처리 로직 🌟
+const MAX_MONTHLY_SCANS = 1250; 
+const SCAN_COOLDOWN_MS = 1000;
+
+function checkScanLimit() {
+    const now = Date.now();
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const lastScanTime = localStorage.getItem('deliveryProLastScanTime');
+    if (lastScanTime && (now - parseInt(lastScanTime) < SCAN_COOLDOWN_MS)) { alert("1초 후 다시 스캔해주세요."); return false; }
+    let scanData = JSON.parse(localStorage.getItem('deliveryProScanData') || '{"month": "", "count": 0}');
+    if (scanData.month !== currentMonth) { scanData = { month: currentMonth, count: 0 }; }
+    if (scanData.count >= MAX_MONTHLY_SCANS) { alert(`⚠️ 월간 최대 스캔 한도(${MAX_MONTHLY_SCANS}장) 초과.`); return false; }
+    scanData.count++;
+    localStorage.setItem('deliveryProScanData', JSON.stringify(scanData));
+    localStorage.setItem('deliveryProLastScanTime', now.toString());
+    return true;
+}
+
+async function performOCR(base64Data) {
+    const response = await fetch('/api/ocr', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ imageContent: base64Data }) 
+    });
+    const data = await response.json();
+    if (data.error) throw new Error(data.error);
+    if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
+    if (data.responses && data.responses[0].fullTextAnnotation) return data.responses[0].fullTextAnnotation.text;
+    throw new Error("사진에서 글자를 찾을 수 없습니다.");
+}
+
+export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isEditMode = false) {
+    return new Promise((resolve) => {
+        const modal = document.getElementById('address-input-modal');
+        const addrInput = document.getElementById('manual-address-input');
+        const phoneInput = document.getElementById('manual-phone-input');
+        const snippetEl = document.getElementById('ocr-snippet');
+        const snippetContainer = document.getElementById('ocr-snippet-container');
+        const titleEl = document.getElementById('address-modal-title');
+        const descEl = document.getElementById('address-modal-desc');
+        const btnConfirm = document.getElementById('address-modal-confirm');
+        const btnCancel = document.getElementById('address-modal-cancel');
+
+        if (isEditMode) {
+            if(titleEl) titleEl.innerText = "정보 확인 및 수정"; 
+            if(descEl) descEl.innerText = "정확한 배송지 정보를 입력해 주세요.";
+            if(snippetContainer) snippetContainer.classList.add('hidden');
+        } else {
+            if(titleEl) titleEl.innerText = "주소 확인"; 
+            if(descEl) descEl.innerText = "인식 오류 시 직접 입력해 주세요";
+            if(snippetContainer) snippetContainer.classList.remove('hidden'); 
+            if(snippetEl) snippetEl.innerText = snippet || "인식된 텍스트가 없습니다.";
+        }
+
+        if(addrInput) addrInput.value = defaultText || ""; 
+        if(phoneInput) phoneInput.value = defaultPhone || "";
+        if(modal) modal.classList.remove('hidden');
+        setTimeout(() => { if(addrInput) addrInput.focus(); }, 100);
+
+        const onConfirm = () => { cleanup(); resolve({ address: addrInput.value.trim(), phone: phoneInput.value.trim() }); };
+        const onCancel = () => { cleanup(); resolve(null); };
+        const cleanup = () => { 
+            btnConfirm.removeEventListener('click', onConfirm); 
+            btnCancel.removeEventListener('click', onCancel); 
+            if(modal) modal.classList.add('hidden'); 
+        };
+        btnConfirm.addEventListener('click', onConfirm); 
+        btnCancel.addEventListener('click', onCancel);
+    });
+}
+
+export function initCameraScan() {
+    const cameraInput = document.getElementById('camera-input');
+    if (!cameraInput) return;
+    
+    cameraInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+        if (!checkScanLimit()) { e.target.value = ''; return; }
+
+        let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
+        showLoading("사진 판독 중...");
+        try {
+            const base64Image = await toBase64_SafeCompress(file);
+            const imageContent = base64Image.split(',')[1];
+            rawOCRText = await performOCR(imageContent);
+            addressStr = extractAddressLogic(rawOCRText);
+            extractedPhone = extractPhoneLogic(rawOCRText);
+            hideLoading();
+        } catch (error) {
+            hideLoading();
+            const result = await promptAddressCustom("사진 인식 실패", "", "", false);
+            if (!result || !result.address) { e.target.value = ''; return; }
+            addressStr = result.address; extractedPhone = result.phone;
+        }
+
+        if (!addressStr && rawOCRText) {
+            let snippet = rawOCRText.replace(/\n/g, ' ').substring(0, 40);
+            const result = await promptAddressCustom(snippet + "...", "", extractedPhone, false);
+            if (!result || !result.address) { e.target.value = ''; return; }
+            addressStr = result.address; extractedPhone = result.phone;
+        }
+
+        let coords = null;
+        while (!coords) {
+            try {
+                showLoading("지도 위치 확인 중...");
+                coords = await geocodeAddress(addressStr);
+                hideLoading();
+            } catch (error) {
+                hideLoading();
+                const result = await promptAddressCustom("지도에서 주소를 찾을 수 없습니다.", addressStr, extractedPhone, true);
+                if (!result || !result.address) { e.target.value = ''; return; }
+                addressStr = result.address; extractedPhone = result.phone;
+            }
+        }
+
+        if (coords) {
+            let nextNum = destinations.length > 0 ? Math.max(...destinations.map(d => d.displayNumber)) + 1 : 1;
+            const newDestId = idCounter++; 
+            destinations.push({
+                id: newDestId, address: coords.address_name || addressStr,
+                lat: coords.lat, lng: coords.lng, phone: extractedPhone, displayNumber: nextNum
+            });
+            saveActiveData(); renderList();
+            setTimeout(() => { 
+                const newEl = document.querySelector(`li[data-id="${newDestId}"]`); 
+                if (newEl) newEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
+            }, 150);
+        }
+        e.target.value = ''; 
+    });
+}
+
 
 // 🌟 HTML과의 연결을 위한 맨 마지막 전역 바인딩 (이름표 달기)
 window.logout = logout;
