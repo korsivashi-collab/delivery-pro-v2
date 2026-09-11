@@ -1797,7 +1797,7 @@ window.drawAllDriversOnMap = function() {
 };
 window.fitMapToAllDrivers = function() { window.drawAllDriversOnMap(); };
 
-function drawDriverOnMap(devId) {
+window.drawDriverOnMap = function(devId) {
             clearMapOverlays();
             const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
             const driver = activeRoutes[devId] || null;
