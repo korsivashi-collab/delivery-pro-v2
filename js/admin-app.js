@@ -1297,12 +1297,13 @@ window.renderDriverListView = function() {
             return matchesDev && matchesDate;
         });
 
-        const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
-        const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-        const pendingCount = remainingDests.length;
-        const doneCount = driverDone.length;
-        const totalCount = pendingCount + doneCount;
-        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
+const remainingDests = rawDests.filter(d => !doneMap[d.address]);
+
+const pendingCount = isToday ? remainingDests.length : 0; // 오늘이 아니면 잔여 건수는 0
+const doneCount = driverDone.length;
+const totalCount = isToday ? (pendingCount + doneCount) : doneCount; // 총 건수도 날짜별로 정산
+const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
 
         html += `
         <div onclick="selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
@@ -1347,10 +1348,11 @@ window.renderDriverDetailView = function(devId) {
 
     const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
     const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-    const pendingCount = remainingDests.length;
-    const doneCount = driverDone.length;
-    const totalCount = pendingCount + doneCount;
-    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+
+const pendingCount = isToday ? remainingDests.length : 0;
+const doneCount = driverDone.length;
+const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
+const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);	
 
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
@@ -1783,63 +1785,88 @@ window.drawAllDriversOnMap = function() {
 };
 window.fitMapToAllDrivers = function() { window.drawAllDriversOnMap(); };
 
-window.drawDriverOnMap = function(devId) {
-    clearMapOverlays();
-    const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = activeRoutes[devId] || null;
-    if (!driver || !map) return;
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
-    const rawDests = driver.destinations || [];
-    const completions = allCompletions.filter(c => {
-        const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
-        const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
-        return matchesDev && matchesDate;
-    });
+function drawDriverOnMap(devId) {
+            clearMapOverlays();
+            const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
+            const driver = activeRoutes[devId] || null;
+            if (!map) return;
 
-    completions.sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
-    const doneMap = {}; completions.forEach(c => { doneMap[c.address] = c; });
-    const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-    const currentTargetAddr = remainingDests.length > 0 ? remainingDests[0].address : null;
+            const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
+            const dotDate = selectedDate.replace(/-/g, '.');
+            const isToday = (selectedDate === todayStr); // 🌟 오늘 날짜 여부 확인
 
-    const bounds = new kakao.maps.LatLngBounds(); let pointsCount = 0;
-    const plannedPath = []; const completedPath = [];
+            // 🌟 [핵심 수정] 오늘 날짜가 아니면 기사의 실시간 계획 동선(대기 목적지)은 지도에 렌더링하지 않음
+            const rawDests = (isToday && driver) ? (driver.destinations || []) : [];
 
-    completions.forEach(comp => {
-        if (comp.lat && comp.lng) {
-            const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
-            bounds.extend(pos); completedPath.push(pos); pointsCount++;
-            const content = document.createElement('div'); content.className = 'custom-overlay completed';
-            content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
-            const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.setMap(map); mapOverlays.push(overlay);
-        }
-    });
-    rawDests.forEach(d => {
-        if (d.lat && d.lng) {
-            const pos = new kakao.maps.LatLng(d.lat, d.lng);
-            plannedPath.push(pos);
-            if (!doneMap[d.address]) {
-                bounds.extend(pos); pointsCount++;
-                const isCurrent = d.address === currentTargetAddr;
-                const content = document.createElement('div'); content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
-                content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
-                const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                overlay.setMap(map); mapOverlays.push(overlay);
+            // 선택한 날짜에 맞는 완료 이력만 정확히 필터링
+            const completions = allCompletions.filter(c => {
+                const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
+                const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
+                                    (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
+                return matchesDev && matchesDate;
+            });
+
+            completions.sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+            const doneMap = {};
+            completions.forEach(c => { doneMap[c.address] = c; });
+            const remainingDests = rawDests.filter(d => !doneMap[d.address]);
+            const currentTargetAddr = remainingDests.length > 0 ? remainingDests[0].address : null;
+
+            const bounds = new kakao.maps.LatLngBounds();
+            let pointsCount = 0;
+            const plannedPath = [];
+            const completedPath = [];
+
+            // 완료된 배송 핀 그리기 (초록색)
+            completions.forEach(comp => {
+                if (comp.lat && comp.lng) {
+                    const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
+                    bounds.extend(pos); completedPath.push(pos); pointsCount++;
+                    const content = document.createElement('div');
+                    content.className = 'custom-overlay completed';
+                    content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
+                    const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
+                    overlay.setMap(map); mapOverlays.push(overlay);
+                }
+            });
+
+            // 오늘 날짜일 때만 대기 목적지 핀 그리기 (파란색)
+            if (isToday) {
+                rawDests.forEach(d => {
+                    if (d.lat && d.lng) {
+                        const pos = new kakao.maps.LatLng(d.lat, d.lng);
+                        plannedPath.push(pos);
+                        if (!doneMap[d.address]) {
+                            bounds.extend(pos); pointsCount++;
+                            const isCurrent = d.address === currentTargetAddr;
+                            const content = document.createElement('div');
+                            content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
+                            content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
+                            const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
+                            overlay.setMap(map); mapOverlays.push(overlay);
+                        }
+                    }
+                });
             }
-        }
-    });
 
-    if (plannedPath.length > 1) {
-        window.mapPlannedPolyline = new kakao.maps.Polyline({ path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid' });
-        if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'planned') window.mapPlannedPolyline.setMap(map);
-    }
-    if (completedPath.length > 1) {
-        window.mapCompletedPolyline = new kakao.maps.Polyline({ path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid' });
-        if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'completed') window.mapCompletedPolyline.setMap(map);
-    }
-    if (pointsCount > 0) map.setBounds(bounds);
-};
+            // 오늘 날짜일 때만 배송 계획 동선(파란선) 표시
+            if (plannedPath.length > 1 && isToday) {
+                window.mapPlannedPolyline = new kakao.maps.Polyline({
+                    path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
+                });
+                if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'planned') window.mapPlannedPolyline.setMap(map);
+            }
+
+            // 완료된 동선(초록선)은 언제나 해당 날짜에 맞게 표시
+            if (completedPath.length > 1) {
+                window.mapCompletedPolyline = new kakao.maps.Polyline({
+                    path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
+                });
+                if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'completed') window.mapCompletedPolyline.setMap(map);
+            }
+
+            if (pointsCount > 0) map.setBounds(bounds);
+        }
 
 window.setMapPolylineMode = function(mode) {
     currentMapPolylineMode = mode;
