@@ -251,6 +251,65 @@ function checkUnreadNotices() {
     else dot.classList.add('hidden');
 }
 
+// 🌟 추가된 누락 함수: 지난 이력 청소 및 스와이프 초기화
+function cleanOldHistory() {
+    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    let sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
+    history = history.filter(h => h.timestamp > sevenDaysAgo);
+    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+}
+
+function initSwipeButton() {
+    const swipeContainer = document.getElementById('swipe-container');
+    const swipeBtn = document.getElementById('swipe-btn');
+    if (!swipeContainer || !swipeBtn) return;
+    
+    let isDragging = false;
+    let startX = 0; let btnLeft = 4;
+    
+    function startDrag(e) {
+        isDragging = true;
+        startX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        swipeBtn.style.transition = 'none';
+    }
+    
+    function moveDrag(e) {
+        if (!isDragging) return;
+        const currentX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        let moveX = currentX - startX;
+        let newLeft = btnLeft + moveX;
+        let maxW = swipeContainer.offsetWidth - swipeBtn.offsetWidth - 4;
+        
+        if (newLeft < 4) newLeft = 4;
+        if (newLeft > maxW) newLeft = maxW;
+        
+        swipeBtn.style.transform = `translateX(${newLeft - 4}px)`;
+        
+        if (newLeft >= maxW - 2) {
+            isDragging = false;
+            swipeBtn.style.transform = `translateX(0px)`;
+            swipeBtn.style.transition = 'transform 0.3s ease';
+            if (typeof window.openStartSelectionModal === 'function') {
+                window.openStartSelectionModal();
+            }
+        }
+    }
+    
+    function endDrag() {
+        if (!isDragging) return;
+        isDragging = false;
+        swipeBtn.style.transition = 'transform 0.3s ease';
+        swipeBtn.style.transform = `translateX(0px)`;
+    }
+    
+    swipeBtn.addEventListener('mousedown', startDrag);
+    swipeBtn.addEventListener('touchstart', startDrag, {passive: true});
+    document.addEventListener('mousemove', moveDrag);
+    document.addEventListener('touchmove', moveDrag, {passive: false});
+    document.addEventListener('mouseup', endDrag);
+    document.addEventListener('touchend', endDrag);
+}
+
 // 🌟 메인 최적화 실행 함수
 export function optimizeRouteAction() {
     if (destinations.length < 2) { 
@@ -306,7 +365,7 @@ function loadActiveData() {
     renderList();
 }
 
-// 🌟 누락되었던 리스트 렌더링 및 UI 연동 함수 추가
+// 리스트 렌더링 및 UI 연동 함수
 function initSortable() {
     const el = document.getElementById('destination-list');
     if (sortableInstance) sortableInstance.destroy();
