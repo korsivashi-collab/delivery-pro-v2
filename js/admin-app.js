@@ -1823,7 +1823,7 @@ window.drawAllDriversOnMap = function() {
 window.fitMapToAllDrivers = function() { window.drawAllDriversOnMap(); };
 
 window.drawDriverOnMap = function(devId) {
-    window.forceClearMap(); // 모듈화 충돌 방지 초기화
+    window.forceClearMap(); // 모듈화 충돌 방지 초기화 (완료 동선 고쳐진 핵심 유지)
     const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const driver = activeRoutes[devId] || null;
     if (!map) return;
@@ -1832,8 +1832,10 @@ window.drawDriverOnMap = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    const rawDests = (isToday && driver) ? (driver.destinations || []) : [];
+    // 🌟 [핵심 복구] 사이드바 목록과 100% 일치하도록, 날짜에 상관없이 파이어베이스 동선 데이터가 있으면 무조건 가져옵니다!
+    const rawDests = driver ? (driver.destinations || []) : [];
 
+    // 선택한 날짜에 맞는 완료 이력 필터링
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
@@ -1852,6 +1854,7 @@ window.drawDriverOnMap = function(devId) {
     const plannedPath = [];
     const completedPath = [];
 
+    // 완료된 배송 핀 그리기 (초록색)
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
@@ -1865,12 +1868,13 @@ window.drawDriverOnMap = function(devId) {
         }
     });
 
-    if (isToday && rawDests.length > 0) {
+    // 🌟 사이드바에 대기 데이터가 있다면, 지도 위에도 동일하게 파란 핀과 파란선을 그립니다.
+    if (rawDests.length > 0) {
         rawDests.forEach(d => {
             if (d.lat && d.lng) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
-                plannedPath.push(pos);
-                if (!doneMap[d.address]) {
+                plannedPath.push(pos); // 파란선 그리기 용 좌표 추가
+                if (!doneMap[d.address]) { // 아직 해당 날짜에 완료 안된 곳만 파란 대기 핀 표시
                     bounds.extend(pos); pointsCount++;
                     const isCurrent = d.address === currentTargetAddr;
                     const content = document.createElement('div');
@@ -1884,7 +1888,8 @@ window.drawDriverOnMap = function(devId) {
         });
     }
 
-    if (plannedPath.length > 1 && isToday) {
+    // 배송 계획 동선(파란선) 표시
+    if (plannedPath.length > 1) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
@@ -1893,6 +1898,7 @@ window.drawDriverOnMap = function(devId) {
         }
     }
 
+    // 완료된 동선(초록선) 표시
     if (completedPath.length > 1) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
