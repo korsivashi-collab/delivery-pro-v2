@@ -403,9 +403,9 @@
                         <i class="fa-solid fa-map-location-dot text-[11px]"></i> 위치 확인
                     </button>
                     <div class="w-px h-5 bg-gray-300 mx-0.5"></div>
-                    <button onclick="downloadDispatchExcel()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5" title="현재 날짜의 완료된 배송 내역을 엑셀로 다운로드">
-                        <i class="fa-solid fa-file-excel text-[11px]"></i> 엑셀 다운로드
-                    </button>
+                  <button onclick="openExcelExportModal()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5 shadow-sm active:scale-95" title="원하는 기간과 항목을 선택하여 엑셀 리포트를 추출합니다">
+    <i class="fa-solid fa-file-excel text-[11px]"></i> 데이터 추출
+</button>
                 </div>
             </div>
 
@@ -604,5 +604,54 @@
 
     <!-- 🌟 ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
     <script type="module" src="./js/admin-app.js"></script>
+    <!-- 🌟 [신규 추가] 엑셀 데이터 추출 기간/항목 설정 모달 -->
+    <div id="excel-export-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative">
+            <div class="flex justify-between items-center pb-3 border-b border-gray-100 mb-4">
+                <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
+                    <i class="fa-solid fa-file-excel text-emerald-600"></i> 데이터 추출 (엑셀 리포트)
+                </h3>
+                <button onclick="closeExcelExportModal()" class="text-gray-400 hover:text-red-500 transition p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            
+            <!-- 날짜 구간 선택 -->
+            <div class="mb-5">
+                <label class="block text-xs font-black text-gray-700 mb-2"><i class="fa-regular fa-calendar text-blue-600 mr-1"></i> 조회 기간 설정</label>
+                <div class="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200 shadow-inner">
+                    <input type="date" id="export-start-date" class="flex-1 bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-blue-500 shadow-sm cursor-pointer">
+                    <span class="text-gray-400 font-black">~</span>
+                    <input type="date" id="export-end-date" class="flex-1 bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-blue-500 shadow-sm cursor-pointer">
+                </div>
+            </div>
+
+            <!-- 추출 항목 다중 선택 -->
+            <div class="mb-6">
+                <label class="block text-xs font-black text-gray-700 mb-2"><i class="fa-solid fa-list-check text-blue-600 mr-1"></i> 출력할 데이터 (복수 선택)</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <label class="flex items-center gap-2 p-2.5 border border-gray-200 rounded-xl cursor-pointer hover:bg-emerald-50 transition shadow-sm">
+                        <input type="checkbox" id="chk-export-completed" checked class="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer">
+                        <span class="text-xs font-black text-gray-800">배송 완료</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 border border-gray-200 rounded-xl cursor-pointer hover:bg-blue-50 transition shadow-sm">
+                        <input type="checkbox" id="chk-export-pending" checked class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                        <span class="text-xs font-black text-gray-800">대기 동선</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 border border-gray-200 rounded-xl cursor-pointer hover:bg-red-50 transition shadow-sm">
+                        <input type="checkbox" id="chk-export-canceled" class="w-4 h-4 text-red-600 rounded border-gray-300 focus:ring-red-500 cursor-pointer">
+                        <span class="text-xs font-black text-gray-800">배송 취소</span>
+                    </label>
+                </div>
+                <p class="text-[10px] text-gray-400 font-bold mt-2 leading-relaxed">* 선택한 항목별로 엑셀 파일 내에 각각의 페이지(시트)가 나뉘어 생성됩니다.</p>
+            </div>
+
+            <!-- 버튼 영역 -->
+            <div class="flex gap-2">
+                <button type="button" onclick="closeExcelExportModal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-xl text-xs transition">취소</button>
+                <button type="button" onclick="executeExcelExport()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-download"></i> 리포트 다운로드
+                </button>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
