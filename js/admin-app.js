@@ -1363,7 +1363,16 @@ window.renderDriverDetailView = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    const rawDests = driver ? driver.destinations || [] : [];
+    // 🌟 [핵심 차단 로직 1] 과거 날짜 조회 시, 오늘의 실시간 계획 동선이 섞여 들어오는 것을 철저히 막습니다.
+    let driverRoute = null;
+    if (driver && driver.updatedAt) {
+        const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
+        if (isToday || routeDateStr === selectedDate) {
+            driverRoute = driver;
+        }
+    }
+    const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
+
     const driverDone = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
@@ -1391,7 +1400,7 @@ window.renderDriverDetailView = function(devId) {
 
     if (window.dispatchDetailTab === 'ROUTE') {
         if (rawDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-route text-2xl text-gray-300 mb-1"></i><p>기사가 최적화한 배송 동선이 없습니다.</p><p class="text-[11px] font-normal text-gray-400">기사 앱에서 '밀어서 동선 최적화'를 실행하면 표시됩니다.</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-route text-2xl text-gray-300 mb-1"></i><p>선택하신 날짜의 대기 중인 배송 동선이 없습니다.</p><p class="text-[11px] font-normal text-gray-400">과거 내역은 '배송 완료' 탭에서 확인해 주세요.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             rawDests.forEach((d, idx) => {
@@ -1823,7 +1832,7 @@ window.drawAllDriversOnMap = function() {
 window.fitMapToAllDrivers = function() { window.drawAllDriversOnMap(); };
 
 window.drawDriverOnMap = function(devId) {
-    window.forceClearMap(); // 모듈화 충돌 방지 초기화 (완료 동선 고쳐진 핵심 유지)
+    window.forceClearMap(); 
     const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const driver = activeRoutes[devId] || null;
     if (!map) return;
@@ -1832,10 +1841,16 @@ window.drawDriverOnMap = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    // 🌟 [핵심 복구] 사이드바 목록과 100% 일치하도록, 날짜에 상관없이 파이어베이스 동선 데이터가 있으면 무조건 가져옵니다!
-    const rawDests = driver ? (driver.destinations || []) : [];
+    // 🌟 [핵심 차단 로직 2] 지도에서도 과거 날짜 조회 시, 오늘의 파란색 계획 동선이 그려지지 않도록 차단
+    let driverRoute = null;
+    if (driver && driver.updatedAt) {
+        const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
+        if (isToday || routeDateStr === selectedDate) {
+            driverRoute = driver;
+        }
+    }
+    const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
 
-    // 선택한 날짜에 맞는 완료 이력 필터링
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
@@ -1854,7 +1869,6 @@ window.drawDriverOnMap = function(devId) {
     const plannedPath = [];
     const completedPath = [];
 
-    // 완료된 배송 핀 그리기 (초록색)
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
@@ -1868,13 +1882,12 @@ window.drawDriverOnMap = function(devId) {
         }
     });
 
-    // 🌟 사이드바에 대기 데이터가 있다면, 지도 위에도 동일하게 파란 핀과 파란선을 그립니다.
     if (rawDests.length > 0) {
         rawDests.forEach(d => {
             if (d.lat && d.lng) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
-                plannedPath.push(pos); // 파란선 그리기 용 좌표 추가
-                if (!doneMap[d.address]) { // 아직 해당 날짜에 완료 안된 곳만 파란 대기 핀 표시
+                plannedPath.push(pos);
+                if (!doneMap[d.address]) {
                     bounds.extend(pos); pointsCount++;
                     const isCurrent = d.address === currentTargetAddr;
                     const content = document.createElement('div');
@@ -1888,8 +1901,7 @@ window.drawDriverOnMap = function(devId) {
         });
     }
 
-    // 배송 계획 동선(파란선) 표시
-    if (plannedPath.length > 1) {
+    if (plannedPath.length > 1 && driverRoute) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
@@ -1898,7 +1910,6 @@ window.drawDriverOnMap = function(devId) {
         }
     }
 
-    // 완료된 동선(초록선) 표시
     if (completedPath.length > 1) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
