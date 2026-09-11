@@ -1283,12 +1283,23 @@ window.renderDriverListView = function() {
 
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
+    
+    // 🌟 [안전한 날짜 비교 변수 정의]
+    const isToday = (selectedDate === todayStr);
 
     let html = '';
     visibleLicenses.forEach(lic => {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
-        const driverRoute = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
+        
+        const routeData = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
+        let driverRoute = null;
+        if (routeData && routeData.updatedAt) {
+            const routeDateStr = new Date(routeData.updatedAt).toISOString().split('T')[0];
+            if (isToday || routeDateStr === selectedDate) {
+                driverRoute = routeData;
+            }
+        }
         const rawDests = driverRoute ? driverRoute.destinations || [] : [];
 
         const driverDone = allCompletions.filter(c => {
@@ -1297,13 +1308,14 @@ window.renderDriverListView = function() {
             return matchesDev && matchesDate;
         });
 
-const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
-const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-
-const pendingCount = isToday ? remainingDests.length : 0; // 오늘이 아니면 잔여 건수는 0
-const doneCount = driverDone.length;
-const totalCount = isToday ? (pendingCount + doneCount) : doneCount; // 총 건수도 날짜별로 정산
-const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
+        const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
+        const remainingDests = rawDests.filter(d => !doneMap[d.address]);
+        
+        // 🌟 안전하게 연산 적용
+        const pendingCount = isToday ? remainingDests.length : 0;
+        const doneCount = driverDone.length;
+        const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
+        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
 
         html += `
         <div onclick="selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
