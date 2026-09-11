@@ -87,8 +87,14 @@ export async function initApp() {
     const savedPhone = localStorage.getItem('deliveryProUserPhone');
     const bootScreen = document.getElementById('boot-screen');
 
-    if (savedKey) document.getElementById('license-input').value = savedKey;
-    if (savedPhone) document.getElementById('auth-phone-input').value = savedPhone;
+    if (savedKey) {
+        const inputKey = document.getElementById('license-input');
+        if (inputKey) inputKey.value = savedKey;
+    }
+    if (savedPhone) {
+        const inputPhone = document.getElementById('auth-phone-input');
+        if (inputPhone) inputPhone.value = savedPhone;
+    }
 
     const cleanDigits = (savedPhone || '').replace(/[^0-9]/g, '');
 
@@ -114,15 +120,20 @@ export async function initApp() {
                 updatePhotoCompButtonState(!!res.dispatchKey);
             } else {
                 clearAuthStorage();
-                document.getElementById('auth-message').innerText = res.msg;
-                document.getElementById('auth-screen').classList.remove('hidden');
+                const authMsg = document.getElementById('auth-message');
+                if (authMsg) authMsg.innerText = res.msg;
+                const authScreen = document.getElementById('auth-screen');
+                if (authScreen) authScreen.classList.remove('hidden');
             }
         } catch (e) {
-            document.getElementById('auth-message').innerText = "보안 통신 오류가 발생했습니다. 네트워크를 확인해 주세요.";
-            document.getElementById('auth-screen').classList.remove('hidden');
+            const authMsg = document.getElementById('auth-message');
+            if (authMsg) authMsg.innerText = "보안 통신 오류가 발생했습니다. 네트워크를 확인해 주세요.";
+            const authScreen = document.getElementById('auth-screen');
+            if (authScreen) authScreen.classList.remove('hidden');
         }
     } else {
-        document.getElementById('auth-screen').classList.remove('hidden');
+        const authScreen = document.getElementById('auth-screen');
+        if (authScreen) authScreen.classList.remove('hidden');
     }
 
     if (bootScreen) bootScreen.classList.add('hidden');
@@ -149,15 +160,20 @@ function startLicenseRealtimeWatcher(key) {
 }
 
 function unlockApp() {
-    document.getElementById('auth-screen').classList.add('hidden');
-    document.getElementById('main-app').classList.remove('hidden');
-    document.getElementById('main-app').classList.add('flex');
+    const authScreen = document.getElementById('auth-screen');
+    const mainApp = document.getElementById('main-app');
+    if (authScreen) authScreen.classList.add('hidden');
+    if (mainApp) {
+        mainApp.classList.remove('hidden');
+        mainApp.classList.add('flex');
+    }
     updateExpireBadge(); 
     startGpsWatcher();
 }
 
 function updateExpireBadge(serverDate) {
     const badge = document.getElementById('license-expire-badge');
+    if (!badge) return;
     const cachedDate = localStorage.getItem('deliveryProExpireDate');
     const expireDate = serverDate || cachedDate || "2026.12.31";
     if (serverDate) localStorage.setItem('deliveryProExpireDate', serverDate);
@@ -201,9 +217,13 @@ export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, sen
         if (badge) { badge.className = "bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider"; badge.innerText = title; }
     }
 
-    document.getElementById('dispatch-alert-content').innerText = content;
-    document.getElementById('dispatch-alert-time').innerText = `${timeStr || '방금'} 수신`;
-    document.getElementById('dispatch-alert-modal').classList.remove('hidden');
+    const contentEl = document.getElementById('dispatch-alert-content');
+    const timeEl = document.getElementById('dispatch-alert-time');
+    const modalEl = document.getElementById('dispatch-alert-modal');
+
+    if (contentEl) contentEl.innerText = content;
+    if (timeEl) timeEl.innerText = `${timeStr || '방금'} 수신`;
+    if (modalEl) modalEl.classList.remove('hidden');
 
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     playBeepSound();
@@ -251,7 +271,7 @@ function checkUnreadNotices() {
     else dot.classList.add('hidden');
 }
 
-// 🌟 추가된 누락 함수: 지난 이력 청소 및 스와이프 초기화
+// 🌟 누락되었던 헬퍼 함수: 이력 청소 및 스와이프 초기화
 function cleanOldHistory() {
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
     let sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
@@ -321,13 +341,14 @@ export function optimizeRouteAction() {
         return; 
     }
     
-    showLoading("최적화중...");
+    // showLoading은 HTML 내부 스크립트에 정의되어 있거나 전역일 수 있음
+    if (typeof window.showLoading === 'function') window.showLoading("최적화중...");
     
     setTimeout(() => {
         try {
             destinations = calculateOptimizedRoute(destinations, startLocation, endLocation);
             updateDisplayNumbers();
-            hideLoading();
+            if (typeof window.hideLoading === 'function') window.hideLoading();
             
             const deviceId = getOrCreateDeviceId();
             const phone = localStorage.getItem('deliveryProUserPhone') || "";
@@ -338,7 +359,7 @@ export function optimizeRouteAction() {
                 if (mainContainer) mainContainer.scrollTo({ top: 0, behavior: 'smooth' }); 
             }, 100);
         } catch (error) {
-            hideLoading();
+            if (typeof window.hideLoading === 'function') window.hideLoading();
             alert(error.message);
         }
     }, 500);
@@ -368,6 +389,7 @@ function loadActiveData() {
 // 리스트 렌더링 및 UI 연동 함수
 function initSortable() {
     const el = document.getElementById('destination-list');
+    if (!el) return;
     if (sortableInstance) sortableInstance.destroy();
     
     if (window.Sortable) {
@@ -539,7 +561,7 @@ export async function logout() {
 window.logout = logout;
 window.renderList = renderList;
 
-// 화면 렌더링 및 UI 바인딩 함수들은 브라우저 전역(window)으로 등록하여 HTML과 연결
+// 전역 바인딩
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
 };
