@@ -1879,11 +1879,21 @@ window.setMapPolylineMode = function(mode) {
     currentMapPolylineMode = mode;
     ['all', 'planned', 'completed'].forEach(m => {
         const btn = document.getElementById(`btn-mode-${m}`);
-        if (m === mode) btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
-        else btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition font-black flex items-center gap-1";
+        if (!btn) return;
+        if (m === mode) {
+            btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
+        } else {
+            btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition font-black flex items-center gap-1";
+        }
     });
-    if (mapPlannedPolyline) mapPlannedPolyline.setMap(mode === 'all' || mode === 'planned' ? map : null);
-    if (mapCompletedPolyline) mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
+
+    // 🌟 admin-map.js에서 관리하는 폴리라인 객체들을 안전하게 토글
+    if (mapPlannedPolyline) {
+        mapPlannedPolyline.setMap(mode === 'all' || mode === 'planned' ? map : null);
+    }
+    if (mapCompletedPolyline) {
+        mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
+    }
 };
 
 window.focusMapPosition = function(lat, lng) { focusMapPosition(lat, lng); };
