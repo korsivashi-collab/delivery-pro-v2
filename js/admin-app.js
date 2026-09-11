@@ -2122,7 +2122,7 @@ window.executeExcelExport = function() {
         }
     }
 
-    // --- 시트 2: [대기 동선] 데이터 ---
+    // --- 시트 2: [미처리 배송] 데이터 ---
     if (isPending) {
         let pendingList = [];
         for (const devId in activeRoutes) {
