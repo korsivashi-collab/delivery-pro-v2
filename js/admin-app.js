@@ -1814,8 +1814,10 @@ window.drawDriverOnMap = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    const rawDests = (isToday && driver && driver.destinations) ? driver.destinations : [];
+    // 🌟 원본과 같이 기사 동선 데이터가 있으면 안전하게 목적지 배열을 가져옴
+    const rawDests = driver ? (driver.destinations || []) : [];
 
+    // 선택한 날짜에 맞는 완료 이력 필터링
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
@@ -1834,6 +1836,7 @@ window.drawDriverOnMap = function(devId) {
     const plannedPath = [];
     const completedPath = [];
 
+    // 완료된 배송 핀 그리기 (초록색)
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
@@ -1846,7 +1849,8 @@ window.drawDriverOnMap = function(devId) {
         }
     });
 
-    if (isToday && rawDests.length > 0) {
+    // 대기 목적지가 있을 때 핀 그리기 (파란색)
+    if (rawDests.length > 0) {
         rawDests.forEach(d => {
             if (d.lat && d.lng) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
@@ -1864,18 +1868,24 @@ window.drawDriverOnMap = function(devId) {
         });
     }
 
-    if (plannedPath.length > 1 && isToday) {
+    // 🌟 배송 계획 동선(파란선) 표시 (데이터가 있으면 항상 정상 출력되도록 보장)
+    if (plannedPath.length > 1) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
-        if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'planned') window.mapPlannedPolyline.setMap(map);
+        if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'planned') {
+            window.mapPlannedPolyline.setMap(map);
+        }
     }
 
+    // 완료된 동선(초록선) 표시
     if (completedPath.length > 1) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
         });
-        if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'completed') window.mapCompletedPolyline.setMap(map);
+        if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'completed') {
+            window.mapCompletedPolyline.setMap(map);
+        }
     }
 
     if (pointsCount > 0) map.setBounds(bounds);
