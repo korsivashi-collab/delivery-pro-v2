@@ -2064,9 +2064,124 @@ window.confirmLinkDriver = async function() {
     } catch (e) { alert("오류: " + e.message); }
 };
 
-window.downloadDispatchExcel = function() {
-    const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
-    utilDownloadExcel(allCompletions, selectedDate);
+// 🌟 1. 엑셀 추출 모달창 열기/닫기
+window.openExcelExportModal = function() {
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('export-start-date').value = today;
+    document.getElementById('export-end-date').value = today;
+    document.getElementById('excel-export-modal').classList.remove('hidden');
+};
+
+window.closeExcelExportModal = function() {
+    document.getElementById('excel-export-modal').classList.add('hidden');
+};
+
+// 🌟 2. 설정된 기간과 다중 시트 기반으로 엑셀 통합 다운로드 실행
+window.executeExcelExport = function() {
+    const startDateStr = document.getElementById('export-start-date').value;
+    const endDateStr = document.getElementById('export-end-date').value;
+    const isCompleted = document.getElementById('chk-export-completed').checked;
+    const isPending = document.getElementById('chk-export-pending').checked;
+    const isCanceled = document.getElementById('chk-export-canceled').checked;
+
+    if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
+
+    const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
+    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
+
+    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
+    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
+
+    const wb = XLSX.utils.book_new();
+    let hasData = false;
+
+    // 시트 1: [배송 완료] 데이터
+    if (isCompleted) {
+        const targetCompletions = allCompletions.filter(c => {
+            if (!c.completedAt) return false;
+            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
+            return matchesDev && inRange;
+        }).sort((a, b) => a.completedAt - b.completedAt);
+
+        if (targetCompletions.length > 0) {
+            hasData = true;
+            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
+            
+            targetCompletions.forEach((c, idx) => {
+                const dt = new Date(c.completedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
+        }
+    }
+
+    // 시트 2: [대기 동선] 데이터
+    if (isPending) {
+        let pendingList = [];
+        for (const devId in activeRoutes) {
+            if (!visibleDeviceIds.includes(devId)) continue;
+            const driver = activeRoutes[devId];
+            if (!driver || !driver.updatedAt) continue;
+
+            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
+                const dests = driver.destinations || [];
+                dests.forEach(d => {
+                    const isDone = allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
+                    if (!isDone) {
+                        pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
+                    }
+                });
+            }
+        }
+
+        if (pendingList.length > 0) {
+            hasData = true;
+            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
+            pendingList.forEach((p, idx) => {
+                const dt = new Date(p.updatedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
+                ]);
+            });
+
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
+            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
+        }
+    }
+
+    // 시트 3: [배송 취소] 안내 시트
+    if (isCanceled) {
+        hasData = true;
+        const excelData = [
+            ["안내 사항"], 
+            ["현재 '목록 강제제외(삭제)' 기능은 파이어베이스 데이터베이스에서 해당 주소를 완전히 영구 삭제하므로 복원 및 엑셀 출력이 불가능합니다."],
+            ["추후 취소 전용 데이터베이스 테이블이 구축되면 이 시트에 정상적으로 출력됩니다."]
+        ];
+        const ws = XLSX.utils.aoa_to_sheet(excelData);
+        ws['!cols'] = [{wch:120}];
+        XLSX.utils.book_append_sheet(wb, ws, "취소내역(데이터없음)");
+    }
+
+    if (!hasData) {
+        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
+        return;
+    }
+
+    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
+    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
+    window.closeExcelExportModal();
 };
 
 window.setDispatchMode = function(mode, keepSelected = false) {
