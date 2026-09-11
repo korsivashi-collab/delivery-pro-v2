@@ -1,6 +1,6 @@
 // js/admin-app.js
 import { db, storage, generateSecureKey } from "./admin-api.js";
-import { initKakaoMap, map, clearMapOverlays, focusMapPosition, currentLocationOverlay, mapOverlays, mapPlannedPolyline, mapCompletedPolyline } from "./admin-map.js";
+import { initKakaoMap, map, focusMapPosition } from "./admin-map.js"; // 지도 초기화 모듈만 가져옴
 import { playBeepSound, getAddressFromCoords, downloadDispatchExcel as utilDownloadExcel } from "./admin-utils.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc, addDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -20,6 +20,18 @@ let dispatchDetailTab = 'ROUTE';
 window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
+
+// 🌟 [핵심 해결] 모듈 스코프 충돌을 막기 위한 admin-app.js 전용 지도 초기화 및 통제 변수
+window.myMapOverlays = [];
+window.forceClearMap = function() {
+    if (window.myMapOverlays) {
+        window.myMapOverlays.forEach(ov => ov.setMap(null));
+    }
+    window.myMapOverlays = [];
+    if (window.mapPlannedPolyline) { window.mapPlannedPolyline.setMap(null); window.mapPlannedPolyline = null; }
+    if (window.mapCompletedPolyline) { window.mapCompletedPolyline.setMap(null); window.mapCompletedPolyline = null; }
+    if (window.currentLocationOverlay) { window.currentLocationOverlay.setMap(null); window.currentLocationOverlay = null; }
+};
 
 window.masterPages = { regular: 1, trial: 1, dispatch: 1, memos: 1 };
 window.historySortField = 'originalIndex';
@@ -1284,7 +1296,6 @@ window.renderDriverListView = function() {
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
     
-    // 🌟 [안전한 날짜 비교 변수 정의]
     const isToday = (selectedDate === todayStr);
 
     let html = '';
@@ -1311,7 +1322,6 @@ window.renderDriverListView = function() {
         const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
         const remainingDests = rawDests.filter(d => !doneMap[d.address]);
         
-        // 🌟 안전하게 연산 적용
         const pendingCount = isToday ? remainingDests.length : 0;
         const doneCount = driverDone.length;
         const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
@@ -1351,7 +1361,7 @@ window.renderDriverDetailView = function(devId) {
 
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
-    const isToday = (selectedDate === todayStr); // 🌟 누락 방지 선언
+    const isToday = (selectedDate === todayStr);
 
     const rawDests = driver ? driver.destinations || [] : [];
     const driverDone = allCompletions.filter(c => {
@@ -1438,7 +1448,12 @@ window.selectDriver = function(devId) {
     if (dispatchNavState === 'DELIVERY') window.drawDriverOnMap(devId);
 };
 
-window.clearSelectedDriver = function() { selectedDeviceId = null; clearMapOverlays(); window.renderSidebar(); };
+window.clearSelectedDriver = function() { 
+    selectedDeviceId = null; 
+    window.forceClearMap(); 
+    window.renderSidebar(); 
+};
+
 window.removeOrUnlinkDriver = async function(devId, key) {
     if (!confirm(`[${key}] 기사와의 관제 연결을 해제하시겠습니까?`)) return;
     try { await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); alert("연결이 해제되었습니다."); } catch (e) { alert("오류: " + e.message); }
@@ -1721,7 +1736,8 @@ window.focusDriverLocationOnMap = async function(devId) {
                         <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
                     </div>`;
                 window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
-                window.currentLocationOverlay.setMap(map); mapOverlays.push(window.currentLocationOverlay);
+                window.currentLocationOverlay.setMap(map); 
+                window.myMapOverlays.push(window.currentLocationOverlay);
 
                 const resolvedAddr = await getAddressFromCoords(lat, lng);
                 const finalAddr = resolvedAddr || "주소 정보를 변환할 수 없습니다.";
@@ -1754,7 +1770,7 @@ window.showFallbackLocation = async function(devId) {
 
     if (!lat || !lng || !map) { alert("해당 기사의 위치나 동선 데이터가 전혀 없습니다."); return; }
     const pos = new kakao.maps.LatLng(lat, lng); map.setLevel(3); map.panTo(pos);
-    if (currentLocationOverlay) { currentLocationOverlay.setMap(null); window.currentLocationOverlay = null; }
+    if (window.currentLocationOverlay) { window.currentLocationOverlay.setMap(null); window.currentLocationOverlay = null; }
 
     const phone = matchedLic?.phone || driver?.phone || '기사';
     const overlayContainer = document.createElement('div');
@@ -1767,7 +1783,8 @@ window.showFallbackLocation = async function(devId) {
             <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-sky-400"></div>
         </div>`;
     window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
-    window.currentLocationOverlay.setMap(map); mapOverlays.push(window.currentLocationOverlay);
+    window.currentLocationOverlay.setMap(map); 
+    window.myMapOverlays.push(window.currentLocationOverlay);
 
     const resolvedAddr = await getAddressFromCoords(lat, lng);
     const finalAddr = resolvedAddr || knownAddress || "주소 정보를 변환할 수 없습니다.";
@@ -1780,7 +1797,7 @@ window.closeCurrentLocationOverlay = function() {
 };
 
 window.drawAllDriversOnMap = function() {
-    clearMapOverlays();
+    window.forceClearMap();
     if (!map) return;
     const visibleLicenses = getFilteredVisibleDrivers();
     const bounds = new kakao.maps.LatLngBounds();
@@ -1797,7 +1814,8 @@ window.drawAllDriversOnMap = function() {
             content.innerHTML = `<i class="fa-solid fa-truck text-sky-400 text-xs"></i><span>${lic.phone || '기사'}</span>`;
             content.onclick = () => { window.jumpToDriverDelivery(devId); };
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.3, zIndex: 30 });
-            overlay.setMap(map); mapOverlays.push(overlay);
+            overlay.setMap(map); 
+            window.myMapOverlays.push(overlay);
         }
     });
     if (hasPoints) map.setBounds(bounds);
@@ -1805,7 +1823,7 @@ window.drawAllDriversOnMap = function() {
 window.fitMapToAllDrivers = function() { window.drawAllDriversOnMap(); };
 
 window.drawDriverOnMap = function(devId) {
-    clearMapOverlays();
+    window.forceClearMap(); // 모듈화 충돌 방지 초기화
     const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const driver = activeRoutes[devId] || null;
     if (!map) return;
@@ -1814,7 +1832,6 @@ window.drawDriverOnMap = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    // 🌟 오늘 날짜일 때만 파란색 계획 동선 데이터를 가져옴 (과거 날짜에는 원천 차단)
     const rawDests = (isToday && driver) ? (driver.destinations || []) : [];
 
     const completions = allCompletions.filter(c => {
@@ -1843,7 +1860,8 @@ window.drawDriverOnMap = function(devId) {
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.setMap(map); mapOverlays.push(overlay);
+            overlay.setMap(map); 
+            window.myMapOverlays.push(overlay);
         }
     });
 
@@ -1859,7 +1877,8 @@ window.drawDriverOnMap = function(devId) {
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
                     content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                    overlay.setMap(map); mapOverlays.push(overlay);
+                    overlay.setMap(map); 
+                    window.myMapOverlays.push(overlay);
                 }
             }
         });
@@ -2058,7 +2077,8 @@ window.setDispatchMode = function(mode, keepSelected = false) {
         setTimeout(() => { if (map) map.relayout(); }, 100);
     }
 
-    clearMapOverlays();
+    window.forceClearMap(); // 모듈화 충돌 방지 초기화
+
     if (mode === 'LOCATION') {
         if (filterControls) filterControls.classList.add('hidden');
         if (fitAllBtn) fitAllBtn.classList.remove('hidden');
