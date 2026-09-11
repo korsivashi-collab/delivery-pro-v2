@@ -1283,12 +1283,21 @@ window.renderDriverListView = function() {
 
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
+    const isToday = (selectedDate === todayStr);
 
     let html = '';
     visibleLicenses.forEach(lic => {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
-        const driverRoute = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
+        
+        const routeData = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
+        let driverRoute = null;
+        if (routeData && routeData.updatedAt) {
+            const routeDateStr = new Date(routeData.updatedAt).toISOString().split('T')[0];
+            if (isToday || routeDateStr === selectedDate) {
+                driverRoute = routeData;
+            }
+        }
         const rawDests = driverRoute ? driverRoute.destinations || [] : [];
 
         const driverDone = allCompletions.filter(c => {
@@ -1301,8 +1310,8 @@ window.renderDriverListView = function() {
         const remainingDests = rawDests.filter(d => !doneMap[d.address]);
         const pendingCount = remainingDests.length;
         const doneCount = driverDone.length;
-        const totalCount = pendingCount + doneCount;
-        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+        const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
+        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
 
         html += `
         <div onclick="selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
@@ -1311,7 +1320,7 @@ window.renderDriverListView = function() {
                 <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
             </div>
             <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden"><div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
-            <div class="flex justify-between text-[11px] font-bold text-gray-600"><span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span><span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span></div>
+            <div class="flex justify-between text-[11px] font-bold text-gray-600"><span>잔여: <b class="text-blue-600 font-black text-xs">${isToday ? pendingCount : 0}</b>건</span><span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span></div>
         </div>`;
     });
     contentEl.innerHTML = html;
@@ -1326,8 +1335,21 @@ window.renderDriverDetailView = function(devId) {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
     const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = activeRoutes[devId] || null;
-    const phone = driver?.phone || matchedLic?.phone || '기사';
+    
+    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
+    const dotDate = selectedDate.replace(/-/g, '.');
+    const isToday = (selectedDate === todayStr);
+
+    const routeData = activeRoutes[devId] || null;
+    let driverRoute = null;
+    if (routeData && routeData.updatedAt) {
+        const routeDateStr = new Date(routeData.updatedAt).toISOString().split('T')[0];
+        if (isToday || routeDateStr === selectedDate) {
+            driverRoute = routeData;
+        }
+    }
+
+    const phone = driverRoute?.phone || matchedLic?.phone || '기사';
 
     headerEl.innerHTML = `
         <div class="flex items-center justify-between w-full">
@@ -1336,9 +1358,7 @@ window.renderDriverDetailView = function(devId) {
         </div>
     `;
 
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
-    const rawDests = driver ? driver.destinations || [] : [];
+    const rawDests = driverRoute ? driverRoute.destinations || [] : [];
     const driverDone = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
@@ -1347,14 +1367,14 @@ window.renderDriverDetailView = function(devId) {
 
     const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
     const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-    const pendingCount = remainingDests.length;
+    const pendingCount = isToday ? remainingDests.length : 0;
     const doneCount = driverDone.length;
-    const totalCount = pendingCount + doneCount;
-    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+    const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
+    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
 
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
-        <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black"><span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도</span><span>완료 ${doneCount} / 전체 ${totalCount} 건 (${rate}%)</span></div>
+        <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black"><span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도 (${selectedDate})</span><span>완료 ${doneCount} 건</span></div>
         <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
         <div class="flex justify-between text-[11px] font-bold text-blue-800"><span>남은 배송: <b class="text-blue-600 font-black">${pendingCount}</b>곳</span><span>완료율: <b class="text-emerald-600 font-black">${rate}%</b></span></div>
     </div>
@@ -1364,8 +1384,10 @@ window.renderDriverDetailView = function(devId) {
     </div>`;
 
     if (window.dispatchDetailTab === 'ROUTE') {
-        if (rawDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-route text-2xl text-gray-300 mb-1"></i><p>기사가 최적화한 배송 동선이 없습니다.</p><p class="text-[11px] font-normal text-gray-400">기사 앱에서 '밀어서 동선 최적화'를 실행하면 표시됩니다.</p></div>`;
+        if (!isToday && rawDests.length === 0) {
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-calendar-xmark text-2xl text-gray-300 mb-1"></i><p>선택한 과거 날짜에는 실시간 계획 동선이 보존되지 않습니다.</p><p class="text-[11px] font-normal text-gray-400">아래 [배송 완료] 탭에서 해당 날짜의 확정 이력을 확인하세요.</p></div>`;
+        } else if (rawDests.length === 0) {
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-route text-2xl text-gray-300 mb-1"></i><p>기사가 최적화한 배송 동선이 없습니다.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             rawDests.forEach((d, idx) => {
@@ -1375,7 +1397,7 @@ window.renderDriverDetailView = function(devId) {
                 let numberBadge = isDone ? `<span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs"><i class="fa-solid fa-check text-[9px]"></i></span>` : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
                 let addressHtml = isDone ? `<span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${d.address}</span>` : `<span class="font-bold text-gray-900 truncate">${d.address}</span>`;
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
-                let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<button onclick="event.stopPropagation(); adminForceDeleteRoute('${devId}', '${d.address}')" class="text-red-500 hover:text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded mr-1 text-[10px] font-black transition active:scale-95"><i class="fa-solid fa-xmark"></i> 삭제</button><span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
+                let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
                 let photoBtn = comp && comp.photoUrl ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
                 <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
@@ -1395,7 +1417,7 @@ window.renderDriverDetailView = function(devId) {
                 html += `
                 <div onclick="focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
-                    <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '완료'}]</span></div>
+                    <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-emerald-600 text-white text-[10px] font-black px-2.5 py-0.5 rounded shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '완료'}]</span></div>
                 </div>`;
             });
             html += `</div>`;
@@ -1786,11 +1808,23 @@ window.fitMapToAllDrivers = function() { window.drawAllDriversOnMap(); };
 window.drawDriverOnMap = function(devId) {
     clearMapOverlays();
     const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = activeRoutes[devId] || null;
-    if (!driver || !map) return;
+    
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
-    const rawDests = driver.destinations || [];
+    const isToday = (selectedDate === todayStr);
+
+    const driver = activeRoutes[devId] || null;
+    let driverRoute = null;
+    if (driver && driver.updatedAt) {
+        const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
+        if (isToday || routeDateStr === selectedDate) {
+            driverRoute = driver;
+        }
+    }
+
+    if (!map) return;
+
+    const rawDests = driverRoute ? driverRoute.destinations || [] : [];
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
@@ -1830,7 +1864,7 @@ window.drawDriverOnMap = function(devId) {
         }
     });
 
-    if (plannedPath.length > 1) {
+    if (plannedPath.length > 1 && isToday) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({ path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid' });
         if (currentMapPolylineMode === 'all' || currentMapPolylineMode === 'planned') window.mapPlannedPolyline.setMap(map);
     }
