@@ -23,6 +23,8 @@ let currentMemoAddress = "";
 let selectedHeightText = "";
 let selectedTimeText = "";
 let licenseWatcherUnsub = null;
+let dispatchMsgWatcherUnsub = null; // 🌟 추가: 관제 메시지 리스너 해제용 변수
+let gpsRequestWatcherUnsub = null;  // 🌟 추가: GPS 요청 리스너 해제용 변수
 let currentActiveAlertMsgId = null;
 let lastKnownGps = null;
 let gpsWatchId = null;
@@ -99,16 +101,16 @@ export async function initApp() {
                 unlockApp();
                 updateExpireBadge(res.expireDate);
                 startLicenseRealtimeWatcher(res.actualKey || savedKey);
-                
-                startDispatchMessageListener(deviceId, savedPhone, res.actualKey || savedKey, (msg) => {
-                    saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
-                    const alreadyAcked = localStorage.getItem(`acked_msg_${msg.msgId}`);
-                    if (!alreadyAcked) {
-                        showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);
-                    }
-                });
 
-                startGpsRequestLister(deviceId, savedPhone, res.actualKey || savedKey, getDeviceRealGPS);
+dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, savedPhone, res.actualKey || savedKey, (msg) => {
+    saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
+    const alreadyAcked = localStorage.getItem(`acked_msg_${msg.msgId}`);
+    if (!alreadyAcked) {
+        showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);
+    }
+});
+
+gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, savedPhone, res.actualKey || savedKey, getDeviceRealGPS);
                 updatePhotoCompButtonState(!!res.dispatchKey);
             } else {
                 clearAuthStorage();
@@ -306,7 +308,43 @@ function loadActiveData() {
     renderList();
 }
 
+
 // 화면 렌더링 및 UI 바인딩 함수들은 브라우저 전역(window)으로 등록하여 HTML과 연결
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS
 };
+
+export async function logout() {
+    if (!confirm("로그아웃 하시겠습니까?\n로그아웃 시 기기 정보가 초기화되어 다른 기기에서 로그인할 수 있습니다.")) return;
+    
+    const currentKey = localStorage.getItem('deliveryProKey');
+    
+    if (currentKey && typeof firebaseClearDeviceData === 'function') {
+        try {
+            await firebaseClearDeviceData(currentKey);
+        } catch (e) {
+            console.error("서버 초기화 중 오류 발생:", e);
+        }
+    }
+    
+    try {
+        if (typeof licenseWatcherUnsub === 'function') { licenseWatcherUnsub(); }
+    } catch(e) {}
+
+    try {
+        if (typeof dispatchMsgWatcherUnsub === 'function') { dispatchMsgWatcherUnsub(); }
+    } catch(e) {}
+
+    try {
+        if (typeof gpsRequestWatcherUnsub === 'function') { gpsRequestWatcherUnsub(); }
+    } catch(e) {}
+
+    localStorage.removeItem('deliveryProKey');
+    localStorage.removeItem('deliveryProUserPhone');
+    localStorage.removeItem('deliveryProExpireDate');
+    localStorage.removeItem('deliveryProDispatchKey');
+    
+    window.location.reload();
+}
+
+window.logout = logout;
