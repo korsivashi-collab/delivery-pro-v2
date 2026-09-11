@@ -1,6 +1,6 @@
 // js/admin-app.js
 import { db, storage, generateSecureKey } from "./admin-api.js";
-import { initKakaoMap, map, focusMapPosition } from "./admin-map.js"; // 지도 초기화 모듈만 가져옴
+import { initKakaoMap, map, focusMapPosition } from "./admin-map.js";
 import { playBeepSound, getAddressFromCoords, downloadDispatchExcel as utilDownloadExcel } from "./admin-utils.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc, addDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -21,7 +21,7 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
-// 🌟 [핵심 해결] 모듈 스코프 충돌을 막기 위한 admin-app.js 전용 지도 초기화 및 통제 변수
+// 모듈 스코프 충돌을 막기 위한 admin-app.js 전용 지도 초기화 변수
 window.myMapOverlays = [];
 window.forceClearMap = function() {
     if (window.myMapOverlays) {
@@ -1363,7 +1363,6 @@ window.renderDriverDetailView = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    // 🌟 [핵심 차단 로직 1] 과거 날짜 조회 시, 오늘의 실시간 계획 동선이 섞여 들어오는 것을 철저히 막습니다.
     let driverRoute = null;
     if (driver && driver.updatedAt) {
         const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
@@ -1643,7 +1642,6 @@ window.renderCustomTemplates = function() {
     listEl.innerHTML = html;
 };
 
-// 실시간 관제 및 위치 지도
 window.renderLocationSidebar = function() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
@@ -1841,7 +1839,6 @@ window.drawDriverOnMap = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    // 🌟 [핵심 차단 로직 2] 지도에서도 과거 날짜 조회 시, 오늘의 파란색 계획 동선이 그려지지 않도록 차단
     let driverRoute = null;
     if (driver && driver.updatedAt) {
         const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
@@ -2064,7 +2061,7 @@ window.confirmLinkDriver = async function() {
     } catch (e) { alert("오류: " + e.message); }
 };
 
-// 🌟 1. 엑셀 추출 모달창 열기/닫기
+// 🌟 [추가/수정] 엑셀 추출 모달창 컨트롤 및 다중 시트 다운로드
 window.openExcelExportModal = function() {
     const today = new Date().toISOString().split('T')[0];
     document.getElementById('export-start-date').value = today;
@@ -2103,7 +2100,8 @@ window.executeExcelExport = function() {
             if (!c.completedAt) return false;
             const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
             const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            return matchesDev && inRange;
+            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
+            return matchesDev && inRange && !isCancelTag; // 취소 태그 제외
         }).sort((a, b) => a.completedAt - b.completedAt);
 
         if (targetCompletions.length > 0) {
@@ -2167,13 +2165,13 @@ window.executeExcelExport = function() {
             const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
             const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
             const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && isCancelTag;
+            return matchesDev && inRange && isCancelTag; // 취소 태그만 포함
         }).sort((a, b) => a.completedAt - b.completedAt);
 
-        hasData = true;
-        const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
-
         if (targetCanceled.length > 0) {
+            hasData = true;
+            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
+            
             targetCanceled.forEach((c, idx) => {
                 const dt = new Date(c.completedAt);
                 const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
@@ -2181,78 +2179,11 @@ window.executeExcelExport = function() {
                     idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음'
                 ]);
             });
-        } else {
-            excelData.push(["", "", "", "선택하신 기간 내에 발생한 배송 취소/반품 내역이 없습니다.", "", "", ""]);
-        }
-
-        const ws = XLSX.utils.aoa_to_sheet(excelData);
-        ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
-        XLSX.utils.book_append_sheet(wb, ws, "배송취소");
-    }
-
-    if (!hasData) {
-        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
-        return;
-    }
-
-    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
-    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
-    window.closeExcelExportModal();
-};
 
             const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송취소");
         }
-    }
-
-    // 시트 2: [대기 동선] 데이터
-    if (isPending) {
-        let pendingList = [];
-        for (const devId in activeRoutes) {
-            if (!visibleDeviceIds.includes(devId)) continue;
-            const driver = activeRoutes[devId];
-            if (!driver || !driver.updatedAt) continue;
-
-            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
-                const dests = driver.destinations || [];
-                dests.forEach(d => {
-                    const isDone = allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
-                    if (!isDone) {
-                        pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
-                    }
-                });
-            }
-        }
-
-        if (pendingList.length > 0) {
-            hasData = true;
-            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
-            pendingList.forEach((p, idx) => {
-                const dt = new Date(p.updatedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([
-                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
-                ]);
-            });
-
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
-            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
-        }
-    }
-
-    // 시트 3: [배송 취소] 안내 시트
-    if (isCanceled) {
-        hasData = true;
-        const excelData = [
-            ["안내 사항"], 
-            ["현재 '목록 강제제외(삭제)' 기능은 파이어베이스 데이터베이스에서 해당 주소를 완전히 영구 삭제하므로 복원 및 엑셀 출력이 불가능합니다."],
-            ["추후 취소 전용 데이터베이스 테이블이 구축되면 이 시트에 정상적으로 출력됩니다."]
-        ];
-        const ws = XLSX.utils.aoa_to_sheet(excelData);
-        ws['!cols'] = [{wch:120}];
-        XLSX.utils.book_append_sheet(wb, ws, "취소내역(데이터없음)");
     }
 
     if (!hasData) {
