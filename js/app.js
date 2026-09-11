@@ -565,3 +565,35 @@ window.renderList = renderList;
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
 };
+// 🌟 HTML의 인라인 onclick 이벤트들이 인식할 수 있도록 주요 함수들을 전역(window)에 바인딩
+window.verifyLicense = verifyLicense;
+window.openTrialModal = openTrialModal;
+window.closeTrialModal = closeTrialModal;
+window.startFreeTrial = startFreeTrial;
+window.openNoticeHistoryModal = openNoticeHistoryModal;
+window.closeNoticeHistoryModal = closeNoticeHistoryModal;
+window.clearLocalNotices = clearLocalNotices;
+window.openHistoryModal = openHistoryModal;
+window.closeHistoryModal = closeHistoryModal;
+window.clearAllHistory = clearAllHistory;
+window.setEndLocationGPS = setEndLocationGPS;
+window.toggleHeaderEndEdit = toggleHeaderEndEdit;
+window.applyHeaderCustomEnd = applyHeaderCustomEnd;
+window.openMemoModal = openMemoModal;
+window.closeMemoModal = closeMemoModal;
+window.saveCurrentMemo = saveCurrentMemo;
+window.likeMemo = likeMemo;
+window.reportMemo = reportMemo;
+window.cancelDestination = cancelDestination;
+window.completeDestination = completeDestination;
+window.selectCompletionTag = selectCompletionTag;
+window.closeCompletionModal = closeCompletionModal;
+window.triggerPhotoCompletion = triggerPhotoCompletion;
+window.confirmCompletion = confirmCompletion;
+window.editDestinationAddress = editDestinationAddress;
+window.openTmap = openTmap;
+window.openKakaoNaviDirect = openKakaoNaviDirect;
+window.restoreHistoryItem = restoreHistoryItem;
+window.closeStartModal = closeStartModal;
+window.selectStartDest = selectStartDest;
+window.closeDispatchAlertModal = closeDispatchAlertModal;
