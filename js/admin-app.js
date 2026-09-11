@@ -1814,21 +1814,9 @@ window.drawDriverOnMap = function(devId) {
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    // 🌟 [핵심 수정] 오늘 날짜이거나, 해당 과거 날짜에 정확히 저장된 동선 데이터일 때만 파란색 계획 동선 데이터를 가져옴
-    let driverRoute = null;
-    if (driver) {
-        if (isToday) {
-            driverRoute = driver;
-        } else if (driver.updatedAt) {
-            const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
-            if (routeDateStr === selectedDate) {
-                driverRoute = driver;
-            }
-        }
-    }
-    const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
+    // 🌟 오늘 날짜일 때만 파란색 계획 동선 데이터를 가져옴 (과거 날짜에는 원천 차단)
+    const rawDests = (isToday && driver) ? (driver.destinations || []) : [];
 
-    // 선택한 날짜에 맞는 완료 이력 필터링
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
@@ -1847,7 +1835,6 @@ window.drawDriverOnMap = function(devId) {
     const plannedPath = [];
     const completedPath = [];
 
-    // 완료된 배송 핀 그리기 (초록색) - 모든 날짜 정상 표시
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
@@ -1860,8 +1847,7 @@ window.drawDriverOnMap = function(devId) {
         }
     });
 
-    // 대기 목적지가 있고 해당 날짜가 일치할 때만 파란색 대기 핀 그리기
-    if (driverRoute && rawDests.length > 0) {
+    if (isToday && rawDests.length > 0) {
         rawDests.forEach(d => {
             if (d.lat && d.lng) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
@@ -1879,8 +1865,7 @@ window.drawDriverOnMap = function(devId) {
         });
     }
 
-    // 배송 계획 동선(파란선) 표시 (해당 날짜 동선이 유효할 때만)
-    if (plannedPath.length > 1 && driverRoute) {
+    if (plannedPath.length > 1 && isToday) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
@@ -1889,7 +1874,6 @@ window.drawDriverOnMap = function(devId) {
         }
     }
 
-    // 완료된 동선(초록선) 표시 - 날짜별 완료 이력에 맞춰 항상 정상 표시
     if (completedPath.length > 1) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
