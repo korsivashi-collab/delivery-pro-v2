@@ -197,6 +197,154 @@ function updatePhotoCompButtonState(isLinked) {
     }
 }
 
+// 🌟 누락되었던 인증 및 체험 처리 함수 본체들
+export async function verifyLicense() {
+    const keyInput = (document.getElementById('license-input')?.value || '').trim().toUpperCase();
+    const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
+    const msgEl = document.getElementById('auth-message');
+    const btn = document.getElementById('verify-btn');
+    const deviceId = getOrCreateDeviceId(); 
+    
+    if (!keyInput) { 
+        if (msgEl) msgEl.innerText = "라이선스 키를 입력해 주세요."; 
+        document.getElementById('license-input')?.focus();
+        return; 
+    }
+    
+    const cleanDigits = rawPhone.replace(/[^0-9]/g, '');
+    if (!rawPhone || cleanDigits.length < 9 || cleanDigits.length > 13) {
+        if (msgEl) msgEl.innerText = "휴대폰 번호를 반드시 입력해야 로그인이 완료됩니다.\n(예: 010-1234-5678)";
+        document.getElementById('auth-phone-input')?.focus();
+        return;
+    }
+
+    let formattedPhone = rawPhone;
+    if (!rawPhone.includes('-')) {
+        if (cleanDigits.startsWith('010') && cleanDigits.length === 11) {
+            formattedPhone = cleanDigits.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+        } else if (cleanDigits.length === 10) {
+            formattedPhone = cleanDigits.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+        }
+    }
+    
+    if (msgEl) msgEl.innerText = "";
+    if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-2"></i>인증 확인 중...';
+        btn.disabled = true;
+    }
+
+    try {
+        const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId);
+        if (res.valid) {
+            const actualKey = res.actualKey || keyInput;
+            localStorage.setItem('deliveryProKey', actualKey);
+            localStorage.setItem('deliveryProUserPhone', formattedPhone); 
+            localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
+            if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
+            
+            unlockApp();
+            updateExpireBadge(res.expireDate);
+            startLicenseRealtimeWatcher(actualKey);
+            
+            dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, formattedPhone, actualKey, (msg) => {
+                saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
+                const alreadyAcked = localStorage.getItem(`acked_msg_${msg.msgId}`);
+                if (!alreadyAcked) {
+                    showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);
+                }
+            });
+
+            gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, formattedPhone, actualKey, getDeviceRealGPS);
+            updatePhotoCompButtonState(!!res.dispatchKey);
+        } else {
+            if (msgEl) msgEl.innerText = res.msg;
+        }
+    } catch (e) {
+        if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다: " + e.message;
+    } finally {
+        if (btn) {
+            btn.innerHTML = '인증하고 시작하기';
+            btn.disabled = false;
+        }
+    }
+}
+
+export function openTrialModal() {
+    const input = document.getElementById('trial-phone-input');
+    const msg = document.getElementById('trial-error-msg');
+    const modal = document.getElementById('trial-modal');
+    if (input) input.value = "";
+    if (msg) msg.classList.add('hidden');
+    if (modal) modal.classList.remove('hidden');
+    setTimeout(() => { if (input) input.focus(); }, 100);
+}
+
+export function closeTrialModal() { 
+    document.getElementById('trial-modal')?.classList.add('hidden'); 
+}
+
+export async function startFreeTrial() {
+    const phoneInput = (document.getElementById('trial-phone-input')?.value || '').trim();
+    const msgEl = document.getElementById('trial-error-msg');
+    const btn = document.getElementById('trial-submit-btn');
+    const deviceId = getOrCreateDeviceId();
+    
+    const cleanDigits = phoneInput.replace(/[^0-9]/g, '');
+    if (!phoneInput || cleanDigits.length < 9 || cleanDigits.length > 13) {
+        if (msgEl) {
+            msgEl.innerText = "휴대폰 번호를 정확하게 입력해 주세요 (숫자 9~13자리).";
+            msgEl.classList.remove('hidden');
+        }
+        return;
+    }
+    
+    if (msgEl) msgEl.classList.add('hidden');
+    if (btn) {
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 처리 중...';
+        btn.disabled = true;
+    }
+
+    try {
+        const res = await firebaseStartTrial(phoneInput, deviceId);
+        if (res.valid) {
+            localStorage.setItem('deliveryProKey', res.trialKey);
+            localStorage.setItem('deliveryProUserPhone', phoneInput);
+            localStorage.setItem('deliveryProExpireDate', res.expireDate);
+            localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
+            alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
+            closeTrialModal();
+            unlockApp();
+            updateExpireBadge(res.expireDate);
+            startLicenseRealtimeWatcher(res.trialKey);
+            
+            dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phoneInput, res.trialKey, (msg) => {
+                saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
+                if (!localStorage.getItem(`acked_msg_${msg.msgId}`)) {
+                    showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);
+                }
+            });
+
+            gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phoneInput, res.trialKey, getDeviceRealGPS);
+            updatePhotoCompButtonState(false);
+        } else {
+            if (msgEl) {
+                msgEl.innerText = res.msg;
+                msgEl.classList.remove('hidden');
+            }
+        }
+    } catch (e) {
+        if (msgEl) {
+            msgEl.innerText = "오류 발생: " + e.message;
+            msgEl.classList.remove('hidden');
+        }
+    } finally {
+        if (btn) {
+            btn.innerHTML = '무료로 시작하기';
+            btn.disabled = false;
+        }
+    }
+}
+
 // 팝업 및 알림함 관리
 export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, senderType) {
     currentActiveAlertMsgId = msgId;
@@ -227,6 +375,14 @@ export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, sen
 
     if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
     playBeepSound();
+    checkUnreadNotices();
+}
+
+export function closeDispatchAlertModal() {
+    if (currentActiveAlertMsgId) {
+        localStorage.setItem(`acked_msg_${currentActiveAlertMsgId}`, "true");
+    }
+    document.getElementById('dispatch-alert-modal')?.classList.add('hidden');
     checkUnreadNotices();
 }
 
@@ -271,12 +427,100 @@ function checkUnreadNotices() {
     else dot.classList.add('hidden');
 }
 
+export function openNoticeHistoryModal() {
+    const container = document.getElementById('notice-history-container');
+    const notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
+    if (!container) return;
+
+    if (notices.length === 0) {
+        container.innerHTML = `<div class="text-center text-gray-400 py-20 text-xs font-bold">수신된 알림 내역이 없습니다.</div>`;
+    } else {
+        let html = '';
+        notices.forEach(n => {
+            const isMaster = (n.senderType === 'MASTER' || n.senderTitle === '운영사 알림');
+            const badgeTitle = n.senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
+            const badgeClass = isMaster ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white';
+
+            html += `
+            <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs flex flex-col gap-2">
+                <div class="flex justify-between items-center text-xs">
+                    <span class="${badgeClass} font-black text-[10px] px-2 py-0.5 rounded-md">${badgeTitle}</span>
+                    <span class="text-[11px] font-mono text-gray-400">${n.dateStr} ${n.timeStr}</span>
+                </div>
+                <div class="p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">
+                    ${n.content}
+                </div>
+            </div>`;
+        });
+        container.innerHTML = html;
+    }
+    document.getElementById('notice-history-modal')?.classList.remove('hidden');
+}
+
+export function closeNoticeHistoryModal() { 
+    document.getElementById('notice-history-modal')?.classList.add('hidden'); 
+}
+
+export function clearLocalNotices() {
+    if (!confirm("알림 보관함을 모두 비우시겠습니까?")) return;
+    localStorage.removeItem('deliveryPro_notices');
+    openNoticeHistoryModal();
+    checkUnreadNotices();
+}
+
 // 🌟 누락되었던 헬퍼 함수: 이력 청소 및 스와이프 초기화
 function cleanOldHistory() {
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
     let sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
     history = history.filter(h => h.timestamp > sevenDaysAgo);
     localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+}
+
+export function openHistoryModal() {
+    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    let container = document.getElementById('history-list-container');
+    if (!container) return;
+    if (history.length === 0) container.innerHTML = `<div class="text-center text-gray-400 py-16 text-sm"><p>완료된 배송 이력이 없습니다.</p></div>`;
+    else {
+        let grouped = {}; history.forEach(h => { if (!grouped[h.date]) grouped[h.date] = []; grouped[h.date].push(h); });
+        let html = '';
+        for (let date in grouped) {
+            html += `<div class="sticky top-0 bg-white/95 backdrop-blur-sm z-10 py-2 mt-1 mb-2 border-b border-gray-100"><span class="text-[11px] font-black text-gray-600 bg-gray-100 px-2 py-1 rounded-md">${date}</span></div><div class="space-y-2 mb-4">`;
+            let dailyTotal = grouped[date].length;
+            grouped[date].forEach((h, idx) => { 
+                let sequentialNum = dailyTotal - idx;
+                let tagBadge = h.tag ? `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>` : "";
+                let photoBadge = h.photoUrl 
+                    ? `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0 flex items-center gap-0.5 shadow-sm active:bg-blue-100"><i class="fa-solid fa-camera"></i> 사진</a>`
+                    : (h.hasPhoto ? `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0"><i class="fa-solid fa-camera"></i></span>` : "");
+                html += `
+                <div class="bg-gray-50 border border-gray-200 p-2.5 rounded-xl flex justify-between items-center text-xs shadow-sm">
+                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
+                        <span class="bg-gray-200 text-gray-700 font-bold px-2 py-0.5 rounded-full shrink-0 text-[10px]">${sequentialNum}건</span>
+                        <span class="font-bold text-gray-800 truncate ml-0.5">${h.address}</span>${tagBadge}${photoBadge}
+                    </div>
+                    <div class="flex items-center gap-2 shrink-0 ml-2">
+                        <span class="text-gray-400 text-[9px] font-semibold">${h.time}</span>
+                        <button onclick="restoreHistoryItem(${h.timestamp})" class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1.5 rounded-lg text-[10px] font-bold active:bg-blue-100 shadow-sm transition flex items-center"><i class="fa-solid fa-rotate-left mr-1"></i> 복원</button>
+                    </div>
+                </div>`; 
+            });
+            html += `</div>`;
+        }
+        container.innerHTML = html;
+    }
+    document.getElementById('history-modal')?.classList.remove('hidden');
+}
+
+export function closeHistoryModal() { 
+    document.getElementById('history-modal')?.classList.add('hidden'); 
+}
+
+export function clearAllHistory() { 
+    if (confirm("이력을 모두 삭제하시겠습니까?")) { 
+        localStorage.removeItem('deliveryPro_history'); 
+        openHistoryModal(); 
+    } 
 }
 
 function initSwipeButton() {
@@ -309,9 +553,7 @@ function initSwipeButton() {
             isDragging = false;
             swipeBtn.style.transform = `translateX(0px)`;
             swipeBtn.style.transition = 'transform 0.3s ease';
-            if (typeof window.openStartSelectionModal === 'function') {
-                window.openStartSelectionModal();
-            }
+            openStartSelectionModal();
         }
     }
     
@@ -330,6 +572,39 @@ function initSwipeButton() {
     document.addEventListener('touchend', endDrag);
 }
 
+export function openStartSelectionModal() {
+    if (destinations.length === 0) { alert("스캔된 배송지가 최소 1곳 이상 있어야 합니다."); return; }
+    const listEl = document.getElementById('start-select-list');
+    if (!listEl) return;
+    let html = '';
+    destinations.forEach(d => {
+        html += `
+            <button onclick="selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
+                <span class="font-bold text-gray-800 text-[13px] truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${d.address}</span>
+                <i class="fa-solid fa-check text-gray-300"></i>
+            </button>
+        `;
+    });
+    listEl.innerHTML = html;
+    document.getElementById('start-select-modal')?.classList.remove('hidden');
+}
+
+export function closeStartModal() { 
+    document.getElementById('start-select-modal')?.classList.add('hidden'); 
+}
+
+export function selectStartDest(id) {
+    closeStartModal();
+    const idx = destinations.findIndex(d => d.id === id);
+    if (idx > -1) {
+        const chosen = destinations.splice(idx, 1)[0];
+        destinations.unshift(chosen);
+        startLocation = { lat: chosen.lat, lng: chosen.lng, address: chosen.address };
+        saveActiveData();
+        optimizeRouteAction();
+    }
+}
+
 // 🌟 메인 최적화 실행 함수
 export function optimizeRouteAction() {
     if (destinations.length < 2) { 
@@ -341,14 +616,13 @@ export function optimizeRouteAction() {
         return; 
     }
     
-    // showLoading은 HTML 내부 스크립트에 정의되어 있거나 전역일 수 있음
-    if (typeof window.showLoading === 'function') window.showLoading("최적화중...");
+    showLoading("최적화중...");
     
     setTimeout(() => {
         try {
             destinations = calculateOptimizedRoute(destinations, startLocation, endLocation);
             updateDisplayNumbers();
-            if (typeof window.hideLoading === 'function') window.hideLoading();
+            hideLoading();
             
             const deviceId = getOrCreateDeviceId();
             const phone = localStorage.getItem('deliveryProUserPhone') || "";
@@ -359,7 +633,7 @@ export function optimizeRouteAction() {
                 if (mainContainer) mainContainer.scrollTo({ top: 0, behavior: 'smooth' }); 
             }, 100);
         } catch (error) {
-            if (typeof window.hideLoading === 'function') window.hideLoading();
+            hideLoading();
             alert(error.message);
         }
     }, 500);
@@ -532,10 +806,452 @@ export async function renderList() {
     initSortable();
 }
 
+// 🌟 주소 및 내비, 종료지 관련 헬퍼 함수들
+export async function setEndLocationGPS() {
+    showLoading("현위치 파악 중...");
+    if (lastKnownGps) {
+        const addr = await coordToAddress(lastKnownGps.lng, lastKnownGps.lat);
+        endLocation = { lat: lastKnownGps.lat, lng: lastKnownGps.lng, address: addr || "현재 위치 (GPS)" };
+        saveActiveData(); renderList(); hideLoading();
+        return;
+    }
+
+    if (navigator.geolocation) {
+        navigator.geolocation.getCurrentPosition(
+            async (position) => {
+                let lat = position.coords.latitude;
+                let lng = position.coords.longitude;
+                lastKnownGps = { lat, lng, timestamp: Date.now() };
+                const addr = await coordToAddress(lng, lat);
+                endLocation = { lat: lat, lng: lng, address: addr || "현재 위치 (GPS)" };
+                saveActiveData(); renderList(); hideLoading();
+            },
+            (error) => { hideLoading(); alert("위치 정보를 가져올 수 없습니다."); },
+            { enableHighAccuracy: false, timeout: 5000, maximumAge: 30000 }
+        );
+    } else { hideLoading(); alert("GPS를 지원하지 않는 기기입니다."); }
+}
+
+export function toggleHeaderEndEdit() { 
+    document.getElementById('header-end-edit-area')?.classList.toggle('hidden'); 
+}
+
+export async function applyHeaderCustomEnd() {
+    const addr = (document.getElementById('header-inline-end-input')?.value || '').trim();
+    if (!addr) {
+        endLocation = { lat: 0, lng: 0, address: "" };
+        saveActiveData(); renderList(); toggleHeaderEndEdit(); return;
+    }
+    showLoading("종료 위치 찾는 중...");
+    try {
+        const coords = await geocodeAddress(addr);
+        if (coords) {
+            endLocation = { lat: coords.lat, lng: coords.lng, address: coords.address_name || addr };
+            saveActiveData(); renderList(); toggleHeaderEndEdit();
+        }
+    } catch(error) { alert("종료지 주소를 찾을 수 없습니다."); } finally { hideLoading(); }
+}
+
+async function geocodeAddress(address) {
+    const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
+    let response = await fetch(`https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(address)}`, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } });
+    let data = await response.json();
+    if (data.documents && data.documents.length > 0) return { lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x), address_name: data.documents[0].address_name };
+    response = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(address)}`, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } });
+    data = await response.json();
+    if (data.documents && data.documents.length > 0) {
+        let finalName = data.documents[0].place_name;
+        if(data.documents[0].address_name) finalName += ` (${data.documents[0].address_name})`;
+        return { lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x), address_name: finalName };
+    }
+    throw new Error('검색 실패');
+}
+
+async function coordToAddress(x, y) {
+    const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
+    try {
+        const response = await fetch(`https://dapi.kakao.com/v2/local/geo/coord2address.json?x=${x}&y=${y}`, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } });
+        const data = await response.json();
+        if (data.documents && data.documents.length > 0) return data.documents[0].address.address_name;
+    } catch (e) {} return null;
+}
+
+export function openTmap(lat, lng, name) { 
+    window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
+}
+
+export function openKakaoNaviDirect(lat, lng, name) { 
+    if (window.Kakao && window.Kakao.isInitialized()) window.Kakao.Navi.start({ name: name, x: lng, y: lat, coordType: 'wgs84' });
+    else alert("카카오 내비 모듈 오류입니다.");
+}
+
+// 🌟 주차 메모 모달 제어 함수들
+export async function openMemoModal(id) {
+    const item = destinations.find(d => d.id === id); if (!item) return; currentMemoAddress = item.address;
+    const titleEl = document.getElementById('memo-modal-title');
+    if (titleEl) titleEl.innerText = currentMemoAddress; 
+    resetMemoForm();
+    const listContainer = document.getElementById('memo-list-container');
+    if (listContainer) listContainer.innerHTML = `<div class="flex justify-center items-center py-6 text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>목록을 불러오는 중...</div>`;
+    document.getElementById('memo-modal')?.classList.remove('hidden');
+
+    try {
+        const memos = await getMemosFromFirestore(currentMemoAddress);
+        const myDeviceId = getOrCreateDeviceId();
+        
+        const myMemo = memos.find(m => m.deviceId === myDeviceId);
+        if (myMemo) {
+            const rawMemo = myMemo.memo || "";
+            const heightMatch = rawMemo.match(/\[주차장 높이 (.*?)\]/);
+            if (heightMatch) {
+                const val = heightMatch[1];
+                document.querySelectorAll('.height-tag-btn').forEach(b => {
+                    if (b.innerText.trim() === val) selectHeightTag(b, val);
+                });
+            }
+
+            const timeMatch = rawMemo.match(/\[무료 회차 시간 (.*?)\]/);
+            if (timeMatch) {
+                const val = timeMatch[1];
+                document.querySelectorAll('.time-tag-btn').forEach(b => {
+                    if (b.innerText.trim() === val) selectTimeTag(b, val);
+                });
+            }
+
+            ['도로변 주차', '지하주차장', '지상주차장'].forEach(tag => {
+                if (rawMemo.includes(`[${tag}]`)) {
+                    document.querySelectorAll('.etc-tag-btn').forEach(b => {
+                        if (b.dataset.val === tag && b.dataset.active !== "true") toggleEtcTag(b);
+                    });
+                }
+            });
+
+            const pureText = rawMemo.replace(/\[.*?\]/g, '').trim();
+            const memoInput = document.getElementById('memo-input');
+            const countEl = document.getElementById('memo-char-count');
+            if (memoInput) memoInput.value = pureText;
+            if (countEl) countEl.innerText = `${pureText.length} / 30`;
+        }
+
+        if (memos.length > 0) {
+            let html = "";
+            memos.forEach((m, idx) => {
+                let isMyMemo = (m.deviceId === myDeviceId);
+                let crownHtml = (idx === 0) ? `<i class="fa-solid fa-crown text-yellow-400 mr-1 text-sm drop-shadow-sm"></i> ` : '';
+                let myBadge = isMyMemo ? `<span class="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded ml-1">내가 쓴 정보</span>` : '';
+                
+                html += `
+                <div class="bg-white border ${isMyMemo ? 'border-blue-300 ring-1 ring-blue-200' : 'border-gray-200'} rounded-xl p-3 shadow-sm relative overflow-hidden">
+                    ${idx === 0 ? '<div class="absolute top-0 left-0 w-1 h-full bg-yellow-400"></div>' : ''}
+                    <div class="text-[12px] text-gray-800 font-bold whitespace-pre-line leading-relaxed mb-2 pl-1">${crownHtml}${m.memo} ${myBadge}</div>
+                    <div class="flex justify-between items-center border-t border-gray-100 pt-2 mt-2">
+                        <span class="text-[9px] text-gray-400">${m.time}</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="likeMemo('${m.id}')" class="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1 rounded-lg font-bold border border-blue-100 active:scale-95 transition"><i class="fa-solid fa-thumbs-up mr-0.5"></i> ${m.likes || 0}</button>
+                            <button onclick="reportMemo('${m.id}')" class="text-[10px] text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-500 px-2 py-1 rounded-lg border border-gray-100 active:scale-95 transition">🚨 신고</button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            if (listContainer) listContainer.innerHTML = html;
+        } else { 
+            if (listContainer) listContainer.innerHTML = `<div class="bg-white border border-gray-200 rounded-xl p-6 text-center shadow-sm"><p class="text-gray-400 text-xs font-bold">등록된 주차정보가 없습니다.<br>첫 번째 정보를 남겨주세요!</p></div>`; 
+        }
+    } catch (e) { 
+        if (listContainer) listContainer.innerHTML = `<div class="text-red-500 text-center text-xs py-4">데이터를 불러오지 못했습니다.</div>`; 
+    }
+}
+
+export function closeMemoModal() { 
+    document.getElementById('memo-modal')?.classList.add('hidden'); 
+}
+
+function resetMemoForm() {
+    document.querySelectorAll('.height-tag-btn, .time-tag-btn, .etc-tag-btn').forEach(b => { 
+        b.dataset.active = "false"; 
+        b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    });
+    selectedHeightText = ""; selectedTimeText = ""; 
+    const memoInput = document.getElementById('memo-input');
+    const countEl = document.getElementById('memo-char-count');
+    if (memoInput) memoInput.value = ""; 
+    if (countEl) countEl.innerText = "0 / 30";
+}
+
+export function selectHeightTag(btn, val) {
+    const isActive = btn.dataset.active === "true";
+    document.querySelectorAll('.height-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
+    if (isActive) { selectedHeightText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedHeightText = `[주차장 높이 ${val}]`; }
+}
+
+export function selectTimeTag(btn, val) {
+    const isActive = btn.dataset.active === "true";
+    document.querySelectorAll('.time-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
+    if (isActive) { selectedTimeText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedTimeText = `[무료 회차 시간 ${val}]`; }
+}
+
+export function toggleEtcTag(btn) {
+    const isActive = btn.dataset.active === "true";
+    if (isActive) { btn.dataset.active = "false"; btn.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); btn.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); } 
+    else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); }
+}
+
+export async function saveCurrentMemo() {
+    const rawText = (document.getElementById('memo-input')?.value || '').trim();
+    let tags = [];
+    if (selectedHeightText) tags.push(selectedHeightText); if (selectedTimeText) tags.push(selectedTimeText);
+    document.querySelectorAll('.etc-tag-btn').forEach(btn => { if (btn.dataset.active === "true") tags.push(`[${btn.dataset.val}]`); });
+    const tagString = tags.join(" "); let finalMemo = "";
+    if (tagString && rawText) finalMemo = tagString + "\n" + rawText; else finalMemo = (tagString + rawText).trim();
+
+    if (!finalMemo) { alert("항목을 선택하거나 내용을 입력해주세요."); return; }
+    const sensitiveRegex = /(비번|비밀번호|패스워드|#|\*|\d{4,})/g;
+    if (sensitiveRegex.test(rawText)) { alert("⚠️ [보안 경고]\n현관 비밀번호 등은 법적 문제로 공유할 수 없습니다."); return; }
+
+    showLoading("주차정보 등록/수정 중...");
+    try {
+        await saveMemoToFirestore(currentMemoAddress, getOrCreateDeviceId(), finalMemo);
+        hideLoading(); alert("주차 정보가 등록(수정)되었습니다.");
+        const dest = destinations.find(d => d.address === currentMemoAddress);
+        if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
+    } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
+}
+
+export async function likeMemo(docId) {
+    try {
+        await likeMemoInFirestore(docId);
+        const dest = destinations.find(d => d.address === currentMemoAddress);
+        if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
+    } catch (e) { alert("통신 오류가 발생했습니다."); }
+}
+
+export async function reportMemo(docId) {
+    if (!confirm("이 메모에 부적절한 내용이 있습니까?\n신고하시면 즉시 블라인드 처리됩니다.")) return;
+    showLoading("신고 처리 중...");
+    try {
+        await reportMemoInFirestore(docId);
+        hideLoading(); alert("신고가 접수되어 블라인드 처리되었습니다."); 
+        const dest = destinations.find(d => d.address === currentMemoAddress);
+        if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
+    } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
+}
+
+// 🌟 배송 취소 및 완료 처리 함수들
+export async function cancelDestination(id) {
+    if (!confirm("이 배송지를 취소하시겠습니까?\n취소된 내역은 '지난배송' 목록에 기록됩니다.")) return;
+    const item = destinations.find(d => d.id === id);
+    if (!item) return;
+
+    showLoading("취소 내역 기록 중...");
+    try {
+        const realGps = await getDeviceRealGPS();
+        let actualLat = item.lat;
+        let actualLng = item.lng;
+        let isRealGpsCaptured = false;
+
+        if (realGps && realGps.lat && realGps.lng) {
+            actualLat = realGps.lat; actualLng = realGps.lng; isRealGpsCaptured = true;
+        }
+
+        const deviceId = getOrCreateDeviceId();
+        const phone = localStorage.getItem('deliveryProUserPhone') || "";
+        const cancelTag = "배송 취소";
+
+        const completionDocId = await saveCompletionToFirestore(deviceId, phone, item, cancelTag, actualLat, actualLng, isRealGpsCaptured, null);
+        archiveCompletedDelivery(item, cancelTag, completionDocId, null);
+
+        destinations = destinations.filter(d => d.id !== id);
+        updateDisplayNumbers();
+    } catch (e) {
+        alert("취소 처리 중 오류가 발생했습니다.");
+    } finally {
+        hideLoading();
+    }
+}
+
+export function completeDestination(id) {
+    pendingCompletionId = id;
+    selectedCompTag = "";
+    document.querySelectorAll('.comp-tag-btn').forEach(b => {
+        b.classList.remove('bg-emerald-100', 'border-emerald-400', 'text-emerald-800');
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700');
+    });
+    const etcContainer = document.getElementById('comp-etc-input-container');
+    const etcInput = document.getElementById('comp-etc-input');
+    if (etcContainer) etcContainer.classList.add('hidden');
+    if (etcInput) etcInput.value = "";
+    
+    updatePhotoCompButtonState(!!localStorage.getItem('deliveryProDispatchKey'));
+    document.getElementById('completion-modal')?.classList.remove('hidden');
+}
+
+export function selectCompletionTag(btn, tag) {
+    document.querySelectorAll('.comp-tag-btn').forEach(b => {
+        b.classList.remove('bg-emerald-100', 'border-emerald-400', 'text-emerald-800');
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700');
+    });
+    btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700');
+    btn.classList.add('bg-emerald-100', 'border-emerald-400', 'text-emerald-800');
+    
+    selectedCompTag = tag;
+    const etcContainer = document.getElementById('comp-etc-input-container');
+    const etcInput = document.getElementById('comp-etc-input');
+    if (tag === '기타') {
+        if (etcContainer) etcContainer.classList.remove('hidden');
+        setTimeout(() => { if (etcInput) etcInput.focus(); }, 100);
+    } else { 
+        if (etcContainer) etcContainer.classList.add('hidden'); 
+    }
+}
+
+export function closeCompletionModal() {
+    document.getElementById('completion-modal')?.classList.add('hidden');
+    pendingCompletionId = null;
+}
+
+export function triggerPhotoCompletion() {
+    const dispatchKey = localStorage.getItem('deliveryProDispatchKey');
+    if (!dispatchKey) {
+        alert("⚠️ [관제 연결 필요]\n사진 전송은 관제 센터(사무실)와 연결된 기사 계정만 사용하실 수 있습니다.\n관리자에게 기사 등록 연결을 요청해 주세요.");
+        return;
+    }
+    document.getElementById('completion-photo-input')?.click();
+}
+
+export async function confirmCompletion(photoUrl = null) {
+    if (typeof photoUrl !== 'string') photoUrl = null;
+    if (!photoUrl && !selectedCompTag) { 
+        alert("배송 완료 태그를 선택해 주세요."); 
+        return; 
+    }
+    
+    let finalTag = selectedCompTag;
+    if (selectedCompTag === '기타') {
+        const etcText = (document.getElementById('comp-etc-input')?.value || '').trim();
+        if (!etcText && !photoUrl) { 
+            alert("기타 사유를 상세하게 입력해 주세요."); 
+            return; 
+        }
+        finalTag = etcText ? `기타: ${etcText}` : "사진 완료";
+    } else if (!finalTag && photoUrl) {
+        finalTag = "사진 완료";
+    }
+
+    const item = destinations.find(d => d.id === pendingCompletionId);
+    if (!item) { closeCompletionModal(); return; }
+
+    document.getElementById('completion-modal')?.classList.add('hidden');
+
+    const loadingMsg = photoUrl 
+        ? "사진 등록 및 현장 GPS 완료 처리 중..." 
+        : "현장 실제 GPS 수신 및 완료 처리 중...";
+    showLoading(loadingMsg);
+    
+    const realGps = await getDeviceRealGPS();
+    let actualLat = item.lat;
+    let actualLng = item.lng;
+    let isRealGpsCaptured = false;
+
+    if (realGps && realGps.lat && realGps.lng) {
+        actualLat = realGps.lat; actualLng = realGps.lng; isRealGpsCaptured = true;
+    }
+
+    const deviceId = getOrCreateDeviceId();
+    const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    
+    const completionDocId = await saveCompletionToFirestore(deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl);
+    archiveCompletedDelivery(item, finalTag, completionDocId, photoUrl);
+
+    destinations = destinations.filter(d => d.id !== pendingCompletionId);
+    updateDisplayNumbers();
+    
+    hideLoading();
+    closeCompletionModal();
+}
+
+function archiveCompletedDelivery(item, tag = "", completionDocId = null, photoUrl = null) {
+    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    let now = new Date(); let archivedItem = { ...item }; 
+    history.unshift({ 
+        id: item.id, address: item.address, tag: tag, hasPhoto: !!photoUrl, photoUrl: photoUrl || "", completionDocId: completionDocId, 
+        date: now.toLocaleDateString(), time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+        timestamp: now.getTime(), originalData: archivedItem 
+    });
+    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+}
+
+export async function restoreHistoryItem(timestamp) {
+    if (!confirm("이 배송지를 다시 진행 목록으로 되돌리시겠습니까?")) return;
+    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    const idx = history.findIndex(h => h.timestamp === timestamp);
+    
+    if (idx > -1) {
+        showLoading("배송지 복원 중...");
+        const targetHistory = history[idx];
+
+        if (targetHistory.completionDocId) {
+            await deleteCompletionFromFirestore(targetHistory.completionDocId);
+        }
+
+        let itemToRestore = targetHistory.originalData;
+        if (!itemToRestore) {
+            try {
+                const coords = await geocodeAddress(targetHistory.address);
+                itemToRestore = { id: targetHistory.id || Date.now(), address: targetHistory.address, lat: coords.lat, lng: coords.lng, phone: null };
+            } catch(e) { 
+                itemToRestore = { id: targetHistory.id || Date.now(), address: targetHistory.address, lat: 0, lng: 0, phone: null }; 
+            }
+        }
+        
+        if (itemToRestore) { 
+            destinations.push(itemToRestore); 
+            history.splice(idx, 1); 
+            localStorage.setItem('deliveryPro_history', JSON.stringify(history)); 
+            updateDisplayNumbers(); 
+            openHistoryModal(); 
+        }
+        hideLoading();
+    }
+}
+
+export async function editDestinationAddress(id) {
+    const item = destinations.find(d => d.id === id); if (!item) return;
+    const newAddr = prompt("수정할 주소를 입력하세요:", item.address);
+    if (!newAddr || newAddr.trim() === item.address) return;
+
+    showLoading("수정된 주소 확인 중...");
+    try {
+        const coords = await geocodeAddress(newAddr.trim());
+        if (coords) { 
+            item.address = coords.address_name || newAddr.trim(); 
+            item.lat = coords.lat; 
+            item.lng = coords.lng; 
+            saveActiveData(); 
+            renderList();
+        }
+    } catch (e) { 
+        alert("수정된 주소를 지도에서 찾을 수 없습니다."); 
+    } finally { 
+        hideLoading(); 
+    }
+}
+
+function showLoading(text) { 
+    const elText = document.getElementById('loading-text');
+    const elOverlay = document.getElementById('loading-overlay');
+    if (elText) elText.innerText = text; 
+    if (elOverlay) elOverlay.classList.remove('hidden'); 
+}
+
+function hideLoading() { 
+    const elOverlay = document.getElementById('loading-overlay');
+    if (elOverlay) elOverlay.classList.add('hidden'); 
+}
+
 // 로그아웃 함수
 export async function logout() {
     if (!confirm("로그아웃 하시겠습니까?\n로그아웃 시 기기 정보가 초기화되어 다른 기기에서 로그인할 수 있습니다.")) return;
-    
     const currentKey = localStorage.getItem('deliveryProKey');
     
     if (currentKey && typeof firebaseClearDeviceData === 'function') {
@@ -550,22 +1266,13 @@ export async function logout() {
     try { if (typeof dispatchMsgWatcherUnsub === 'function') { dispatchMsgWatcherUnsub(); } } catch(e) {}
     try { if (typeof gpsRequestWatcherUnsub === 'function') { gpsRequestWatcherUnsub(); } } catch(e) {}
 
-    localStorage.removeItem('deliveryProKey');
-    localStorage.removeItem('deliveryProUserPhone');
-    localStorage.removeItem('deliveryProExpireDate');
-    localStorage.removeItem('deliveryProDispatchKey');
-    
+    clearAuthStorage();
     window.location.reload();
 }
 
+// 🌟 HTML과의 연결을 위한 맨 마지막 전역 바인딩 (이름표 달기)
 window.logout = logout;
 window.renderList = renderList;
-
-// 전역 바인딩
-window.appActions = {
-    initApp, optimizeRouteAction, getDeviceRealGPS, renderList
-};
-// 🌟 HTML의 인라인 onclick 이벤트들이 인식할 수 있도록 주요 함수들을 전역(window)에 바인딩
 window.verifyLicense = verifyLicense;
 window.openTrialModal = openTrialModal;
 window.closeTrialModal = closeTrialModal;
@@ -597,3 +1304,8 @@ window.restoreHistoryItem = restoreHistoryItem;
 window.closeStartModal = closeStartModal;
 window.selectStartDest = selectStartDest;
 window.closeDispatchAlertModal = closeDispatchAlertModal;
+window.optimizeRoute = optimizeRouteAction;
+
+window.appActions = {
+    initApp, optimizeRouteAction, getDeviceRealGPS, renderList
+};
