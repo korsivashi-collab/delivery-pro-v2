@@ -219,6 +219,7 @@ window.generateNewLicense = async function() {
             expireDate: expireDate.replace(/-/g, '.'),
             deviceId: "", status: "active",
             maxSlots: (type === 'dispatch' ? 20 : 0),
+            isPro: false, // 신규 발급 시 기본값 false
             createdAt: Date.now()
         });
         alert(`[${typeName} 발급 완료]\n키: ${newKey}`);
@@ -293,6 +294,7 @@ function renderMasterTables() {
     renderPagedTableTab('dispatch', dispatches, 'table-body-dispatch', 'pagination-dispatch', (item, idx) => {
         const connectedDrivers = allLicenses.filter(l => l.dispatchKey === item.key);
         const slotLimitStr = item.maxSlots ? `${item.maxSlots}대 한도` : '무제한';
+        const proBadge = item.isPro ? `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-black ml-1 border border-amber-300"><i class="fa-solid fa-crown text-amber-500"></i> PRO</span>` : ``;
         return `
         <tr class="hover:bg-gray-50/80 transition">
             <td class="py-3 px-3 font-bold text-gray-400">${idx}</td>
@@ -306,7 +308,7 @@ function renderMasterTables() {
                 <span class="text-[10px] text-gray-400 block mt-0.5">(${slotLimitStr})</span>
             </td>
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
-            <td class="py-3 px-3"><span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full text-[10px] font-black">관제운영</span></td>
+            <td class="py-3 px-3"><span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full text-[10px] font-black">관제운영</span>${proBadge}</td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="openDispatchMonitorView('${item.key}')" class="px-2.5 py-1 bg-emerald-600 text-white font-black rounded-lg text-[11px] hover:bg-emerald-700 transition">모니터링</button>
                 <button onclick="openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px] hover:bg-blue-700 transition">수정</button>
@@ -341,7 +343,7 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
     }
 }
 
-// === 3. 라이선스/계정 관리 모달 ===
+// === 3. 라이선스/계정 관리 모달 (PRO 권한 연동 포함) ===
 window.openEditLicenseModal = function(key) {
     const target = allLicenses.find(l => l.key === key);
     if (!target) return;
@@ -358,18 +360,29 @@ window.openEditLicenseModal = function(key) {
     document.getElementById('edit-expire-input').value = expFormatted;
     document.getElementById('edit-status-select').value = target.status || 'active';
 
-    const slotsBox = document.getElementById('edit-slots-container');
+    const dispatchOptionsBox = document.getElementById('edit-dispatch-options-container');
     const dispatchSec = document.getElementById('edit-dispatch-connected-section');
 
     if (target.type === 'dispatch') {
-        if (slotsBox) slotsBox.classList.remove('hidden');
+        if (dispatchOptionsBox) {
+            dispatchOptionsBox.classList.remove('hidden');
+            dispatchOptionsBox.classList.add('grid');
+        }
         document.getElementById('edit-slots-input').value = target.maxSlots || 0;
+        
+        // 🌟 PRO 권한 체크박스 상태 반영
+        const proCheckbox = document.getElementById('edit-pro-checkbox');
+        if (proCheckbox) proCheckbox.checked = !!target.isPro;
+
         if (dispatchSec) { dispatchSec.classList.remove('hidden'); dispatchSec.classList.add('flex'); }
         const addInput = document.getElementById('modal-add-driver-input');
         if (addInput) addInput.value = '';
         window.renderModalConnectedDrivers(target.key);
     } else {
-        if (slotsBox) slotsBox.classList.add('hidden');
+        if (dispatchOptionsBox) {
+            dispatchOptionsBox.classList.add('hidden');
+            dispatchOptionsBox.classList.remove('grid');
+        }
         if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
     }
     document.getElementById('edit-license-modal').classList.remove('hidden');
@@ -485,10 +498,15 @@ window.saveLicenseEdit = async function() {
 
     const expStr = expireDate.replace(/-/g, '.');
     const target = allLicenses.find(l => l.key === origKey);
+
+    // 🌟 PRO 체크박스 상태 읽어서 저장 페이로드에 포함
+    const isProChecked = type === 'dispatch' ? (document.getElementById('edit-pro-checkbox')?.checked || false) : false;
+
     const updatePayload = {
         key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
         dispatchKey: target ? target.dispatchKey || '' : '',
-        maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input').value) || 0 : 0
+        maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input').value) || 0 : 0,
+        isPro: isProChecked // 🌟 DB에 PRO 권한 저장
     };
 
     try {
@@ -2086,7 +2104,7 @@ window.confirmLinkDriver = async function() {
             if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
         }
 
-        if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
+        if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
         if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
             alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
         }
