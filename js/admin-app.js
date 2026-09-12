@@ -62,6 +62,9 @@ window.onload = () => {
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
+    // 🌟 로드 시 저장된 폼 목록 초기화
+    window.loadSavedForms();
+
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
     if (monitorKey) {
@@ -1120,6 +1123,7 @@ window.handleProFeature = function(featureName) {
     if (isPro) {
         if (featureName === 'INVOICE') {
             document.getElementById('pro-invoice-modal').classList.remove('hidden');
+            window.loadSavedForms(); // 창 열릴 때 저장된 폼 목록 로드
             window.updateLivePreview(); // 창 열릴 때 미리보기 초기화 반영
         } else if (featureName === 'AUTO_DISPATCH') {
             alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 화면 레이아웃도 곧 업데이트됩니다.");
@@ -1169,7 +1173,7 @@ window.updateLivePreview = function() {
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const addr = document.getElementById('input-prov-addr')?.value || '';
     const tel = document.getElementById('input-prov-tel')?.value || '';
-    const addTel = document.getElementById('input-prov-add-tel')?.value || ''; // 새로 추가된 부분
+    const addTel = document.getElementById('input-prov-add-tel')?.value || '';
 
     const today = new Date();
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -1180,12 +1184,94 @@ window.updateLivePreview = function() {
     document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
     document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
-    document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel); // 새로 추가된 부분
+    document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 
     // 사용자가 우측 폼에서 입력할 때만 미리보기 탭으로 자동 전환
     if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
         window.switchInvoiceTab('PREVIEW');
     }
+};
+
+// === 🌟 [신규] 명세서 폼 저장 및 불러오기 (Local Storage) ===
+window.loadSavedForms = function() {
+    const listEl = document.getElementById('saved-forms-list');
+    if (!listEl) return;
+    
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    if (savedForms.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`;
+        return;
+    }
+
+    let html = '';
+    savedForms.forEach((form, idx) => {
+        html += `
+        <div class="bg-white border border-gray-200 rounded-xl p-2 shadow-xs hover:border-indigo-400 transition flex items-center justify-between cursor-pointer group" onclick="applySavedForm(${idx})">
+            <div class="flex items-center gap-2 overflow-hidden flex-1">
+                <div class="w-6 h-6 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fa-solid fa-file-invoice"></i></div>
+                <div class="min-w-0">
+                    <p class="text-[11px] font-black text-gray-800 truncate leading-tight">${form.title}</p>
+                    <p class="text-[9px] text-gray-400 truncate">${form.name}</p>
+                </div>
+            </div>
+            <button type="button" onclick="event.stopPropagation(); deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition" title="폼 삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+};
+
+window.saveProviderForm = function() {
+    const title = document.getElementById('input-form-title').value.trim();
+    const name = document.getElementById('input-prov-name').value.trim();
+    const regno = document.getElementById('input-prov-regno').value.trim();
+    const addr = document.getElementById('input-prov-addr').value.trim();
+    const tel = document.getElementById('input-prov-tel').value.trim();
+    const addTel = document.getElementById('input-prov-add-tel').value.trim();
+
+    if (!title) { alert("저장할 폼의 '제목'을 입력해주세요."); document.getElementById('input-form-title').focus(); return; }
+
+    const newForm = { title, name, regno, addr, tel, addTel, savedAt: Date.now() };
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    
+    const existingIdx = savedForms.findIndex(f => f.title === title);
+    if(existingIdx >= 0) {
+        if(confirm(`'${title}'(으)로 이미 저장된 폼이 있습니다. 덮어쓰시겠습니까?`)) {
+            savedForms[existingIdx] = newForm;
+        } else return;
+    } else {
+        savedForms.push(newForm);
+    }
+
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
+    window.loadSavedForms();
+};
+
+window.applySavedForm = function(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const form = savedForms[idx];
+    if (!form) return;
+
+    document.getElementById('input-form-title').value = form.title || '';
+    document.getElementById('input-prov-name').value = form.name || '';
+    document.getElementById('input-prov-regno').value = form.regno || '';
+    document.getElementById('input-prov-addr').value = form.addr || '';
+    document.getElementById('input-prov-tel').value = form.tel || '';
+    document.getElementById('input-prov-add-tel').value = form.addTel || '';
+
+    // 미리보기 업데이트 및 탭 전환
+    window.updateLivePreview();
+    window.switchInvoiceTab('PREVIEW');
+};
+
+window.deleteSavedForm = function(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const form = savedForms[idx];
+    if(!confirm(`[${form.title}] 폼을 삭제하시겠습니까?`)) return;
+
+    savedForms.splice(idx, 1);
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    window.loadSavedForms();
 };
 
 // 숫자 포맷팅 유틸리티 (콤마 찍기)
@@ -1203,7 +1289,7 @@ function processExcelData(jsonData) {
             phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: ''
         };
 
-        // 스마트 헤더 매핑 알고리즘 (버그 수정됨)
+        // 스마트 헤더 매핑 알고리즘
         for (let key in row) {
             const val = row[key];
             const k = key.replace(/\s+/g, ''); // 공백 제거 후 분석
@@ -1217,8 +1303,8 @@ function processExcelData(jsonData) {
             else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
             else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
             else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
-            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val; // 총액을 단가보다 먼저 검사하여 '총금액'이 '금액'에 잡히는 것을 방지
-            else if (/단가|가격|금액/.test(k)) mappedRow.price = val; // 문법 오류 원인이었던 불필요한 정규식 제거 완료
+            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val; 
+            else if (/단가|가격|금액/.test(k)) mappedRow.price = val; 
             else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
         }
         parsedExcelList.push(mappedRow);
