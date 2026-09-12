@@ -219,7 +219,7 @@ window.generateNewLicense = async function() {
             expireDate: expireDate.replace(/-/g, '.'),
             deviceId: "", status: "active",
             maxSlots: (type === 'dispatch' ? 20 : 0),
-            isPro: false, // 신규 발급 시 기본값 false
+            isPro: false,
             createdAt: Date.now()
         });
         alert(`[${typeName} 발급 완료]\n키: ${newKey}`);
@@ -247,6 +247,10 @@ window.changeMasterTabPagination = function(tabKey, targetPage) {
     window.masterPages[tabKey] = targetPage;
     if (tabKey === 'memos') window.renderMemosTable(allMemos);
     else renderMasterTables();
+};
+
+window.openDispatchMonitorView = function(dispatchKey) {
+    window.open(window.location.pathname + '?monitor=' + dispatchKey, '_blank');
 };
 
 function renderMasterTables() {
@@ -343,7 +347,7 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
     }
 }
 
-// === 3. 라이선스/계정 관리 모달 (PRO 권한 연동 포함) ===
+// === 3. 라이선스/계정 관리 모달 ===
 window.openEditLicenseModal = function(key) {
     const target = allLicenses.find(l => l.key === key);
     if (!target) return;
@@ -370,7 +374,6 @@ window.openEditLicenseModal = function(key) {
         }
         document.getElementById('edit-slots-input').value = target.maxSlots || 0;
         
-        // 🌟 PRO 권한 체크박스 상태 반영
         const proCheckbox = document.getElementById('edit-pro-checkbox');
         if (proCheckbox) proCheckbox.checked = !!target.isPro;
 
@@ -499,14 +502,13 @@ window.saveLicenseEdit = async function() {
     const expStr = expireDate.replace(/-/g, '.');
     const target = allLicenses.find(l => l.key === origKey);
 
-    // 🌟 PRO 체크박스 상태 읽어서 저장 페이로드에 포함
     const isProChecked = type === 'dispatch' ? (document.getElementById('edit-pro-checkbox')?.checked || false) : false;
 
     const updatePayload = {
         key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
         dispatchKey: target ? target.dispatchKey || '' : '',
         maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input').value) || 0 : 0,
-        isPro: isProChecked // 🌟 DB에 PRO 권한 저장
+        isPro: isProChecked
     };
 
     try {
