@@ -46,7 +46,7 @@ window.historySelectedAccountKeys = new Set();
 window.selectedMessageDrivers = new Set();
 let activeDispatchPopupMsgId = null;
 
-// 🌟 한국 시간(로컬) 기준 YYYY-MM-DD 변환 전역 함수
+// 한국 시간(로컬) 기준 YYYY-MM-DD 변환 전역 함수
 function getLocalDateString(d = new Date()) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -62,10 +62,10 @@ window.onload = () => {
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
-    // 🌟 로드 시 저장된 폼 목록 초기화
+    // 로드 시 저장된 폼 목록 초기화
     window.loadSavedForms();
 
-    // 🌟 [추가] 일괄 출력 버튼에 미리 이벤트 리스너 연결
+    // 🌟 일괄 출력 버튼에 미리 이벤트 리스너 연결
     setTimeout(() => {
         const printBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
         if (printBtn) printBtn.onclick = window.executeBatchPrint;
@@ -884,7 +884,7 @@ window.renderAccountHistoryView = function() {
     }
 
     const targetLic = allLicenses.find(l => l.key === selectedKey);
-    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 없습니다.</div>`; return; }
+    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 বৃত্তান্ত을 수 없습니다.</div>`; return; }
 
     window.currentSelectedAccountKey = targetLic.key;
     if (topFilterBarEl) topFilterBarEl.classList.add('hidden');
@@ -1154,7 +1154,7 @@ window.switchInvoiceTab = function(tabName) {
     const viewExcel = document.getElementById('inv-view-excel');
     const viewPreview = document.getElementById('inv-view-preview');
 
-    if (!btnExcel || !btnPreview || !viewExcel || !viewPreview) return;
+    if (!btnExcel || !viewExcel || !viewPreview) return;
 
     if (tabName === 'EXCEL') {
         btnExcel.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
@@ -1192,7 +1192,8 @@ window.updateLivePreview = function() {
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 
-    // 사용자가 우측 폼에서 입력할 때만 미리보기 탭으로 자동 전환 (기존 탭이 있으면)
+    // 사용자가 우측 폼에서 타이핑을 할 때마다 즉시 탭 전환을 원하지 않을 수 있으므로,
+    // 활성화된 창이 폼 입력창일 경우에만 미리보기 탭으로 넘깁니다.
     if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
         window.switchInvoiceTab('PREVIEW');
     }
@@ -1265,7 +1266,9 @@ window.applySavedForm = function(idx) {
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
+    // 양식을 불러오면 실시간으로 좌측 미리보기에 연동하여 보여줍니다.
     window.updateLivePreview();
+    window.switchInvoiceTab('PREVIEW');
 };
 
 window.deleteSavedForm = function(idx) {
@@ -1321,11 +1324,11 @@ function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody');
     if (!tbody) return;
     
-    // 🌟 [추가] 엑셀이 업로드되면 일괄 출력 버튼의 (0건) 텍스트를 파싱된 건수로 업데이트하고 이벤트 연결
+    // 🌟 엑셀 업로드 시 일괄 출력 버튼에 파싱된 데이터 개수를 표시하고 함수를 연결합니다.
     const printBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
     if (printBtn) {
         printBtn.innerHTML = `<i class="fa-solid fa-print"></i> 일괄 출력 (${parsedExcelList.length}건)`;
-        printBtn.onclick = window.executeBatchPrint; // 동적 함수 연결
+        printBtn.onclick = window.executeBatchPrint;
     }
 
     if (parsedExcelList.length === 0) {
@@ -1396,6 +1399,7 @@ window.previewInvoiceRow = function(idx) {
     });
 
     window.updateLivePreview(); 
+    window.switchInvoiceTab('PREVIEW');
 };
 
 // === 🌟 [신규] 명세서 일괄 출력 자동화 기능 (Batch Print) ===
@@ -1408,14 +1412,14 @@ function generateInvoiceHTML(item, providerInfo) {
     const template = originalTemplate.cloneNode(true);
     template.id = ''; // 다중 생성을 위해 ID 제거
 
-    // 1. 공급자(폼) 정보 바인딩
+    // 1. 공급자(우측 폼) 정보 바인딩
     template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
     template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
     template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
     template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
     template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
 
-    // 2. 엑셀 데이터(고객/수신자 및 품목) 정보 바인딩
+    // 2. 엑셀 데이터(수신자 및 품목) 정보 바인딩
     template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
     template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
@@ -1469,7 +1473,7 @@ window.executeBatchPrint = function() {
     const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인쇄 생성 중...';
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 렌더링 중...';
     }
 
     // 작성 중이거나 선택된 폼(공급자)의 현재 값을 수집
@@ -1499,7 +1503,7 @@ window.executeBatchPrint = function() {
                 let invoiceHtml = generateInvoiceHTML(item, providerInfo);
                 
                 if(isA4Split) {
-                    // A4 2분할(절반 높이 148mm 적용 및 중간 점선 삽입)
+                    // A4 2분할(절반 높이 148.5mm 적용 및 중간 점선 삽입)
                     const borderStyle = j === 0 ? 'border-bottom: 1px dashed #ccc;' : '';
                     invoiceHtml = invoiceHtml.replace('class="invoice-paper', `style="height: 148.5mm; overflow: hidden; ${borderStyle}" class="invoice-paper`);
                 } else {
