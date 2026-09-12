@@ -892,15 +892,15 @@ window.renderAccountHistoryView = function() {
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
         <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black">
-            <span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도</span>
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도 요약</span>
             <span>완료 ${doneCount} / 전체 ${totalCount} 건 (${rate}%)</span>
         </div>
         <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2">
             <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div>
         </div>
-        <div class="flex justify-between text-[11px] font-bold text-blue-800">
+        <div class="flex justify-between items-center text-[11px] font-bold text-blue-800 pt-1.5 border-t border-blue-200/50">
             <span>미배송 대기: <b class="text-blue-600 font-black">${pendingCount}</b>곳</span>
-            <span>완료율: <b class="text-emerald-600 font-black">${rate}%</b></span>
+            <span>등록 공유 메모: <b class="text-yellow-600 font-black">${driverMemos.length}</b>건</span>
         </div>
     </div>
 
@@ -959,7 +959,7 @@ window.renderAccountHistoryView = function() {
         }
     } else {
         if (driverDone.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-300 mb-1"></i><p>완료된 배송 건이 없습니다.</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-300 mb-1"></i><p>선택한 날짜(${selectedDate})에 완료된 배송 건이 없습니다.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             driverDone.forEach((c, idx) => {
@@ -1625,7 +1625,7 @@ window.executeExcelExport = function() {
     const isCanceled = document.getElementById('chk-export-canceled').checked;
 
     if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 정 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
