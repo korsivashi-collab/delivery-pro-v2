@@ -57,9 +57,9 @@
         .excel-table td, .excel-table th { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; font-size: 11px; }
         .excel-table tr:hover td { background-color: #eef2ff; }
 
-        /* 🌟 새롭게 디자인된 실제 거래명세표(노란색) 전용 스타일 */
+        /* 🌟 2차 수정: 꽉 찬 A4 비율을 위한 거래명세표 여백 최소화 최적화 */
         .invoice-paper { 
-            background-color: #ffeb5c; /* 사진과 유사한 진한 노란색 */
+            background-color: #ffeb5c;
             border: 1px solid #d1d5db; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
             width: 210mm; 
@@ -68,26 +68,19 @@
             color: #000; 
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
             position: relative;
-            padding: 12mm 15mm; /* 여백 조정 */
+            padding: 5mm 8mm; /* 여백 대폭 최소화 */
+            box-sizing: border-box;
         }
         .invoice-title {
             text-align: center;
-            font-size: 24px;
+            font-size: 26px; /* 폰트 약간 키움 */
             font-weight: 900;
-            letter-spacing: 12px;
+            letter-spacing: 15px; /* 자간 넓힘 */
             text-decoration: underline;
-            margin-bottom: 2px;
+            margin-bottom: 5px;
         }
-        .invoice-subtitle {
-            text-align: center;
-            font-size: 13px;
-            font-weight: normal;
-            margin-bottom: 15px;
-            letter-spacing: 1px;
-        }
-        
-        .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: -2px; }
-        .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 3px 5px; }
+        .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 12px; margin-bottom: -2px; }
+        .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px 5px; } /* 패딩 살짝 늘림 */
         .invoice-table th { font-weight: bold; text-align: center; }
         
         .invoice-label { background-color: transparent; font-weight: bold; text-align: center; letter-spacing: 1px; }
@@ -109,7 +102,7 @@
         .inv-font-bold { font-weight: bold; }
         
         /* 품목 테이블 최소 높이 유지를 위한 빈 줄 설정 */
-        .empty-row td { height: 22px; }
+        .empty-row td { height: 26px; } /* 줄 높이 늘림 */
     </style>
 </head>
 <body class="bg-gray-100 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
@@ -658,18 +651,28 @@
             
             <!-- ⬅️ 좌측: 엑셀 형태 주문 리스트 (82%로 확장) -->
             <div class="w-[82%] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
-                <div class="absolute top-3 left-4 flex gap-1.5 z-20">
+                
+                <!-- 🌟 2차 수정: 탭 영역 디자인 변경 (미리보기 시 뒤로가기 버튼 표시) -->
+                <div class="absolute top-3 left-4 flex gap-1.5 z-20 items-center">
                     <button id="inv-tab-excel" onclick="switchInvoiceTab('EXCEL')" class="px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition">주문 리스트</button>
-                    <!-- 명세서 미리보기 (출력용) 버튼 삭제됨 -->
+                    <!-- 미리보기 화면일 때만 보이는 리스트 복귀 버튼 -->
+                    <button id="inv-btn-back" onclick="switchInvoiceTab('EXCEL')" class="hidden px-4 py-2 bg-slate-800 text-white font-black text-xs rounded-lg shadow-sm hover:bg-slate-700 transition flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> 리스트로 돌아가기</button>
+                </div>
+
+                <!-- 🌟 2차 수정: 선택 삭제 및 목록 비우기 버튼 추가 -->
+                <div id="inv-list-actions" class="absolute top-3 right-4 flex gap-1.5 z-20 items-center">
+                    <button onclick="deleteSelectedExcelRows()" class="px-3 py-1.5 bg-red-50 text-red-600 font-bold text-xs rounded-lg border border-red-200 shadow-sm hover:bg-red-100 transition active:scale-95 flex items-center gap-1"><i class="fa-solid fa-trash-can"></i> 선택 삭제</button>
+                    <button onclick="clearAllExcelRows()" class="px-3 py-1.5 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg border border-gray-200 shadow-sm hover:bg-gray-200 transition active:scale-95 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> 목록 비우기</button>
                 </div>
 
                 <!-- 엑셀 뷰 -->
                 <div id="inv-view-excel" class="flex-1 flex flex-col mt-12">
                     <div class="flex-1 overflow-auto custom-scrollbar relative px-2">
-                        <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table min-w-[1500px]">
+                        <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table min-w-[1550px]">
                             <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm">
                                 <tr class="border-b border-gray-200 text-gray-700">
-                                    <th class="font-black text-center w-10"><input type="checkbox" class="cursor-pointer"></th>
+                                    <!-- 🌟 2차 수정: 전체 선택 ID 부여 -->
+                                    <th class="font-black text-center w-10"><input type="checkbox" id="chk-excel-all" class="cursor-pointer"></th>
                                     <th class="font-black text-center w-12">순번</th>
                                     <th class="font-black">발송자(고객)</th>
                                     <th class="font-black">주문번호</th>
@@ -683,11 +686,13 @@
                                     <th class="font-black text-blue-600 text-right">단가</th>
                                     <th class="font-black text-blue-600 text-right">총액</th>
                                     <th class="font-black">결제/배송 메모</th>
+                                    <!-- 🌟 2차 수정: 개별 삭제 버튼을 위한 관리 열 추가 -->
+                                    <th class="font-black text-center w-16">관리</th>
                                 </tr>
                             </thead>
                             <tbody id="invoice-excel-tbody" class="divide-y divide-gray-200 bg-white">
                                 <tr id="empty-excel-row">
-                                    <td colspan="14" class="text-center py-32">
+                                    <td colspan="15" class="text-center py-32">
                                         <i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i>
                                         <span class="text-gray-400 font-bold text-sm">데이터가 없습니다.<br>우측 패널에 엑셀 주문서 파일을 업로드해주세요.</span>
                                     </td>
@@ -700,7 +705,8 @@
                 <!-- 🌟 1차 수정: 사진과 유사한 실제 거래명세표(노란색) 디자인 -->
                 <div id="inv-view-preview" class="hidden flex-1 overflow-auto bg-gray-300 p-8 flex-col items-center gap-6">
                     <div id="print-area" class="invoice-paper">
-                        <div class="invoice-title">거래명세표<span style="font-size: 14px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(공급자 보관용)</span></div>
+                        <!-- 🌟 2차 수정: (공급자 보관용) 텍스트에 ID를 부여하여 출력 시 분기 처리 -->
+                        <div class="invoice-title">거래명세표<span id="invoice-copy-type" style="font-size: 14px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(공급자 보관용)</span></div>
                         
                         <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 2px;">
                             <div style="font-size: 11px; font-weight: bold; width: 45%;">주문일자: <span id="prev-date-1" style="font-weight: normal;"></span></div>
@@ -876,9 +882,9 @@
                 <!-- 4. 우측 하단: 출력 실행 영역 -->
                 <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none">
                     <label class="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 cursor-pointer">
-                        <input type="checkbox" checked class="w-3.5 h-3.5 text-indigo-600 rounded"> A4 분할 인쇄
+                        <input type="checkbox" id="chk-a4-split" checked class="w-3.5 h-3.5 text-indigo-600 rounded"> A4 분할 인쇄 (공급자/공급받는자 보관용)
                     </label>
-                    <button class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-1.5">
+                    <button id="btn-batch-print" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-1.5">
                         <i class="fa-solid fa-print"></i> 일괄 출력 (0건)
                     </button>
                 </div>
@@ -998,7 +1004,7 @@
                     </span>
                     <div>
                         <h3 class="font-black text-gray-900 text-sm">운영사 알림 발송 이력 관리</h3>
-                        <p class="text-[10px] text-gray-400 font-bold">마스터 계정에서 보낸 전체 알림 내역을 조회하고 삭제할 수 있습니다.</p>
+                        <p class="text-[10px] text-gray-400 font-bold">마스터 계정에서 보낸 전체 알림 내역을 정렬하고 삭제할 수 있습니다.</p>
                     </div>
                 </div>
                 <button onclick="closeMasterNoticeHistoryModal()" class="text-gray-400 hover:text-gray-700 text-lg p-1"><i class="fa-solid fa-xmark"></i></button>
