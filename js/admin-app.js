@@ -1102,34 +1102,25 @@ window.deleteParkingMemo = async function(id) {
 
 // === 5. 관제 사이드바, 지도 및 알림 기능 ===
 
-// 🌟 [신규 추가] PRO 기능 권한 통제 (Feature Toggling)
+// 🌟 PRO 기능 권한 통제 (Feature Toggling)
 window.handleProFeature = function(featureName) {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const role = sessionStorage.getItem('deliveryProRole');
     let isPro = false;
 
-    // 현재 접속한 관제 계정의 isPro 상태 확인
     if (dispatchKey) {
         const myLic = allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
-        if (myLic && myLic.isPro) {
-            isPro = true;
-        }
+        if (myLic && myLic.isPro) isPro = true;
     }
-
-    // 마스터 관리자가 직접 보고 있을 때는 기능 테스트를 위해 허용
-    if (role === 'MASTER' && !dispatchKey) {
-        isPro = true;
-    }
+    if (role === 'MASTER' && !dispatchKey) isPro = true;
 
     if (isPro) {
-        // PRO 권한이 있는 경우
-        if (featureName === 'AUTO_DISPATCH') {
+        if (featureName === 'INVOICE') {
+            document.getElementById('pro-invoice-modal').classList.remove('hidden');
+        } else if (featureName === 'AUTO_DISPATCH') {
             alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 기능 개발 및 연동 준비 중입니다.");
-        } else if (featureName === 'INVOICE') {
-            alert("👑 PRO 권한 확인됨:\n[주문서 통합관리] 기능 개발 및 연동 준비 중입니다.");
         }
     } else {
-        // 일반(Free) 계정인 경우 모달 띄우기
         document.getElementById('premium-upgrade-modal').classList.remove('hidden');
     }
 };
@@ -1137,6 +1128,31 @@ window.handleProFeature = function(featureName) {
 window.closePremiumModal = function() {
     document.getElementById('premium-upgrade-modal').classList.add('hidden');
 };
+
+// 🌟 주문서 통합관리 창 닫기
+window.closeProInvoiceModal = function() {
+    document.getElementById('pro-invoice-modal').classList.add('hidden');
+};
+
+// 엑셀 드롭존 인터랙션
+setTimeout(() => {
+    const dropZone = document.getElementById('excel-drop-zone');
+    if (dropZone) {
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.classList.add('bg-indigo-100', 'border-indigo-500');
+        });
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
+            alert("엑셀 파일 파싱 로직(SheetJS 연동) 개발 대기 중입니다.");
+        });
+    }
+}, 1000);
 
 window.showDispatchPopupAlert = function(msg) {
     activeDispatchPopupMsgId = msg.id;
@@ -2140,7 +2156,7 @@ window.confirmLinkDriver = async function() {
             let directSnap = await getDoc(doc(db, "licenses", rawInput));
             if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `TRIAL-${rawInput}`));
             if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `PRO-${rawInput}`));
-            if (directSnap.exists()) targetLic = { id: snap.id, ...snap.data() };
+            if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
         }
 
         if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
