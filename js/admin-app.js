@@ -1102,7 +1102,8 @@ window.deleteParkingMemo = async function(id) {
 
 // === 5. 관제 사이드바, 지도 및 알림 기능 ===
 
-// === 🌟 [PRO 전용] 주문서 통합관리 기능 로직 ===
+// === 🌟 [PRO 전용] 주문서 통합관리 및 엑셀 파싱 기능 로직 ===
+let parsedExcelList = []; // 파싱된 엑셀 데이터 전역 보관
 
 // 1. PRO 권한 통제 (Feature Toggling)
 window.handleProFeature = function(featureName) {
@@ -1119,7 +1120,7 @@ window.handleProFeature = function(featureName) {
     if (isPro) {
         if (featureName === 'INVOICE') {
             document.getElementById('pro-invoice-modal').classList.remove('hidden');
-            updateLivePreview(); // 창 열릴 때 미리보기 초기화 반영
+            window.updateLivePreview(); // 창 열릴 때 미리보기 초기화 반영
         } else if (featureName === 'AUTO_DISPATCH') {
             alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 화면 레이아웃도 곧 업데이트됩니다.");
         }
@@ -1143,56 +1144,158 @@ window.switchInvoiceTab = function(tabName) {
     const viewExcel = document.getElementById('inv-view-excel');
     const viewPreview = document.getElementById('inv-view-preview');
 
+    if (!btnExcel || !btnPreview || !viewExcel || !viewPreview) return;
+
     if (tabName === 'EXCEL') {
-        btnExcel.className = "px-4 py-2.5 bg-white text-indigo-600 font-black text-sm rounded-xl border border-gray-200 shadow-sm transition flex items-center gap-2";
-        btnPreview.className = "px-4 py-2.5 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-sm rounded-xl transition flex items-center gap-2";
+        btnExcel.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
+        btnPreview.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
         viewExcel.classList.remove('hidden');
         viewPreview.classList.add('hidden');
+        viewPreview.classList.remove('flex');
     } else {
-        btnPreview.className = "px-4 py-2.5 bg-white text-indigo-600 font-black text-sm rounded-xl border border-gray-200 shadow-sm transition flex items-center gap-2";
-        btnExcel.className = "px-4 py-2.5 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-sm rounded-xl transition flex items-center gap-2";
+        btnPreview.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
+        btnExcel.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
         viewPreview.classList.remove('hidden');
-        viewPreview.classList.add('flex'); // 미리보기 영역 활성화
+        viewPreview.classList.add('flex');
         viewExcel.classList.add('hidden');
         
-        // 탭 열 때 즉시 데이터 렌더링
-        updateLivePreview();
+        window.updateLivePreview();
     }
 };
 
 // 3. 우측 폼 입력 시 좌측 미리보기에 실시간 데이터 바인딩 (Live Preview)
 window.updateLivePreview = function() {
-    // 사용자가 입력한 값 가져오기
-    const name = document.getElementById('input-prov-name').value || '';
-    const regno = document.getElementById('input-prov-regno').value || '';
-    const ceo = document.getElementById('input-prov-ceo').value || '';
-    const addr = document.getElementById('input-prov-addr').value || '';
-    const type = document.getElementById('input-prov-type').value || '';
-    const biz = document.getElementById('input-prov-biz').value || '';
+    const name = document.getElementById('input-prov-name')?.value || '';
+    const regno = document.getElementById('input-prov-regno')?.value || '';
+    const ceo = document.getElementById('input-prov-ceo')?.value || '';
+    const addr = document.getElementById('input-prov-addr')?.value || '';
+    const tel = document.getElementById('input-prov-tel')?.value || '';
 
-    // 오늘 날짜 세팅
     const today = new Date();
-    const dateStr = `${today.getFullYear()}년 ${String(today.getMonth() + 1).padStart(2, '0')}월 ${String(today.getDate()).padStart(2, '0')}일`;
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     
-    document.getElementById('prev-date-1').innerText = dateStr;
-    document.getElementById('prev-date-2').innerText = dateStr;
-
-    // 위아래(공급자/공급받는자 보관용) 영수증에 동시에 값 박아넣기
+    if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
+    
     document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
     document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
     document.querySelectorAll('.prev-prov-ceo').forEach(el => el.innerText = ceo);
     document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
-    document.querySelectorAll('.prev-prov-type').forEach(el => el.innerText = type);
-    document.querySelectorAll('.prev-prov-biz').forEach(el => el.innerText = biz);
-    
-    // 사용자가 오른쪽 칸에 입력 중이면, 왼쪽 화면을 '미리보기' 탭으로 강제 전환하여 보여줌
-    switchInvoiceTab('PREVIEW');
+    document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
+
+    // 사용자가 우측 폼에서 입력할 때만 미리보기 탭으로 자동 전환
+    if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
+        window.switchInvoiceTab('PREVIEW');
+    }
 };
 
-// 4. 엑셀 드래그 앤 드롭 -> 스마트 매핑 모달 띄우기
+// 숫자 포맷팅 유틸리티 (콤마 찍기)
+function formatNumber(num) {
+    if (!num || isNaN(num)) return num || '';
+    return Number(num).toLocaleString('ko-KR');
+}
+
+// 4. 엑셀 스마트 추출 알고리즘 (SheetJS 파싱)
+function processExcelData(jsonData) {
+    parsedExcelList = [];
+    jsonData.forEach((row, index) => {
+        const mappedRow = {
+            id: index, senderName: '', orderNo: '', bizNo: '', address: '', storeName: '',
+            phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: ''
+        };
+
+        // 스마트 헤더 매핑 알고리즘
+        for (let key in row) {
+            const val = row[key];
+            const k = key.replace(/\s+/g, ''); // 공백 제거 후 분석
+            
+            if (/보내는분|발송자|주문자|고객명/.test(k)) mappedRow.senderName = val;
+            else if (/주문번호|오더번호|주문코드/.test(k)) mappedRow.orderNo = val;
+            else if (/사업자/.test(k)) mappedRow.bizNo = val;
+            else if (/주소|배송지(?!(명|간판))/.test(k)) mappedRow.address = val;
+            else if (/상호|간판|배송지명|받는분|수령인|수신자/.test(k)) mappedRow.storeName = val;
+            else if (/연락처|전화|핸드폰|휴대폰|폰/.test(k)) mappedRow.phone = val;
+            else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
+            else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
+            else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
+            else if (/단가|가격|금액/.test(k)) mappedRow.price = val;
+            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val;
+            else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
+        }
+        parsedExcelList.push(mappedRow);
+    });
+    renderExcelTable();
+}
+
+// 5. 파싱된 데이터를 엑셀 리스트 테이블에 그리기
+function renderExcelTable() {
+    const tbody = document.getElementById('invoice-excel-tbody');
+    if (!tbody) return;
+    
+    if (parsedExcelList.length === 0) {
+        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="14" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">추출된 데이터가 없습니다. 올바른 양식인지 확인해주세요.</span></td></tr>`;
+        return;
+    }
+
+    let html = '';
+    parsedExcelList.forEach((item, idx) => {
+        html += `
+        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="previewInvoiceRow(${idx})">
+            <td class="text-center" onclick="event.stopPropagation()"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
+            <td class="text-center font-bold text-gray-500">${idx + 1}</td>
+            <td class="font-bold">${item.senderName || '-'}</td>
+            <td class="text-gray-500 font-mono text-[10px]">${item.orderNo || '-'}</td>
+            <td class="text-gray-500 font-mono">${item.bizNo || '-'}</td>
+            <td class="truncate max-w-[200px]" title="${item.address}">${item.address || '-'}</td>
+            <td class="font-black text-gray-900">${item.storeName || '-'}</td>
+            <td class="font-bold text-blue-600">${item.phone || '-'}</td>
+            <td class="font-bold truncate max-w-[150px]" title="${item.itemName}">${item.itemName || '-'}</td>
+            <td class="text-gray-700">${item.unit || '-'}</td>
+            <td class="text-right font-black">${formatNumber(item.qty)}</td>
+            <td class="text-right text-gray-600">${formatNumber(item.price)}</td>
+            <td class="text-right font-black text-red-600">${formatNumber(item.total)}</td>
+            <td class="truncate max-w-[150px] text-gray-500 text-[10px]" title="${item.memo}">${item.memo || '-'}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+    window.switchInvoiceTab('EXCEL'); // 매핑 완료 후 리스트로 자동 이동
+}
+
+// 6. 리스트 클릭 시 명세서 뷰에 해당 고객/상품 데이터 렌더링
+window.previewInvoiceRow = function(idx) {
+    if (!parsedExcelList || !parsedExcelList[idx]) return;
+    const item = parsedExcelList[idx];
+
+    // 고객(공급받는 자) 정보 바인딩
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.storeName || item.senderName || ''); 
+    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+
+    // 품목 정보 바인딩
+    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+
+    window.updateLivePreview(); // 우측 공급자 폼의 내용도 함께 갱신하여 덮어쓰기
+    window.switchInvoiceTab('PREVIEW'); // 노란색 명세서 탭으로 전환하여 보여주기
+};
+
+// 7. 엑셀 파일 드래그 앤 드롭 업로드 핸들러
 setTimeout(() => {
     const dropZone = document.getElementById('excel-drop-zone');
     if (dropZone) {
+        const fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.accept = '.xlsx, .xls, .csv';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+
+        fileInput.addEventListener('change', handleExcelUpload);
+
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
             dropZone.classList.add('bg-indigo-100', 'border-indigo-500');
@@ -1204,22 +1307,36 @@ setTimeout(() => {
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
-            // 엑셀이 떨어지면 매핑 모달 오픈!
-            document.getElementById('excel-mapping-modal').classList.remove('hidden');
+            if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+                fileInput.files = e.dataTransfer.files;
+                handleExcelUpload({ target: fileInput });
+            }
         });
-        // 클릭해서 파일 첨부하는 효과 (테스트용)
-        dropZone.addEventListener('click', () => {
-            document.getElementById('excel-mapping-modal').classList.remove('hidden');
-        });
+        dropZone.addEventListener('click', () => { fileInput.click(); });
     }
 }, 1000);
 
-// 매핑 완료 후 리스트 화면으로 돌아가기
-window.applyExcelMapping = function() {
-    document.getElementById('excel-mapping-modal').classList.add('hidden');
-    switchInvoiceTab('EXCEL');
-    alert("데이터 매핑이 완료되었습니다.\n실제 엑셀 파싱 로직(SheetJS) 연동 대기 중입니다.");
-};
+function handleExcelUpload(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(evt) {
+        try {
+            const data = new Uint8Array(evt.target.result);
+            const workbook = XLSX.read(data, { type: 'array' });
+            const firstSheetName = workbook.SheetNames[0];
+            const worksheet = workbook.Sheets[firstSheetName];
+            const json = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+            
+            processExcelData(json);
+            alert(`성공!\n총 ${parsedExcelList.length}건의 주문 데이터가 스마트 매핑되었습니다.\n리스트를 클릭하여 영수증을 확인하세요.`);
+        } catch(err) {
+            alert("엑셀 파일을 읽는 중 오류가 발생했습니다. 올바른 파일 형식(.xlsx)인지 확인해주세요.");
+        }
+    };
+    reader.readAsArrayBuffer(file);
+}
 
 window.showDispatchPopupAlert = function(msg) {
     activeDispatchPopupMsgId = msg.id;
