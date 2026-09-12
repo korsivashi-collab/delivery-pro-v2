@@ -1563,27 +1563,39 @@ window.executeBatchPrint = function() {
         addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert("출력할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요.");
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-print text-sm"></i> 출력';
+        }
+        return;
+    }
+
     let printContents = '';
 
-    // 모든 주문을 1건당 A4 1장(상단: 공급자, 하단: 공급받는자)으로 반복 출력
-    for (let i = 0; i < parsedExcelList.length; i++) {
-        const item = parsedExcelList[i];
-        
-        printContents += `<div style="width: 210mm; height: 296mm; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; margin: 0 auto; background: white;">`;
+    checkboxes.forEach(cb => {
+        const idx = parseInt(cb.getAttribute('data-idx'));
+        const item = parsedExcelList[idx];
+        if (!item) return;
+
+        // 🌟 [수정] height 고정 및 overflow hidden 제거 -> min-height, overflow visible 적용
+        printContents += `<div style="width: 210mm; min-height: 296mm; page-break-after: always; display: flex; flex-direction: column; overflow: visible; margin: 0 auto; background: white;">`;
         
         // 1. 상단: (공급자 보관용) 
         let topHtml = generateInvoiceHTML(item, providerInfo);
-        topHtml = topHtml.replace('class="invoice-paper"', `style="height: 148.5mm; overflow: hidden; border-bottom: 1px dashed #ccc;" class="invoice-paper"`);
+        topHtml = topHtml.replace('class="invoice-paper"', `style="min-height: 148.5mm; overflow: visible; border-bottom: 1px dashed #ccc; box-sizing: border-box;" class="invoice-paper"`);
         printContents += topHtml;
 
-        // 2. 하단: 동일한 데이터를 복사하되 제목만 (공급받는 자 보관용)으로 치환
+        // 2. 하단: (공급받는 자 보관용)
         let bottomHtml = generateInvoiceHTML(item, providerInfo);
         bottomHtml = bottomHtml.replace('(공급자 보관용)', '(공급받는 자 보관용)');
-        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="height: 148.5mm; overflow: hidden;" class="invoice-paper"`);
+        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="min-height: 148.5mm; overflow: visible; box-sizing: border-box;" class="invoice-paper"`);
         printContents += bottomHtml;
         
         printContents += `</div>`;
-    }
+    });
 
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
