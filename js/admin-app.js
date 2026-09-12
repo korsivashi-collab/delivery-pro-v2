@@ -1332,7 +1332,7 @@ function processExcelData(jsonData) {
             // 상호명을 먼저 검사하여 '배송지명'이 상호명으로 들어가게 함
             else if (/상호|간판|배송지명|받는분|수령인|수신자/.test(k)) mappedRow.storeName = val;
             // 그 후 주소를 검사하여 순수 '배송지' 나 '주소'만 캐치하도록 함
-            else if (/주소|배송지/.test(k)) mappedRow.address = val;
+            else if (/주소|배송지(?!(명|간판))/.test(k)) mappedRow.address = val;
             else if (/연락처|전화|핸드폰|휴대폰|폰/.test(k)) mappedRow.phone = val;
             else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
             else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
@@ -1641,7 +1641,7 @@ window.executeBatchPrint = function() {
                 document.body.removeChild(iframe);
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력`;
+                    btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 출력`;
                 }
             }, 1000);
         }, 800); 
@@ -2853,7 +2853,7 @@ window.executeExcelExport = function() {
     }
 
     if (!hasData) {
-        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
+        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 봉랎습니다.`);
         return;
     }
 
