@@ -1481,16 +1481,14 @@ window.previewInvoiceRow = function(idx) {
     window.switchInvoiceTab('PREVIEW');
 };
 
-// === 🌟 3차 수정: 명세서 일괄 출력 자동화 기능 (1건을 A4 상/하단 분할로 복제 출력) ===
-
-// 각 엑셀 아이템을 기반으로 HTML 문자열을 동적 생성하는 함수
+// === 🌟 4차 수정: 문서 양식 기준(Baseline) 기반 렌더링 함수 ===
 function generateInvoiceHTML(item, providerInfo) {
     const originalTemplate = document.getElementById('print-area');
     if (!originalTemplate) return '';
     const template = originalTemplate.cloneNode(true);
     template.id = ''; 
 
-    // 1. 공급자(우측 폼) 정보 바인딩
+    // 1. 공급자 정보 바인딩
     template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
     template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
     template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
@@ -1541,17 +1539,18 @@ function generateInvoiceHTML(item, providerInfo) {
     return template.outerHTML;
 }
 
-// 🌟 3차 수정: 최종 일괄 인쇄를 관장하는 메인 함수 (A4 1장에 동일한 주문을 상/하단 복제 출력)
+// 🌟 4차 수정: 최종 일괄 인쇄 (체크된 항목 필터링 + 문서 양식 구조 적용)
 window.executeBatchPrint = function() {
-    if (!parsedExcelList || parsedExcelList.length === 0) {
-        alert("출력할 주문 데이터가 없습니다. 우측 패널에서 엑셀 파일을 먼저 업로드해주세요.");
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert("출력할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요.");
         return;
     }
 
     const btn = document.getElementById('btn-batch-print');
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 렌더링 중...';
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 문서 생성 중...';
     }
 
     const providerInfo = {
@@ -1563,16 +1562,6 @@ window.executeBatchPrint = function() {
         addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
-    if (checkboxes.length === 0) {
-        alert("출력할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요.");
-        if (btn) {
-            btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-print text-sm"></i> 출력';
-        }
-        return;
-    }
-
     let printContents = '';
 
     checkboxes.forEach(cb => {
@@ -1580,18 +1569,18 @@ window.executeBatchPrint = function() {
         const item = parsedExcelList[idx];
         if (!item) return;
 
-        // 🌟 [수정] height 고정 및 overflow hidden 제거 -> min-height, overflow visible 적용
-        printContents += `<div style="width: 210mm; min-height: 296mm; page-break-after: always; display: flex; flex-direction: column; overflow: visible; margin: 0 auto; background: white;">`;
+        // A4 1장 컨테이너 (세로 297mm 기준, 페이지 넘김 자동 처리)
+        printContents += `<div style="width: 210mm; min-height: 296mm; page-break-after: always; display: flex; flex-direction: column; justify-content: space-between; overflow: visible; margin: 0 auto; background: white; padding: 5mm 0;">`;
         
         // 1. 상단: (공급자 보관용) 
         let topHtml = generateInvoiceHTML(item, providerInfo);
-        topHtml = topHtml.replace('class="invoice-paper"', `style="min-height: 148.5mm; overflow: visible; border-bottom: 1px dashed #ccc; box-sizing: border-box;" class="invoice-paper"`);
+        topHtml = topHtml.replace('class="invoice-paper"', `style="min-height: 140mm; overflow: visible; border-bottom: 2px dashed #9ca3af; box-sizing: border-box;" class="invoice-paper"`);
         printContents += topHtml;
 
         // 2. 하단: (공급받는 자 보관용)
         let bottomHtml = generateInvoiceHTML(item, providerInfo);
         bottomHtml = bottomHtml.replace('(공급자 보관용)', '(공급받는 자 보관용)');
-        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="min-height: 148.5mm; overflow: visible; box-sizing: border-box;" class="invoice-paper"`);
+        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="min-height: 140mm; overflow: visible; box-sizing: border-box;" class="invoice-paper"`);
         printContents += bottomHtml;
         
         printContents += `</div>`;
@@ -1614,19 +1603,38 @@ window.executeBatchPrint = function() {
         <html lang="ko">
         <head>
             <meta charset="UTF-8">
-            <title>배송 동선 PRO - 거래명세표 일괄 출력</title>
+            <title>배송 동선 PRO - 표준 거래명세표 출력</title>
             <script src="https://cdn.tailwindcss.com"></script>
             <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
             <style>
                 @media print {
                     @page { size: A4 portrait; margin: 0; }
                     body { margin: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: white; }
+                    .invoice-paper { page-break-inside: avoid; }
                 }
                 body { background: white; margin: 0; padding: 0; }
-                .invoice-paper { box-sizing: border-box; color: #000; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background-color: #ffeb5c !important; padding: 5mm 8mm; }
-                .invoice-title { text-align: center; font-size: 26px; font-weight: 900; letter-spacing: 15px; text-decoration: underline; margin-bottom: 5px; }
-                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 12px; margin-bottom: -2px; }
-                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px 5px; }
+                .invoice-paper { 
+                    background-color: #ffeb5c !important;
+                    border: 1px solid #d1d5db; 
+                    width: 210mm; 
+                    min-height: 140mm; 
+                    margin: 0 auto; 
+                    color: #000; 
+                    font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+                    box-sizing: border-box;
+                    padding: 8mm 10mm;
+                    overflow: visible !important;
+                }
+                .invoice-title {
+                    text-align: center;
+                    font-size: 24px;
+                    font-weight: 900;
+                    letter-spacing: 12px;
+                    text-decoration: underline;
+                    margin-bottom: 6px;
+                }
+                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; }
+                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 5px 6px; word-break: break-all; overflow-wrap: break-word; }
                 .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
                 .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 1px; }
                 .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 4px; padding: 5px 2px !important; line-height: 1.2; }
