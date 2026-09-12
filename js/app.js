@@ -1,4 +1,4 @@
-// app.js
+// js/app.js
 import { calculateOptimizedRoute } from './optimizer.js';
 import { 
     firebaseVerifyLicense, watchLicenseStatus, startGpsRequestLister, 
@@ -83,10 +83,8 @@ export async function initApp() {
     startGpsWatcher();
     checkUnreadNotices();
     
-    // 🌟 누락되었던 카메라/스캔 기능 초기화 함수 호출!
+    // 카메라/스캔 및 사진 완료 전송 초기화
     initCameraScan();
-    
-    // 🌟 여기에 사진 완료 이벤트 리스너를 추가합니다!
     initPhotoCompletion(); 
     
     const savedKey = localStorage.getItem('deliveryProKey');
@@ -609,7 +607,7 @@ export function selectStartDest(id) {
     }
 }
 
-// 🌟 메인 최적화 실행 함수
+// 메인 최적화 실행 함수
 export function optimizeRouteAction() {
     if (destinations.length < 2) { 
         alert("출발지를 포함하여 최소 2곳의 배송지가 필요합니다."); 
@@ -810,7 +808,7 @@ export async function renderList() {
     initSortable();
 }
 
-// 🌟 주소 및 내비, 종료지 관련 헬퍼 함수들
+// 주소 및 내비, 종료지 관련 헬퍼 함수들
 export async function setEndLocationGPS() {
     showLoading("현위치 파악 중...");
     if (lastKnownGps) {
@@ -889,7 +887,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
     else alert("카카오 내비 모듈 오류입니다.");
 }
 
-// 🌟 주차 메모 모달 제어 함수들
+// 주차 메모 모달 제어 함수들
 export async function openMemoModal(id) {
     const item = destinations.find(d => d.id === id); if (!item) return; currentMemoAddress = item.address;
     const titleEl = document.getElementById('memo-modal-title');
@@ -1041,7 +1039,7 @@ export async function reportMemo(docId) {
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
 
-// 🌟 배송 취소 및 완료 처리 함수들
+// 배송 취소 및 완료 처리 함수들
 export async function cancelDestination(id) {
     if (!confirm("이 배송지를 취소하시겠습니까?\n취소된 내역은 '지난배송' 목록에 기록됩니다.")) return;
     const item = destinations.find(d => d.id === id);
@@ -1219,11 +1217,10 @@ export async function restoreHistoryItem(timestamp) {
     }
 }
 
-// 🌟 [추가/수정됨] 주소 직접 수정 시 커스텀 모달(promptAddressCustom) 호출 적용
+// 주소 직접 수정 시 커스텀 모달 호출 적용
 export async function editDestinationAddress(id) {
     const item = destinations.find(d => d.id === id); if (!item) return;
     
-    // 기본 브라우저 prompt가 아닌, 예쁜 커스텀 모달 호출
     const result = await promptAddressCustom("", item.address, item.phone || "", true); 
     if (!result) return;
     
@@ -1287,7 +1284,7 @@ export async function logout() {
     window.location.reload();
 }
 
-// 🌟 [추가됨] OCR 스캔 및 카메라 이벤트 처리 로직 🌟
+// OCR 스캔 및 카메라 이벤트 처리 로직
 const MAX_MONTHLY_SCANS = 1250; 
 const SCAN_COOLDOWN_MS = 1000;
 
@@ -1370,7 +1367,8 @@ export function initCameraScan() {
         let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
         showLoading("사진 판독 중...");
         try {
-            const base64Image = await toBase64_SafeCompress(file);
+            const safeBlob = new Blob([file], { type: file.type || 'image/jpeg' });
+            const base64Image = await toBase64_SafeCompress(safeBlob);
             const imageContent = base64Image.split(',')[1];
             rawOCRText = await performOCR(imageContent);
             addressStr = extractAddressLogic(rawOCRText);
@@ -1421,7 +1419,7 @@ export function initCameraScan() {
     });
 }
 
-// 🌟 [추가됨] 사진 전송 및 완료 처리 이벤트 리스너 🌟
+// 사진 전송 및 완료 처리 이벤트 리스너 (Blob 래핑 처리 적용)
 export function initPhotoCompletion() {
     const photoInput = document.getElementById('completion-photo-input');
     if (!photoInput) return;
@@ -1432,8 +1430,11 @@ export function initPhotoCompletion() {
 
         showLoading("사진 압축 및 서버 전송 중...");
         try {
+            // 모바일 카메라 촬영본이 Blob으로 올바르게 인식되도록 안전하게 래핑
+            const safeBlob = new Blob([file], { type: file.type || 'image/jpeg' });
+
             // 1. 이미지 압축 및 Base64 변환
-            const base64Image = await toBase64_SafeCompress(file);
+            const base64Image = await toBase64_SafeCompress(safeBlob);
 
             // 2. Firebase 저장소에 업로드 및 URL 반환
             const deviceId = getOrCreateDeviceId();
@@ -1458,7 +1459,7 @@ export function initPhotoCompletion() {
 }
 
 
-// 🌟 HTML과의 연결을 위한 맨 마지막 전역 바인딩 (이름표 달기)
+// HTML과의 연결을 위한 전역 바인딩
 window.logout = logout;
 window.renderList = renderList;
 window.verifyLicense = verifyLicense;
@@ -1493,7 +1494,6 @@ window.closeStartModal = closeStartModal;
 window.selectStartDest = selectStartDest;
 window.closeDispatchAlertModal = closeDispatchAlertModal;
 window.optimizeRoute = optimizeRouteAction;
-// 새로 추가된 initPhotoCompletion 함수 바인딩
 window.initPhotoCompletion = initPhotoCompletion;
 
 window.appActions = {
