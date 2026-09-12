@@ -843,36 +843,35 @@
                         <i class="fa-solid fa-chevron-up text-indigo-600 text-[10px]"></i>
                     </div>
                     
-                    <div id="form-setup-accordion" class="hidden flex-col p-3 space-y-3 custom-scrollbar overflow-y-auto max-h-[300px]">
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">폼 제목 (예: 본사 폼, A지점 폼)</label>
-                            <input type="text" id="input-form-title" placeholder="저장할 폼의 이름을 입력하세요" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-lg p-2 text-xs font-black outline-none focus:border-indigo-500 text-indigo-900">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label>
-                            <input type="text" id="input-prov-regno" placeholder="예: 210-81-36588" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label>
-                            <input type="text" id="input-prov-name" placeholder="예: 농업회사법인토박이..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label>
-                            <input type="text" id="input-prov-addr" placeholder="예: 서울 강북구 덕릉로..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label>
-                            <input type="text" id="input-prov-tel" placeholder="예: 010-7279-6514" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-                        </div>
-                        <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label>
-                            <input type="text" id="input-prov-add-tel" placeholder="예: 02-981-9594" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-                        </div>
-                        <button type="button" onclick="saveProviderForm()" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1">
-                            <i class="fa-solid fa-save"></i> 이 폼 저장하기
-                        </button>
-                    </div>
-                </div>
+<div id="form-setup-accordion" class="hidden flex-col p-3 space-y-3 custom-scrollbar overflow-y-auto max-h-[300px]">
+    <div>
+        <label class="block text-[10px] font-bold text-gray-500 mb-1">폼 제목 (예: 본사 폼, A지점 폼)</label>
+        <input type="text" id="input-form-title" placeholder="저장할 폼의 이름을 입력하세요" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-lg p-2 text-xs font-black outline-none focus:border-indigo-500 text-indigo-900">
+    </div>
+    <div>
+        <label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label>
+        <input type="text" id="input-prov-regno" oninput="updateLivePreview()" placeholder="예: 210-81-36588" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+    </div>
+    <div>
+        <label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label>
+        <input type="text" id="input-prov-name" oninput="updateLivePreview()" placeholder="예: 농업회사법인토박이..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+    </div>
+    <div>
+        <label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label>
+        <input type="text" id="input-prov-addr" oninput="updateLivePreview()" placeholder="예: 서울 강북구 덕릉로..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+    </div>
+    <div>
+        <label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label>
+        <input type="text" id="input-prov-tel" oninput="updateLivePreview()" placeholder="예: 010-7279-6514" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+    </div>
+    <div>
+        <label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label>
+        <input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" placeholder="예: 02-981-9594" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+    </div>
+    <button type="button" onclick="saveProviderForm()" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1">
+        <i class="fa-solid fa-save"></i> 이 폼 저장하기
+    </button>
+</div>
 
                 <!-- 4. 우측 하단: 출력 실행 영역 -->
                 <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none">
