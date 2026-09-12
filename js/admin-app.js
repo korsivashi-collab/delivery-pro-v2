@@ -1102,7 +1102,9 @@ window.deleteParkingMemo = async function(id) {
 
 // === 5. 관제 사이드바, 지도 및 알림 기능 ===
 
-// 🌟 PRO 기능 권한 통제 (Feature Toggling)
+// === 🌟 [PRO 전용] 주문서 통합관리 기능 로직 ===
+
+// 1. PRO 권한 통제 (Feature Toggling)
 window.handleProFeature = function(featureName) {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const role = sessionStorage.getItem('deliveryProRole');
@@ -1112,13 +1114,14 @@ window.handleProFeature = function(featureName) {
         const myLic = allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
         if (myLic && myLic.isPro) isPro = true;
     }
-    if (role === 'MASTER' && !dispatchKey) isPro = true;
+    if (role === 'MASTER' && !dispatchKey) isPro = true; // 마스터는 통과
 
     if (isPro) {
         if (featureName === 'INVOICE') {
             document.getElementById('pro-invoice-modal').classList.remove('hidden');
+            updateLivePreview(); // 창 열릴 때 미리보기 초기화 반영
         } else if (featureName === 'AUTO_DISPATCH') {
-            alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 기능 개발 및 연동 준비 중입니다.");
+            alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 화면 레이아웃도 곧 업데이트됩니다.");
         }
     } else {
         document.getElementById('premium-upgrade-modal').classList.remove('hidden');
@@ -1129,12 +1132,64 @@ window.closePremiumModal = function() {
     document.getElementById('premium-upgrade-modal').classList.add('hidden');
 };
 
-// 🌟 주문서 통합관리 창 닫기
 window.closeProInvoiceModal = function() {
     document.getElementById('pro-invoice-modal').classList.add('hidden');
 };
 
-// 엑셀 드롭존 인터랙션
+// 2. 엑셀 뷰 / 명세서 미리보기 뷰 탭 전환 기능
+window.switchInvoiceTab = function(tabName) {
+    const btnExcel = document.getElementById('inv-tab-excel');
+    const btnPreview = document.getElementById('inv-tab-preview');
+    const viewExcel = document.getElementById('inv-view-excel');
+    const viewPreview = document.getElementById('inv-view-preview');
+
+    if (tabName === 'EXCEL') {
+        btnExcel.className = "px-4 py-2.5 bg-white text-indigo-600 font-black text-sm rounded-xl border border-gray-200 shadow-sm transition flex items-center gap-2";
+        btnPreview.className = "px-4 py-2.5 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-sm rounded-xl transition flex items-center gap-2";
+        viewExcel.classList.remove('hidden');
+        viewPreview.classList.add('hidden');
+    } else {
+        btnPreview.className = "px-4 py-2.5 bg-white text-indigo-600 font-black text-sm rounded-xl border border-gray-200 shadow-sm transition flex items-center gap-2";
+        btnExcel.className = "px-4 py-2.5 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-sm rounded-xl transition flex items-center gap-2";
+        viewPreview.classList.remove('hidden');
+        viewPreview.classList.add('flex'); // 미리보기 영역 활성화
+        viewExcel.classList.add('hidden');
+        
+        // 탭 열 때 즉시 데이터 렌더링
+        updateLivePreview();
+    }
+};
+
+// 3. 우측 폼 입력 시 좌측 미리보기에 실시간 데이터 바인딩 (Live Preview)
+window.updateLivePreview = function() {
+    // 사용자가 입력한 값 가져오기
+    const name = document.getElementById('input-prov-name').value || '';
+    const regno = document.getElementById('input-prov-regno').value || '';
+    const ceo = document.getElementById('input-prov-ceo').value || '';
+    const addr = document.getElementById('input-prov-addr').value || '';
+    const type = document.getElementById('input-prov-type').value || '';
+    const biz = document.getElementById('input-prov-biz').value || '';
+
+    // 오늘 날짜 세팅
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}년 ${String(today.getMonth() + 1).padStart(2, '0')}월 ${String(today.getDate()).padStart(2, '0')}일`;
+    
+    document.getElementById('prev-date-1').innerText = dateStr;
+    document.getElementById('prev-date-2').innerText = dateStr;
+
+    // 위아래(공급자/공급받는자 보관용) 영수증에 동시에 값 박아넣기
+    document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
+    document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
+    document.querySelectorAll('.prev-prov-ceo').forEach(el => el.innerText = ceo);
+    document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
+    document.querySelectorAll('.prev-prov-type').forEach(el => el.innerText = type);
+    document.querySelectorAll('.prev-prov-biz').forEach(el => el.innerText = biz);
+    
+    // 사용자가 오른쪽 칸에 입력 중이면, 왼쪽 화면을 '미리보기' 탭으로 강제 전환하여 보여줌
+    switchInvoiceTab('PREVIEW');
+};
+
+// 4. 엑셀 드래그 앤 드롭 -> 스마트 매핑 모달 띄우기
 setTimeout(() => {
     const dropZone = document.getElementById('excel-drop-zone');
     if (dropZone) {
@@ -1149,10 +1204,22 @@ setTimeout(() => {
         dropZone.addEventListener('drop', (e) => {
             e.preventDefault();
             dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
-            alert("엑셀 파일 파싱 로직(SheetJS 연동) 개발 대기 중입니다.");
+            // 엑셀이 떨어지면 매핑 모달 오픈!
+            document.getElementById('excel-mapping-modal').classList.remove('hidden');
+        });
+        // 클릭해서 파일 첨부하는 효과 (테스트용)
+        dropZone.addEventListener('click', () => {
+            document.getElementById('excel-mapping-modal').classList.remove('hidden');
         });
     }
 }, 1000);
+
+// 매핑 완료 후 리스트 화면으로 돌아가기
+window.applyExcelMapping = function() {
+    document.getElementById('excel-mapping-modal').classList.add('hidden');
+    switchInvoiceTab('EXCEL');
+    alert("데이터 매핑이 완료되었습니다.\n실제 엑셀 파싱 로직(SheetJS) 연동 대기 중입니다.");
+};
 
 window.showDispatchPopupAlert = function(msg) {
     activeDispatchPopupMsgId = msg.id;
