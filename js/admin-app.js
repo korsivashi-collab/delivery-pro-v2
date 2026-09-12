@@ -1197,8 +1197,7 @@ window.switchInvoiceTab = function(tabName) {
 
 // 3. 우측 폼 입력 시 좌측 미리보기에 실시간 데이터 바인딩 (Live Preview)
 window.updateLivePreview = function() {
-    // 실제 거래명세표 항목에 맞춘 ID로 데이터 수집
-    const title = document.getElementById('input-form-title')?.value || '';
+    // 변경된 우측 입력창 ID들로부터 값을 정확히 가져옵니다.
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const name = document.getElementById('input-prov-name')?.value || '';
     const addr = document.getElementById('input-prov-addr')?.value || '';
@@ -1210,14 +1209,14 @@ window.updateLivePreview = function() {
     
     if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
     
-    // HTML 템플릿(세로쓰기 버전)의 클래스에 맞게 값 주입
+    // 좌측 노란색 명세서 양식의 공급자 영역 클래스에 실시간 반영
     document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
     document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
     document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 
-    // 활성화된 창이 폼 입력창일 경우에만 미리보기 탭으로 자동 넘김
+    // 입력 중일 때는 자동으로 미리보기 탭/화면을 유지합니다.
     if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
         window.switchInvoiceTab('PREVIEW');
     }
