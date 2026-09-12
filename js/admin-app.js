@@ -46,7 +46,10 @@ window.historySelectedAccountKeys = new Set();
 window.selectedMessageDrivers = new Set();
 let activeDispatchPopupMsgId = null;
 
-const todayStr = new Date().toISOString().split('T')[0];
+function getLocalDateString(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const todayStr = getLocalDateString();
 
 // === 1. 초기화 및 로그인/로그아웃 ===
 window.onload = () => {
