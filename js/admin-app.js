@@ -904,7 +904,7 @@ window.renderAccountHistoryView = function() {
         </div>
     </div>
 
-    <div class="flex gap-1 mb-3 bg-gray-100 p-1 rounded-xl text-xs font-black">
+    <div class="flex gap-1.5 mb-4 bg-gray-100 p-1.5 rounded-2xl text-xs font-black">
         <button onclick="setHistoryMasterSubTab('ALL')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'ALL' ? 'bg-white text-blue-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">배송 리스트 (${totalCount})</button>
         <button onclick="setHistoryMasterSubTab('DONE')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'DONE' ? 'bg-white text-emerald-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">배송 완료 (${doneCount})</button>
         <button onclick="setHistoryMasterSubTab('PENDING')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'PENDING' ? 'bg-white text-blue-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">미배송 (${pendingCount})</button>
@@ -989,7 +989,7 @@ window.renderAccountHistoryView = function() {
                 html += `
                 <div class="p-3 bg-white border border-gray-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
                     <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span></div>
-                    <div class="flex items-center gap-1.5 shrink-0 ml-2"><button onclick="adminForceDeleteRoute('${targetDeviceId}', '${dest.address}')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[10px] font-black px-2 py-0.5 rounded transition">목록 강제제외</button><span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shrink-0 ml-2">배송 대기중</span></div>
+                    <span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shrink-0 ml-2">배송 대기중</span>
                 </div>`;
             });
             html += `</div></div>`;
@@ -1433,7 +1433,7 @@ window.renderDriverDetailView = function(devId) {
                 let numberBadge = isDone ? `<span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs"><i class="fa-solid fa-check text-[9px]"></i></span>` : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
                 let addressHtml = isDone ? `<span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${d.address}</span>` : `<span class="font-bold text-gray-900 truncate">${d.address}</span>`;
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
-                let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<button onclick="event.stopPropagation(); adminForceDeleteRoute('${devId}', '${d.address}')" class="text-red-500 hover:text-red-700 bg-red-50 border border-red-200 px-1.5 py-0.5 rounded mr-1 text-[10px] font-black transition active:scale-95"><i class="fa-solid fa-xmark"></i> 삭제</button><span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
+                let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
                 let photoBtn = comp && comp.photoUrl ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
                 <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
@@ -1455,7 +1455,6 @@ window.renderDriverDetailView = function(devId) {
                         <span class="font-bold text-gray-900 truncate">${d.address}</span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
-                        <button onclick="event.stopPropagation(); adminForceDeleteRoute('${devId}', '${d.address}')" class="text-red-500 hover:text-red-700 bg-white border border-red-200 px-2 py-0.5 rounded text-[10px] font-black transition active:scale-95">제외</button>
                         <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shrink-0">배송 대기</span>
                     </div>
                 </div>`;
@@ -1480,19 +1479,6 @@ window.renderDriverDetailView = function(devId) {
         }
     }
     contentEl.innerHTML = html;
-};
-
-window.adminForceDeleteRoute = async function(devId, address) {
-    if(!confirm("이 대기 목적지를 관리자 권한으로 강제 삭제하시겠습니까?")) return;
-    try {
-        const routeRef = doc(db, "routes", devId);
-        const routeSnap = await getDoc(routeRef);
-        if(routeSnap.exists()) {
-            const data = routeSnap.data();
-            const newDests = data.destinations.filter(d => d.address !== address);
-            await updateDoc(routeRef, { destinations: newDests });
-        }
-    } catch(e) { alert("제외 처리 중 오류가 발생했습니다: " + e.message); }
 };
 
 window.selectDriver = function(devId) {
