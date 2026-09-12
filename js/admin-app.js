@@ -890,522 +890,35 @@ window.renderAccountHistoryView = function() {
     const driverMemos = allMemos.filter(m => targetDeviceId && m.deviceId === targetDeviceId);
 
     let html = `
-    <div class="bg-blue-50 border border-blue-200 rounded-2xl p-4 shadow-inner mb-4 text-xs">
-        <div class="flex justify-between items-center mb-1 text-blue-950 font-black">
-            <span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도 요약</span>
+    <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
+        <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도</span>
             <span>완료 ${doneCount} / 전체 ${totalCount} 건 (${rate}%)</span>
         </div>
-        <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
-        <div class="flex justify-between items-center text-[11px] font-bold text-blue-800 pt-1.5 border-t border-blue-200/50">
+        <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2">
+            <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div>
+        </div>
+        <div class="flex justify-between text-[11px] font-bold text-blue-800">
             <span>미배송 대기: <b class="text-blue-600 font-black">${pendingCount}</b>곳</span>
-            <span>등록 공유 메모: <b class="text-yellow-600 font-black">${driverMemos.length}</b>건</span>
+            <span>완료율: <b class="text-emerald-600 font-black">${rate}%</b></span>
         </div>
     </div>
 
-    <div class="flex gap-1.5 mb-4 bg-gray-100 p-1.5 rounded-2xl text-xs font-black">
-        <button onclick="setHistoryMasterSubTab('ALL')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'ALL' ? 'bg-white text-blue-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">배송 리스트 (${totalCount})</button>
-        <button onclick="setHistoryMasterSubTab('DONE')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'DONE' ? 'bg-white text-emerald-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">배송 완료 (${doneCount})</button>
-        <button onclick="setHistoryMasterSubTab('PENDING')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'PENDING' ? 'bg-white text-blue-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">미배송 (${pendingCount})</button>
-        <button onclick="setHistoryMasterSubTab('MEMOS')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'MEMOS' ? 'bg-white text-yellow-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">등록한 메모 (${driverMemos.length})</button>
-    </div>
-    <div class="space-y-3">`;
-
-    if (window.historyMasterSubTab === 'ALL') {
-        if (rawDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">등록된 배송 동선이 없습니다.</div>`;
-        } else {
-            html += `
-            <div class="border border-blue-200 rounded-2xl overflow-hidden bg-white shadow-xs">
-                <div onclick="document.getElementById('route-accordion-body').classList.toggle('hidden')" class="bg-blue-50 hover:bg-blue-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
-                    <span class="font-black text-xs text-blue-950 flex items-center gap-2"><i class="fa-solid fa-route text-blue-600"></i> 배송 동선 목록 (총 ${rawDests.length}개 목적지)</span>
-                    <div class="flex items-center gap-2"><span class="text-[11px] text-blue-700 font-bold">클릭하여 펼치기/접기</span><i class="fa-solid fa-chevron-down text-blue-600 text-xs"></i></div>
-                </div>
-                <div id="route-accordion-body" class="hidden p-3 bg-slate-50 border-t border-blue-100 space-y-1.5">
-            `;
-            rawDests.forEach((dest, idx) => {
-                const isDone = !!doneMap[dest.address];
-                html += `
-                <div class="p-3 ${isDone ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white border-gray-200'} border rounded-xl flex items-center justify-between text-xs shadow-xs">
-                    <div class="flex items-center gap-2.5 min-w-0 flex-1">
-                        <span class="w-5 h-5 ${isDone ? 'bg-emerald-600' : 'bg-blue-600'} text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span>
-                        <span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span>
-                    </div>
-                    <span class="text-[10px] font-black px-2 py-0.5 rounded ${isDone ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-50 text-blue-700 border border-blue-200'} shrink-0 ml-2">${isDone ? '✓ 완료' : '대기'}</span>
-                </div>`;
-            });
-            html += `</div></div>`;
-        }
-    } else if (window.historyMasterSubTab === 'DONE') {
-        if (driverDone.length === 0) {
-            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">배송 완료 내역이 없습니다.</div>`;
-        } else {
-            const completionsByDate = {};
-            driverDone.forEach(c => {
-                let dStr = '기타 일자';
-                if (c.timeString && c.timeString.includes(' ')) dStr = c.timeString.split(' ')[0].replace(/\./g, '-');
-                else if (c.completedAt) dStr = getLocalDateString(new Date(c.completedAt));
-                if (!completionsByDate[dStr]) completionsByDate[dStr] = [];
-                completionsByDate[dStr].push(c);
-            });
-            const sortedCompDates = Object.keys(completionsByDate).sort().reverse();
-            sortedCompDates.forEach((dKey, idx) => {
-                const dayList = completionsByDate[dKey];
-                const folderId = `done-acc-${idx}`;
-                html += `
-                <div class="border border-emerald-200 rounded-2xl overflow-hidden bg-white shadow-xs mb-2.5">
-                    <div onclick="document.getElementById('${folderId}').classList.toggle('hidden')" class="bg-emerald-50 hover:bg-emerald-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
-                        <span class="font-black text-xs text-emerald-950 flex items-center gap-2"><i class="fa-regular fa-calendar-check text-emerald-600"></i> ${dKey} 배송 완료 이력<span class="bg-emerald-200/80 text-emerald-900 text-[10px] font-black px-2 py-0.5 rounded-full">${dayList.length}건 완료</span></span>
-                        <div class="flex items-center gap-2"><span class="text-[11px] text-emerald-700 font-bold">클릭하여 펼치기/접기</span><i class="fa-solid fa-chevron-down text-emerald-600 text-xs"></i></div>
-                    </div>
-                    <div id="${folderId}" class="hidden p-3 bg-slate-50 border-t border-emerald-100 space-y-1.5">
-                        ${dayList.map((c, cIdx) => {
-                            let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
-                            let photoBadge = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" class="bg-blue-600 text-white text-[9px] font-black px-2 py-1 rounded shadow-sm hover:bg-blue-700 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진보기</a>` : '';
-                            return `
-                            <div class="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
-                                <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${cIdx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${c.address}</span></div>
-                                <div class="flex items-center gap-2 shrink-0 ml-2">${photoBadge}<span class="bg-emerald-600 text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '전달완료'}]</span></div>
-                            </div>`;
-                        }).join('')}
-                    </div>
-                </div>`;
-            });
-        }
-    } else if (window.historyMasterSubTab === 'PENDING') {
-        if (remainingDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">미배송된 목적지가 없습니다 (전원 완료).</div>`;
-        } else {
-            html += `
-            <div class="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-xs">
-                <div onclick="document.getElementById('pending-accordion-body').classList.toggle('hidden')" class="bg-gray-100 hover:bg-gray-200 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
-                    <span class="font-black text-xs text-gray-800 flex items-center gap-2"><i class="fa-solid fa-clock text-blue-600"></i> 미배송 대기 목적지 (총 ${remainingDests.length}곳)</span>
-                    <div class="flex items-center gap-2"><span class="text-[11px] text-gray-500 font-bold">클릭하여 펼치기/접기</span><i class="fa-solid fa-chevron-down text-gray-400 text-xs"></i></div>
-                </div>
-                <div id="pending-accordion-body" class="hidden p-3 bg-slate-50 border-t border-gray-200 space-y-1.5">
-            `;
-            remainingDests.forEach((dest, idx) => {
-                html += `
-                <div class="p-3 bg-white border border-gray-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
-                    <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span></div>
-                    <div class="flex items-center gap-1.5 shrink-0 ml-2"><button onclick="adminForceDeleteRoute('${targetDeviceId}', '${dest.address}')" class="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-[10px] font-black px-2 py-0.5 rounded transition">목록 강제제외</button><span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shrink-0 ml-2">배송 대기중</span></div>
-                </div>`;
-            });
-            html += `</div></div>`;
-        }
-    } else if (window.historyMasterSubTab === 'MEMOS') {
-        if (driverMemos.length === 0) {
-            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">이 기사가 현장에서 등록한 주차/건물 메모가 없습니다.</div>`;
-        } else {
-            const memosByDate = {};
-            driverMemos.forEach(m => {
-                let dStr = '최근 등록';
-                if (m.time && m.time.includes(' ')) dStr = m.time.split(' ')[0].replace(/\./g, '-');
-                if (!memosByDate[dStr]) memosByDate[dStr] = [];
-                memosByDate[dStr].push(m);
-            });
-            const sortedMemoDates = Object.keys(memosByDate).sort().reverse();
-            sortedMemoDates.forEach((dKey, idx) => {
-                const mList = memosByDate[dKey];
-                const mFolderId = `memo-acc-${idx}`;
-                html += `
-                <div class="border border-yellow-200 rounded-2xl overflow-hidden bg-white shadow-xs mb-2.5">
-                    <div onclick="document.getElementById('${mFolderId}').classList.toggle('hidden')" class="bg-yellow-50 hover:bg-yellow-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
-                        <span class="font-black text-xs text-yellow-950 flex items-center gap-2"><i class="fa-regular fa-calendar-days text-yellow-600"></i> ${dKey} 등록 메모<span class="bg-yellow-200 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full">${mList.length}건 등록</span></span>
-                        <div class="flex items-center gap-2"><span class="text-[11px] text-yellow-700 font-bold">어느 주소에 어떤 내용인지 펼치기/접기</span><i class="fa-solid fa-chevron-down text-yellow-600 text-xs"></i></div>
-                    </div>
-                    <div id="${mFolderId}" class="hidden p-3 bg-slate-50 border-t border-yellow-100 space-y-2">
-                        ${mList.map(m => `
-                        <div class="p-3 bg-white border border-gray-200 rounded-xl flex flex-col gap-1.5 shadow-xs">
-                            <div class="flex justify-between items-center text-xs"><span class="font-black text-gray-900 flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-red-500 text-[11px]"></i> ${m.address}</span><span class="text-[10px] font-mono text-gray-400">${m.time || ''}</span></div>
-                            <p class="bg-yellow-50/50 p-2.5 rounded-lg border border-yellow-100 text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${m.memo}</p>
-                        </div>`).join('')}
-                    </div>
-                </div>`;
-            });
-        }
-    }
-    html += `</div>`;
-    listEl.innerHTML = html;
-};
-
-window.setHistoryMasterSubTab = function(tab) {
-    window.historyMasterSubTab = tab;
-    window.renderAccountHistoryView();
-};
-
-window.deleteAccountFromHistory = async function() {
-    if (!window.currentSelectedAccountKey) return;
-    const key = window.currentSelectedAccountKey;
-    if (!confirm(`정말 [${key}] 계정을 완전히 영구 삭제하시겠습니까?`)) return;
-    await window.deleteLicense(key);
-    window.backToAllAccountsView();
-};
-
-window.renderMemosTable = function(memos) {
-    const tbody = document.getElementById('table-body-memos');
-    const pagEl = document.getElementById('pagination-memos');
-    if (!tbody) return;
-    if (!memos || memos.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-gray-400 font-bold">등록된 주차 메모가 없습니다.</td></tr>`;
-        if (pagEl) pagEl.innerHTML = '';
-        return;
-    }
-    const total = memos.length;
-    const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
-    let curPage = window.masterPages['memos'] || 1;
-    if (curPage > totalPages) curPage = totalPages;
-    if (curPage < 1) curPage = 1;
-    window.masterPages['memos'] = curPage;
-
-    const start = (curPage - 1) * PAGE_SIZE_MASTER;
-    const pagedMemos = memos.slice(start, start + PAGE_SIZE_MASTER);
-
-    tbody.innerHTML = pagedMemos.map((m, idx) => `
-        <tr class="hover:bg-gray-50 transition">
-            <td class="py-3 px-3 font-bold text-gray-400">${start + idx + 1}</td>
-            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate">${m.address}</td>
-            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate">${m.memo}</td>
-            <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap">${m.time || '-'}</td>
-            <td class="py-3 px-3 text-center font-bold text-blue-600">${m.likes || 0}</td>
-            <td class="py-3 px-3 text-center whitespace-nowrap"><button onclick="deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px]">삭제</button></td>
-        </tr>
-    `).join('');
-    if (pagEl) pagEl.innerHTML = renderPaginationControls('memos', curPage, total, PAGE_SIZE_MASTER, 'changeMasterTabPagination');
-};
-
-window.deleteParkingMemo = async function(id) {
-    if (!confirm("이 주차 메모를 삭제하시겠습니까?")) return;
-    try { await deleteDoc(doc(db, "memos", id)); } catch (e) { alert("삭제 오류: " + e.message); }
-};
-
-// === 5. 관제 사이드바, 지도 및 알림 기능 ===
-window.showDispatchPopupAlert = function(msg) {
-    activeDispatchPopupMsgId = msg.id;
-    const contentEl = document.getElementById('dispatch-popup-alert-content');
-    const timeEl = document.getElementById('dispatch-popup-alert-time');
-    const modal = document.getElementById('dispatch-popup-alert-modal');
-    if (!contentEl || !modal) return;
-    contentEl.innerText = msg.content || '';
-    timeEl.innerText = `${msg.timeStr || '방금'} 수신`;
-    modal.classList.remove('hidden');
-    playBeepSound();
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-};
-
-window.closeDispatchPopupAlertModal = function() {
-    if (activeDispatchPopupMsgId) localStorage.setItem(`acked_disp_inbox_${activeDispatchPopupMsgId}`, 'true');
-    const modal = document.getElementById('dispatch-popup-alert-modal');
-    if (modal) modal.classList.add('hidden');
-    activeDispatchPopupMsgId = null;
-    window.checkDispatchInboxNotifications();
-};
-
-window.checkDispatchInboxNotifications = function() {
-    if (currentUserRole !== 'DISPATCH') return;
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
-    const matchedLic = allLicenses.find(l => l.key === dispatchKey);
-    const phone = (matchedLic?.phone || '').replace(/[^0-9]/g, '');
-
-    const normalizeKey = (k) => k ? k.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '') : '';
-    const normalizedDispatchKey = normalizeKey(dispatchKey);
-
-    const myReceivedMasterNotices = allDispatchMessages.filter(msg => {
-        if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
-        if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
-
-        const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
-        let keyMatch = false;
-        if (hasTargets) {
-            keyMatch = msg.targetDeviceIds.some(targetKey => normalizeKey(targetKey) === normalizedDispatchKey || targetKey === sessionToken);
-        }
-        const phoneMatch = phone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === phone);
-        return keyMatch || phoneMatch;
-    });
-
-    const unreadMessages = myReceivedMasterNotices.filter(m => !localStorage.getItem(`acked_disp_inbox_${m.id}`));
-    const unreadCount = unreadMessages.length;
-
-    const badge = document.getElementById('dispatch-inbox-badge');
-    const btn = document.getElementById('btn-dispatch-inbox');
-    if (badge) {
-        if (unreadCount > 0) { badge.innerText = unreadCount; badge.classList.remove('hidden'); badge.classList.add('animate-pulse'); }
-        else { badge.classList.add('hidden'); badge.classList.remove('animate-pulse'); }
-    }
-    if (btn) {
-        if (unreadCount > 0) { btn.classList.add('ring-2', 'ring-red-500', 'animate-pulse', 'bg-amber-100'); btn.classList.remove('bg-amber-50'); }
-        else { btn.classList.remove('ring-2', 'ring-red-500', 'animate-pulse', 'bg-amber-100'); btn.classList.add('bg-amber-50'); }
-    }
-
-    if (unreadMessages.length > 0) {
-        const latest = unreadMessages[0];
-        const alreadyPopped = sessionStorage.getItem(`popped_disp_alert_${latest.id}`);
-        if (!alreadyPopped) {
-            sessionStorage.setItem(`popped_disp_alert_${latest.id}`, 'true');
-            window.showDispatchPopupAlert(latest);
-        }
-    }
-};
-
-window.openDispatchInboxModal = function() {
-    const container = document.getElementById('dispatch-inbox-container');
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
-    const matchedLic = allLicenses.find(l => l.key === dispatchKey);
-    const phone = (matchedLic?.phone || '').replace(/[^0-9]/g, '');
-
-    const normalizeKey = (k) => k ? k.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '') : '';
-    const normalizedDispatchKey = normalizeKey(dispatchKey);
-
-    const myReceivedMasterNotices = allDispatchMessages.filter(msg => {
-        if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
-        if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
-
-        const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
-        let keyMatch = false;
-        if (hasTargets) {
-            keyMatch = msg.targetDeviceIds.some(targetKey => normalizeKey(targetKey) === normalizedDispatchKey || targetKey === sessionToken);
-        }
-        const phoneMatch = phone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === phone);
-        return keyMatch || phoneMatch;
-    });
-
-    if (myReceivedMasterNotices.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">수신된 알림이 없습니다.</div>`;
-    } else {
-        let html = '';
-        myReceivedMasterNotices.forEach(m => {
-            localStorage.setItem(`acked_disp_inbox_${m.id}`, 'true');
-            html += `
-            <div class="bg-amber-50/40 border border-amber-200 rounded-2xl p-4 shadow-2xs flex flex-col gap-1.5 hover:border-amber-300 transition">
-                <div class="flex justify-between items-center text-xs">
-                    <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">${m.senderTitle || '운영사 알림'}</span>
-                    <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
-                </div>
-                <p class="text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed mt-1">${m.content}</p>
-            </div>`;
-        });
-        container.innerHTML = html;
-    }
-    window.checkDispatchInboxNotifications();
-    document.getElementById('dispatch-inbox-modal').classList.remove('hidden');
-};
-
-window.closeDispatchInboxModal = function() { document.getElementById('dispatch-inbox-modal').classList.add('hidden'); };
-
-window.deleteNoticeFromDispatchInbox = async function(msgId) {
-    if (!confirm("이 알림을 삭제하시겠습니까?")) return;
-    try {
-        localStorage.setItem(`deleted_disp_msg_${msgId}`, 'true');
-        window.openDispatchInboxModal();
-        window.checkDispatchInboxNotifications();
-    } catch(e) { alert("삭제 오류: " + e.message); }
-};
-
-window.clearAllDispatchInbox = async function() {
-    if (!confirm("알림함의 모든 알림을 삭제하시겠습니까?")) return;
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
-    const matchedLic = allLicenses.find(l => l.key === dispatchKey);
-    const phone = (matchedLic?.phone || '').replace(/[^0-9]/g, '');
-
-    const normalizeKey = (k) => k ? k.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '') : '';
-    const normalizedDispatchKey = normalizeKey(dispatchKey);
-
-    const myNotices = allDispatchMessages.filter(msg => {
-        if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
-        if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
-        const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
-        let keyMatch = false;
-        if (hasTargets) {
-            keyMatch = msg.targetDeviceIds.some(targetKey => normalizeKey(targetKey) === normalizedDispatchKey || targetKey === sessionToken);
-        }
-        const phoneMatch = phone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === phone);
-        return keyMatch || phoneMatch;
-    });
-
-    for (const m of myNotices) localStorage.setItem(`deleted_disp_msg_${m.id}`, 'true');
-    window.openDispatchInboxModal();
-    window.checkDispatchInboxNotifications();
-};
-
-window.openMasterNoticeHistoryModal = function() {
-    window.renderMasterNoticeHistoryList();
-    document.getElementById('master-notice-history-modal').classList.remove('hidden');
-};
-window.closeMasterNoticeHistoryModal = function() { document.getElementById('master-notice-history-modal').classList.add('hidden'); };
-
-window.renderMasterNoticeHistoryList = function() {
-    const container = document.getElementById('master-notice-history-container');
-    if (!container) return;
-    const masterSentList = allDispatchMessages.filter(m => m.senderKey === 'MASTER' || m.senderType === 'MASTER');
-
-    if (masterSentList.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">발송된 운영사 알림 이력이 없습니다.</div>`; return;
-    }
-    let html = '';
-    masterSentList.forEach(m => {
-        const targetPreview = m.targetPhones && m.targetPhones.length > 0 ? (m.targetPhones.length === 1 ? m.targetPhones[0] : `${m.targetPhones[0]} 외 ${m.targetPhones.length - 1}명`) : '전체 지정 계정';
-        html += `
-        <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-2xs flex flex-col gap-2 hover:border-amber-400 transition">
-            <div class="flex justify-between items-center text-xs">
-                <div class="flex items-center gap-2">
-                    <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">운영사 알림</span>
-                    <span class="font-bold text-gray-800 text-xs"><i class="fa-solid fa-users text-amber-500 mr-1 text-[10px]"></i>수신: ${targetPreview}</span>
-                </div>
-                <div class="flex items-center gap-2">
-                    <span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span>
-                    <button type="button" onclick="deleteDispatchMessage('${m.id}')" class="text-red-500 hover:text-red-700 p-1 text-xs transition active:scale-95" title="이 발송 알림 삭제"><i class="fa-solid fa-trash-can"></i></button>
-                </div>
-            </div>
-            <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${m.content}</div>
-        </div>`;
-    });
-    container.innerHTML = html;
-};
-
-function getFilteredVisibleDrivers() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const isMaster = (currentUserRole === 'MASTER');
-    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch');
-    if (!isMaster && dispatchKey) visibleLicenses = visibleLicenses.filter(l => l.dispatchKey === dispatchKey);
-    return visibleLicenses;
-}
-
-window.renderSidebar = function() {
-    if (dispatchNavState === 'DELIVERY') {
-        if (selectedDeviceId) window.renderDriverDetailView(selectedDeviceId);
-        else window.renderDriverListView();
-    } else if (dispatchNavState === 'MESSAGE') {
-        window.renderMessageSidebar();
-    } else if (dispatchNavState === 'LOCATION') {
-        window.renderLocationSidebar();
-    }
-};
-
-window.renderDriverListView = function() {
-    const headerEl = document.getElementById('sidebar-header');
-    const contentEl = document.getElementById('sidebar-content');
-    const visibleLicenses = getFilteredVisibleDrivers();
-
-    headerEl.innerHTML = `
-        <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-600"></i> 운행 기사 (<span id="driver-count">${visibleLicenses.length}</span>명)</h2>
-        <button onclick="openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
-    `;
-
-    if (visibleLicenses.length === 0) {
-        contentEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">연결된 운행 기사가 없습니다. [+ 기사 등록]을 눌러 기사를 추가하세요.</div>`; return;
-    }
-
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
-    
-    const isToday = (selectedDate === todayStr);
-
-    let html = '';
-    visibleLicenses.forEach(lic => {
-        const devId = lic.deviceId || lic.key;
-        const phone = lic.phone || '연락처 미등록';
-        
-        const routeData = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
-        let driverRoute = null;
-        if (routeData && routeData.updatedAt) {
-            const routeDateStr = getLocalDateString(new Date(routeData.updatedAt));
-            if (isToday || routeDateStr === selectedDate) {
-                driverRoute = routeData;
-            }
-        }
-        const rawDests = driverRoute ? driverRoute.destinations || [] : [];
-
-        const driverDone = allCompletions.filter(c => {
-            const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || (lic.phone && c.phone === lic.phone);
-            const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                                (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
-            return matchesDev && matchesDate;
-        });
-
-        const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
-        const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-        
-        const pendingCount = isToday ? remainingDests.length : 0;
-        const doneCount = driverDone.length;
-        const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
-        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
-
-        html += `
-        <div onclick="selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
-            <div class="flex justify-between items-center mb-1.5">
-                <span class="font-black text-sm text-gray-900 tracking-tight flex items-center gap-1.5"><i class="fa-solid fa-phone text-blue-500 text-xs"></i>${phone}<span class="text-[10px] text-gray-400 font-mono font-normal">[${lic.key}]</span></span>
-                <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
-            </div>
-            <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden"><div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
-            <div class="flex justify-between text-[11px] font-bold text-gray-600"><span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span><span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span></div>
-        </div>`;
-    });
-    contentEl.innerHTML = html;
-};
-
-window.setDispatchDetailTab = function(tab) {
-    dispatchDetailTab = tab; window.dispatchDetailTab = tab;
-    if (selectedDeviceId) window.renderDriverDetailView(selectedDeviceId);
-};
-
-window.renderDriverDetailView = function(devId) {
-    const headerEl = document.getElementById('sidebar-header');
-    const contentEl = document.getElementById('sidebar-content');
-    const matchedLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = activeRoutes[devId] || null;
-    const phone = driver?.phone || matchedLic?.phone || '기사';
-
-    headerEl.innerHTML = `
-        <div class="flex items-center justify-between w-full">
-            <button onclick="clearSelectedDriver()" class="text-xs font-black text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 border border-blue-200"><i class="fa-solid fa-arrow-left"></i> 기사 목록</button>
-            <span class="text-xs font-black text-gray-900 bg-white border border-gray-200 shadow-sm px-3 py-1.5 rounded-xl truncate"><i class="fa-solid fa-phone text-blue-500 mr-1 text-[11px]"></i>${phone}</span>
-        </div>
-    `;
-
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
-    const isToday = (selectedDate === todayStr);
-
-    let driverRoute = null;
-    if (driver && driver.updatedAt) {
-        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
-        if (isToday || routeDateStr === selectedDate) {
-            driverRoute = driver;
-        }
-    }
-    const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
-
-    const driverDone = allCompletions.filter(c => {
-        const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
-        const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
-        return matchesDev && matchesDate;
-    }).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
-
-    const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
-    const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-
-    const pendingCount = isToday ? remainingDests.length : 0;
-    const doneCount = driverDone.length;
-    const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
-    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;	
-
-    let html = `
-    <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
-        <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black"><span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도</span><span>완료 ${doneCount} / 전체 ${totalCount} 건 (${rate}%)</span></div>
-        <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2"><div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
-        <div class="flex justify-between text-[11px] font-bold text-blue-800"><span>남은 배송: <b class="text-blue-600 font-black">${pendingCount}</b>곳</span><span>완료율: <b class="text-emerald-600 font-black">${rate}%</b></span></div>
-    </div>
-    <div class="flex gap-1.5 mb-3 bg-gray-100 p-1 rounded-xl text-xs font-black">
-        <button onclick="setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}"><i class="fa-solid fa-route mr-1"></i> 동선 리스트 (${totalCount})</button>
-        <button onclick="setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}"><i class="fa-solid fa-circle-check mr-1"></i> 배송 완료 (${doneCount})</button>
+    <div class="flex gap-1 mb-3 bg-gray-100 p-1 rounded-xl text-xs font-black">
+        <button onclick="setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+            <i class="fa-solid fa-route mr-1"></i> 동선 (${totalCount})
+        </button>
+        <button onclick="setDispatchDetailTab('PENDING')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'PENDING' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+            <i class="fa-solid fa-clock mr-1"></i> 미처리 (${pendingCount})
+        </button>
+        <button onclick="setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+            <i class="fa-solid fa-circle-check mr-1"></i> 완료 (${doneCount})
+        </button>
     </div>`;
 
     if (window.dispatchDetailTab === 'ROUTE') {
         if (rawDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-route text-2xl text-gray-300 mb-1"></i><p>선택하신 날짜의 대기 중인 배송 동선이 없습니다.</p><p class="text-[11px] font-normal text-gray-400">과거 내역은 '배송 완료' 탭에서 확인해 주세요.</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-route text-2xl text-gray-300 mb-1"></i><p>선택하신 날짜의 대기 중인 배송 동선이 없습니다.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             rawDests.forEach((d, idx) => {
@@ -1424,9 +937,29 @@ window.renderDriverDetailView = function(devId) {
             });
             html += `</div>`;
         }
+    } else if (window.dispatchDetailTab === 'PENDING') {
+        if (remainingDests.length === 0) {
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-circle-check text-2xl text-emerald-500 mb-1"></i><p>모든 배송이 완료되었습니다!</p></div>`;
+        } else {
+            html += `<div class="space-y-1.5 pb-4">`;
+            remainingDests.forEach((d, idx) => {
+                html += `
+                <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                    <div class="flex items-center gap-2 min-w-0 flex-1">
+                        <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${d.displayNumber || idx + 1}</span>
+                        <span class="font-bold text-gray-900 truncate">${d.address}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5 shrink-0 ml-2">
+                        <button onclick="event.stopPropagation(); adminForceDeleteRoute('${devId}', '${d.address}')" class="text-red-500 hover:text-red-700 bg-white border border-red-200 px-2 py-0.5 rounded text-[10px] font-black transition active:scale-95">제외</button>
+                        <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shrink-0">배송 대기</span>
+                    </div>
+                </div>`;
+            });
+            html += `</div>`;
+        }
     } else {
         if (driverDone.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-300 mb-1"></i><p>선택한 날짜(${selectedDate})에 완료된 배송 건이 없습니다.</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-300 mb-1"></i><p>완료된 배송 건이 없습니다.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             driverDone.forEach((c, idx) => {
@@ -2092,7 +1625,7 @@ window.executeExcelExport = function() {
     const isCanceled = document.getElementById('chk-export-canceled').checked;
 
     if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 정 없습니다. 날짜를 다시 확인해주세요."); return; }
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
