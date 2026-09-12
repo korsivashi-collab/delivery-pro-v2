@@ -237,8 +237,10 @@ export async function verifyLicense() {
     }
 
     try {
+        // 서버/API 통신 호출
         const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId);
-        if (res.valid) {
+        
+        if (res && res.valid) {
             const actualKey = res.actualKey || keyInput;
             localStorage.setItem('deliveryProKey', actualKey);
             localStorage.setItem('deliveryProUserPhone', formattedPhone); 
@@ -260,10 +262,11 @@ export async function verifyLicense() {
             gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, formattedPhone, actualKey, getDeviceRealGPS);
             updatePhotoCompButtonState(!!res.dispatchKey);
         } else {
-            if (msgEl) msgEl.innerText = res.msg;
+            if (msgEl) msgEl.innerText = (res && res.msg) ? res.msg : "인증에 실패했습니다. 키와 번호를 확인해 주세요.";
         }
     } catch (e) {
-        if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다: " + e.message;
+        console.error("인증 통신 예외 발생:", e);
+        if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
     } finally {
         if (btn) {
             btn.innerHTML = '인증하고 시작하기';
