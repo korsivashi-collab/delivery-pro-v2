@@ -57,31 +57,44 @@
         .excel-table td, .excel-table th { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; font-size: 11px; }
         .excel-table tr:hover td { background-color: #eef2ff; }
 
-        /* 🌟 3차 수정: 꽉 찬 A4 비율을 위한 거래명세표 여백 및 뷰포트 최적화 */
+        /* 🌟 4차 수정: 워드 문서 표준 방식을 적용한 유연한 거래명세표 양식 스타일 */
         .invoice-paper { 
             background-color: #ffeb5c;
             border: 1px solid #d1d5db; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
             width: 210mm; 
-            min-height: 148mm; 
+            min-height: 148.5mm; /* 최소 높이만 유지하고 내용에 따라 자연스럽게 확장 */
             margin: 0 auto; 
             color: #000; 
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
             position: relative;
-            padding: 5mm 8mm; /* 여백 대폭 최소화 */
+            padding: 10mm 12mm; /* 인쇄 안정권 여백 확보 */
             box-sizing: border-box;
+            overflow: visible !important; /* 절대 잘리지 않도록 강제 해제 */
         }
         .invoice-title {
             text-align: center;
-            font-size: 26px; /* 폰트 약간 키움 */
+            font-size: 24px;
             font-weight: 900;
-            letter-spacing: 15px; /* 자간 넓힘 */
+            letter-spacing: 12px;
             text-decoration: underline;
-            margin-bottom: 5px;
+            margin-bottom: 8px;
         }
-        .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 12px; margin-bottom: -2px; }
-        .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px 5px; } /* 패딩 살짝 늘림 */
-        .invoice-table th { font-weight: bold; text-align: center; }
+        .invoice-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            border: 2px solid #000; 
+            font-size: 11px; 
+            margin-bottom: 4px;
+            table-layout: fixed; /* 칸 너비를 고정하여 주소나 상호가 길어져도 표가 붕괴되지 않게 방어 */
+        }
+        .invoice-table th, .invoice-table td { 
+            border: 1px solid #000; 
+            padding: 5px 6px; 
+            word-break: break-all; /* 주소나 글자가 길어지면 셀 내부에서 자동으로 완벽한 줄바꿈 처리 */
+            overflow-wrap: break-word;
+        }
+        .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
         
         .invoice-label { background-color: transparent; font-weight: bold; text-align: center; letter-spacing: 1px; }
         
@@ -102,12 +115,15 @@
         .inv-font-bold { font-weight: bold; }
         
         /* 품목 테이블 최소 높이 유지를 위한 빈 줄 설정 */
-        .empty-row td { height: 26px; } /* 줄 높이 늘림 */
-        
-        /* 🌟 인쇄 전용 스타일 강제 설정 (브라우저 잘림 현상 방지) */
+        .empty-row td { height: 26px; }
+
+        /* 🌟 인쇄 전용 브라우저 페이징 규칙 (워드 페이지 넘김과 동일한 효과) */
         @media print {
             @page { size: A4 portrait; margin: 0; }
             body, html { margin: 0; padding: 0; width: 100%; height: 100%; }
+            .invoice-paper {
+                page-break-inside: avoid; /* 양식 중간이 반토막 나는 현상 방지 */
+            }
         }
     </style>
 </head>
