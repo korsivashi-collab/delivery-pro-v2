@@ -1420,7 +1420,7 @@ export function initCameraScan() {
     });
 }
 
-// 사진 전송 및 완료 처리 이벤트 리스너 (ArrayBuffer 활용한 완전한 Blob 래핑)
+// 사진 전송 및 완료 처리 이벤트 리스너 (원본 정상 작동 방식과 일치)
 export function initPhotoCompletion() {
     const photoInput = document.getElementById('completion-photo-input');
     if (!photoInput) return;
@@ -1429,37 +1429,24 @@ export function initPhotoCompletion() {
         const file = e.target.files[0];
         if (!file) return;
 
+        document.getElementById('completion-modal')?.classList.add('hidden');
+
         showLoading("사진 압축 및 서버 전송 중...");
         try {
-            // 파일을 ArrayBuffer로 읽은 후 새로운 순수 Blob으로 생성하여 FileReader 오류 원천 차단
-            const arrayBuffer = await file.arrayBuffer();
-            const cleanBlob = new Blob([arrayBuffer], { type: file.type || 'image/jpeg' });
-
-            // 1. 이미지 압축 및 Base64 변환
-            const base64Image = await toBase64_SafeCompress(cleanBlob);
-
-            // 2. Firebase 저장소에 업로드 및 URL 반환
             const deviceId = getOrCreateDeviceId();
-            const photoUrl = await firebaseUploadDeliveryPhoto(deviceId, base64Image);
-
+            
+            // 원본과 동일하게 순수 file 객체와 deviceId를 정확한 순서로 전달
+            const photoUrl = await firebaseUploadDeliveryPhoto(file, deviceId);
+            
+            await confirmCompletion(photoUrl);
+        } catch (err) {
             hideLoading();
-
-            // 3. 업로드 성공 시 사진 URL을 담아 완료 처리 확정
-            if (photoUrl) {
-                confirmCompletion(photoUrl);
-            } else {
-                alert("사진 전송에 실패했습니다. 다시 시도해 주세요.");
-            }
-        } catch (error) {
-            hideLoading();
-            alert("사진 전송 중 오류가 발생했습니다: " + error.message);
+            alert("사진 전송 중 오류가 발생했습니다: " + err.message);
+        } finally {
+            e.target.value = '';
         }
-        
-        // 다음 사진 촬영을 위해 input 상태 초기화
-        e.target.value = '';
     });
 }
-
 
 // HTML과의 연결을 위한 전역 바인딩
 window.logout = logout;
