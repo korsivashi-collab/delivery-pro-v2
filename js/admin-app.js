@@ -884,7 +884,7 @@ window.renderAccountHistoryView = function() {
     }
 
     const targetLic = allLicenses.find(l => l.key === selectedKey);
-    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 বৃত্তান্ত을 수 없습니다.</div>`; return; }
+    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 없습니다.</div>`; return; }
 
     window.currentSelectedAccountKey = targetLic.key;
     if (topFilterBarEl) topFilterBarEl.classList.add('hidden');
@@ -1147,6 +1147,28 @@ window.closeProInvoiceModal = function() {
     document.getElementById('pro-invoice-modal').classList.add('hidden');
 };
 
+// 🌟 [신규] 기본 양식 템플릿 선택 기능
+window.selectFormTemplate = function(type) {
+    // 1. 모달창 닫기
+    document.getElementById('form-template-modal').classList.add('hidden');
+    
+    // 2. 우측 폼 입력 아코디언 자동으로 열기 (포커스 유도)
+    const accordion = document.getElementById('form-setup-accordion');
+    if (accordion && accordion.classList.contains('hidden')) {
+        accordion.classList.remove('hidden');
+        accordion.classList.add('flex');
+    }
+    
+    // 3. 좌측 메인 뷰를 '미리보기' 화면으로 강제 전환하여 선택한 템플릿을 바로 보여줌
+    window.switchInvoiceTab('PREVIEW');
+    
+    // 입력창 포커스 (UX 향상)
+    setTimeout(() => {
+        const titleInput = document.getElementById('input-form-title');
+        if (titleInput) titleInput.focus();
+    }, 300);
+};
+
 // 2. 엑셀 뷰 / 명세서 미리보기 뷰 탭 전환 기능
 window.switchInvoiceTab = function(tabName) {
     const btnExcel = document.getElementById('inv-tab-excel');
@@ -1175,8 +1197,10 @@ window.switchInvoiceTab = function(tabName) {
 
 // 3. 우측 폼 입력 시 좌측 미리보기에 실시간 데이터 바인딩 (Live Preview)
 window.updateLivePreview = function() {
-    const name = document.getElementById('input-prov-name')?.value || '';
+    // 실제 거래명세표 항목에 맞춘 ID로 데이터 수집
+    const title = document.getElementById('input-form-title')?.value || '';
     const regno = document.getElementById('input-prov-regno')?.value || '';
+    const name = document.getElementById('input-prov-name')?.value || '';
     const addr = document.getElementById('input-prov-addr')?.value || '';
     const tel = document.getElementById('input-prov-tel')?.value || '';
     const addTel = document.getElementById('input-prov-add-tel')?.value || '';
@@ -1186,14 +1210,14 @@ window.updateLivePreview = function() {
     
     if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
     
-    document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
+    // HTML 템플릿(세로쓰기 버전)의 클래스에 맞게 값 주입
     document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
+    document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
     document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 
-    // 사용자가 우측 폼에서 타이핑을 할 때마다 즉시 탭 전환을 원하지 않을 수 있으므로,
-    // 활성화된 창이 폼 입력창일 경우에만 미리보기 탭으로 넘깁니다.
+    // 활성화된 창이 폼 입력창일 경우에만 미리보기 탭으로 자동 넘김
     if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
         window.switchInvoiceTab('PREVIEW');
     }
@@ -1229,8 +1253,8 @@ window.loadSavedForms = function() {
 
 window.saveProviderForm = function() {
     const title = document.getElementById('input-form-title').value.trim();
-    const name = document.getElementById('input-prov-name').value.trim();
     const regno = document.getElementById('input-prov-regno').value.trim();
+    const name = document.getElementById('input-prov-name').value.trim();
     const addr = document.getElementById('input-prov-addr').value.trim();
     const tel = document.getElementById('input-prov-tel').value.trim();
     const addTel = document.getElementById('input-prov-add-tel').value.trim();
@@ -1260,13 +1284,12 @@ window.applySavedForm = function(idx) {
     if (!form) return;
 
     document.getElementById('input-form-title').value = form.title || '';
-    document.getElementById('input-prov-name').value = form.name || '';
     document.getElementById('input-prov-regno').value = form.regno || '';
+    document.getElementById('input-prov-name').value = form.name || '';
     document.getElementById('input-prov-addr').value = form.addr || '';
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
-    // 양식을 불러오면 실시간으로 좌측 미리보기에 연동하여 보여줍니다.
     window.updateLivePreview();
     window.switchInvoiceTab('PREVIEW');
 };
@@ -1299,7 +1322,7 @@ function processExcelData(jsonData) {
         // 스마트 헤더 매핑 알고리즘
         for (let key in row) {
             const val = row[key];
-            const k = key.replace(/\s+/g, ''); // 공백 제거 후 분석
+            const k = key.replace(/\s+/g, ''); 
             
             if (/보내는분|발송자|주문자|고객명/.test(k)) mappedRow.senderName = val;
             else if (/주문번호|오더번호|주문코드/.test(k)) mappedRow.orderNo = val;
@@ -1357,7 +1380,7 @@ function renderExcelTable() {
         </tr>`;
     });
     tbody.innerHTML = html;
-    window.switchInvoiceTab('EXCEL'); // 매핑 완료 후 리스트로 자동 이동
+    window.switchInvoiceTab('EXCEL'); 
 }
 
 // 6. 리스트 클릭 시 명세서 뷰에 해당 고객/상품 데이터 렌더링
@@ -1366,11 +1389,11 @@ window.previewInvoiceRow = function(idx) {
     const item = parsedExcelList[idx];
 
     // 고객(공급받는 자) 정보 바인딩
-    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
     document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
-    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
     document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
     document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
 
     // 품목 정보 바인딩
     document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
@@ -1406,25 +1429,24 @@ window.previewInvoiceRow = function(idx) {
 
 // 각 엑셀 아이템을 기반으로 HTML 문자열을 동적 생성하는 함수
 function generateInvoiceHTML(item, providerInfo) {
-    // DOM에 있는 원본 템플릿(id="print-area")을 가져와 복제합니다.
     const originalTemplate = document.getElementById('print-area');
     if (!originalTemplate) return '';
     const template = originalTemplate.cloneNode(true);
-    template.id = ''; // 다중 생성을 위해 ID 제거
+    template.id = ''; 
 
     // 1. 공급자(우측 폼) 정보 바인딩
-    template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
     template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
+    template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
     template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
     template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
     template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
 
     // 2. 엑셀 데이터(수신자 및 품목) 정보 바인딩
-    template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
     template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
-    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
     template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
     template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
 
     template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
     template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
@@ -1456,8 +1478,8 @@ function generateInvoiceHTML(item, providerInfo) {
         if (span.classList.contains('w-32')) span.innerText = item.orderNo || '';
     });
 
-    // 템플릿 하단의 회색 가이드 문구(미리보기용)는 실제 출력 시 필요 없으므로 숨김 처리
-    const guideText = Array.from(template.querySelectorAll('div')).find(div => div.innerText.includes('하단: 공급받는 자 보관용'));
+    // 출력 시 하단 회색 안내 문구 숨김
+    const guideText = template.querySelector('#preview-guide-bottom');
     if (guideText) guideText.style.display = 'none';
 
     return template.outerHTML;
@@ -1476,25 +1498,22 @@ window.executeBatchPrint = function() {
         btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 렌더링 중...';
     }
 
-    // 작성 중이거나 선택된 폼(공급자)의 현재 값을 수집
     const providerInfo = {
-        name: document.getElementById('input-prov-name')?.value || '',
+        title: document.getElementById('input-form-title')?.value || '',
         regno: document.getElementById('input-prov-regno')?.value || '',
+        name: document.getElementById('input-prov-name')?.value || '',
         addr: document.getElementById('input-prov-addr')?.value || '',
         tel: document.getElementById('input-prov-tel')?.value || '',
         addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
-    // 'A4 분할 인쇄' 체크박스 상태 확인
     const a4Checkbox = Array.from(document.querySelectorAll('input[type="checkbox"]')).find(cb => cb.nextSibling && cb.nextSibling.textContent.includes('A4 분할 인쇄'));
     const isA4Split = a4Checkbox ? a4Checkbox.checked : true;
 
     let printContents = '';
-    const itemsPerPage = isA4Split ? 2 : 1; // 분할 인쇄 시 1장에 2건, 아니면 1건 배치
+    const itemsPerPage = isA4Split ? 2 : 1; 
 
-    // 엑셀 리스트를 순회하며 페이지 생성
     for (let i = 0; i < parsedExcelList.length; i += itemsPerPage) {
-        // A4 1장 단위의 Wrapper (여백 없이 꽉 채우고 항상 다음 장으로 넘기도록 CSS 처리)
         printContents += `<div style="width: 210mm; height: 296mm; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; margin: 0 auto; background: white;">`;
         
         for (let j = 0; j < itemsPerPage; j++) {
@@ -1503,12 +1522,10 @@ window.executeBatchPrint = function() {
                 let invoiceHtml = generateInvoiceHTML(item, providerInfo);
                 
                 if(isA4Split) {
-                    // A4 2분할(절반 높이 148.5mm 적용 및 중간 점선 삽입)
                     const borderStyle = j === 0 ? 'border-bottom: 1px dashed #ccc;' : '';
-                    invoiceHtml = invoiceHtml.replace('class="invoice-paper', `style="height: 148.5mm; overflow: hidden; ${borderStyle}" class="invoice-paper`);
+                    invoiceHtml = invoiceHtml.replace('class="invoice-paper"', `style="height: 148.5mm; overflow: hidden; ${borderStyle}" class="invoice-paper"`);
                 } else {
-                    // 단일 출력(전체 높이 사용)
-                    invoiceHtml = invoiceHtml.replace('class="invoice-paper', `style="height: 296mm; overflow: hidden;" class="invoice-paper`);
+                    invoiceHtml = invoiceHtml.replace('class="invoice-paper"', `style="height: 296mm; overflow: hidden;" class="invoice-paper"`);
                 }
                 printContents += invoiceHtml;
             }
@@ -1516,7 +1533,6 @@ window.executeBatchPrint = function() {
         printContents += `</div>`;
     }
 
-    // 현재 페이지 UI에 영향을 주지 않도록 보이지 않는 iframe 생성
     const iframe = document.createElement('iframe');
     iframe.style.position = 'fixed';
     iframe.style.right = '0';
@@ -1527,7 +1543,6 @@ window.executeBatchPrint = function() {
     iframe.style.zIndex = '-1';
     document.body.appendChild(iframe);
 
-    // iframe 내부에 인쇄 전용 HTML 주입
     const doc = iframe.contentWindow.document;
     doc.open();
     doc.write(`
@@ -1541,25 +1556,21 @@ window.executeBatchPrint = function() {
             <style>
                 @media print {
                     @page { size: A4 portrait; margin: 0; }
-                    body { 
-                        margin: 0; 
-                        -webkit-print-color-adjust: exact !important; 
-                        print-color-adjust: exact !important; 
-                        background: white; 
-                    }
+                    body { margin: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: white; }
                 }
                 body { background: white; margin: 0; padding: 0; }
-                .invoice-paper { 
-                    box-sizing: border-box; 
-                    color: #000; 
-                    font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
-                    background-color: #fef08a !important; 
-                }
-                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; }
-                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px; text-align: center; }
-                .invoice-table th { font-weight: bold; background-color: #fef08a !important; }
-                .invoice-label { background-color: #fef08a !important; font-weight: bold; text-align: center; }
-                .writing-mode-vertical { writing-mode: vertical-lr; }
+                .invoice-paper { box-sizing: border-box; color: #000; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background-color: #ffeb5c !important; padding: 12mm 15mm; }
+                .invoice-title { text-align: center; font-size: 24px; font-weight: 900; letter-spacing: 12px; text-decoration: underline; margin-bottom: 2px; }
+                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: -2px; }
+                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 3px 5px; }
+                .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
+                .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 1px; }
+                .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 4px; padding: 5px 2px !important; line-height: 1.2; }
+                .inv-text-center { text-align: center; }
+                .inv-text-left { text-align: left; padding-left: 8px !important; }
+                .inv-text-right { text-align: right; padding-right: 8px !important; }
+                .inv-font-bold { font-weight: bold; }
+                .empty-row td { height: 22px; }
             </style>
         </head>
         <body>
@@ -1569,13 +1580,11 @@ window.executeBatchPrint = function() {
     `);
     doc.close();
 
-    // Tailwind CSS 및 폰트가 iframe 내부에 렌더링될 시간을 0.8초 부여 후 Print 창 호출
     iframe.onload = function() {
         setTimeout(() => {
             iframe.contentWindow.focus();
             iframe.contentWindow.print();
             
-            // 인쇄 창이 닫히거나 취소되면 사용된 임시 iframe 폐기 및 버튼 상태 복구
             setTimeout(() => {
                 document.body.removeChild(iframe);
                 if (btn) {
