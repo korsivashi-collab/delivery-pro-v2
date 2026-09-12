@@ -1203,7 +1203,7 @@ function processExcelData(jsonData) {
             phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: ''
         };
 
-        // 스마트 헤더 매핑 알고리즘
+        // 스마트 헤더 매핑 알고리즘 (버그 수정됨)
         for (let key in row) {
             const val = row[key];
             const k = key.replace(/\s+/g, ''); // 공백 제거 후 분석
@@ -1217,8 +1217,8 @@ function processExcelData(jsonData) {
             else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
             else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
             else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
-            else if (/단가|가격|금액(?!(총)))/.test(k)) mappedRow.price = val;
-            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val;
+            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val; // 총액을 단가보다 먼저 검사하여 '총금액'이 '금액'에 잡히는 것을 방지
+            else if (/단가|가격|금액/.test(k)) mappedRow.price = val; // 문법 오류 원인이었던 불필요한 정규식 제거 완료
             else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
         }
         parsedExcelList.push(mappedRow);
@@ -1720,7 +1720,7 @@ window.renderDriverDetailView = function(devId) {
         }
     } else if (window.dispatchDetailTab === 'PENDING') {
         if (remainingDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-circle-check text-2xl text-emerald-50 mb-1"></i><p>모든 배송이 완료되었습니다!</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-circle-check text-2xl text-emerald-500 mb-1"></i><p>모든 배송이 완료되었습니다!</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
