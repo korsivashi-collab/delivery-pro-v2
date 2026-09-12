@@ -614,7 +614,7 @@
             <div class="w-[82%] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
                 <div class="absolute top-3 left-4 flex gap-1.5 z-20">
                     <button id="inv-tab-excel" onclick="switchInvoiceTab('EXCEL')" class="px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition">주문 리스트</button>
-                    <button id="inv-tab-preview" onclick="switchInvoiceTab('PREVIEW')" class="px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition">명세서 미리보기(출력용)</button>
+                    <!-- 명세서 미리보기 (출력용) 버튼 삭제됨 -->
                 </div>
 
                 <!-- 엑셀 뷰 -->
@@ -755,14 +755,14 @@
             <div class="w-[18%] flex flex-col gap-3">
                 
                 <!-- 1. 업로드 박스 -->
-                <div id="excel-drop-zone" class="bg-white border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 rounded-2xl p-3 flex flex-col items-center justify-center text-center transition cursor-pointer flex-none shadow-sm h-[80px]">
-                    <div class="flex flex-col items-center gap-1">
-                        <div class="w-8 h-8 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-sm shadow-inner shrink-0">
+                <div id="excel-drop-zone" class="bg-white border-2 border-dashed border-indigo-300 hover:border-indigo-500 hover:bg-indigo-50 rounded-2xl p-4 flex flex-col items-center justify-center text-center transition cursor-pointer flex-none shadow-sm h-[160px]">
+                    <div class="flex flex-col items-center gap-2">
+                        <div class="w-12 h-12 bg-indigo-100 text-indigo-600 rounded-full flex items-center justify-center text-lg shadow-inner shrink-0">
                             <i class="fa-solid fa-file-excel"></i>
                         </div>
                         <div>
-                            <h4 class="font-black text-gray-800 text-[11px] leading-tight mb-0.5">엑셀 주문서 업로드</h4>
-                            <p class="text-[9px] text-gray-500 font-bold">클릭 또는 드래그 (.xlsx)</p>
+                            <h4 class="font-black text-gray-800 text-sm leading-tight mb-1">엑셀 주문서 업로드</h4>
+                            <p class="text-xs text-gray-500 font-bold">클릭 또는 드래그 (.xlsx)</p>
                         </div>
                     </div>
                 </div>
