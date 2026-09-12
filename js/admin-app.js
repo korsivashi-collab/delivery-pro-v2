@@ -46,6 +46,7 @@ window.historySelectedAccountKeys = new Set();
 window.selectedMessageDrivers = new Set();
 let activeDispatchPopupMsgId = null;
 
+// 🌟 한국 시간(로컬) 기준 YYYY-MM-DD 변환 전역 함수
 function getLocalDateString(d = new Date()) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -59,7 +60,7 @@ window.onload = () => {
     const defaultExpire = new Date();
     defaultExpire.setDate(defaultExpire.getDate() + 30);
     const expEl = document.getElementById('new-key-expire');
-    if (expEl) expEl.value = defaultExpire.toISOString().split('T')[0];
+    if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
@@ -671,7 +672,7 @@ window.sendHistoryNoticeToSelected = async function() {
 
     const now = new Date();
     const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const dateStr = now.toISOString().split('T')[0];
+    const dateStr = getLocalDateString(now);
 
     try {
         await addDoc(collection(db, "dispatch_messages"), {
@@ -733,7 +734,7 @@ window.renderAccountHistoryView = function() {
             driverComps.forEach(c => {
                 let d = '';
                 if (c.timeString && c.timeString.includes(' ')) d = c.timeString.split(' ')[0].replace(/\./g, '-');
-                else if (c.completedAt) d = new Date(c.completedAt).toISOString().split('T')[0];
+                else if (c.completedAt) d = getLocalDateString(new Date(c.completedAt));
                 if (d) activeDatesSet.add(d);
             });
             if (activeRoutes[devId] && activeRoutes[devId].destinations && activeRoutes[devId].destinations.length > 0) activeDatesSet.add(todayStr);
@@ -942,7 +943,7 @@ window.renderAccountHistoryView = function() {
             driverDone.forEach(c => {
                 let dStr = '기타 일자';
                 if (c.timeString && c.timeString.includes(' ')) dStr = c.timeString.split(' ')[0].replace(/\./g, '-');
-                else if (c.completedAt) dStr = new Date(c.completedAt).toISOString().split('T')[0];
+                else if (c.completedAt) dStr = getLocalDateString(new Date(c.completedAt));
                 if (!completionsByDate[dStr]) completionsByDate[dStr] = [];
                 completionsByDate[dStr].push(c);
             });
@@ -1309,7 +1310,7 @@ window.renderDriverListView = function() {
         const routeData = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
         let driverRoute = null;
         if (routeData && routeData.updatedAt) {
-            const routeDateStr = new Date(routeData.updatedAt).toISOString().split('T')[0];
+            const routeDateStr = getLocalDateString(new Date(routeData.updatedAt));
             if (isToday || routeDateStr === selectedDate) {
                 driverRoute = routeData;
             }
@@ -1318,7 +1319,8 @@ window.renderDriverListView = function() {
 
         const driverDone = allCompletions.filter(c => {
             const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || (lic.phone && c.phone === lic.phone);
-            const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
+            const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
+                                (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
             return matchesDev && matchesDate;
         });
 
@@ -1368,7 +1370,7 @@ window.renderDriverDetailView = function(devId) {
 
     let driverRoute = null;
     if (driver && driver.updatedAt) {
-        const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
+        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
         if (isToday || routeDateStr === selectedDate) {
             driverRoute = driver;
         }
@@ -1377,7 +1379,8 @@ window.renderDriverDetailView = function(devId) {
 
     const driverDone = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
-        const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
+        const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
+                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
         return matchesDev && matchesDate;
     }).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
 
@@ -1387,7 +1390,7 @@ window.renderDriverDetailView = function(devId) {
     const pendingCount = isToday ? remainingDests.length : 0;
     const doneCount = driverDone.length;
     const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
-    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);	
+    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;	
 
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
@@ -1535,7 +1538,7 @@ window.sendDispatchMessage = async function() {
     try {
         const now = new Date();
         const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const dateStr = now.toISOString().split('T')[0];
+        const dateStr = getLocalDateString(now);
 
         const targetPhones = [];
         targets.forEach(tId => {
@@ -1844,7 +1847,7 @@ window.drawDriverOnMap = function(devId) {
 
     let driverRoute = null;
     if (driver && driver.updatedAt) {
-        const routeDateStr = new Date(driver.updatedAt).toISOString().split('T')[0];
+        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
         if (isToday || routeDateStr === selectedDate) {
             driverRoute = driver;
         }
@@ -1854,7 +1857,7 @@ window.drawDriverOnMap = function(devId) {
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                            (c.completedAt && new Date(c.completedAt).toISOString().startsWith(selectedDate));
+                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
         return matchesDev && matchesDate;
     });
 
@@ -1937,9 +1940,10 @@ window.focusMapPosition = function(lat, lng) { focusMapPosition(lat, lng); };
 window.changeDispatchDate = function(days) {
     const picker = document.getElementById('dispatch-date-picker');
     if (!picker) return;
-    const curDate = new Date(picker.value || todayStr);
+    let parts = (picker.value || todayStr).split('-');
+    const curDate = new Date(parts[0], parts[1] - 1, parts[2]);
     curDate.setDate(curDate.getDate() + days);
-    picker.value = curDate.toISOString().split('T')[0];
+    picker.value = getLocalDateString(curDate);
     window.onDispatchDateChange();
 };
 window.onDispatchDateChange = function() {
@@ -1994,7 +1998,11 @@ window.handleGlobalSearch = function(query) {
             if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
             let dStr = todayStr; let tStr = '';
             if (c.timeString && c.timeString.includes(' ')) { dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); tStr = c.timeString.split(' ')[1]; } 
-            else if (c.completedAt) { dStr = new Date(c.completedAt).toISOString().split('T')[0]; const dt = new Date(c.completedAt); tStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; }
+            else if (c.completedAt) { 
+                dStr = getLocalDateString(new Date(c.completedAt)); 
+                const dt = new Date(c.completedAt); 
+                tStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; 
+            }
             addressGroups[addrKey].push({
                 type: 'DONE', address: c.address, dateStr: dStr, timeStr: tStr, tag: c.tag || '전달완료',
                 phone: c.phone || '기사', devId: c.deviceId, lat: c.lat, lng: c.lng, timestamp: c.completedAt || 0
@@ -2064,9 +2072,9 @@ window.confirmLinkDriver = async function() {
     } catch (e) { alert("오류: " + e.message); }
 };
 
-// 🌟 [추가/수정] 엑셀 추출 모달창 컨트롤 및 다중 시트 다운로드
+// 🌟 엑셀 추출 모달창 컨트롤 및 다중 시트 다운로드
 window.openExcelExportModal = function() {
-    const today = new Date().toISOString().split('T')[0];
+    const today = getLocalDateString();
     document.getElementById('export-start-date').value = today;
     document.getElementById('export-end-date').value = today;
     document.getElementById('excel-export-modal').classList.remove('hidden');
