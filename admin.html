@@ -57,27 +57,28 @@
         .excel-table td, .excel-table th { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; font-size: 11px; }
         .excel-table tr:hover td { background-color: #eef2ff; }
 
-        /* 🌟 5차 수정: 1장 통출력을 위한 완벽한 A4 컨테이너 양식 설계 */
+        /* 🌟 6차 수정: 1장 통출력 시 하단 잘림 해결을 위한 완벽한 A4 컨테이너 양식 설계 */
         .invoice-container { 
             background-color: white;
             border: 1px solid #d1d5db; 
             box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
             width: 210mm; 
-            min-height: 297mm; /* A4 전체 크기 보장 */
+            height: 297mm; /* min-height를 height로 변경하여 높이를 강제 고정 */
             margin: 0 auto; 
             position: relative;
             display: flex;
             flex-direction: column;
             box-sizing: border-box;
+            overflow: hidden; /* 초과 내용이 인쇄 시 2장으로 넘어가지 않도록 강력 제어 */
         }
         .invoice-half {
-            flex: 1; /* 상단과 하단이 정확히 50%씩 공간을 차지 */
+            flex: 1; 
             background-color: #ffeb5c;
-            padding: 8mm 12mm; /* 여백 밸런스 조정 */
+            padding: 5mm 10mm; /* 패딩을 약간 슬림하게 조정하여 안전 여백 확보 */
             box-sizing: border-box;
             display: flex;
             flex-direction: column;
-            overflow: visible; /* 내용이 길면 늘어나도록 허용 */
+            overflow: hidden; 
         }
         .invoice-cut-line {
             border-top: 1px dashed #9ca3af;
@@ -90,7 +91,7 @@
             font-weight: 900;
             letter-spacing: 12px;
             text-decoration: underline;
-            margin-bottom: 8px;
+            margin-bottom: 5px; /* 8px -> 5px (세로 공간 최적화) */
             color: #000; 
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
         }
@@ -100,14 +101,14 @@
             border: 2px solid #000; 
             font-size: 11px; 
             margin-bottom: 4px;
-            table-layout: fixed; /* 긴 주소에 찌그러지지 않도록 셀 너비 고정 */
+            table-layout: fixed; 
             color: #000; 
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
         }
         .invoice-table th, .invoice-table td { 
             border: 1px solid #000; 
-            padding: 5px 6px; 
-            word-break: break-all; /* 주소 강제 줄바꿈 허용 */
+            padding: 4px 6px; /* 5px 6px -> 4px 6px로 슬림화 (세로 넘침 방지) */
+            word-break: break-all; 
             overflow-wrap: break-word;
         }
         .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
@@ -137,10 +138,11 @@
             body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
             .invoice-container {
                 box-shadow: none;
-                page-break-after: always; /* 1건 인쇄 완료 시 깔끔하게 다음 장으로 넘김 */
+                border: none;
+                page-break-after: always; 
             }
             .invoice-half {
-                page-break-inside: avoid; /* 한 덩어리가 중간에 갈라지는 현상 방지 */
+                page-break-inside: avoid; 
             }
         }
     </style>
@@ -268,6 +270,8 @@
                 
                 <!-- 탭 5: 계정/내역 조회 -->
                 <div id="tab-content-history" class="hidden p-5 flex flex-col gap-3.5">
+                    <!-- 생략됨: 코드 크기를 줄이기 위해 내부 UI는 그대로 유지 -->
+                    <!-- 원래 제공해주신 3번 소스코드의 <div id="tab-content-history"> 내용 동일하게 적용 -->
                     <div id="account-back-bar" class="hidden justify-between items-center bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-xs">
                         <button onclick="backToAllAccountsView()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow transition active:scale-95">
                             <i class="fa-solid fa-arrow-left"></i> 전체 계정 목록으로 돌아가기
@@ -479,6 +483,7 @@
 
     <!-- 4. 실시간 관제 화면 -->
     <div id="dispatch-panel" class="hidden flex-col h-full w-full bg-gray-100">
+        <!-- 4번 헤더 영역 원본 유지 -->
         <header class="bg-white border-b border-gray-200 px-5 py-2 flex justify-between items-center z-20 shadow-sm flex-none gap-3">
             <div class="flex items-center gap-3 flex-none">
                 <div onclick="window.location.reload()" class="flex items-center gap-2 cursor-pointer group" title="새로고침 / 홈으로 이동">
@@ -692,22 +697,23 @@
             <!-- ⬅️ 좌측: 엑셀 형태 주문 리스트 (82%로 확장) -->
             <div class="w-[82%] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
                 
-                <!-- 🌟 2차 수정: 탭 영역 디자인 변경 (미리보기 시 뒤로가기 버튼 표시) -->
+                <!-- 🌟 6차 수정: 명시적으로 뷰(View)를 전환할 수 있도록 탭 2개로 분리 -->
                 <div class="absolute top-3 left-4 flex gap-1.5 z-20 items-center">
                     <button id="inv-tab-excel" onclick="switchInvoiceTab('EXCEL')" class="px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition">주문 리스트</button>
-                    <!-- 미리보기 화면일 때만 보이는 리스트 복귀 버튼 -->
-                    <button id="inv-btn-back" onclick="switchInvoiceTab('EXCEL')" class="hidden px-4 py-2 bg-slate-800 text-white font-black text-xs rounded-lg shadow-sm hover:bg-slate-700 transition flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> 리스트로 돌아가기</button>
+                    <!-- 명시적인 뷰 전환을 위한 탭 추가 -->
+                    <button id="inv-tab-preview" onclick="switchInvoiceTab('PREVIEW')" class="px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition">명세서 미리보기</button>
                 </div>
 
-                <!-- 🌟 2차 수정: 선택 삭제 및 목록 비우기 버튼 추가 -->
+                <!-- 🌟 6차 수정: 선택 삭제 옆에 '서버에 저장(Firebase)' 버튼 추가 -->
                 <div id="inv-list-actions" class="absolute top-3 right-4 flex gap-1.5 z-20 items-center">
+                    <button onclick="saveExcelToFirebase()" class="px-3 py-1.5 bg-blue-50 text-blue-600 font-bold text-xs rounded-lg border border-blue-200 shadow-sm hover:bg-blue-100 transition active:scale-95 flex items-center gap-1"><i class="fa-solid fa-cloud-arrow-up"></i> 서버에 저장</button>
                     <button onclick="deleteSelectedExcelRows()" class="px-3 py-1.5 bg-red-50 text-red-600 font-bold text-xs rounded-lg border border-red-200 shadow-sm hover:bg-red-100 transition active:scale-95 flex items-center gap-1"><i class="fa-solid fa-trash-can"></i> 선택 삭제</button>
                     <button onclick="clearAllExcelRows()" class="px-3 py-1.5 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg border border-gray-200 shadow-sm hover:bg-gray-200 transition active:scale-95 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> 목록 비우기</button>
                 </div>
 
-                <!-- 🌟 3차 수정: 스크롤 영역을 명확히 구분하여 리스트가 갇히지 않도록 수정 -->
-                <div id="inv-view-excel" class="flex-1 flex flex-col mt-12 bg-white">
-                    <div class="flex-1 overflow-auto custom-scrollbar">
+                <!-- 🌟 6차 수정: 컨테이너에 overflow-hidden을 부여해 자식 스크롤이 확실히 먹히도록 수정 -->
+                <div id="inv-view-excel" class="flex-1 flex flex-col mt-12 bg-white overflow-hidden">
+                    <div class="flex-1 overflow-y-auto custom-scrollbar block">
                         <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table min-w-[1550px]">
                             <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm">
                                 <tr class="border-b border-gray-200 text-gray-700">
@@ -973,45 +979,45 @@
                     </div>
                 </div>
 
-                <!-- 3. 하단 아코디언: 명세서 폼 작성/수정 (실제 거래명세표 항목으로 업데이트) -->
+                <!-- 3. 하단 아코디언: 명세서 폼 작성/수정 -->
                 <div class="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col flex-none overflow-hidden">
                     <div onclick="document.getElementById('form-setup-accordion').classList.toggle('hidden')" class="bg-indigo-50 border-b border-gray-200 p-2.5 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition">
                         <span class="text-[11px] font-black text-indigo-800 flex items-center gap-1.5"><i class="fa-solid fa-pen-to-square"></i> 선택된 양식 공급자 정보 입력</span>
                         <i class="fa-solid fa-chevron-up text-indigo-600 text-[10px]"></i>
                     </div>
                     
-<div id="form-setup-accordion" class="hidden flex-col p-3 space-y-3 custom-scrollbar overflow-y-auto max-h-[300px]">
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">폼 제목 (예: 본사 폼, A지점 폼)</label>
-        <input type="text" id="input-form-title" placeholder="저장할 폼의 이름을 입력하세요" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-lg p-2 text-xs font-black outline-none focus:border-indigo-500 text-indigo-900">
-    </div>
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label>
-        <input type="text" id="input-prov-regno" oninput="updateLivePreview()" placeholder="예: 210-81-36588" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-    </div>
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label>
-        <input type="text" id="input-prov-name" oninput="updateLivePreview()" placeholder="예: 농업회사법인토박이..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-    </div>
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label>
-        <input type="text" id="input-prov-addr" oninput="updateLivePreview()" placeholder="예: 서울 강북구 덕릉로..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-    </div>
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label>
-        <input type="text" id="input-prov-tel" oninput="updateLivePreview()" placeholder="예: 010-7279-6514" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-    </div>
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label>
-        <input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" placeholder="예: 02-981-9594" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
-    </div>
-    <button type="button" onclick="saveProviderForm()" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1">
-        <i class="fa-solid fa-save"></i> 이 폼 저장하기
-    </button>
-</div>
+                    <div id="form-setup-accordion" class="hidden flex-col p-3 space-y-3 custom-scrollbar overflow-y-auto max-h-[300px]">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">폼 제목 (예: 본사 폼, A지점 폼)</label>
+                            <input type="text" id="input-form-title" placeholder="저장할 폼의 이름을 입력하세요" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-lg p-2 text-xs font-black outline-none focus:border-indigo-500 text-indigo-900">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label>
+                            <input type="text" id="input-prov-regno" oninput="updateLivePreview()" placeholder="예: 210-81-36588" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label>
+                            <input type="text" id="input-prov-name" oninput="updateLivePreview()" placeholder="예: 농업회사법인토박이..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label>
+                            <input type="text" id="input-prov-addr" oninput="updateLivePreview()" placeholder="예: 서울 강북구 덕릉로..." class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label>
+                            <input type="text" id="input-prov-tel" oninput="updateLivePreview()" placeholder="예: 010-7279-6514" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label>
+                            <input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" placeholder="예: 02-981-9594" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                        </div>
+                        <button type="button" onclick="saveProviderForm()" class="w-full bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1">
+                            <i class="fa-solid fa-save"></i> 이 폼 저장하기
+                        </button>
+                    </div>
 
                 <!-- 🌟 3차 수정: 출력 버튼 명칭 '출력'으로 단순화 및 직관적 연동 -->
-                <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none">
+                <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none mt-auto border-t">
                     <button id="btn-batch-print" onclick="executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
                         <i class="fa-solid fa-print text-sm"></i> 출력
                     </button>
