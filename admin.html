@@ -879,13 +879,10 @@
     </button>
 </div>
 
-                <!-- 4. 우측 하단: 출력 실행 영역 -->
+                <!-- 🌟 3차 수정: A4 체크박스 제거 및 출력 버튼 단순화 직관적 연동 -->
                 <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none">
-                    <label class="flex items-center gap-1.5 text-[11px] font-bold text-gray-700 cursor-pointer">
-                        <input type="checkbox" id="chk-a4-split" checked class="w-3.5 h-3.5 text-indigo-600 rounded"> A4 분할 인쇄 (공급자/공급받는자 보관용)
-                    </label>
-                    <button id="btn-batch-print" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-2.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-print"></i> 일괄 출력 (0건)
+                    <button id="btn-batch-print" onclick="executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력
                     </button>
                 </div>
 
