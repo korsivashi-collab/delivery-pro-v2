@@ -328,35 +328,21 @@
                             <button type="button" onclick="document.getElementById('edit-device-input').value=''" class="px-2.5 py-1 bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-xl text-[10px] font-bold text-gray-700">초기화</button>
                         </div>
                     </div>
-<div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">만료일 (YYYY.MM.DD)</label>
-        <input type="date" id="edit-expire-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500">
-    </div>
-    <div>
-        <label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label>
-        <select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500">
-            <option value="active">정상 운행 (Active)</option>
-            <option value="suspended">사용 정지 (Suspended)</option>
-        </select>
-    </div>
-</div>
-
-<!-- 🌟 [신규 추가] 관제 계정 전용 슬롯 수 + PRO 권한 부여 체크박스 영역 -->
-<div id="edit-dispatch-options-container" class="hidden grid-cols-2 gap-2.5 mt-1">
-    <div>
-        <label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 (0=무제한)</label>
-        <input type="number" id="edit-slots-input" class="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-black outline-none focus:border-purple-500">
-    </div>
-    <div class="flex flex-col justify-end">
-        <label class="flex items-center justify-center gap-1.5 w-full bg-amber-50 border border-amber-300 rounded-xl p-2 cursor-pointer hover:bg-amber-100 transition shadow-sm h-[34px]">
-            <input type="checkbox" id="edit-pro-checkbox" class="w-3.5 h-3.5 text-amber-600 rounded border-amber-400 focus:ring-amber-500 cursor-pointer">
-            <span class="text-[11px] font-black text-amber-900"><i class="fa-solid fa-crown text-amber-500"></i> PRO 권한 부여</span>
-        </label>
-    </div>
-</div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">만료일 (YYYY.MM.DD)</label>
+                            <input type="date" id="edit-expire-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label>
+                            <select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500">
+                                <option value="active">정상 운행 (Active)</option>
+                                <option value="suspended">사용 정지 (Suspended)</option>
+                            </select>
+                        </div>
+                    </div>
                     
-                    <!-- 🌟 [수정된 부분] PRO 권한 부여 스위치와 슬롯 수 설정을 나란히 배치 -->
+                    <!-- 🌟 관제 계정 전용 슬롯 수 + PRO 권한 부여 체크박스 영역 -->
                     <div id="edit-dispatch-options-container" class="hidden grid-cols-2 gap-2.5 mt-1">
                         <div>
                             <label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 (0=무제한)</label>
@@ -371,6 +357,7 @@
                     </div>
                 </div>
 
+                <!-- 하단 영역: 소속 연결 기사 관리 -->
                 <div id="edit-dispatch-connected-section" class="hidden flex-col gap-2.5 bg-purple-50/50 p-3.5 rounded-2xl border border-purple-200">
                     <div class="flex justify-between items-center">
                         <span class="text-[11px] font-black text-purple-900 flex items-center gap-1.5">
@@ -426,14 +413,14 @@
                     <button onclick="setDispatchMode('LOCATION')" id="nav-btn-LOCATION" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
                         <i class="fa-solid fa-map-location-dot text-[11px]"></i> 위치 확인
                     </button>
+                    <!-- 🌟 엑셀(.xlsx) 다운로드 버튼 -->
                     <div class="w-px h-5 bg-gray-300 mx-0.5"></div>
-                    <button onclick="openExcelExportModal()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5 shadow-sm active:scale-95" title="원하는 기간과 항목을 선택하여 엑셀 리포트를 추출합니다">
-                        <i class="fa-solid fa-file-excel text-[11px]"></i> 데이터 추출
+                    <button onclick="downloadDispatchExcel()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5" title="현재 날짜의 완료된 배송 내역을 엑셀로 다운로드">
+                        <i class="fa-solid fa-file-excel text-[11px]"></i> 엑셀 다운로드
                     </button>
                 </div>
             </div>
 
-            <!-- 🌟 [수정된 부분] 주소/연락처 검색창 (좌측 영역으로 축소 배치) -->
             <div class="flex-1 max-w-md relative">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
@@ -443,14 +430,14 @@
                 <div id="search-dropdown" class="hidden absolute left-0 right-0 top-11 bg-white border border-gray-200 rounded-2xl shadow-2xl z-50 max-h-[460px] overflow-y-auto hide-scrollbar p-2.5 space-y-2"></div>
             </div>
 
-            <!-- 🌟 [신규 추가] 우측 프리미엄(PRO) 기능 버튼 2개 (PRO 표시 포함) -->
+            <!-- 🌟 [수정된 부분] 우측 프리미엄(PRO) 기능 버튼 2개 (JS 문지기 함수 연결) -->
             <div class="flex items-center gap-1.5 flex-none">
-                <button type="button" id="btn-pro-auto-dispatch" onclick="alert('PRO 전용 [AI 자동배차] 기능은 준비 중입니다.')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 active:scale-95">
+                <button type="button" id="btn-pro-auto-dispatch" onclick="handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 active:scale-95">
                     <span class="absolute -top-2 -right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-xs border border-white">PRO</span>
                     <i class="fa-solid fa-wand-magic-sparkles text-amber-200"></i>
                     <span>AI 자동배차</span>
                 </button>
-                <button type="button" id="btn-pro-invoice" onclick="alert('PRO 전용 [주문서 통합관리] 기능은 준비 중입니다.')" class="relative bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 active:scale-95">
+                <button type="button" id="btn-pro-invoice" onclick="handleProFeature('INVOICE')" class="relative bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 active:scale-95">
                     <span class="absolute -top-2 -right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full shadow-xs border border-white">PRO</span>
                     <i class="fa-solid fa-file-invoice-dollar text-amber-200"></i>
                     <span>주문서 통합관리</span>
@@ -568,6 +555,26 @@
     </div>
 
     <!-- [모달들] -->
+    <!-- 🌟 [신규 추가] 프리미엄 업그레이드 전용 안내 모달 -->
+    <div id="premium-upgrade-modal" class="hidden fixed inset-0 bg-black/75 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border-2 border-amber-400 text-center flex flex-col items-center">
+            <div class="w-16 h-16 bg-amber-50 text-amber-500 rounded-full flex items-center justify-center text-3xl mb-4 shadow-inner">
+                <i class="fa-solid fa-crown"></i>
+            </div>
+            <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider mb-2 border border-amber-300">PRO 전용 기능</span>
+            <h3 class="text-lg font-black text-gray-900 mb-2">프리미엄 업그레이드 필요</h3>
+            <p class="text-xs text-gray-500 font-bold mb-6 leading-relaxed">
+                해당 기능은 <b class="text-amber-600">PRO 요금제</b> 이용 관제소만<br>사용할 수 있는 강력한 전용 기능입니다.<br>
+                마스터 관리자에게 권한을 요청해 주세요.
+            </p>
+            <div class="w-full flex gap-2">
+                <button onclick="closePremiumModal()" class="flex-1 bg-slate-900 hover:bg-slate-800 text-white font-black py-3 rounded-xl shadow-lg transition active:scale-95 text-sm">
+                    확인
+                </button>
+            </div>
+        </div>
+    </div>
+
     <div id="dispatch-popup-alert-modal" class="hidden fixed inset-0 bg-black/75 z-[250] flex items-center justify-center p-5 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border-2 border-amber-500 text-center">
             <div class="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 shadow-inner animate-bounce">
