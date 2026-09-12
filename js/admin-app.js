@@ -1313,7 +1313,6 @@ function formatNumber(num) {
 
 // 🌟 2차 수정: 엑셀 스마트 추출 (기존 배열 초기화 삭제하여 데이터 누적 처리 + 주소/상호 충돌 완벽 해결)
 function processExcelData(jsonData) {
-    // parsedExcelList = []; <- 기존 코드를 삭제하여 데이터가 누적(Append)되도록 변경
     
     jsonData.forEach((row) => {
         const mappedRow = {
@@ -1356,11 +1355,6 @@ function processExcelData(jsonData) {
 function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody');
     if (!tbody) return;
-    
-    const printBtn = document.getElementById('btn-batch-print');
-    if (printBtn) {
-        printBtn.innerHTML = `<i class="fa-solid fa-print"></i> 일괄 출력 (${parsedExcelList.length}건)`;
-    }
 
     if (parsedExcelList.length === 0) {
         tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="15" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">데이터가 없습니다.<br>우측 패널에 엑셀 주문서 파일을 업로드해주세요.</span></td></tr>`;
@@ -1487,7 +1481,7 @@ window.previewInvoiceRow = function(idx) {
     window.switchInvoiceTab('PREVIEW');
 };
 
-// === 🌟 [신규] 명세서 일괄 출력 자동화 기능 (Batch Print) ===
+// === 🌟 3차 수정: 명세서 일괄 출력 자동화 기능 (1건을 A4 상/하단 분할로 복제 출력) ===
 
 // 각 엑셀 아이템을 기반으로 HTML 문자열을 동적 생성하는 함수
 function generateInvoiceHTML(item, providerInfo) {
@@ -1547,7 +1541,7 @@ function generateInvoiceHTML(item, providerInfo) {
     return template.outerHTML;
 }
 
-// 최종 일괄 인쇄를 관장하는 메인 함수
+// 🌟 3차 수정: 최종 일괄 인쇄를 관장하는 메인 함수 (A4 1장에 동일한 주문을 상/하단 복제 출력)
 window.executeBatchPrint = function() {
     if (!parsedExcelList || parsedExcelList.length === 0) {
         alert("출력할 주문 데이터가 없습니다. 우측 패널에서 엑셀 파일을 먼저 업로드해주세요.");
@@ -1569,34 +1563,25 @@ window.executeBatchPrint = function() {
         addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
-    const a4Checkbox = document.getElementById('chk-a4-split');
-    const isA4Split = a4Checkbox ? a4Checkbox.checked : true;
-
     let printContents = '';
-    const itemsPerPage = isA4Split ? 2 : 1; 
 
-    for (let i = 0; i < parsedExcelList.length; i += itemsPerPage) {
+    // 모든 주문을 1건당 A4 1장(상단: 공급자, 하단: 공급받는자)으로 반복 출력
+    for (let i = 0; i < parsedExcelList.length; i++) {
+        const item = parsedExcelList[i];
+        
         printContents += `<div style="width: 210mm; height: 296mm; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; margin: 0 auto; background: white;">`;
         
-        for (let j = 0; j < itemsPerPage; j++) {
-            if (i + j < parsedExcelList.length) {
-                const item = parsedExcelList[i + j];
-                let invoiceHtml = generateInvoiceHTML(item, providerInfo);
-                
-                // 🌟 2차 수정: A4 분할이고 두 번째(아래쪽) 명세서일 경우 '공급받는 자 보관용'으로 텍스트 치환
-                if (isA4Split && j === 1) {
-                    invoiceHtml = invoiceHtml.replace('(공급자 보관용)', '(공급받는 자 보관용)');
-                }
-                
-                if(isA4Split) {
-                    const borderStyle = j === 0 ? 'border-bottom: 1px dashed #ccc;' : '';
-                    invoiceHtml = invoiceHtml.replace('class="invoice-paper"', `style="height: 148.5mm; overflow: hidden; ${borderStyle}" class="invoice-paper"`);
-                } else {
-                    invoiceHtml = invoiceHtml.replace('class="invoice-paper"', `style="height: 296mm; overflow: hidden;" class="invoice-paper"`);
-                }
-                printContents += invoiceHtml;
-            }
-        }
+        // 1. 상단: (공급자 보관용) 
+        let topHtml = generateInvoiceHTML(item, providerInfo);
+        topHtml = topHtml.replace('class="invoice-paper"', `style="height: 148.5mm; overflow: hidden; border-bottom: 1px dashed #ccc;" class="invoice-paper"`);
+        printContents += topHtml;
+
+        // 2. 하단: 동일한 데이터를 복사하되 제목만 (공급받는 자 보관용)으로 치환
+        let bottomHtml = generateInvoiceHTML(item, providerInfo);
+        bottomHtml = bottomHtml.replace('(공급자 보관용)', '(공급받는 자 보관용)');
+        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="height: 148.5mm; overflow: hidden;" class="invoice-paper"`);
+        printContents += bottomHtml;
+        
         printContents += `</div>`;
     }
 
@@ -1656,7 +1641,7 @@ window.executeBatchPrint = function() {
                 document.body.removeChild(iframe);
                 if (btn) {
                     btn.disabled = false;
-                    btn.innerHTML = `<i class="fa-solid fa-print"></i> 일괄 출력 (${parsedExcelList.length}건)`;
+                    btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력`;
                 }
             }, 1000);
         }, 800); 
