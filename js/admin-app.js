@@ -1167,9 +1167,9 @@ window.switchInvoiceTab = function(tabName) {
 window.updateLivePreview = function() {
     const name = document.getElementById('input-prov-name')?.value || '';
     const regno = document.getElementById('input-prov-regno')?.value || '';
-    const ceo = document.getElementById('input-prov-ceo')?.value || '';
     const addr = document.getElementById('input-prov-addr')?.value || '';
     const tel = document.getElementById('input-prov-tel')?.value || '';
+    const addTel = document.getElementById('input-prov-add-tel')?.value || ''; // 새로 추가된 부분
 
     const today = new Date();
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -1178,9 +1178,9 @@ window.updateLivePreview = function() {
     
     document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
     document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
-    document.querySelectorAll('.prev-prov-ceo').forEach(el => el.innerText = ceo);
     document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
+    document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel); // 새로 추가된 부분
 
     // 사용자가 우측 폼에서 입력할 때만 미리보기 탭으로 자동 전환
     if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
@@ -1217,7 +1217,7 @@ function processExcelData(jsonData) {
             else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
             else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
             else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
-            else if (/단가|가격|금액/.test(k)) mappedRow.price = val;
+            else if (/단가|가격|금액(?!(총)))/.test(k)) mappedRow.price = val;
             else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val;
             else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
         }
@@ -1266,7 +1266,7 @@ window.previewInvoiceRow = function(idx) {
     const item = parsedExcelList[idx];
 
     // 고객(공급받는 자) 정보 바인딩
-    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.storeName || item.senderName || ''); 
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
     document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
     document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
@@ -1278,7 +1278,26 @@ window.previewInvoiceRow = function(idx) {
     document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
     document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
     document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    
+    // 결제, 수량, 배송비, 총액 등
+    // 네이버페이, 카드결제 등이 메모에 있으면 파싱, 없으면 빈칸 혹은 '네이버페이' 기본값 (이미지 참고)
+    let payMethod = '';
+    if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
+    else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    
+    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
     document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+
+    // 주문번호 (HTML에 id가 없어서 태그 구조로 찾아 입력)
+    document.querySelectorAll('span.font-normal.inline-block').forEach(span => {
+        if (span.classList.contains('w-32')) {
+            span.innerText = item.orderNo || '';
+        }
+    });
 
     window.updateLivePreview(); // 우측 공급자 폼의 내용도 함께 갱신하여 덮어쓰기
     window.switchInvoiceTab('PREVIEW'); // 노란색 명세서 탭으로 전환하여 보여주기
@@ -1701,7 +1720,7 @@ window.renderDriverDetailView = function(devId) {
         }
     } else if (window.dispatchDetailTab === 'PENDING') {
         if (remainingDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-circle-check text-2xl text-emerald-500 mb-1"></i><p>모든 배송이 완료되었습니다!</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-circle-check text-2xl text-emerald-50 mb-1"></i><p>모든 배송이 완료되었습니다!</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
