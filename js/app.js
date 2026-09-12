@@ -1367,8 +1367,9 @@ export function initCameraScan() {
         let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
         showLoading("사진 판독 중...");
         try {
-            const safeBlob = new Blob([file], { type: file.type || 'image/jpeg' });
-            const base64Image = await toBase64_SafeCompress(safeBlob);
+            const arrayBuffer = await file.arrayBuffer();
+            const cleanBlob = new Blob([arrayBuffer], { type: file.type || 'image/jpeg' });
+            const base64Image = await toBase64_SafeCompress(cleanBlob);
             const imageContent = base64Image.split(',')[1];
             rawOCRText = await performOCR(imageContent);
             addressStr = extractAddressLogic(rawOCRText);
@@ -1419,7 +1420,7 @@ export function initCameraScan() {
     });
 }
 
-// 사진 전송 및 완료 처리 이벤트 리스너 (Blob 래핑 처리 적용)
+// 사진 전송 및 완료 처리 이벤트 리스너 (ArrayBuffer 활용한 완전한 Blob 래핑)
 export function initPhotoCompletion() {
     const photoInput = document.getElementById('completion-photo-input');
     if (!photoInput) return;
@@ -1430,11 +1431,12 @@ export function initPhotoCompletion() {
 
         showLoading("사진 압축 및 서버 전송 중...");
         try {
-            // 모바일 카메라 촬영본이 Blob으로 올바르게 인식되도록 안전하게 래핑
-            const safeBlob = new Blob([file], { type: file.type || 'image/jpeg' });
+            // 파일을 ArrayBuffer로 읽은 후 새로운 순수 Blob으로 생성하여 FileReader 오류 원천 차단
+            const arrayBuffer = await file.arrayBuffer();
+            const cleanBlob = new Blob([arrayBuffer], { type: file.type || 'image/jpeg' });
 
             // 1. 이미지 압축 및 Base64 변환
-            const base64Image = await toBase64_SafeCompress(safeBlob);
+            const base64Image = await toBase64_SafeCompress(cleanBlob);
 
             // 2. Firebase 저장소에 업로드 및 URL 반환
             const deviceId = getOrCreateDeviceId();
