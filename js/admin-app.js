@@ -1210,6 +1210,7 @@ window.updateLivePreview = function() {
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     
     if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
+    if (document.getElementById('prev-date-2')) document.getElementById('prev-date-2').innerText = dateStr;
     
     // 좌측 노란색 명세서 양식의 공급자 영역 클래스에 실시간 반영
     document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
@@ -1225,6 +1226,8 @@ window.updateLivePreview = function() {
 };
 
 // === 🌟 [신규] 명세서 폼 저장 및 불러오기 (Local Storage) ===
+let currentSelectedFormIndex = null;
+
 window.loadSavedForms = function() {
     const listEl = document.getElementById('saved-forms-list');
     if (!listEl) return;
@@ -1237,10 +1240,13 @@ window.loadSavedForms = function() {
 
     let html = '';
     savedForms.forEach((form, idx) => {
+        const isSelected = (currentSelectedFormIndex === idx);
         html += `
-        <div class="bg-white border border-gray-200 rounded-xl p-2 shadow-xs hover:border-indigo-400 transition flex items-center justify-between cursor-pointer group" onclick="applySavedForm(${idx})">
+        <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between cursor-pointer group" onclick="applySavedForm(${idx})">
             <div class="flex items-center gap-2 overflow-hidden flex-1">
-                <div class="w-6 h-6 bg-indigo-50 text-indigo-600 rounded-lg flex items-center justify-center text-[10px] shrink-0"><i class="fa-solid fa-file-invoice"></i></div>
+                <div class="w-6 h-6 ${isSelected ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'} rounded-lg flex items-center justify-center text-[10px] shrink-0 transition">
+                    ${isSelected ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-file-invoice"></i>'}
+                </div>
                 <div class="min-w-0">
                     <p class="text-[11px] font-black text-gray-800 truncate leading-tight">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate">${form.name}</p>
@@ -1284,6 +1290,8 @@ window.applySavedForm = function(idx) {
     const form = savedForms[idx];
     if (!form) return;
 
+    currentSelectedFormIndex = idx;
+
     document.getElementById('input-form-title').value = form.title || '';
     document.getElementById('input-prov-regno').value = form.regno || '';
     document.getElementById('input-prov-name').value = form.name || '';
@@ -1291,6 +1299,7 @@ window.applySavedForm = function(idx) {
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
+    window.loadSavedForms(); 
     window.updateLivePreview();
     window.switchInvoiceTab('PREVIEW');
 };
@@ -1473,10 +1482,6 @@ window.previewInvoiceRow = function(idx) {
         }
     });
 
-    // 🌟 2차 수정: 미리보기 창에 들어갈 때 명세서 상단 제목을 (공급자 보관용)으로 리셋해줌
-    const copyTypeSpan = document.getElementById('invoice-copy-type');
-    if (copyTypeSpan) copyTypeSpan.innerText = "(공급자 보관용)";
-
     window.updateLivePreview(); 
     window.switchInvoiceTab('PREVIEW');
 };
@@ -1522,24 +1527,20 @@ function generateInvoiceHTML(item, providerInfo) {
     // 3. 주문 날짜 및 주문번호 바인딩
     const today = new Date();
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    const dateSpan = template.querySelector('#prev-date-1');
-    if (dateSpan) {
-        dateSpan.id = '';
-        dateSpan.innerText = dateStr;
-    }
+    
+    const dateSpan1 = template.querySelector('#prev-date-1');
+    if (dateSpan1) { dateSpan1.id = ''; dateSpan1.innerText = dateStr; }
+    const dateSpan2 = template.querySelector('#prev-date-2');
+    if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
 
     template.querySelectorAll('span.font-normal.inline-block').forEach(span => {
         if (span.classList.contains('w-32')) span.innerText = item.orderNo || '';
     });
 
-    // 출력 시 하단 회색 안내 문구 숨김
-    const guideText = template.querySelector('#preview-guide-bottom');
-    if (guideText) guideText.style.display = 'none';
-
     return template.outerHTML;
 }
 
-// 🌟 4차 수정: 최종 일괄 인쇄 (체크된 항목 필터링 + 문서 양식 구조 적용)
+// 🌟 5차 수정: 최종 일괄 인쇄 (HTML의 A4 통출력 양식을 그대로 활용)
 window.executeBatchPrint = function() {
     const checkboxes = document.querySelectorAll('.row-checkbox:checked');
     if (checkboxes.length === 0) {
@@ -1562,28 +1563,15 @@ window.executeBatchPrint = function() {
         addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
-let printContents = '';
+    let printContents = '';
 
     checkboxes.forEach(cb => {
         const idx = parseInt(cb.getAttribute('data-idx'));
         const item = parsedExcelList[idx];
         if (!item) return;
 
-        // A4 1장 컨테이너 (세로 297mm 기준, 위아래 2분할 구조)
-        printContents += `<div style="width: 210mm; min-height: 296mm; page-break-after: always; display: flex; flex-direction: column; justify-content: space-between; overflow: visible; margin: 0 auto; background: white; padding: 5mm 0; box-sizing: border-box;">`;
-        
-        // 1. 상단: (공급자 보관용) 
-        let topHtml = generateInvoiceHTML(item, providerInfo);
-        topHtml = topHtml.replace('class="invoice-paper"', `style="min-height: 135mm; overflow: visible; border-bottom: 2px dashed #9ca3af; box-sizing: border-box;" class="invoice-paper"`);
-        printContents += topHtml;
-
-        // 2. 하단: (공급받는 자 보관용) - 동일한 데이터를 복사하되 제목만 정확히 치환
-        let bottomHtml = generateInvoiceHTML(item, providerInfo);
-        bottomHtml = bottomHtml.replace('(공급자 보관용)', '(공급받는 자 보관용)');
-        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="min-height: 135mm; overflow: visible; box-sizing: border-box;" class="invoice-paper"`);
-        printContents += bottomHtml;
-        
-        printContents += `</div>`;
+        // HTML에 정의된 완벽한 A4 1장 컨테이너 구조(상/하단 모두 포함)를 그대로 생성하여 덧붙임
+        printContents += generateInvoiceHTML(item, providerInfo);
     });
 
     const iframe = document.createElement('iframe');
@@ -1604,36 +1592,39 @@ let printContents = '';
         <head>
             <meta charset="UTF-8">
             <title>배송 동선 PRO - 표준 거래명세표 출력</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
             <style>
                 @media print {
                     @page { size: A4 portrait; margin: 0; }
-                    body { margin: 0; -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; background: white; }
-                    .invoice-paper { page-break-inside: avoid; }
+                    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
+                    .invoice-container { page-break-after: always; box-shadow: none !important; border: none !important; }
+                    .invoice-half { page-break-inside: avoid; }
                 }
-                body { background: white; margin: 0; padding: 0; }
-                .invoice-paper { 
-                    background-color: #ffeb5c !important;
-                    border: 1px solid #d1d5db; 
+                body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; }
+                
+                .invoice-container { 
+                    background-color: white; 
                     width: 210mm; 
-                    min-height: 140mm; 
+                    min-height: 297mm; 
                     margin: 0 auto; 
-                    color: #000; 
-                    font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+                    position: relative;
+                    display: flex;
+                    flex-direction: column;
                     box-sizing: border-box;
-                    padding: 8mm 10mm;
-                    overflow: visible !important;
                 }
-                .invoice-title {
-                    text-align: center;
-                    font-size: 24px;
-                    font-weight: 900;
-                    letter-spacing: 12px;
-                    text-decoration: underline;
-                    margin-bottom: 6px;
+                .invoice-half {
+                    flex: 1; 
+                    background-color: #ffeb5c !important; 
+                    padding: 8mm 12mm; 
+                    box-sizing: border-box;
+                    display: flex;
+                    flex-direction: column;
+                    overflow: visible; 
+                    -webkit-print-color-adjust: exact; 
+                    print-color-adjust: exact;
                 }
-                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; }
+                .invoice-cut-line { border-top: 1px dashed #9ca3af; width: 100%; margin: 0; }
+                .invoice-title { text-align: center; font-size: 24px; font-weight: 900; letter-spacing: 12px; text-decoration: underline; margin-bottom: 8px; color: #000; }
+                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; color: #000; }
                 .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 5px 6px; word-break: break-all; overflow-wrap: break-word; }
                 .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
                 .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 1px; }
