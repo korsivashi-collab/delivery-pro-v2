@@ -65,6 +65,12 @@ window.onload = () => {
     // 🌟 로드 시 저장된 폼 목록 초기화
     window.loadSavedForms();
 
+    // 🌟 [추가] 일괄 출력 버튼에 미리 이벤트 리스너 연결
+    setTimeout(() => {
+        const printBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
+        if (printBtn) printBtn.onclick = window.executeBatchPrint;
+    }, 1000);
+
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
     if (monitorKey) {
@@ -1152,12 +1158,12 @@ window.switchInvoiceTab = function(tabName) {
 
     if (tabName === 'EXCEL') {
         btnExcel.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
-        btnPreview.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
+        if(btnPreview) btnPreview.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
         viewExcel.classList.remove('hidden');
         viewPreview.classList.add('hidden');
         viewPreview.classList.remove('flex');
     } else {
-        btnPreview.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
+        if(btnPreview) btnPreview.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
         btnExcel.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
         viewPreview.classList.remove('hidden');
         viewPreview.classList.add('flex');
@@ -1186,7 +1192,7 @@ window.updateLivePreview = function() {
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 
-    // 사용자가 우측 폼에서 입력할 때만 미리보기 탭으로 자동 전환
+    // 사용자가 우측 폼에서 입력할 때만 미리보기 탭으로 자동 전환 (기존 탭이 있으면)
     if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
         window.switchInvoiceTab('PREVIEW');
     }
@@ -1259,9 +1265,7 @@ window.applySavedForm = function(idx) {
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
-    // 미리보기 업데이트 및 탭 전환
     window.updateLivePreview();
-    window.switchInvoiceTab('PREVIEW');
 };
 
 window.deleteSavedForm = function(idx) {
@@ -1317,6 +1321,13 @@ function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody');
     if (!tbody) return;
     
+    // 🌟 [추가] 엑셀이 업로드되면 일괄 출력 버튼의 (0건) 텍스트를 파싱된 건수로 업데이트하고 이벤트 연결
+    const printBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
+    if (printBtn) {
+        printBtn.innerHTML = `<i class="fa-solid fa-print"></i> 일괄 출력 (${parsedExcelList.length}건)`;
+        printBtn.onclick = window.executeBatchPrint; // 동적 함수 연결
+    }
+
     if (parsedExcelList.length === 0) {
         tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="14" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">추출된 데이터가 없습니다. 올바른 양식인지 확인해주세요.</span></td></tr>`;
         return;
@@ -1366,7 +1377,6 @@ window.previewInvoiceRow = function(idx) {
     document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
     
     // 결제, 수량, 배송비, 총액 등
-    // 네이버페이, 카드결제 등이 메모에 있으면 파싱, 없으면 빈칸 혹은 '네이버페이' 기본값 (이미지 참고)
     let payMethod = '';
     if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
     else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
@@ -1378,15 +1388,199 @@ window.previewInvoiceRow = function(idx) {
     document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
     document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
 
-    // 주문번호 (HTML에 id가 없어서 태그 구조로 찾아 입력)
+    // 주문번호
     document.querySelectorAll('span.font-normal.inline-block').forEach(span => {
         if (span.classList.contains('w-32')) {
             span.innerText = item.orderNo || '';
         }
     });
 
-    window.updateLivePreview(); // 우측 공급자 폼의 내용도 함께 갱신하여 덮어쓰기
-    window.switchInvoiceTab('PREVIEW'); // 노란색 명세서 탭으로 전환하여 보여주기
+    window.updateLivePreview(); 
+};
+
+// === 🌟 [신규] 명세서 일괄 출력 자동화 기능 (Batch Print) ===
+
+// 각 엑셀 아이템을 기반으로 HTML 문자열을 동적 생성하는 함수
+function generateInvoiceHTML(item, providerInfo) {
+    // DOM에 있는 원본 템플릿(id="print-area")을 가져와 복제합니다.
+    const originalTemplate = document.getElementById('print-area');
+    if (!originalTemplate) return '';
+    const template = originalTemplate.cloneNode(true);
+    template.id = ''; // 다중 생성을 위해 ID 제거
+
+    // 1. 공급자(폼) 정보 바인딩
+    template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
+    template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
+    template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
+    template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
+    template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
+
+    // 2. 엑셀 데이터(고객/수신자 및 품목) 정보 바인딩
+    template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
+    template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+
+    template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+
+    let payMethod = '';
+    if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
+    else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+
+    template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
+    template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+
+    // 3. 주문 날짜 및 주문번호 바인딩
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    const dateSpan = template.querySelector('#prev-date-1');
+    if (dateSpan) {
+        dateSpan.id = '';
+        dateSpan.innerText = dateStr;
+    }
+
+    template.querySelectorAll('span.font-normal.inline-block').forEach(span => {
+        if (span.classList.contains('w-32')) span.innerText = item.orderNo || '';
+    });
+
+    // 템플릿 하단의 회색 가이드 문구(미리보기용)는 실제 출력 시 필요 없으므로 숨김 처리
+    const guideText = Array.from(template.querySelectorAll('div')).find(div => div.innerText.includes('하단: 공급받는 자 보관용'));
+    if (guideText) guideText.style.display = 'none';
+
+    return template.outerHTML;
+}
+
+// 최종 일괄 인쇄를 관장하는 메인 함수
+window.executeBatchPrint = function() {
+    if (!parsedExcelList || parsedExcelList.length === 0) {
+        alert("출력할 주문 데이터가 없습니다. 우측 패널에서 엑셀 파일을 먼저 업로드해주세요.");
+        return;
+    }
+
+    const btn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인쇄 생성 중...';
+    }
+
+    // 작성 중이거나 선택된 폼(공급자)의 현재 값을 수집
+    const providerInfo = {
+        name: document.getElementById('input-prov-name')?.value || '',
+        regno: document.getElementById('input-prov-regno')?.value || '',
+        addr: document.getElementById('input-prov-addr')?.value || '',
+        tel: document.getElementById('input-prov-tel')?.value || '',
+        addTel: document.getElementById('input-prov-add-tel')?.value || ''
+    };
+
+    // 'A4 분할 인쇄' 체크박스 상태 확인
+    const a4Checkbox = Array.from(document.querySelectorAll('input[type="checkbox"]')).find(cb => cb.nextSibling && cb.nextSibling.textContent.includes('A4 분할 인쇄'));
+    const isA4Split = a4Checkbox ? a4Checkbox.checked : true;
+
+    let printContents = '';
+    const itemsPerPage = isA4Split ? 2 : 1; // 분할 인쇄 시 1장에 2건, 아니면 1건 배치
+
+    // 엑셀 리스트를 순회하며 페이지 생성
+    for (let i = 0; i < parsedExcelList.length; i += itemsPerPage) {
+        // A4 1장 단위의 Wrapper (여백 없이 꽉 채우고 항상 다음 장으로 넘기도록 CSS 처리)
+        printContents += `<div style="width: 210mm; height: 296mm; page-break-after: always; display: flex; flex-direction: column; overflow: hidden; margin: 0 auto; background: white;">`;
+        
+        for (let j = 0; j < itemsPerPage; j++) {
+            if (i + j < parsedExcelList.length) {
+                const item = parsedExcelList[i + j];
+                let invoiceHtml = generateInvoiceHTML(item, providerInfo);
+                
+                if(isA4Split) {
+                    // A4 2분할(절반 높이 148mm 적용 및 중간 점선 삽입)
+                    const borderStyle = j === 0 ? 'border-bottom: 1px dashed #ccc;' : '';
+                    invoiceHtml = invoiceHtml.replace('class="invoice-paper', `style="height: 148.5mm; overflow: hidden; ${borderStyle}" class="invoice-paper`);
+                } else {
+                    // 단일 출력(전체 높이 사용)
+                    invoiceHtml = invoiceHtml.replace('class="invoice-paper', `style="height: 296mm; overflow: hidden;" class="invoice-paper`);
+                }
+                printContents += invoiceHtml;
+            }
+        }
+        printContents += `</div>`;
+    }
+
+    // 현재 페이지 UI에 영향을 주지 않도록 보이지 않는 iframe 생성
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.zIndex = '-1';
+    document.body.appendChild(iframe);
+
+    // iframe 내부에 인쇄 전용 HTML 주입
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(`
+        <!DOCTYPE html>
+        <html lang="ko">
+        <head>
+            <meta charset="UTF-8">
+            <title>배송 동선 PRO - 거래명세표 일괄 출력</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+            <style>
+                @media print {
+                    @page { size: A4 portrait; margin: 0; }
+                    body { 
+                        margin: 0; 
+                        -webkit-print-color-adjust: exact !important; 
+                        print-color-adjust: exact !important; 
+                        background: white; 
+                    }
+                }
+                body { background: white; margin: 0; padding: 0; }
+                .invoice-paper { 
+                    box-sizing: border-box; 
+                    color: #000; 
+                    font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+                    background-color: #fef08a !important; 
+                }
+                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; }
+                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px; text-align: center; }
+                .invoice-table th { font-weight: bold; background-color: #fef08a !important; }
+                .invoice-label { background-color: #fef08a !important; font-weight: bold; text-align: center; }
+                .writing-mode-vertical { writing-mode: vertical-lr; }
+            </style>
+        </head>
+        <body>
+            ${printContents}
+        </body>
+        </html>
+    `);
+    doc.close();
+
+    // Tailwind CSS 및 폰트가 iframe 내부에 렌더링될 시간을 0.8초 부여 후 Print 창 호출
+    iframe.onload = function() {
+        setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            
+            // 인쇄 창이 닫히거나 취소되면 사용된 임시 iframe 폐기 및 버튼 상태 복구
+            setTimeout(() => {
+                document.body.removeChild(iframe);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = `<i class="fa-solid fa-print"></i> 일괄 출력 (${parsedExcelList.length}건)`;
+                }
+            }, 1000);
+        }, 800); 
+    };
 };
 
 // 7. 엑셀 파일 드래그 앤 드롭 업로드 핸들러
