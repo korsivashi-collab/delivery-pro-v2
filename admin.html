@@ -62,8 +62,8 @@
         .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; }
         .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px; text-align: center; }
         .invoice-table th { font-weight: bold; background-color: #fef08a; }
-        .invoice-label { background-color: #fef08a; font-weight: bold; width: 80px; }
-        .writing-mode-vertical { writing-mode: vertical-lr; letter-spacing: 5px; }
+        .invoice-label { background-color: #fef08a; font-weight: bold; }
+        .writing-mode-vertical { writing-mode: vertical-lr; }
     </style>
 </head>
 <body class="bg-gray-100 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
@@ -586,7 +586,7 @@
         </div>
     </div>
 
-    <!-- 🌟 [PRO 전용] 주문서 통합관리 및 거래명세표 출력 화면 (Full Screen) - 📏 우측 패널 40% 축소 적용 (82% vs 18%) -->
+    <!-- 🌟 [PRO 전용] 주문서 통합관리 및 거래명세표 출력 화면 (Full Screen) -->
     <div id="pro-invoice-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col animate-slide-up overflow-hidden">
         <!-- 상단 헤더 -->
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
@@ -613,7 +613,7 @@
             <!-- ⬅️ 좌측: 엑셀 형태 주문 리스트 (82%로 확장) -->
             <div class="w-[82%] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
                 <div class="absolute top-3 left-4 flex gap-1.5 z-20">
-                    <button id="inv-tab-excel" onclick="switchInvoiceTab('EXCEL')" class="px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition">엑셀 리스트</button>
+                    <button id="inv-tab-excel" onclick="switchInvoiceTab('EXCEL')" class="px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition">주문 리스트</button>
                     <button id="inv-tab-preview" onclick="switchInvoiceTab('PREVIEW')" class="px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition">명세서 미리보기(출력용)</button>
                 </div>
 
@@ -653,53 +653,51 @@
 
                 <!-- 노란색 명세서 미리보기 뷰 -->
                 <div id="inv-view-preview" class="hidden flex-1 overflow-auto bg-gray-300 p-8 flex-col items-center gap-6">
-                    <div id="print-area" class="invoice-paper p-6 flex flex-col gap-6">
+                    <div id="print-area" class="invoice-paper p-6 flex flex-col gap-4">
                         <div>
-                            <div class="flex justify-between items-end mb-2">
-                                <h2 class="text-2xl font-black tracking-widest text-black flex-1 text-center pr-20">거래명세표 <span class="text-base font-normal tracking-normal">(공급자 보관용)</span></h2>
+                            <div class="flex justify-between items-end mb-1">
+                                <h2 class="text-2xl font-black tracking-widest text-black flex-1 text-left">거래명세표 <span class="text-base font-normal tracking-normal">(공급자 보관용)</span></h2>
                             </div>
-                            <div class="flex justify-between items-end mb-1 text-[11px] font-bold">
-                                <div><span class="mr-2">주문일자: <span class="font-normal" id="prev-date-1">2026-09-10</span></span> <span>주문번호: <span class="font-normal">SPKD00180408773</span></span></div>
+                            <div class="flex justify-between items-end mb-2 text-[11px] font-bold">
+                                <div><span class="mr-2">주문일자: <span class="font-normal inline-block w-24" id="prev-date-1"></span></span> <span>주문번호: <span class="font-normal inline-block w-32"></span></span></div>
                             </div>
+                            
                             <table class="invoice-table mb-2 border-[2px]">
                                 <tr>
-                                    <td rowspan="5" class="invoice-label w-8 writing-mode-vertical text-center px-1">공급자</td>
-                                    <td class="invoice-label">등록번호</td>
-                                    <td colspan="3" class="text-left px-2 font-black prev-prov-regno">210-81-36588</td>
-                                    <td rowspan="5" class="invoice-label w-8 writing-mode-vertical text-center px-1">공급받는 자</td>
-                                    <td class="invoice-label">등록번호</td>
-                                    <td colspan="3" class="text-left px-2 font-black prev-cust-regno">5011142343</td>
+                                    <td rowspan="5" class="invoice-label w-8 writing-mode-vertical text-center px-1 tracking-[0.3em]">공급자</td>
+                                    <td class="invoice-label w-24">사업자등록번호</td>
+                                    <td class="text-left px-2 font-black prev-prov-regno w-[35%]"></td>
+                                    <td rowspan="5" class="invoice-label w-8 writing-mode-vertical text-center px-1 tracking-[0.1em]">공급받는 자</td>
+                                    <td class="invoice-label w-28">사업자등록번호</td>
+                                    <td class="text-left px-2 font-black prev-cust-regno w-[35%]"></td>
                                 </tr>
                                 <tr>
                                     <td class="invoice-label">상호(법인명)</td>
-                                    <td class="text-left px-2 prev-prov-name">농업회사법인토박이농산주식회사</td>
-                                    <td class="invoice-label w-12">성명</td>
-                                    <td class="text-left px-2 prev-prov-ceo"></td>
-                                    <td class="invoice-label">상호(법인명)</td>
-                                    <td class="text-left px-2 prev-cust-name">장재혁</td>
+                                    <td class="text-left px-2 prev-prov-name"></td>
+                                    <td class="invoice-label">구매자명</td>
+                                    <td class="text-left px-2 prev-cust-name"></td>
                                 </tr>
                                 <tr>
                                     <td class="invoice-label">주 소</td>
-                                    <td colspan="3" class="text-left px-2 prev-prov-addr">[01134] 서울 강북구 덕릉로 160 (번동) 1층</td>
-                                    <td class="invoice-label">주 소</td>
-                                    <td colspan="3" class="text-left px-2 prev-cust-addr">[03787] 서울 서대문구 연세로7안길 43 (창천동) 1층 파스타예요</td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">업 태</td>
-                                    <td class="text-left px-2 prev-prov-type"></td>
-                                    <td class="invoice-label">종 목</td>
-                                    <td class="text-left px-2 prev-prov-biz"></td>
-                                    <td class="invoice-label">배송지명</td>
-                                    <td colspan="3" class="text-left px-2 prev-cust-store">파스타예요 마포신촌본점</td>
+                                    <td class="text-left px-2 prev-prov-addr"></td>
+                                    <td class="invoice-label">배송지명(간판명)</td>
+                                    <td class="text-left px-2 prev-cust-store"></td>
                                 </tr>
                                 <tr>
                                     <td class="invoice-label">연락처/FAX</td>
-                                    <td colspan="3" class="text-left px-2 prev-prov-tel">010-7279-6514 / 02-981-9594</td>
+                                    <td class="text-left px-2 prev-prov-tel"></td>
                                     <td class="invoice-label">연 락 처</td>
-                                    <td colspan="3" class="text-left px-2 prev-cust-tel">01087278541</td>
+                                    <td class="text-left px-2 prev-cust-tel"></td>
+                                </tr>
+                                <tr>
+                                    <td class="invoice-label">추가연락처</td>
+                                    <td class="text-left px-2 prev-prov-add-tel"></td>
+                                    <td class="invoice-label"></td>
+                                    <td class="text-left px-2 border-none"></td>
                                 </tr>
                             </table>
-                            <table class="invoice-table">
+
+                            <table class="invoice-table mb-2">
                                 <thead>
                                     <tr>
                                         <th class="w-8">No.</th>
@@ -712,34 +710,38 @@
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <tr class="h-6">
-                                        <td>1</td>
-                                        <td class="text-left px-2 font-bold prev-item-name">칼로스쌀20kg</td>
-                                        <td class="prev-item-unit">20kg</td>
-                                        <td>한국농수산식품유</td>
-                                        <td class="prev-item-qty">3</td>
-                                        <td class="text-right px-1 prev-item-price">49,900</td>
-                                        <td class="text-right px-1 prev-item-total">149,700</td>
-                                    </tr>
+                                    <tr class="h-6"><td></td><td class="text-left px-2 font-bold prev-item-name"></td><td class="prev-item-unit"></td><td></td><td class="prev-item-qty"></td><td class="text-right px-1 prev-item-price"></td><td class="text-right px-1 prev-item-total"></td></tr>
                                     <tr class="h-6"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
                                     <tr class="h-6"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
                                     <tr class="h-6"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
-                                    <tr>
-                                        <td colspan="4" class="text-left px-2 border-r-0">
-                                            <div class="flex flex-col text-[10px] gap-1">
-                                                <span><b>요청사항:</b> <span class="prev-cust-memo">냉장(동)고</span></span>
-                                            </div>
-                                        </td>
-                                        <td colspan="3" class="text-right px-2 border-l-0">
-                                            <div class="flex flex-col text-[10px] gap-1 font-black">
-                                                <span>총 수량: <span class="prev-item-qty">3</span>개 &nbsp;&nbsp;&nbsp; 배송비: 0원</span>
-                                                <span>주문금액: <span class="prev-item-total">149,700</span>원</span>
-                                            </div>
-                                        </td>
-                                    </tr>
+                                    <tr class="h-6"><td></td><td></td><td></td><td></td><td></td><td></td><td></td></tr>
                                 </tbody>
                             </table>
-                            <div class="flex justify-end mt-1 pr-4 font-black text-xs">
+
+                            <table class="invoice-table border-[2px]">
+                                <tr>
+                                    <td class="invoice-label w-24">결제 수단</td>
+                                    <td class="text-left px-2 prev-pay-method w-[35%]"></td>
+                                    <td class="invoice-label w-24">총 상품수량</td>
+                                    <td class="text-right px-2 prev-total-qty w-[35%]"></td>
+                                </tr>
+                                <tr>
+                                    <td rowspan="3" class="invoice-label">배송 요청사항</td>
+                                    <td rowspan="3" class="text-left px-2 align-top pt-2 prev-cust-memo"></td>
+                                    <td class="invoice-label">배송비</td>
+                                    <td class="text-right px-2 prev-shipping-fee"></td>
+                                </tr>
+                                <tr>
+                                    <td class="invoice-label">총 상품금액</td>
+                                    <td class="text-right px-2 prev-item-total-amt"></td>
+                                </tr>
+                                <tr>
+                                    <td class="invoice-label font-bold text-[13px] bg-gray-100/50">총 주문금액</td>
+                                    <td class="text-right px-2 font-black text-[13px] bg-gray-100/50 prev-total-order-amt"></td>
+                                </tr>
+                            </table>
+
+                            <div class="flex justify-end mt-2 pr-4 font-black text-xs">
                                 <span>인수자: <span class="inline-block w-24 border-b border-black text-center text-gray-500 italic">서 명</span></span>
                             </div>
                         </div>
@@ -768,29 +770,29 @@
                 <!-- 2. 중앙: 명세서 폼(공급자 정보) 설정 영역 -->
                 <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col min-h-0 overflow-hidden">
                     <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex justify-between items-center flex-none">
-                        <span class="text-[11px] font-black text-gray-700 flex items-center gap-1"><i class="fa-solid fa-building text-gray-500"></i> 공급자 정보</span>
+                        <span class="text-[11px] font-black text-gray-700 flex items-center gap-1"><i class="fa-solid fa-sliders text-gray-500"></i> 기본 폼 설정 (공급자 정보)</span>
                     </div>
                     
                     <div class="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-3">
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label>
-                            <input type="text" id="input-prov-name" value="농업회사법인토박이농산주식회사" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                            <input type="text" id="input-prov-name" placeholder="입력" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label>
-                            <input type="text" id="input-prov-regno" value="210-81-36588" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                            <input type="text" id="input-prov-regno" placeholder="입력" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label>
-                            <input type="text" id="input-prov-addr" value="[01134] 서울 강북구 덕릉로 160 (번동) 1층" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                            <input type="text" id="input-prov-addr" placeholder="입력" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
                         </div>
                         <div>
                             <label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label>
-                            <input type="text" id="input-prov-tel" value="010-7279-6514 / 02-981-9594" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                            <input type="text" id="input-prov-tel" placeholder="입력" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
                         </div>
                         <div>
-                            <label class="block text-[10px] font-bold text-gray-500 mb-1">대표자 성명</label>
-                            <input type="text" id="input-prov-ceo" placeholder="입력" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
+                            <label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label>
+                            <input type="text" id="input-prov-add-tel" placeholder="입력" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500">
                         </div>
                     </div>
                 </div>
