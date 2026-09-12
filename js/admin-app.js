@@ -1562,25 +1562,25 @@ window.executeBatchPrint = function() {
         addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
-    let printContents = '';
+let printContents = '';
 
     checkboxes.forEach(cb => {
         const idx = parseInt(cb.getAttribute('data-idx'));
         const item = parsedExcelList[idx];
         if (!item) return;
 
-        // A4 1장 컨테이너 (세로 297mm 기준, 페이지 넘김 자동 처리)
-        printContents += `<div style="width: 210mm; min-height: 296mm; page-break-after: always; display: flex; flex-direction: column; justify-content: space-between; overflow: visible; margin: 0 auto; background: white; padding: 5mm 0;">`;
+        // A4 1장 컨테이너 (세로 297mm 기준, 위아래 2분할 구조)
+        printContents += `<div style="width: 210mm; min-height: 296mm; page-break-after: always; display: flex; flex-direction: column; justify-content: space-between; overflow: visible; margin: 0 auto; background: white; padding: 5mm 0; box-sizing: border-box;">`;
         
         // 1. 상단: (공급자 보관용) 
         let topHtml = generateInvoiceHTML(item, providerInfo);
-        topHtml = topHtml.replace('class="invoice-paper"', `style="min-height: 140mm; overflow: visible; border-bottom: 2px dashed #9ca3af; box-sizing: border-box;" class="invoice-paper"`);
+        topHtml = topHtml.replace('class="invoice-paper"', `style="min-height: 135mm; overflow: visible; border-bottom: 2px dashed #9ca3af; box-sizing: border-box;" class="invoice-paper"`);
         printContents += topHtml;
 
-        // 2. 하단: (공급받는 자 보관용)
+        // 2. 하단: (공급받는 자 보관용) - 동일한 데이터를 복사하되 제목만 정확히 치환
         let bottomHtml = generateInvoiceHTML(item, providerInfo);
         bottomHtml = bottomHtml.replace('(공급자 보관용)', '(공급받는 자 보관용)');
-        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="min-height: 140mm; overflow: visible; box-sizing: border-box;" class="invoice-paper"`);
+        bottomHtml = bottomHtml.replace('class="invoice-paper"', `style="min-height: 135mm; overflow: visible; box-sizing: border-box;" class="invoice-paper"`);
         printContents += bottomHtml;
         
         printContents += `</div>`;
