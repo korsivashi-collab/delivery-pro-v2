@@ -660,6 +660,7 @@
             <div class="w-[82%] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
                 <div class="absolute top-3 left-4 flex gap-1.5 z-20">
                     <button id="inv-tab-excel" onclick="switchInvoiceTab('EXCEL')" class="px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition">주문 리스트</button>
+                    <!-- 명세서 미리보기 (출력용) 버튼 삭제됨 -->
                 </div>
 
                 <!-- 엑셀 뷰 -->
@@ -817,6 +818,11 @@
                     </div>
                 </div>
 
+                <!-- 🌟 [추가] 기본 양식 선택 버튼 -->
+                <button type="button" onclick="document.getElementById('form-template-modal').classList.remove('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-3.5 rounded-2xl transition shadow-lg active:scale-95 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-layer-group"></i> 기본 양식 선택
+                </button>
+
                 <!-- 2. 중앙: 저장된 폼 리스트 -->
                 <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col min-h-0 overflow-hidden">
                     <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex justify-between items-center flex-none">
@@ -833,7 +839,7 @@
                 <!-- 3. 하단 아코디언: 명세서 폼 작성/수정 (실제 거래명세표 항목으로 업데이트) -->
                 <div class="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col flex-none overflow-hidden">
                     <div onclick="document.getElementById('form-setup-accordion').classList.toggle('hidden')" class="bg-indigo-50 border-b border-gray-200 p-2.5 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition">
-                        <span class="text-[11px] font-black text-indigo-800 flex items-center gap-1.5"><i class="fa-solid fa-pen-to-square"></i> 신규 폼 작성 / 수정</span>
+                        <span class="text-[11px] font-black text-indigo-800 flex items-center gap-1.5"><i class="fa-solid fa-pen-to-square"></i> 선택된 양식 공급자 정보 입력</span>
                         <i class="fa-solid fa-chevron-up text-indigo-600 text-[10px]"></i>
                     </div>
                     
@@ -881,6 +887,69 @@
             </div>
         </div>
     </div>
+
+    <!-- 🌟 [추가] 기본 양식 템플릿 선택 모달창 -->
+    <div id="form-template-modal" class="hidden fixed inset-0 bg-black/70 z-[500] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-gray-100 w-full max-w-4xl rounded-3xl shadow-2xl relative overflow-hidden flex flex-col h-[80vh]">
+            <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-slate-900 text-white rounded-xl flex items-center justify-center text-lg shadow-inner">
+                        <i class="fa-solid fa-layer-group"></i>
+                    </div>
+                    <div>
+                        <h2 class="text-base font-black text-gray-900">기본 양식 템플릿 선택</h2>
+                        <p class="text-xs text-gray-500 font-bold">출력할 명세서의 기본 디자인 형태를 선택하세요.</p>
+                    </div>
+                </div>
+                <button onclick="document.getElementById('form-template-modal').classList.add('hidden')" class="w-8 h-8 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-lg flex items-center justify-center transition active:scale-95">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </header>
+
+            <div class="flex-1 p-6 overflow-y-auto custom-scrollbar">
+                <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+                    <!-- 첫 번째 기본 제공 양식 (노란색) -->
+                    <div onclick="selectFormTemplate('type1')" class="bg-white border-2 border-indigo-500 rounded-2xl overflow-hidden cursor-pointer hover:shadow-lg transition relative group">
+                        <div class="absolute top-3 right-3 bg-indigo-600 text-white text-[10px] font-black px-2 py-1 rounded-md shadow-sm z-10">사용 중</div>
+                        
+                        <!-- 템플릿 썸네일(미리보기) 영역 -->
+                        <div class="h-40 bg-gray-200 w-full relative overflow-hidden border-b border-gray-100 flex items-center justify-center">
+                            <div class="w-3/4 h-5/6 bg-[#ffeb5c] border border-gray-300 shadow-sm flex flex-col p-2 opacity-80 group-hover:opacity-100 transition">
+                                <div class="w-full h-2 border-b border-black mb-1"></div>
+                                <div class="flex gap-1 flex-1">
+                                    <div class="w-1/2 border border-black flex flex-col"><div class="h-1/3 border-b border-black"></div></div>
+                                    <div class="w-1/2 border border-black flex flex-col"><div class="h-1/3 border-b border-black"></div></div>
+                                </div>
+                                <div class="w-full h-10 border border-black mt-1"></div>
+                            </div>
+                        </div>
+                        
+                        <div class="p-4">
+                            <span class="bg-gray-100 text-gray-600 text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider mb-1 inline-block">표준형</span>
+                            <h3 class="text-sm font-black text-gray-900 mb-1">일반 거래명세표 (가로형)</h3>
+                            <p class="text-[10px] text-gray-500 font-bold leading-relaxed">공급자와 공급받는자가 좌우로 나뉘어 있고, 하단에 품목이 나열되는 가장 기본적인 A4 분할 인쇄용 노란색 양식입니다.</p>
+                        </div>
+                    </div>
+
+                    <!-- 양식 추가 예정 Placeholder -->
+                    <div class="bg-transparent border-2 border-dashed border-gray-300 rounded-2xl flex flex-col items-center justify-center text-center p-6 h-full min-h-[260px] opacity-70">
+                        <div class="w-12 h-12 bg-gray-200 text-gray-400 rounded-full flex items-center justify-center text-xl mb-3">
+                            <i class="fa-solid fa-plus"></i>
+                        </div>
+                        <h3 class="text-sm font-black text-gray-500 mb-1">새로운 양식 추가 예정</h3>
+                        <p class="text-[10px] text-gray-400 font-bold leading-relaxed">추후 세로형 명세서, 영수증형 등 다양한 템플릿이 추가될 예정입니다.</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="bg-white border-t border-gray-200 p-4 flex justify-end">
+                <button onclick="document.getElementById('form-template-modal').classList.add('hidden')" class="bg-slate-900 text-white text-xs font-black px-5 py-2.5 rounded-xl transition shadow-md active:scale-95">
+                    확인
+                </button>
+            </div>
+        </div>
+    </div>
+
 
     <!-- 기존 모달들 -->
     <div id="dispatch-popup-alert-modal" class="hidden fixed inset-0 bg-black/75 z-[250] flex items-center justify-center p-5 backdrop-blur-sm animate-slide-up">
