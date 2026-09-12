@@ -1,4 +1,4 @@
-// js/app.js
+// app.js
 import { calculateOptimizedRoute } from './optimizer.js';
 import { 
     firebaseVerifyLicense, watchLicenseStatus, startGpsRequestLister, 
@@ -85,6 +85,9 @@ export async function initApp() {
     
     // 🌟 누락되었던 카메라/스캔 기능 초기화 함수 호출!
     initCameraScan();
+    
+    // 🌟 여기에 사진 완료 이벤트 리스너를 추가합니다!
+    initPhotoCompletion(); 
     
     const savedKey = localStorage.getItem('deliveryProKey');
     const savedPhone = localStorage.getItem('deliveryProUserPhone');
@@ -1418,6 +1421,42 @@ export function initCameraScan() {
     });
 }
 
+// 🌟 [추가됨] 사진 전송 및 완료 처리 이벤트 리스너 🌟
+export function initPhotoCompletion() {
+    const photoInput = document.getElementById('completion-photo-input');
+    if (!photoInput) return;
+
+    photoInput.addEventListener('change', async (e) => {
+        const file = e.target.files[0];
+        if (!file) return;
+
+        showLoading("사진 압축 및 서버 전송 중...");
+        try {
+            // 1. 이미지 압축 및 Base64 변환
+            const base64Image = await toBase64_SafeCompress(file);
+
+            // 2. Firebase 저장소에 업로드 및 URL 반환
+            const deviceId = getOrCreateDeviceId();
+            const photoUrl = await firebaseUploadDeliveryPhoto(deviceId, base64Image);
+
+            hideLoading();
+
+            // 3. 업로드 성공 시 사진 URL을 담아 완료 처리 확정
+            if (photoUrl) {
+                confirmCompletion(photoUrl);
+            } else {
+                alert("사진 전송에 실패했습니다. 다시 시도해 주세요.");
+            }
+        } catch (error) {
+            hideLoading();
+            alert("사진 전송 중 오류가 발생했습니다: " + error.message);
+        }
+        
+        // 다음 사진 촬영을 위해 input 상태 초기화
+        e.target.value = '';
+    });
+}
+
 
 // 🌟 HTML과의 연결을 위한 맨 마지막 전역 바인딩 (이름표 달기)
 window.logout = logout;
@@ -1454,6 +1493,8 @@ window.closeStartModal = closeStartModal;
 window.selectStartDest = selectStartDest;
 window.closeDispatchAlertModal = closeDispatchAlertModal;
 window.optimizeRoute = optimizeRouteAction;
+// 새로 추가된 initPhotoCompletion 함수 바인딩
+window.initPhotoCompletion = initPhotoCompletion;
 
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
