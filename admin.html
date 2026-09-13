@@ -12,7 +12,7 @@
     <!-- 엑셀 파일(.xlsx) 생성을 위한 라이브러리 (SheetJS) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
-    <style>
+<style>
         .custom-overlay {
             background: #2563eb; color: white; padding: 3px 7px; border-radius: 9999px;
             font-size: 11px; font-weight: 800; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.25);
@@ -54,28 +54,75 @@
         .excel-table td, .excel-table th { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; font-size: 11px; }
         .excel-table tr:hover td { background-color: #eef2ff; }
 
+        /* 🌟 완벽한 문서 템플릿 규격 (A4 사이즈 및 가독성 고정) */
         .invoice-container { 
-            background-color: white; border: 1px solid #d1d5db; box-shadow: 0 4px 6px rgba(0,0,0,0.1); 
-            width: 210mm; height: 297mm; margin: 0 auto; position: relative;
-            display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden;
+            background-color: white; 
+            border: 1px solid #d1d5db; 
+            box-shadow: 0 10px 25px rgba(0,0,0,0.15); 
+            width: 210mm; 
+            height: 297mm; 
+            margin: 0 auto; 
+            position: relative;
+            display: flex; 
+            flex-direction: column; 
+            box-sizing: border-box;
+            overflow: hidden; 
+            flex-shrink: 0;
         }
         .invoice-half {
-            flex: 1; background-color: #ffeb5c; padding: 5mm 10mm; box-sizing: border-box;
-            display: flex; flex-direction: column; overflow: hidden;
+            flex: 1; 
+            background-color: #ffeb5c !important; 
+            padding: 6mm 12mm; 
+            box-sizing: border-box;
+            display: flex; 
+            flex-direction: column; 
+            overflow: hidden; 
+            -webkit-print-color-adjust: exact; 
+            print-color-adjust: exact;
         }
-        .invoice-cut-line { border-top: 1px dashed #9ca3af; width: 100%; margin: 0; }
+        .invoice-cut-line { 
+            border-top: 1px dashed #6b7280; 
+            width: 100%; 
+            margin: 0; 
+        }
         .invoice-title {
-            text-align: center; font-size: 24px; font-weight: 900; letter-spacing: 12px;
-            text-decoration: underline; margin-bottom: 5px; color: #000; font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+            text-align: center; 
+            font-size: 22px; 
+            font-weight: 900; 
+            letter-spacing: 8px; /* 자간을 자연스럽게 조정하여 글자 벌어짐 방지 */
+            text-decoration: underline; 
+            margin-bottom: 6px; 
+            color: #000; 
+            font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+            white-space: nowrap; /* 타이틀이 강제로 줄바꿈되거나 벌어지는 현상 차단 */
         }
         .invoice-table { 
-            width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; 
-            margin-bottom: 4px; table-layout: fixed; color: #000; font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+            width: 100%; 
+            border-collapse: collapse; 
+            border: 2px solid #000; 
+            font-size: 11px; 
+            margin-bottom: 4px; 
+            table-layout: fixed; 
+            color: #000; 
+            font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
         }
-        .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px 6px; word-break: break-all; overflow-wrap: break-word; }
+        .invoice-table th, .invoice-table td { 
+            border: 1px solid #000; 
+            padding: 4px 6px; 
+            word-break: break-all; 
+            overflow-wrap: break-word; 
+        }
         .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
-        .invoice-label { background-color: transparent; font-weight: bold; text-align: center; letter-spacing: 1px; }
-        .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 4px; padding: 5px 2px !important; line-height: 1.2; }
+        .invoice-label { background-color: transparent; font-weight: bold; text-align: center; letter-spacing: 0.5px; }
+        
+        .writing-mode-vertical { 
+            writing-mode: vertical-rl; 
+            text-orientation: upright;
+            text-align: center; 
+            letter-spacing: 3px;
+            padding: 5px 2px !important;
+            line-height: 1.2;
+        }
 
         .inv-text-center { text-align: center; }
         .inv-text-left { text-align: left; padding-left: 8px !important; }
