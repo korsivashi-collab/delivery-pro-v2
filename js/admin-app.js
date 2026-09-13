@@ -846,6 +846,25 @@ function generateInvoiceHTML(item, providerInfo) {
     template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
     template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
 
+    // 🌟 핵심: 인쇄용 가상 템플릿에도 주소 및 배송요청사항 행에 double-height와 multi-line-text 클래스 강제 적용
+    template.querySelectorAll('tr').forEach(tr => {
+        const text = tr.innerText;
+        if (text.includes('주 소') && !tr.classList.contains('double-height')) {
+            tr.classList.add('double-height');
+            tr.querySelectorAll('td').forEach(td => {
+                if (!td.classList.contains('invoice-label')) td.classList.add('multi-line-text');
+            });
+        }
+        if (text.includes('배 송 요 청 사 항') && !tr.classList.contains('double-height')) {
+            tr.classList.add('double-height');
+            tr.querySelectorAll('td').forEach(td => {
+                if (!td.classList.contains('invoice-label') && !td.classList.contains('inv-text-right')) {
+                    td.classList.add('multi-line-text');
+                }
+            });
+        }
+    });
+
     const today = new Date();
     const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
     
