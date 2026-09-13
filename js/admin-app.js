@@ -39,7 +39,7 @@ import {
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, openLinkDriverModal,
     confirmLinkDriver, handleProFeature,
-    closeProInvoiceModal, selectFormTemplate, syncPreviewData, 
+    selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
     saveProviderForm,  deleteSavedForm, 
     drawOtherDriversTerritories, openDriverTerritoryModal, 
