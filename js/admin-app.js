@@ -51,7 +51,7 @@ import {
     sortExcelList, toggleRowCheckbox, renderExcelTable, 
     initExcelDropZone, 
     handleExcelUpload, processSingleExcelFile, exportToInvoiceModal, previewInvoiceRow, 
-    generateInvoiceHTML, executeBatchPrint
+    generateInvoiceHTML,
 } from "./admin-dispatch.js";
 
 // ==========================================
