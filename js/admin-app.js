@@ -23,7 +23,7 @@ import {
     closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
 } from "./admin-master.js";
 
-// [관제 기능 모듈]
+// [관제 기능 모듈 - 실제 사용하는 핵심 함수만 깔끔하게 정리]
 import {
     forceClearMap, setDispatchMode, renderSidebar, getFilteredVisibleDrivers,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView,
@@ -38,19 +38,15 @@ import {
     drawAllDriversOnMap, fitMapToAllDrivers, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, openLinkDriverModal,
-    handleProFeature,
-    selectFormTemplate, syncPreviewData, 
+    handleProFeature, selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
-    saveProviderForm,
-    openDriverTerritoryModal, 
+    saveProviderForm, openDriverTerritoryModal, 
     setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, saveCompanyBaseAddress, 
     updateCompanyBaseUI, renderDispatchDriverList, 
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
-    processExcelData, 
-    sortExcelList, toggleRowCheckbox, renderExcelTable, 
-    initExcelDropZone, 
-    handleExcelUpload, processSingleExcelFile, previewInvoiceRow, 
+    processExcelData, sortExcelList, toggleRowCheckbox, renderExcelTable, 
+    initExcelDropZone, handleExcelUpload, processSingleExcelFile, previewInvoiceRow 
 } from "./admin-dispatch.js";
 
 // ==========================================
@@ -310,32 +306,19 @@ window.clearSearchInput = clearSearchInput;
 window.jumpToDeliveryTarget = jumpToDeliveryTarget;
 window.handleGlobalSearch = handleGlobalSearch;
 window.openLinkDriverModal = openLinkDriverModal;
-window.closeLinkDriverModal = closeLinkDriverModal;
-window.confirmLinkDriver = confirmLinkDriver;
 window.handleProFeature = handleProFeature;
-window.closePremiumModal = closePremiumModal;
-window.closeProInvoiceModal = closeProInvoiceModal;
-window.closeAutoDispatchModal = closeAutoDispatchModal;
 window.selectFormTemplate = selectFormTemplate;
 window.updateLivePreview = updateLivePreview;
-window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
 window.toggleSelectForm = toggleSelectForm;
 window.previewSavedForm = previewSavedForm;
-window.deleteSavedForm = deleteSavedForm;
 window.openDriverTerritoryModal = openDriverTerritoryModal;
-window.closeDriverTerritoryModal = closeDriverTerritoryModal;
 window.setTerritoryScale = setTerritoryScale;
 window.saveDriverTerritory = saveDriverTerritory;
 window.openAllTerritoriesMap = openAllTerritoriesMap;
-window.closeAllTerritoriesMap = closeAllTerritoriesMap;
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
-window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.selectDispatchDriver = selectDispatchDriver;
-window.deleteExcelRow = deleteExcelRow;
-window.deleteSelectedExcelRows = deleteSelectedExcelRows;
-window.clearAllExcelRows = clearAllExcelRows;
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.toggleRowCheckbox = toggleRowCheckbox;
 window.executeBatchPrint = executeBatchPrint;
-window.focusMapPosition = focusMapPosition; // Map 유틸리티
+window.focusMapPosition = focusMapPosition;
