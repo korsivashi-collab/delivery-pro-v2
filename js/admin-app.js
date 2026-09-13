@@ -903,43 +903,142 @@ window.saveDriverTerritory = async function() {
     }
 };
 
-window.renderDispatchDriverDetail = function() {
-    const header = document.getElementById('detail-driver-header');
-    const table = document.getElementById('detail-driver-table');
-    const tbody = document.getElementById('detail-driver-tbody');
-    const badge = document.getElementById('detail-driver-count-badge');
+// =====================================================================
+// 🌟 삭제된 배송 할당 및 기사 리스트 필터링 필수 로직 복구
+// =====================================================================
+
+window.getFilteredVisibleDrivers = function() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const isMaster = (currentUserRole === 'MASTER');
     
-    if (!selectedDispatchDriverId) {
-        header.classList.remove('hidden');
-        table.classList.add('hidden');
-        badge.classList.add('hidden');
+    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
+    
+    if (!isMaster && dispatchKey) {
+        const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        const matched = visibleLicenses.filter(l => {
+            const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+            return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
+        });
+        
+        if (matched.length > 0) return matched;
+        else return visibleLicenses; 
+    }
+    return visibleLicenses;
+};
+
+window.saveCompanyBaseAddress = async function() {
+    const input = document.getElementById('company-base-address');
+    const addr = input.value.trim();
+    if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
+    
+    const btn = document.getElementById('btn-save-company-base');
+    btn.disabled = true; btn.innerText = "확인중...";
+
+    const coords = await window.getCoordsFromAddress(addr);
+    btn.disabled = false; btn.innerText = "저장";
+
+    if (!coords) {
+        alert("입력하신 주소의 위치(좌표)를 찾을 수 없습니다.\n정확한 도로명 또는 지번 주소를 입력해주세요.");
         return;
     }
 
-    const targetLic = allLicenses.find(l => l.deviceId === selectedDispatchDriverId || l.key === selectedDispatchDriverId);
-    const driverName = targetLic ? (targetLic.phone || targetLic.key) : selectedDispatchDriverId;
+    const fullAddress = coords.fullAddress || addr;
+    const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
+    
+    localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
+    window.updateCompanyBaseUI(baseData);
+    input.value = fullAddress; 
+};
 
-    const assignedItems = parsedExcelList.filter(item => item.assignedDriver === driverName);
+window.clearCompanyBaseAddress = function() {
+    localStorage.removeItem('deliveryProCompanyBase');
+    document.getElementById('company-base-address').value = '';
+    window.updateCompanyBaseUI(null);
+};
 
-    header.classList.add('hidden');
-    table.classList.remove('hidden');
-    badge.classList.remove('hidden');
-    badge.innerText = `총 ${assignedItems.length}건`;
+window.updateCompanyBaseUI = function(baseData) {
+    const textEl = document.getElementById('saved-base-address-text');
+    const clearBtn = document.getElementById('btn-clear-company-base');
 
-    if (assignedItems.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="2" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`;
+    if (baseData) {
+        textEl.innerText = baseData.address;
+        textEl.classList.add('text-indigo-600');
+        textEl.classList.remove('text-gray-500');
+        clearBtn.classList.remove('hidden');
+    } else {
+        textEl.innerText = "저장된 거점이 없습니다.";
+        textEl.classList.add('text-gray-500');
+        textEl.classList.remove('text-indigo-600');
+        clearBtn.classList.add('hidden');
+    }
+};
+
+window.renderDispatchDriverList = function() {
+    const listEl = document.getElementById('dispatch-driver-list');
+    const countEl = document.getElementById('dispatch-driver-count');
+    if (!listEl || !countEl) return;
+    
+    const drivers = window.getFilteredVisibleDrivers();
+    countEl.innerText = `${drivers.length}명`;
+    
+    if (drivers.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`;
         return;
     }
-
+    
     let html = '';
-    assignedItems.forEach((item, idx) => {
+    drivers.forEach((d, idx) => {
+        const devId = d.deviceId || d.key;
+        const phoneDisplay = d.phone || d.key;
+        
+        const tLat = d.territoryLat || '';
+        const tLng = d.territoryLng || '';
+        const tScale = d.territoryScale || '';
+        // 💡 t1에 전체 주소가 담겨있으므로 화면에 출력
+        const t1 = d.territory1 || '';
+        const t2 = d.territory2 || '';
+        
+        let territoryBadge = '';
+        if (tLat && tLng) {
+            let scaleLabel = '동/읍/면';
+            if(tScale === 'gu') scaleLabel = '구/군';
+            if(tScale === 'si') scaleLabel = '시/도';
+            
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap" title="권역 설정됨"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
+                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
+                </div>`;
+        } else {
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
+                    <span class="text-[9px] text-gray-400">미설정</span>
+                </div>`;
+        }
+
+        const isSelected = selectedDispatchDriverId === devId;
+        
         html += `
-        <tr class="hover:bg-blue-50/50 transition">
-            <td class="text-center font-bold text-gray-500">${item.displayNumber || idx + 1}</td>
-            <td class="font-bold text-gray-800 whitespace-normal break-keep">${item.address || '-'}</td>
-        </tr>`;
+        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
+            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0">
+                <span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span>
+                <i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i> 
+                <span class="truncate">${phoneDisplay}</span>
+            </span>
+            <div class="shrink-0 ml-2">
+                ${territoryBadge}
+            </div>
+        </div>
+        `;
     });
-    tbody.innerHTML = html;
+    listEl.innerHTML = html;
+};
+
+window.selectDispatchDriver = function(devId) {
+    selectedDispatchDriverId = devId;
+    window.renderDispatchDriverList(); 
+    window.renderDispatchDriverDetail(); 
 };
 
 // ---------------------------------------------------------------------
