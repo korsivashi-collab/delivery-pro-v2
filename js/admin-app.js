@@ -732,7 +732,6 @@ window.renderDispatchDriverList = function() {
         const devId = d.deviceId || d.key;
         const phoneDisplay = d.phone || d.key;
         
-        // Firestore에서 새로 저장되는 위경도 및 스케일 데이터 파싱
         const tLat = d.territoryLat || '';
         const tLng = d.territoryLng || '';
         const tScale = d.territoryScale || '';
@@ -773,47 +772,41 @@ window.selectDispatchDriver = function(devId) {
 };
 
 // =====================================================================
-// 🌟 신규 권역 설정 지도 로직 (3단 반경)
+// 🌟 신규 권역 설정 지도 로직 (3단 반경) - 함수명 완벽 일치 보장
 // =====================================================================
 
 window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
-    event.stopPropagation(); 
+    if(event) event.stopPropagation(); 
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
     document.getElementById('driver-territory-modal').classList.remove('hidden');
 
-    // 스케일 기본값 설정
     currentTerritoryScale = scale && scale !== 'undefined' ? scale : 'dong';
-    window.setTerritoryScale(currentTerritoryScale, true); // true = 지도 재그리기 지연 방지
+    window.setTerritoryScale(currentTerritoryScale, true); 
 
-    // 모달이 완전히 화면에 표시(display block)된 후 지도 렌더링
     setTimeout(() => {
         if (!territoryMap) {
             const container = document.getElementById('territory-map-container');
             const options = {
-                center: new kakao.maps.LatLng(37.566826, 126.978656), // 기본 서울 시청
-                level: 6 // 동/읍/면 기본 레벨 (화면에 2~3개 행정구역이 보이도록 세팅)
+                center: new kakao.maps.LatLng(37.566826, 126.978656), 
+                level: 6 
             };
             territoryMap = new kakao.maps.Map(container, options);
 
-            // 지도 클릭 시 중심 핀 및 반경 이동
             kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) {
                 window.setTerritoryCenter(mouseEvent.latLng);
             });
         }
         
-        territoryMap.relayout(); // 모달 팝업으로 인한 지도 깨짐 방지
+        territoryMap.relayout(); 
 
-        // 기존에 설정된 좌표가 있다면 핀 꽂기
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined') {
             const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
             territoryMap.setCenter(pos);
             window.setTerritoryCenter(pos);
         } else {
-            // 초기화
             window.clearTerritoryOverlays();
             
-            // 만약 본사 거점이 있다면 본사 거점으로 포커스
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
             if (savedBase) {
                 const baseData = JSON.parse(savedBase);
@@ -833,7 +826,6 @@ window.setTerritoryScale = function(scale, skipRedraw = false) {
     currentTerritoryScale = scale;
     document.getElementById('input-territory-scale').value = scale;
 
-    // UI 버튼 상태 업데이트
     ['dong', 'gu', 'si'].forEach(s => {
         const btn = document.getElementById(`btn-scale-${s}`);
         if (!btn) return;
@@ -844,11 +836,10 @@ window.setTerritoryScale = function(scale, skipRedraw = false) {
         }
     });
 
-    // 지도 줌 레벨 조정 (화면에 최소 2~3개의 해당 행정구역이 보이게 최적화)
     if (territoryMap) {
-        if (scale === 'dong') territoryMap.setLevel(6); // 동/읍/면 (반경 1.5~4.5km 커버)
-        else if (scale === 'gu') territoryMap.setLevel(8); // 구/군 (반경 5~15km 커버)
-        else if (scale === 'si') territoryMap.setLevel(11); // 시/도 (반경 15~45km 커버)
+        if (scale === 'dong') territoryMap.setLevel(6); 
+        else if (scale === 'gu') territoryMap.setLevel(8); 
+        else if (scale === 'si') territoryMap.setLevel(11); 
     }
 
     if (!skipRedraw && territoryMarker) {
@@ -868,14 +859,13 @@ window.setTerritoryCenter = function(latLng) {
     document.getElementById('input-territory-lat').value = latLng.getLat();
     document.getElementById('input-territory-lng').value = latLng.getLng();
 
-    // 역지오코딩을 통해 구/동 이름 획득하여 숨김 필드에 저장
     const geocoder = new kakao.maps.services.Geocoder();
     geocoder.coord2RegionCode(latLng.getLng(), latLng.getLat(), function(result, status) {
         if (status === kakao.maps.services.Status.OK) {
             for(let i=0; i<result.length; i++) {
-                if(result[i].region_type === 'H') { // 행정동 기준
-                    document.getElementById('input-territory-1').value = result[i].region_2depth_name; // 예: 마포구, 연천군
-                    document.getElementById('input-territory-2').value = result[i].region_3depth_name; // 예: 서교동, 백석리
+                if(result[i].region_type === 'H') { 
+                    document.getElementById('input-territory-1').value = result[i].region_2depth_name; 
+                    document.getElementById('input-territory-2').value = result[i].region_3depth_name; 
                     break;
                 }
             }
@@ -885,36 +875,31 @@ window.setTerritoryCenter = function(latLng) {
     territoryMarker = new kakao.maps.Marker({ position: latLng });
     territoryMarker.setMap(territoryMap);
 
-    // 선택된 단위(Scale)에 따라 반경 자동 세팅 (1차, 2차, 3차)
     let r1, r2, r3;
     if (currentTerritoryScale === 'dong') { 
-        r1 = 1500; r2 = 3000; r3 = 4500; // 동/읍/면
+        r1 = 1500; r2 = 3000; r3 = 4500; 
     } else if (currentTerritoryScale === 'gu') { 
-        r1 = 5000; r2 = 10000; r3 = 15000; // 구/군
+        r1 = 5000; r2 = 10000; r3 = 15000; 
     } else if (currentTerritoryScale === 'si') { 
-        r1 = 15000; r2 = 30000; r3 = 45000; // 시/도
+        r1 = 15000; r2 = 30000; r3 = 45000; 
     }
 
-    // 1차: 가장 진한 핵심 권역
     const c1 = new kakao.maps.Circle({
         center: latLng, radius: r1,
         strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8,
         fillColor: '#3b82f6', fillOpacity: 0.45
     });
-    // 2차: 예비 권역
     const c2 = new kakao.maps.Circle({
         center: latLng, radius: r2,
         strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6,
         fillColor: '#60a5fa', fillOpacity: 0.25
     });
-    // 3차: 최외곽 권역
     const c3 = new kakao.maps.Circle({
         center: latLng, radius: r3,
         strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4,
         fillColor: '#bfdbfe', fillOpacity: 0.1
     });
 
-    // 큰 원부터 그려야 안에 작은 원 클릭이 가능함
     c3.setMap(territoryMap);
     c2.setMap(territoryMap);
     c1.setMap(territoryMap);
@@ -945,6 +930,7 @@ window.saveDriverTerritory = async function() {
         });
         alert("기사 권역(위치 및 반경)이 성공적으로 저장되었습니다.");
         window.closeDriverTerritoryModal();
+        window.renderDispatchDriverList();
     } catch(e) {
         alert("저장 오류: " + e.message);
     }
@@ -1075,7 +1061,6 @@ window.processExcelData = function(jsonData) {
     return newItems;
 };
 
-// 카카오 API에서 전체 주소(fullAddress)까지 파싱해서 반환하도록 수정된 함수
 window.getCoordsFromAddress = function(address) {
     return new Promise((resolve) => {
         if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) {
