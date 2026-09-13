@@ -171,6 +171,26 @@ window.showMasterPanel = function(name = '마스터') {
     if(window.switchMasterTab) window.switchMasterTab('regular');
 };
 
+window.showDispatchPanel = function() {
+    currentUserRole = 'DISPATCH';
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('dispatch-panel').classList.remove('hidden');
+    document.getElementById('dispatch-panel').classList.add('flex');
+
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const localToken = sessionStorage.getItem('deliveryProSessionToken');
+    if (currentKey) {
+        if (localToken && localToken.startsWith('MONITOR-')) {
+            document.getElementById('dispatch-sub-title').innerHTML = `<span class="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black flex items-center gap-1"><i class="fa-solid fa-eye animate-pulse"></i> 마스터 모니터링: [${currentKey}]</span>`;
+        } else {
+            document.getElementById('dispatch-sub-title').innerText = `관제 센터 [${currentKey}]`;
+        }
+    }
+    if(typeof initKakaoMap === 'function') initKakaoMap();
+    if(window.initRealtimeSync) window.initRealtimeSync();
+    if(window.setDispatchMode) window.setDispatchMode('DELIVERY');
+};
+
 window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         allLicenses = [];
