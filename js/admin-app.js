@@ -1041,6 +1041,45 @@ window.selectDispatchDriver = function(devId) {
     window.renderDispatchDriverDetail(); 
 };
 
+// 🌟 누락되었던 기사별 상세 내역 렌더링 함수 복구
+window.renderDispatchDriverDetail = function() {
+    const header = document.getElementById('detail-driver-header');
+    const table = document.getElementById('detail-driver-table');
+    const tbody = document.getElementById('detail-driver-tbody');
+    const badge = document.getElementById('detail-driver-count-badge');
+    
+    if (!selectedDispatchDriverId) {
+        header.classList.remove('hidden');
+        table.classList.add('hidden');
+        badge.classList.add('hidden');
+        return;
+    }
+
+    const targetLic = allLicenses.find(l => l.deviceId === selectedDispatchDriverId || l.key === selectedDispatchDriverId);
+    const driverName = targetLic ? (targetLic.phone || targetLic.key) : selectedDispatchDriverId;
+
+    const assignedItems = parsedExcelList.filter(item => item.assignedDriver === driverName);
+
+    header.classList.add('hidden');
+    table.classList.remove('hidden');
+    badge.classList.remove('hidden');
+    badge.innerText = `총 ${assignedItems.length}건`;
+
+    if (assignedItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`;
+        return;
+    }
+
+    let html = '';
+    assignedItems.forEach((item, idx) => {
+        html += `
+        <tr class="hover:bg-blue-50/50 transition">
+            <td class="text-center font-bold text-gray-500">${item.displayNumber || idx + 1}</td>
+            <td class="font-bold text-gray-800 whitespace-normal break-keep">${item.address || '-'}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+};
 // ---------------------------------------------------------------------
 
 window.loadExcelFromFirebase = async function() {
