@@ -968,10 +968,13 @@ window.executeBatchPrint = function() {
                 .invoice-title { text-align: center; font-size: 22px; font-weight: 900; letter-spacing: 8px; text-decoration: underline; margin-bottom: 5px; color: #000; }
                 .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; color: #000; }
                 
-                /* 🌟 인쇄용 Iframe 내부에도 정확한 27px 및 54px 적용 */
-                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
-                .double-height { height: 54px !important; }
-                .multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
+   .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
+
+/* 🌟 높이가 확실하게 적용되도록 min-height와 height를 동시에 강제 고정 */
+.double-height { height: 54px !important; min-height: 54px !important; }
+.double-height td { height: 54px !important; }
+
+.multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
 
                 .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
                 .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 0.5px; }
