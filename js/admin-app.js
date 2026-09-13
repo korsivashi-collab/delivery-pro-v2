@@ -50,7 +50,7 @@ import {
     formatNumber, processExcelData, getCoordsFromAddress, 
     sortExcelList, toggleRowCheckbox, renderExcelTable, 
     initExcelDropZone, 
-    handleExcelUpload, processSingleExcelFile, exportToInvoiceModal, previewInvoiceRow, 
+    handleExcelUpload, processSingleExcelFile, previewInvoiceRow, 
     generateInvoiceHTML,
 } from "./admin-dispatch.js";
 
