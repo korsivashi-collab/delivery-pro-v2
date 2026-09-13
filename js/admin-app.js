@@ -21,8 +21,8 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
-// 🌟 엑셀 정렬 상태 변수 추가
 let excelSortAsc = true; 
+let parsedExcelList = []; 
 
 // 모듈 스코프 충돌을 막기 위한 admin-app.js 전용 지도 초기화 변수
 window.myMapOverlays = [];
@@ -394,9 +394,7 @@ window.deleteLicense = async function(key) {
     } catch (e) { alert("삭제 오류: " + e.message); }
 };
 
-
 // === 🌟 [PRO 전용] 주문서 통합관리 및 엑셀 파싱 기능 로직 ===
-let parsedExcelList = []; 
 
 window.handleProFeature = function(featureName) {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
@@ -412,8 +410,22 @@ window.handleProFeature = function(featureName) {
     if (isPro) {
         if (featureName === 'INVOICE') {
             document.getElementById('pro-invoice-modal').classList.remove('hidden');
+            
+            // 🌟 엑셀 날짜 필터(달력) UI 동적 주입 (없을 경우에만 추가)
+            const listActions = document.getElementById('inv-list-actions');
+            if (listActions && !document.getElementById('inv-date-picker')) {
+                const dateInputHtml = `
+                    <div class="flex items-center gap-1.5 mr-2">
+                        <label class="text-[11px] font-black text-gray-500 bg-white px-2 py-1.5 rounded-lg border border-gray-200">저장일자</label>
+                        <input type="date" id="inv-date-picker" class="px-2 py-1 bg-white border border-indigo-200 text-indigo-900 rounded-lg text-xs font-black shadow-sm outline-none focus:border-indigo-500 cursor-pointer" onchange="loadExcelFromFirebase()">
+                    </div>`;
+                listActions.insertAdjacentHTML('afterbegin', dateInputHtml);
+                document.getElementById('inv-date-picker').value = getLocalDateString(); // 오늘 날짜 기본 세팅
+            }
+
             window.loadSavedForms(); 
-            window.updateLivePreview(); 
+            window.loadExcelFromFirebase(); // 🌟 모달 켤때 파이어베이스에서 리스트 불러오기
+            window.syncPreviewData(); 
         } else if (featureName === 'AUTO_DISPATCH') {
             alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 화면 레이아웃도 곧 업데이트됩니다.");
         }
@@ -465,11 +477,12 @@ window.switchInvoiceTab = function(tabName) {
         if (labelExcel) labelExcel.classList.add('hidden');
         if (listActions) listActions.classList.add('hidden');
         
-        window.updateLivePreview();
+        window.syncPreviewData(); // 무한루프 방지용 순수 DOM 업데이트만 호출
     }
 };
 
-window.updateLivePreview = function() {
+// 🌟 디바운싱 처리가 안된 순수 돔 업데이트 함수 분리 (렉 방지용)
+window.syncPreviewData = function() {
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const name = document.getElementById('input-prov-name')?.value || '';
     const addr = document.getElementById('input-prov-addr')?.value || '';
@@ -487,13 +500,26 @@ window.updateLivePreview = function() {
     document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
     document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
-
-    if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
-        window.switchInvoiceTab('PREVIEW');
-    }
 };
 
-// === 🌟 [수정] 명세서 폼 저장 및 불러오기: 좌측 진짜 체크박스와 우측 텍스트 영역 분리 ===
+// 🌟 입력 지연(렉) 제거용 디바운싱(Debounce) 타이머 적용
+let previewDebounceTimer = null;
+window.updateLivePreview = function() {
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = setTimeout(() => {
+        window.syncPreviewData();
+        
+        // 사용자가 인풋창에서 타이핑 중일때만 뷰어를 넘기도록 체크 (중복 호출 루프 방지)
+        if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
+            const viewPreview = document.getElementById('inv-view-preview');
+            if (viewPreview && viewPreview.classList.contains('hidden')) {
+                window.switchInvoiceTab('PREVIEW');
+            }
+        }
+    }, 150); // 0.15초 대기 후 한 번만 화면 반영
+};
+
+// === [수정] 명세서 폼 저장 및 불러오기 ===
 let currentSelectedFormIndex = null;
 
 window.loadSavedForms = function() {
@@ -512,10 +538,7 @@ window.loadSavedForms = function() {
         html += `
         <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
-                <!-- 🌟 요구사항 2: 진짜 체크박스(Square) 형태로 렌더링 -->
                 <input type="checkbox" onchange="toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0" title="선택/해제 토글">
-                
-                <!-- 🌟 텍스트 영역 (누르면 미리보기로 이동) -->
                 <div class="min-w-0 cursor-pointer flex-1" onclick="previewSavedForm(${idx})" title="명세서 미리보기">
                     <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
@@ -527,7 +550,6 @@ window.loadSavedForms = function() {
     listEl.innerHTML = html;
 };
 
-// 🌟 체크박스 토글 함수
 window.toggleSelectForm = function(idx) {
     if (currentSelectedFormIndex === idx) {
         currentSelectedFormIndex = null;
@@ -543,7 +565,6 @@ window.previewSavedForm = function(idx) {
     window.switchInvoiceTab('PREVIEW');
 };
 
-// 🌟 취소 버튼 기능
 window.cancelProviderFormEdit = function() {
     currentSelectedFormIndex = null;
     document.getElementById('input-form-title').value = '';
@@ -560,7 +581,7 @@ window.cancelProviderFormEdit = function() {
     }
     
     window.loadSavedForms();
-    window.updateLivePreview();
+    window.syncPreviewData();
 };
 
 window.saveProviderForm = function() {
@@ -605,7 +626,7 @@ window.applySavedForm = function(idx) {
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
     window.loadSavedForms(); 
-    window.updateLivePreview();
+    window.syncPreviewData();
 };
 
 window.deleteSavedForm = function(idx) {
@@ -619,17 +640,40 @@ window.deleteSavedForm = function(idx) {
     window.loadSavedForms();
 };
 
-// 🌟 엑셀 데이터를 파이어베이스에 알아서 자동 저장하는 로직
+// 🌟 [추가] 파이어베이스에서 선택한 날짜의 엑셀 데이터를 불러오는 함수
+window.loadExcelFromFirebase = async function() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    if (!dispatchKey) return;
+    
+    const datePicker = document.getElementById('inv-date-picker');
+    const dateVal = datePicker ? datePicker.value : getLocalDateString();
+    const docId = `${dateVal}_${dispatchKey}`;
+    
+    try {
+        const snap = await getDoc(doc(db, "dispatch_orders", docId));
+        if (snap.exists() && snap.data().orders) {
+            parsedExcelList = snap.data().orders;
+        } else {
+            parsedExcelList = []; // 해당 날짜에 데이터가 없으면 비움
+        }
+        renderExcelTable();
+    } catch (error) {
+        console.error("Firebase 엑셀 로드 오류:", error);
+    }
+};
+
+// 🌟 엑셀 데이터 자동 저장 (선택된 날짜 기준으로 저장)
 window.autoSaveExcelToFirebase = async function() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     if (!dispatchKey) return; 
 
-    const today = getLocalDateString(); 
-    const docId = `${today}_${dispatchKey}`; 
+    const datePicker = document.getElementById('inv-date-picker');
+    const dateVal = datePicker ? datePicker.value : getLocalDateString(); 
+    const docId = `${dateVal}_${dispatchKey}`; 
     
     try {
         await setDoc(doc(db, "dispatch_orders", docId), {
-            date: today,
+            date: dateVal,
             dispatchKey: dispatchKey,
             orders: parsedExcelList || [],
             updatedAt: Date.now()
@@ -677,11 +721,10 @@ function processExcelData(jsonData) {
     });
 }
 
-// 🌟 요구사항 3: 발송자 기준 엑셀 리스트 정렬 함수
 window.sortExcelList = function(field) {
     if (!parsedExcelList || parsedExcelList.length === 0) return;
     
-    excelSortAsc = !excelSortAsc; // 오름차순/내림차순 토글
+    excelSortAsc = !excelSortAsc; 
     
     parsedExcelList.sort((a, b) => {
         let valA = (a[field] || '').toString().trim();
@@ -692,7 +735,7 @@ window.sortExcelList = function(field) {
         return 0;
     });
     
-    renderExcelTable(); // 화면 즉시 반영
+    renderExcelTable();
 };
 
 function renderExcelTable() {
@@ -807,7 +850,7 @@ window.previewInvoiceRow = function(idx) {
         }
     });
 
-    window.updateLivePreview(); 
+    window.syncPreviewData(); // 렌더링 호출을 간소화한 함수로 대체
     window.switchInvoiceTab('PREVIEW');
 };
 
@@ -846,7 +889,6 @@ function generateInvoiceHTML(item, providerInfo) {
     template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
     template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
 
-    // 🌟 [핵심 수정] 인쇄용으로 복사된 템플릿의 모든 테이블 행(tr)을 검사하여 주소와 배송요청사항에 2칸 높이 강제 적용
     template.querySelectorAll('.invoice-table').forEach(table => {
         const rows = table.querySelectorAll('tr');
         rows.forEach(tr => {
@@ -927,7 +969,6 @@ window.executeBatchPrint = function() {
 
     const doc = iframe.contentWindow.document;
     doc.open();
-    // 🌟 100% 동일한 CSS 튜닝: Box-Sizing을 넣고 admin.html의 CSS를 완벽히 가져옴
     doc.write(`
         <!DOCTYPE html>
         <html lang="ko">
@@ -944,35 +985,15 @@ window.executeBatchPrint = function() {
                 }
                 body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; }
                 
-                .invoice-container { 
-                    background-color: white; 
-                    width: 210mm; 
-                    height: 297mm; 
-                    margin: 0 auto; 
-                    position: relative;
-                    display: flex;
-                    flex-direction: column;
-                    overflow: hidden;
-                }
-                .invoice-half {
-                    height: 148mm; 
-                    background-color: #ffeb5c !important; 
-                    padding: 5mm 8mm; /* 🌟 미리보기와 동일하게 패딩 축소 */
-                    display: flex;
-                    flex-direction: column;
-                    overflow: hidden; 
-                    -webkit-print-color-adjust: exact; 
-                    print-color-adjust: exact;
-                }
+                .invoice-container { background-color: white; width: 210mm; height: 297mm; margin: 0 auto; position: relative; display: flex; flex-direction: column; overflow: hidden; }
+                .invoice-half { height: 148mm; background-color: #ffeb5c !important; padding: 5mm 8mm; display: flex; flex-direction: column; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
                 .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; }
                 
-                /* 🌟 미리보기 화면과 완벽히 동일한 폰트 및 여백 설정 적용 */
                 .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; color: #000; }
                 .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; color: #000; }
                 
                 .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
 
-                /* 높이가 확실하게 적용되도록 강제 고정 */
                 .double-height { height: 54px !important; min-height: 54px !important; }
                 .double-height td { height: 54px !important; }
 
@@ -2091,7 +2112,7 @@ window.confirmLinkDriver = async function() {
             if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
         }
 
-        if (!targetLic) { alert("해당 기사 계정을 찾을 수 정없습니다."); return; }
+        if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
         if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
             alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
         }
@@ -2101,7 +2122,6 @@ window.confirmLinkDriver = async function() {
     } catch (e) { alert("오류: " + e.message); }
 };
 
-// 🌟 엑셀 추출 모달창 컨트롤 및 다중 시트 다운로드
 window.openExcelExportModal = function() {
     const today = getLocalDateString();
     document.getElementById('export-start-date').value = today;
@@ -2134,7 +2154,6 @@ window.executeExcelExport = function() {
     const wb = XLSX.utils.book_new();
     let hasData = false;
 
-    // --- 시트 1: [배송 완료] 데이터 ---
     if (isCompleted) {
         const targetCompletions = allCompletions.filter(c => {
             if (!c.completedAt) return false;
@@ -2162,7 +2181,6 @@ window.executeExcelExport = function() {
         }
     }
 
-    // --- 시트 2: [미처리 배송] 데이터 ---
     if (isPending) {
         let pendingList = [];
         for (const devId in activeRoutes) {
@@ -2198,7 +2216,6 @@ window.executeExcelExport = function() {
         }
     }
 
-    // --- 시트 3: [배송 취소] 데이터 ---
     if (isCanceled) {
         const targetCanceled = allCompletions.filter(c => {
             if (!c.completedAt) return false;
