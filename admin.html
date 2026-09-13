@@ -55,14 +55,14 @@
         .excel-table tr:hover td { background-color: #eef2ff; }
 
         /* ========================================================
-           📋 [템플릿 표준 규칙 6대 룰 적용 CSS 스타일]
+           📋 [세로 밸런스 및 공간 최적화 표준 스타일]
            ======================================================== */
         .invoice-container { 
             background-color: white; 
             border: 1px solid #d1d5db; 
             box-shadow: 0 10px 25px rgba(0,0,0,0.15); 
             width: 210mm; 
-            height: 296mm; /* A4 1장 절대 사수 규격 */
+            height: 296mm; /* A4 1장 절대 고정 */
             margin: 0 auto; 
             position: relative;
             display: flex; 
@@ -74,7 +74,7 @@
         .invoice-half {
             height: 148mm; 
             background-color: #ffeb5c !important; 
-            padding: 4mm 8mm; 
+            padding: 4mm 8mm; /* 세로/가로 균형감 있는 내부 여백 조율 */
             box-sizing: border-box;
             display: flex; 
             flex-direction: column; 
@@ -89,7 +89,7 @@
         }
         .invoice-title {
             text-align: center; 
-            font-size: 20px; 
+            font-size: 21px; 
             font-weight: 900; 
             letter-spacing: 6px; 
             text-decoration: underline; 
@@ -102,7 +102,7 @@
             width: 100%; 
             border-collapse: collapse; 
             border: 2px solid #000; 
-            font-size: 10px; /* 룰 2: 기준 폰트 규격 고정 */
+            font-size: 10px; 
             margin-bottom: 3px; 
             table-layout: fixed; 
             color: #000; 
@@ -110,7 +110,7 @@
         }
         .invoice-table th, .invoice-table td { 
             border: 1px solid #000; 
-            padding: 3px 4px; /* 룰 2: 표준 패딩 */
+            padding: 4px 5px; /* 세로 높이감을 살리기 위해 상하 패딩 소폭 확대 */
             word-break: break-all; 
             overflow-wrap: break-word; 
         }
@@ -126,24 +126,26 @@
             line-height: 1.1;
         }
 
-        /* 룰 1: 글자 자동 압축 및 줄바꿈 방지 (.text-fit-auto) */
+        /* 🌟 주소 및 긴 텍스트 전용 넉넉한 세로 높이 클래스 */
+        .invoice-addr-cell {
+            height: 28px; /* 세로로 숨 쉴 수 있는 넉넉한 높이 확보 */
+            vertical-align: middle;
+        }
+
         .text-fit-auto {
             font-size: 9.5px;
             letter-spacing: -0.4px;
-            line-height: 1.1;
+            line-height: 1.2;
             white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
-        /* 룰 4: 속성별 정렬 클래스 */
         .inv-text-center { text-align: center; }
-        .inv-text-left { text-align: left; padding-left: 5px !important; }
-        .inv-text-right { text-align: right; padding-right: 5px !important; }
+        .inv-text-left { text-align: left; padding-left: 6px !important; }
+        .inv-text-right { text-align: right; padding-right: 6px !important; }
         .inv-font-bold { font-weight: bold; }
-        
-        /* 룰 5: 품목 리스트 행 개수 고정 (5개) 및 높이 락 */
-        .empty-row td { height: 21.5px; }
+        .empty-row td { height: 23px; } /* 품목 리스트 세로 칸 안정화 */
 
         @media print {
             @page { size: A4 portrait; margin: 0; }
@@ -322,7 +324,7 @@
         </main>
     </div>
 
-    <!-- PRO 전용: 주문서 통합관리 및 명세서 모달창 (6대 표준 규칙 반영 최종본) -->
+    <!-- PRO 전용: 주문서 통합관리 및 명세서 모달창 (세로 밸런스 확장 최종본) -->
     <div id="pro-invoice-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col animate-slide-up overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
             <div class="flex items-center gap-3">
@@ -366,7 +368,7 @@
                     </div>
                 </div>
 
-                <!-- 🌟 6대 표준 규칙 반영된 명세서 미리보기 뷰 (주소/상호명 2칸 와이드 할당) -->
+                <!-- 🌟 세로 높이감 및 공간 확장 명세서 미리보기 뷰 -->
                 <div id="inv-view-preview" class="hidden flex-1 overflow-auto bg-gray-300 p-8 flex-col items-center gap-6">
                     <div id="print-area" class="invoice-container">
                         
@@ -374,99 +376,17 @@
                         <div class="invoice-half">
                             <div class="invoice-title">거래명세표<span style="font-size: 13px; font-weight: normal; text-decoration: none;">(공급자 보관용)</span></div>
                             <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 2px;">
-                                <div style="font-size: 10.5px; font-weight: bold; width: 45%;">주문일자: <span id="prev-date-1"></span></div>
-                                <div style="font-size: 10.5px; font-weight: bold; text-align: right; width: 45%;">주문번호: <span class="font-normal inline-block w-32" style="text-align: left;"></span></div>
+                                <div style="font-size: 10px; font-weight: bold; width: 45%;">주문일자: <span id="prev-date-1"></span></div>
+                                <div style="font-size: 10px; font-weight: bold; text-align: right; width: 45%;">주문번호: <span class="font-normal inline-block w-32" style="text-align: left;"></span></div>
                             </div>
                             
-                            <!-- 🌟 룰 3 & 6: 주소 및 상호명 칸을 최우선 와이드(auto)로 할당하고 라벨은 최소 폭으로 고정 -->
+                            <!-- 🌟 상단 정보 테이블 (주소 행 세로 높이 확장) -->
                             <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
                                 <colgroup>
-                                    <col style="width: 20px;">  <!-- 공급자 세로 글씨 -->
-                                    <col style="width: 85px;">  <!-- 사업자번호 라벨 (글자 쪼개짐 방지 충분한 폭) -->
-                                    <col style="width: auto;"> <!-- 주소/상호명 (가장 넓은 와이드 2칸 공간) -->
-                                    <col style="width: 20px;">  <!-- 공급받는자 세로 글씨 -->
-                                    <col style="width: 78px;">  <!-- 구매자명 라벨 -->
-                                    <col style="width: auto;"> <!-- 배송지명/주소 (가장 넓은 와이드 2칸 공간) -->
-                                </colgroup>
-                                <tr>
-                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td>
-                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td>
-                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td>
-                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td>
-                                </tr>
-                                <tr><td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td><td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td></tr>
-                                <tr><td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto"></td><td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto"></td></tr>
-                                <tr><td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td><td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td></tr>
-                                <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
-                            </table>
-
-                            <!-- 🌟 룰 5: 상품 리스트 (상품명 칸 최대로 넓게 확보) -->
-                            <table class="invoice-table" style="margin-bottom: 0;">
-                                <colgroup>
-                                    <col style="width: 24px;">  <!-- No -->
-                                    <col style="width: auto;"> <!-- 상품명 (최대로 넓게 확보) -->
-                                    <col style="width: 72px;">  <!-- 규격(단위) -->
-                                    <col style="width: 36px;">  <!-- 수량 -->
-                                    <col style="width: 58px;">  <!-- 단가 -->
-                                    <col style="width: 68px;">  <!-- 총액 -->
-                                </colgroup>
-                                <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
-                                <tbody>
-                                    <tr class="empty-row"><td class="inv-text-center">1</td><td class="inv-text-left inv-font-bold prev-item-name text-fit-auto"></td><td class="inv-text-center prev-item-unit text-fit-auto"></td><td class="inv-text-center prev-item-qty"></td><td class="inv-text-right prev-item-price"></td><td class="inv-text-right prev-item-total"></td></tr>
-                                    <tr class="empty-row"><td class="inv-text-center">2</td><td></td><td></td><td></td><td></td><td></td></tr>
-                                    <tr class="empty-row"><td class="inv-text-center">3</td><td></td><td></td><td></td><td></td><td></td></tr>
-                                    <tr class="empty-row"><td class="inv-text-center">4</td><td></td><td></td><td></td><td></td><td></td></tr>
-                                    <tr class="empty-row"><td class="inv-text-center">5</td><td></td><td></td><td></td><td></td><td></td></tr>
-                                </tbody>
-                            </table>
-
-                            <!-- 🌟 룰 4: 하단 요약 (숫자 우측 정렬 및 포맷팅) -->
-                            <table class="invoice-table" style="border-top: none;">
-                                <colgroup>
-                                    <col style="width: 75px;">
+                                    <col style="width: 18px;">
+                                    <col style="width: 78px;">
                                     <col style="width: auto;">
-                                    <col style="width: 65px;">
-                                    <col style="width: 45px;">
-                                    <col style="width: 50px;">
-                                    <col style="width: 68px;">
-                                </colgroup>
-                                <tbody>
-                                    <tr>
-                                        <td class="invoice-label">결 제 수 단</td>
-                                        <td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td>
-                                        <td class="invoice-label">총 상품수량</td>
-                                        <td class="inv-text-center inv-font-bold prev-total-qty"></td>
-                                        <td class="invoice-label">배 송 비</td>
-                                        <td class="inv-text-right prev-shipping-fee">0원</td>
-                                    </tr>
-                                    <tr>
-                                        <td class="invoice-label">배 송 요 청 사 항</td>
-                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto" style="vertical-align: top; padding-top: 3px;"></td>
-                                        <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
-                                        <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
-                                    </tr>
-                                </tbody>
-                            </table>
-
-                            <div style="text-align: right; font-size: 10.5px; font-weight: bold; margin-top: 5px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
-                        </div>
-
-                        <div class="invoice-cut-line"></div>
-
-                        <!-- [하단: 공급받는 자 보관용] -->
-                        <div class="invoice-half">
-                            <div class="invoice-title">거래명세표<span style="font-size: 13px; font-weight: normal; text-decoration: none;">(공급받는 자 보관용)</span></div>
-                            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 2px;">
-                                <div style="font-size: 10.5px; font-weight: bold; width: 45%;">주문일자: <span id="prev-date-2"></span></div>
-                                <div style="font-size: 10.5px; font-weight: bold; text-align: right; width: 45%;">주문번호: <span class="font-normal inline-block w-32" style="text-align: left;"></span></div>
-                            </div>
-                            
-                            <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
-                                <colgroup>
-                                    <col style="width: 20px;">
-                                    <col style="width: 85px;">
-                                    <col style="width: auto;">
-                                    <col style="width: 20px;">
+                                    <col style="width: 18px;">
                                     <col style="width: 78px;">
                                     <col style="width: auto;">
                                 </colgroup>
@@ -477,7 +397,99 @@
                                     <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td>
                                 </tr>
                                 <tr><td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td><td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td></tr>
-                                <tr><td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto"></td><td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto"></td></tr>
+                                <tr>
+                                    <td class="invoice-label">주 소</td>
+                                    <td colspan="2" class="inv-text-left prev-prov-addr text-fit-auto invoice-addr-cell"></td> <!-- 🌟 세로 높이 28px 확장 -->
+                                    <td class="invoice-label">주 소</td>
+                                    <td colspan="2" class="inv-text-left prev-cust-addr text-fit-auto invoice-addr-cell"></td> <!-- 🌟 세로 높이 28px 확장 -->
+                                </tr>
+                                <tr><td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td><td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td></tr>
+                                <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
+                            </table>
+
+                            <!-- 🌟 상품 리스트 테이블 -->
+                            <table class="invoice-table" style="margin-bottom: 0;">
+                                <colgroup>
+                                    <col style="width: 24px;">
+                                    <col style="width: auto;">
+                                    <col style="width: 68px;">
+                                    <col style="width: 34px;">
+                                    <col style="width: 55px;">
+                                    <col style="width: 65px;">
+                                </colgroup>
+                                <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
+                                <tbody>
+                                    <tr class="empty-row"><td class="inv-text-center">1</td><td class="inv-text-left inv-font-bold prev-item-name text-fit-auto"></td><td class="inv-text-center prev-item-unit text-fit-auto"></td><td class="inv-text-center prev-item-qty"></td><td class="inv-text-right prev-item-price"></td><td class="inv-text-right prev-item-total"></td></tr>
+                                    <tr class="empty-row"><td class="inv-text-center">2</td><td></td><td></td><td></td><td></td><td></td></tr>
+                                    <tr class="empty-row"><td class="inv-text-center">3</td><td></td><td></td><td></td><td></td><td></td></tr>
+                                    <tr class="empty-row"><td class="inv-text-center">4</td><td></td><td></td><td></td><td></td><td></td></tr>
+                                    <tr class="empty-row"><td class="inv-text-center">5</td><td></td><td></td><td></td><td></td><td></td></tr>
+                                </tbody>
+                            </table>
+
+                            <!-- 🌟 하단 요약 테이블 (세로 높이감 확장) -->
+                            <table class="invoice-table" style="border-top: none;">
+                                <colgroup>
+                                    <col style="width: 75px;">
+                                    <col style="width: auto;">
+                                    <col style="width: 62px;">
+                                    <col style="width: 42px;">
+                                    <col style="width: 48px;">
+                                    <col style="width: 65px;">
+                                </colgroup>
+                                <tbody>
+                                    <tr>
+                                        <td class="invoice-label" style="height: 24px;">결 제 수 단</td>
+                                        <td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td>
+                                        <td class="invoice-label">총 상품수량</td>
+                                        <td class="inv-text-center inv-font-bold prev-total-qty"></td>
+                                        <td class="invoice-label">배 송 비</td>
+                                        <td class="inv-text-right prev-shipping-fee">0원</td>
+                                    </tr>
+                                    <tr>
+                                        <td class="invoice-label" style="height: 28px;">배 송 요 청 사 항</td>
+                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto" style="vertical-align: top; padding-top: 4px;"></td>
+                                        <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
+                                        <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+
+                            <div style="text-align: right; font-size: 10px; font-weight: bold; margin-top: 5px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
+                        </div>
+
+                        <div class="invoice-cut-line"></div>
+
+                        <!-- [하단: 공급받는 자 보관용] -->
+                        <div class="invoice-half">
+                            <div class="invoice-title">거래명세표<span style="font-size: 13px; font-weight: normal; text-decoration: none;">(공급받는 자 보관용)</span></div>
+                            <div style="display: flex; justify-content: space-between; align-items: flex-end; margin-bottom: 2px;">
+                                <div style="font-size: 10px; font-weight: bold; width: 45%;">주문일자: <span id="prev-date-2"></span></div>
+                                <div style="font-size: 10px; font-weight: bold; text-align: right; width: 45%;">주문번호: <span class="font-normal inline-block w-32" style="text-align: left;"></span></div>
+                            </div>
+                            
+                            <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
+                                <colgroup>
+                                    <col style="width: 18px;">
+                                    <col style="width: 78px;">
+                                    <col style="width: auto;">
+                                    <col style="width: 18px;">
+                                    <col style="width: 78px;">
+                                    <col style="width: auto;">
+                                </colgroup>
+                                <tr>
+                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td>
+                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td>
+                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td>
+                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td>
+                                </tr>
+                                <tr><td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td><td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td></tr>
+                                <tr>
+                                    <td class="invoice-label">주 소</td>
+                                    <td colspan="2" class="inv-text-left prev-prov-addr text-fit-auto invoice-addr-cell"></td>
+                                    <td class="invoice-label">주 소</td>
+                                    <td colspan="2" class="inv-text-left prev-cust-addr text-fit-auto invoice-addr-cell"></td>
+                                </tr>
                                 <tr><td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td><td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td></tr>
                                 <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
                             </table>
@@ -486,10 +498,10 @@
                                 <colgroup>
                                     <col style="width: 24px;">
                                     <col style="width: auto;">
-                                    <col style="width: 72px;">
-                                    <col style="width: 36px;">
-                                    <col style="width: 58px;">
                                     <col style="width: 68px;">
+                                    <col style="width: 34px;">
+                                    <col style="width: 55px;">
+                                    <col style="width: 65px;">
                                 </colgroup>
                                 <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
                                 <tbody>
@@ -505,14 +517,14 @@
                                 <colgroup>
                                     <col style="width: 75px;">
                                     <col style="width: auto;">
+                                    <col style="width: 62px;">
+                                    <col style="width: 42px;">
+                                    <col style="width: 48px;">
                                     <col style="width: 65px;">
-                                    <col style="width: 45px;">
-                                    <col style="width: 50px;">
-                                    <col style="width: 68px;">
                                 </colgroup>
                                 <tbody>
                                     <tr>
-                                        <td class="invoice-label">결 제 수 단</td>
+                                        <td class="invoice-label" style="height: 24px;">결 제 수 단</td>
                                         <td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td>
                                         <td class="invoice-label">총 상품수량</td>
                                         <td class="inv-text-center inv-font-bold prev-total-qty"></td>
@@ -520,15 +532,15 @@
                                         <td class="inv-text-right prev-shipping-fee">0원</td>
                                     </tr>
                                     <tr>
-                                        <td class="invoice-label">배 송 요 청 사 항</td>
-                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto" style="vertical-align: top; padding-top: 3px;"></td>
+                                        <td class="invoice-label" style="height: 28px;">배 송 요 청 사 항</td>
+                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto" style="vertical-align: top; padding-top: 4px;"></td>
                                         <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
                                         <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
                                     </tr>
                                 </tbody>
                             </table>
 
-                            <div style="text-align: right; font-size: 10.5px; font-weight: bold; margin-top: 6px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
+                            <div style="text-align: right; font-size: 10px; font-weight: bold; margin-top: 5px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
                         </div>
                     </div>
                 </div>
@@ -543,7 +555,7 @@
                     </div>
                 </div>
 
-                <button type="button" onclick="document.getElementById('form-template-modal').classList.add('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-3.5 rounded-2xl transition shadow-lg active:scale-95 flex items-center justify-center gap-2">
+                <button type="button" onclick="document.getElementById('form-template-modal').classList.remove('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-3.5 rounded-2xl transition shadow-lg active:scale-95 flex items-center justify-center gap-2">
                     <i class="fa-solid fa-layer-group"></i> 기본 템플릿(양식) 선택
                 </button>
 
@@ -565,7 +577,7 @@
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label><input type="text" id="input-prov-name" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500, p-2 text-xs font-bold">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         
                         <div class="flex gap-1.5 pt-1">
                             <button type="button" onclick="cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
