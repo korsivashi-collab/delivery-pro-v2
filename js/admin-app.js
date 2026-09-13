@@ -52,7 +52,7 @@ window.getLocalDateString = function(d = new Date()) {
 }
 const todayStr = window.getLocalDateString();
 
-// 🌟 핵심 초기화 (window 객체에 강제 바인딩)
+// 🌟 핵심 초기화
 window.onload = () => {
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
@@ -638,7 +638,6 @@ window.deleteSavedForm = function(idx) {
     window.loadSavedForms();
 };
 
-
 // =====================================================================
 // 🌟 권역 설정 모달 전용 로직 (중복 제거 및 최적화 완료 최종본)
 // =====================================================================
@@ -837,6 +836,83 @@ window.saveDriverTerritory = async function() {
 };
 
 // =====================================================================
+// 🌟 신규 기능: 전체 기사 권역 설정 현황 지도 보기 로직
+// =====================================================================
+let allTerritoriesMap = null;
+let allTerritoriesOverlays = [];
+
+window.openAllTerritoriesMap = function() {
+    const modal = document.getElementById('all-territories-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    setTimeout(() => {
+        const container = document.getElementById('all-territories-map-container');
+        if (!allTerritoriesMap) {
+            const options = { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 };
+            allTerritoriesMap = new kakao.maps.Map(container, options);
+        }
+        allTerritoriesMap.relayout();
+        
+        allTerritoriesOverlays.forEach(ov => ov.setMap(null));
+        allTerritoriesOverlays = [];
+
+        const allDrivers = window.getFilteredVisibleDrivers();
+        let bounds = new kakao.maps.LatLngBounds();
+        let hasValidPoint = false;
+
+        allDrivers.forEach(d => {
+            if (d.territoryLat && d.territoryLng) {
+                hasValidPoint = true;
+                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                bounds.extend(pos);
+
+                const marker = new kakao.maps.Marker({ position: pos });
+                marker.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(marker);
+
+                const label = new kakao.maps.CustomOverlay({
+                    position: pos,
+                    content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`,
+                    yAnchor: 1
+                });
+                label.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(label);
+
+                let r1, r2, r3;
+                const scale = d.territoryScale || 'dong';
+                if (scale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
+                else if (scale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
+                else if (scale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+                const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
+                const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
+                const c3 = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.05 });
+
+                c3.setMap(allTerritoriesMap); c2.setMap(allTerritoriesMap); c1.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(c3, c2, c1);
+            }
+        });
+
+        if (hasValidPoint) {
+            allTerritoriesMap.setBounds(bounds);
+        } else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) {
+                const baseData = JSON.parse(savedBase);
+                if (baseData.lat && baseData.lng) {
+                    allTerritoriesMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
+                }
+            }
+        }
+    }, 200);
+};
+
+window.closeAllTerritoriesMap = function() {
+    document.getElementById('all-territories-modal').classList.add('hidden');
+};
+
+// =====================================================================
 // 🌟 배송 할당 및 기사 리스트 필터링 로직
 // =====================================================================
 
@@ -871,7 +947,7 @@ window.saveCompanyBaseAddress = async function() {
     btn.disabled = false; btn.innerText = "저장";
 
     if (!coords) {
-        alert("입력하신 주소의 위치(좌표)를 찾을 수 정없습니다.\n정확한 도로명 또는 지번 주소를 입력해주세요.");
+        alert("입력하신 주소의 위치(좌표)를 찾을 수 없습니다.\n정확한 도로명 또는 지번 주소를 입력해주세요.");
         return;
     }
 
@@ -1461,7 +1537,9 @@ window.generateInvoiceHTML = function(item, providerInfo) {
     if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
 
     template.querySelectorAll('span.font-normal.inline-block').forEach(span => {
-        if (span.classList.contains('w-32')) span.innerText = item.orderNo || '';
+        if (span.classList.contains('w-32')) {
+            span.innerText = item.orderNo || '';
+        }
     });
 
     return template.outerHTML;
@@ -2623,4 +2701,272 @@ window.initRealtimeSync = function() {
         allDispatchTemplates = [];
         snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
     });
+};
+
+// =====================================================================
+// 🌟 권역 설정 모달 전용 로직
+// =====================================================================
+window.clearTerritoryOverlays = function() {
+    if (territoryMarker) territoryMarker.setMap(null);
+    territoryCircles.forEach(c => c.setMap(null));
+    territoryCircles = [];
+    otherTerritoryOverlays.forEach(ov => ov.setMap(null));
+    otherTerritoryOverlays = [];
+};
+
+window.drawOtherDriversTerritories = function(excludeDevId) {
+    const allDrivers = window.getFilteredVisibleDrivers();
+    allDrivers.forEach(d => {
+        const devId = d.deviceId || d.key;
+        if (devId === excludeDevId) return; 
+        
+        if (d.territoryLat && d.territoryLng) {
+            const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+            const marker = new kakao.maps.Marker({ 
+                position: pos,
+                image: new kakao.maps.MarkerImage('https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png', new kakao.maps.Size(24, 35)) 
+            });
+            marker.setMap(territoryMap);
+            otherTerritoryOverlays.push(marker);
+
+            const label = new kakao.maps.CustomOverlay({
+                position: pos,
+                content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`,
+                yAnchor: 1
+            });
+            label.setMap(territoryMap);
+            otherTerritoryOverlays.push(label);
+
+            let r3 = 5000; 
+            if (d.territoryScale === 'gu') r3 = 15000;
+            else if (d.territoryScale === 'si') r3 = 45000;
+
+            const circle = new kakao.maps.Circle({
+                center: pos, radius: r3,
+                strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6,
+                fillColor: '#d1d5db', fillOpacity: 0.2
+            });
+            circle.setMap(territoryMap);
+            otherTerritoryOverlays.push(circle);
+        }
+    });
+};
+
+window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
+    try { if (window.event) window.event.stopPropagation(); } catch(e) {}
+
+    document.getElementById('territory-target-devid').value = devId;
+    document.getElementById('territory-target-phone').innerText = phone;
+    
+    const modal = document.getElementById('driver-territory-modal');
+    if(!modal) {
+        alert("권역 설정 모달창을 찾을 수 없습니다. HTML 코드를 확인해주세요.");
+        return;
+    }
+    modal.classList.remove('hidden');
+
+    currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
+    window.setTerritoryScale(currentTerritoryScale, true); 
+
+    setTimeout(() => {
+        const container = document.getElementById('territory-map-container');
+        if (!territoryMap) {
+            const options = { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 };
+            territoryMap = new kakao.maps.Map(container, options);
+            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) {
+                window.setTerritoryCenter(mouseEvent.latLng);
+            });
+        }
+        
+        territoryMap.relayout(); 
+        window.clearTerritoryOverlays(); 
+
+        if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
+            const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
+            territoryMap.setCenter(pos);
+            window.setTerritoryCenter(pos);
+        } else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) {
+                const baseData = JSON.parse(savedBase);
+                if (baseData.lat && baseData.lng) {
+                    const basePos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
+                    territoryMap.setCenter(basePos);
+                }
+            } else {
+                territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
+            }
+            const addrDisplayEl = document.getElementById('territory-selected-address');
+            if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
+        }
+        
+        window.drawOtherDriversTerritories(devId);
+        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
+    }, 200);
+};
+
+window.closeDriverTerritoryModal = function() {
+    document.getElementById('driver-territory-modal').classList.add('hidden');
+};
+
+window.setTerritoryScale = function(scale, skipRedraw = false) {
+    currentTerritoryScale = scale;
+    const scaleInput = document.getElementById('input-territory-scale');
+    if(scaleInput) scaleInput.value = scale;
+
+    ['dong', 'gu', 'si'].forEach(s => {
+        const btn = document.getElementById(`btn-scale-${s}`);
+        if (!btn) return;
+        if (s === scale) btn.className = "px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95";
+        else btn.className = "px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
+    });
+
+    if (territoryMap) {
+        if (scale === 'dong') territoryMap.setLevel(7); 
+        else if (scale === 'gu') territoryMap.setLevel(9); 
+        else if (scale === 'si') territoryMap.setLevel(11); 
+    }
+
+    if (!skipRedraw && territoryMarker) {
+        window.setTerritoryCenter(territoryMarker.getPosition());
+    }
+};
+
+window.setTerritoryCenter = function(latLng) {
+    if (territoryMarker) territoryMarker.setMap(null);
+    territoryCircles.forEach(c => c.setMap(null));
+    territoryCircles = [];
+
+    document.getElementById('input-territory-lat').value = latLng.getLat();
+    document.getElementById('input-territory-lng').value = latLng.getLng();
+
+    const geocoder = new kakao.maps.services.Geocoder();
+    geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
+        let displayAddr = "주소를 찾을 수 없는 지역입니다";
+        if (status === kakao.maps.services.Status.OK) {
+            let fullAddress = result[0].address.address_name;
+            if (result[0].road_address) fullAddress = result[0].road_address.address_name;
+            document.getElementById('input-territory-1').value = fullAddress; 
+            document.getElementById('input-territory-2').value = ''; 
+            displayAddr = fullAddress;
+        }
+        const addrDisplayEl = document.getElementById('territory-selected-address');
+        if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
+    });
+
+    territoryMarker = new kakao.maps.Marker({ position: latLng });
+    territoryMarker.setMap(territoryMap);
+
+    let r1, r2, r3;
+    if (currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
+    else if (currentTerritoryScale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
+    else if (currentTerritoryScale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+    const c1 = new kakao.maps.Circle({ center: latLng, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.5 });
+    const c2 = new kakao.maps.Circle({ center: latLng, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.25 });
+    const c3 = new kakao.maps.Circle({ center: latLng, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.1 });
+
+    c3.setMap(territoryMap); c2.setMap(territoryMap); c1.setMap(territoryMap);
+    territoryCircles = [c3, c2, c1];
+};
+
+window.saveDriverTerritory = async function() {
+    const devId = document.getElementById('territory-target-devid').value;
+    const lat = document.getElementById('input-territory-lat').value;
+    const lng = document.getElementById('input-territory-lng').value;
+    const scale = document.getElementById('input-territory-scale').value;
+    const t1 = document.getElementById('input-territory-1').value || '상세 주소 확인 불가'; 
+    const t2 = document.getElementById('input-territory-2').value || '';
+
+    if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
+
+    const targetLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (!targetLic) return;
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key), {
+            territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
+            territoryScale: scale, territory1: t1, territory2: t2
+        });
+        alert("기사 권역(위치 및 반경)이 성공적으로 저장되었습니다.");
+        window.closeDriverTerritoryModal();
+        window.renderDispatchDriverList();
+    } catch(e) { alert("저장 오류: " + e.message); }
+};
+
+// =====================================================================
+// 🌟 신규 기능: 전체 기사 권역 설정 현황 지도 보기 로직
+// =====================================================================
+let allTerritoriesMap = null;
+let allTerritoriesOverlays = [];
+
+window.openAllTerritoriesMap = function() {
+    const modal = document.getElementById('all-territories-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    setTimeout(() => {
+        const container = document.getElementById('all-territories-map-container');
+        if (!allTerritoriesMap) {
+            const options = { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 };
+            allTerritoriesMap = new kakao.maps.Map(container, options);
+        }
+        allTerritoriesMap.relayout();
+        
+        allTerritoriesOverlays.forEach(ov => ov.setMap(null));
+        allTerritoriesOverlays = [];
+
+        const allDrivers = window.getFilteredVisibleDrivers();
+        let bounds = new kakao.maps.LatLngBounds();
+        let hasValidPoint = false;
+
+        allDrivers.forEach(d => {
+            if (d.territoryLat && d.territoryLng) {
+                hasValidPoint = true;
+                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                bounds.extend(pos);
+
+                const marker = new kakao.maps.Marker({ position: pos });
+                marker.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(marker);
+
+                const label = new kakao.maps.CustomOverlay({
+                    position: pos,
+                    content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`,
+                    yAnchor: 1
+                });
+                label.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(label);
+
+                let r1, r2, r3;
+                const scale = d.territoryScale || 'dong';
+                if (scale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
+                else if (scale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
+                else if (scale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+                const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
+                const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
+                const c3 = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.05 });
+
+                c3.setMap(allTerritoriesMap); c2.setMap(allTerritoriesMap); c1.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(c3, c2, c1);
+            }
+        });
+
+        if (hasValidPoint) {
+            allTerritoriesMap.setBounds(bounds);
+        } else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) {
+                const baseData = JSON.parse(savedBase);
+                if (baseData.lat && baseData.lng) {
+                    allTerritoriesMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
+                }
+            }
+        }
+    }, 200);
+};
+
+window.closeAllTerritoriesMap = function() {
+    document.getElementById('all-territories-modal').classList.add('hidden');
 };
