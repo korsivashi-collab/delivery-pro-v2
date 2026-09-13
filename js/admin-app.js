@@ -1213,26 +1213,28 @@ window.updateLivePreview = function() {
 // === 🌟 [수정] 명세서 폼 저장 및 불러오기: 클릭 영역 분리 ===
 let currentSelectedFormIndex = null;
 
+// === 저장된 폼 목록 렌더링 (체크 영역과 미리보기/텍스트 영역 완벽 분리) ===
 window.loadSavedForms = function() {
     const listEl = document.getElementById('saved-forms-list');
     if (!listEl) return;
     
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     if (savedForms.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`;
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.</div>`;
         return;
     }
 
     let html = '';
     savedForms.forEach((form, idx) => {
         const isSelected = (currentSelectedFormIndex === idx);
-        // 🌟 수정: 체크박스 영역과 텍스트 클릭 영역(미리보기 이동)을 명확하게 분리
         html += `
         <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-2 overflow-hidden flex-1">
-                <button type="button" onclick="applySavedForm(${idx})" class="w-6 h-6 ${isSelected ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-200'} rounded-lg flex items-center justify-center text-[10px] shrink-0 transition" title="이 양식 체크(선택)">
+                <!-- 🌟 요구사항 2 & 3 반영: 체크 박스 (누르면 토글 되도록 설정) -->
+                <button type="button" onclick="toggleSelectForm(${idx})" class="w-6 h-6 ${isSelected ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-200'} rounded-lg flex items-center justify-center text-[10px] shrink-0 transition" title="선택(체크) 토글">
                     ${isSelected ? '<i class="fa-solid fa-check"></i>' : '<i class="fa-solid fa-file-invoice"></i>'}
                 </button>
+                <!-- 🌟 요구사항 3 반영: 텍스트 영역 (누르면 명세서 미리보기로 이동) -->
                 <div class="min-w-0 cursor-pointer flex-1" onclick="previewSavedForm(${idx})" title="명세서 미리보기">
                     <p class="text-[11px] font-black text-gray-800 truncate leading-tight hover:text-indigo-600">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate">${form.name}</p>
@@ -1244,10 +1246,35 @@ window.loadSavedForms = function() {
     listEl.innerHTML = html;
 };
 
-// 🌟 수정: 텍스트 영역을 누르면 미리보기로 완전히 이동함
+// 🌟 요구사항 2 반영: 체크 버튼을 누를 때 이미 선택된 상태면 해제(토글), 아니면 선택
+window.toggleSelectForm = function(idx) {
+    if (currentSelectedFormIndex === idx) {
+        // 이미 선택되어 있는 것을 다시 누르면 선택 해제 (체크 취소)
+        currentSelectedFormIndex = null;
+        window.cancelProviderFormEdit(); // 입력창 비우기
+        window.loadSavedForms();
+    } else {
+        // 새로 선택
+        window.applySavedForm(idx);
+    }
+};
+
 window.previewSavedForm = function(idx) {
     window.applySavedForm(idx);
     window.switchInvoiceTab('PREVIEW');
+};
+
+// 🌟 요구사항 1 반영: 입력창 초기화 및 선택 해제 함수
+window.cancelProviderFormEdit = function() {
+    currentSelectedFormIndex = null;
+    document.getElementById('input-form-title').value = '';
+    document.getElementById('input-prov-regno').value = '';
+    document.getElementById('input-prov-name').value = '';
+    document.getElementById('input-prov-addr').value = '';
+    document.getElementById('input-prov-tel').value = '';
+    document.getElementById('input-prov-add-tel').value = '';
+    window.loadSavedForms();
+    window.updateLivePreview();
 };
 
 window.saveProviderForm = function() {
@@ -1274,6 +1301,35 @@ window.saveProviderForm = function() {
 
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
+    window.loadSavedForms();
+};
+
+window.applySavedForm = function(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const form = savedForms[idx];
+    if (!form) return;
+
+    currentSelectedFormIndex = idx;
+
+    document.getElementById('input-form-title').value = form.title || '';
+    document.getElementById('input-prov-regno').value = form.regno || '';
+    document.getElementById('input-prov-name').value = form.name || '';
+    document.getElementById('input-prov-addr').value = form.addr || '';
+    document.getElementById('input-prov-tel').value = form.tel || '';
+    document.getElementById('input-prov-add-tel').value = form.addTel || '';
+
+    window.loadSavedForms(); 
+    window.updateLivePreview();
+};
+
+window.deleteSavedForm = function(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const form = savedForms[idx];
+    if(!confirm(`[${form.title}] 폼을 삭제하시겠습니까?`)) return;
+
+    savedForms.splice(idx, 1);
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    if (currentSelectedFormIndex === idx) currentSelectedFormIndex = null;
     window.loadSavedForms();
 };
 
