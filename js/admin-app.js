@@ -165,7 +165,6 @@ function showMasterPanel(name = '마스터') {
     if(window.switchMasterTab) window.switchMasterTab('regular');
 }
 
-// 🌟 누락되었던 관제 패널 표시 함수 복원
 function showDispatchPanel() {
     currentUserRole = 'DISPATCH';
     document.getElementById('login-screen').classList.add('hidden');
@@ -635,8 +634,24 @@ window.deleteSavedForm = function(idx) {
 };
 
 // =====================================================================
-// 🌟 AI 배송 할당 모달 전용 로직 (회사 거점, 기사 권역, 순번 표시, 분할 뷰어)
+// 🌟 AI 배송 할당 모달 전용 로직 (유연한 기사 필터링 및 권역 설정)
 // =====================================================================
+
+// 🌟 유연한 기사 필터링 함수 (대소문자 및 키 접두사 차이 방어)
+function getFilteredVisibleDrivers() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const isMaster = (currentUserRole === 'MASTER');
+    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch');
+    
+    if (!isMaster && dispatchKey) {
+        const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        visibleLicenses = visibleLicenses.filter(l => {
+            const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+            return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
+        });
+    }
+    return visibleLicenses;
+}
 
 window.saveCompanyBaseAddress = async function() {
     const input = document.getElementById('company-base-address');
@@ -1030,7 +1045,7 @@ window.deleteSelectedExcelRows = async function() {
 
 window.clearAllExcelRows = async function() {
     if(parsedExcelList.length === 0) return;
-    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?\n(되돌릴 수 없습니다)")) return;
+    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?(되돌릴 수 없습니다)")) return;
     parsedExcelList = [];
     renderExcelTable();
     await window.autoSaveExcelToFirebase();
@@ -1355,9 +1370,6 @@ window.executeBatchPrint = function() {
     };
 };
 
-// =====================================================================
-// 🌟 실시간 관제 동기화 루프 함수
-// =====================================================================
 function initRealtimeSync() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         allLicenses = [];
