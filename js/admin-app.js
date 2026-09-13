@@ -21,9 +21,11 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
+// 🌟 엑셀 및 출력, 배차 상태 변수
 let excelSortAsc = true; 
 let parsedExcelList = []; 
 let printReadyList = []; 
+let selectedDispatchDriverId = null; // 🌟 자동배차 창에서 선택된 기사 ID
 
 // 모듈 스코프 충돌 방지용
 window.myMapOverlays = [];
@@ -72,7 +74,7 @@ window.onload = () => {
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
     window.loadSavedForms();
-    initExcelDropZone(); // 🌟 드롭존 초기화 함수 호출
+    initExcelDropZone(); // 드롭존 초기화
 
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
@@ -170,6 +172,12 @@ function initMasterDataSync() {
         renderMasterTables();
         window.populateDriverSelect();
         window.renderAccountHistoryView();
+        
+        // 라이선스 변동 시 자동배차 기사 리스트도 실시간 반영
+        if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
+            window.renderDispatchDriverList();
+            window.renderDispatchDriverDetail();
+        }
     });
 
     onSnapshot(collection(db, "memos"), (snapshot) => {
@@ -421,7 +429,12 @@ window.handleProFeature = function(featureName) {
             document.getElementById('auto-dispatch-modal').classList.remove('hidden');
             window.renderDispatchDriverList();
             window.loadExcelFromFirebase();
-            initExcelDropZone(); // 🌟 모달 열릴 때 드롭존 이벤트 재확인
+            initExcelDropZone(); 
+            
+            // 🌟 모달 켤 때 회사 거점 주소 로드
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
+
         } else if (featureName === 'INVOICE') {
             if (printReadyList.length === 0) {
                 alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요.");
@@ -603,9 +616,55 @@ window.deleteSavedForm = function(idx) {
 };
 
 // =====================================================================
-// 🌟 AI 배송 할당 모달 전용 로직 (엑셀 업로드 및 주소 좌표 변환)
+// 🌟 AI 배송 할당 모달 전용 로직 (회사 거점, 기사 권역, 분할 뷰어)
 // =====================================================================
 
+// 🌟 1. 본사 거점 설정 로직
+window.saveCompanyBaseAddress = async function() {
+    const input = document.getElementById('company-base-address');
+    const addr = input.value.trim();
+    if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
+    
+    const btn = document.getElementById('btn-save-company-base');
+    btn.disabled = true; btn.innerText = "확인중...";
+
+    const coords = await getCoordsFromAddress(addr);
+    btn.disabled = false; btn.innerText = "저장";
+
+    if (!coords) {
+        alert("입력하신 주소의 위치(좌표)를 찾을 수 없습니다.\n정확한 도로명 또는 지번 주소를 입력해주세요.");
+        return;
+    }
+
+    const baseData = { address: addr, lat: coords.lat, lng: coords.lng };
+    localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
+    updateCompanyBaseUI(baseData);
+};
+
+window.clearCompanyBaseAddress = function() {
+    localStorage.removeItem('deliveryProCompanyBase');
+    document.getElementById('company-base-address').value = '';
+    updateCompanyBaseUI(null);
+};
+
+function updateCompanyBaseUI(baseData) {
+    const textEl = document.getElementById('saved-base-address-text');
+    const clearBtn = document.getElementById('btn-clear-company-base');
+
+    if (baseData) {
+        textEl.innerText = baseData.address;
+        textEl.classList.add('text-indigo-600');
+        textEl.classList.remove('text-gray-500');
+        clearBtn.classList.remove('hidden');
+    } else {
+        textEl.innerText = "저장된 거점이 없습니다.";
+        textEl.classList.add('text-gray-500');
+        textEl.classList.remove('text-indigo-600');
+        clearBtn.classList.add('hidden');
+    }
+}
+
+// 🌟 2. 기사 목록 렌더링 및 클릭 이벤트
 window.renderDispatchDriverList = function() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -621,16 +680,120 @@ window.renderDispatchDriverList = function() {
     
     let html = '';
     drivers.forEach(d => {
+        const devId = d.deviceId || d.key;
         const phoneDisplay = d.phone || d.key;
+        const t1 = d.territory1 || '';
+        const t2 = d.territory2 || '';
+        
+        let territoryBadge = '';
+        if (t1) {
+            territoryBadge = `<button type="button" onclick="openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${t1}', '${t2}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap overflow-hidden text-ellipsis max-w-[80px]" title="${t1} ${t2}">${t1}</button>`;
+        } else {
+            territoryBadge = `<button type="button" onclick="openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 미설정</button>`;
+        }
+
+        const isSelected = selectedDispatchDriverId === devId;
+        
         html += `
-        <div class="bg-white border border-gray-200 p-2.5 rounded-xl flex items-center justify-between shadow-xs mb-2 hover:border-blue-300 transition">
-            <span class="font-black text-xs text-gray-800 flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-500"></i> ${phoneDisplay}</span>
-            <button type="button" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition">권역 미설정</button>
+        <div onclick="selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs mb-2 transition">
+            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-1.5 min-w-0">
+                <i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i> 
+                <span class="truncate">${phoneDisplay}</span>
+            </span>
+            <div class="shrink-0 ml-2">
+                ${territoryBadge}
+            </div>
         </div>
         `;
     });
     listEl.innerHTML = html;
 };
+
+// 기사 클릭 시 우측 뷰어 연동
+window.selectDispatchDriver = function(devId) {
+    selectedDispatchDriverId = devId;
+    window.renderDispatchDriverList(); // 좌측 목록 포커스 색상 갱신
+    window.renderDispatchDriverDetail(); // 우측 상세 내역 표 갱신
+};
+
+// 🌟 3. 기사 권역 설정 (자석) 모달창 통제 로직
+window.openDriverTerritoryModal = function(devId, phone, t1, t2) {
+    event.stopPropagation(); // 기사 클릭 이벤트(뷰어 연동) 방지
+    document.getElementById('territory-target-devid').value = devId;
+    document.getElementById('territory-target-phone').innerText = phone;
+    document.getElementById('input-territory-1').value = t1 !== 'undefined' ? t1 : '';
+    document.getElementById('input-territory-2').value = t2 !== 'undefined' ? t2 : '';
+    document.getElementById('driver-territory-modal').classList.remove('hidden');
+};
+
+window.closeDriverTerritoryModal = function() {
+    document.getElementById('driver-territory-modal').classList.add('hidden');
+};
+
+window.saveDriverTerritory = async function() {
+    const devId = document.getElementById('territory-target-devid').value;
+    const t1 = document.getElementById('input-territory-1').value.trim();
+    const t2 = document.getElementById('input-territory-2').value.trim();
+
+    if (!t1) { alert("1차 핵심 권역을 입력해주세요."); return; }
+
+    const targetLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (!targetLic) return;
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key), {
+            territory1: t1,
+            territory2: t2
+        });
+        alert("기사 권역이 성공적으로 저장되었습니다.");
+        window.closeDriverTerritoryModal();
+    } catch(e) {
+        alert("저장 오류: " + e.message);
+    }
+};
+
+// 🌟 4. 오른쪽 창 (기사별 할당 상세 내역) 렌더링
+window.renderDispatchDriverDetail = function() {
+    const header = document.getElementById('detail-driver-header');
+    const table = document.getElementById('detail-driver-table');
+    const tbody = document.getElementById('detail-driver-tbody');
+    const badge = document.getElementById('detail-driver-count-badge');
+    
+    if (!selectedDispatchDriverId) {
+        header.classList.remove('hidden');
+        table.classList.add('hidden');
+        badge.classList.add('hidden');
+        return;
+    }
+
+    const targetLic = allLicenses.find(l => l.deviceId === selectedDispatchDriverId || l.key === selectedDispatchDriverId);
+    const driverName = targetLic ? (targetLic.phone || targetLic.key) : selectedDispatchDriverId;
+
+    // 선택된 기사에게 할당된 아이템만 추출
+    const assignedItems = parsedExcelList.filter(item => item.assignedDriver === driverName);
+
+    header.classList.add('hidden');
+    table.classList.remove('hidden');
+    badge.classList.remove('hidden');
+    badge.innerText = `총 ${assignedItems.length}건`;
+
+    if (assignedItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`;
+        return;
+    }
+
+    let html = '';
+    assignedItems.forEach((item, idx) => {
+        html += `
+        <tr class="hover:bg-blue-50/50 transition">
+            <td class="text-center font-bold text-gray-500">${item.displayNumber || idx + 1}</td>
+            <td class="font-bold text-gray-800 whitespace-normal break-keep">${item.address || '-'}</td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+};
+
+// ---------------------------------------------------------------------
 
 window.loadExcelFromFirebase = async function() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
@@ -686,7 +849,7 @@ function processExcelData(jsonData) {
             assignedDriver: null,
             senderName: '', orderNo: '', bizNo: '', address: '', storeName: '',
             phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: '',
-            lat: null, lng: null // 🌟 카카오 변환 좌표 필드
+            lat: null, lng: null // 카카오 변환 좌표 필드
         };
 
         for (let key in row) {
@@ -744,9 +907,9 @@ async function batchGeocodeExcelList(items) {
         const item = items[i];
         if (dropZone) {
             dropZone.innerHTML = `
-                <div class="flex items-center gap-3 text-blue-600 font-black text-xs">
-                    <i class="fa-solid fa-circle-notch fa-spin text-lg"></i>
-                    <span>배송지 주소 좌표 분석 중... (${i + 1} / ${items.length})</span>
+                <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
+                    <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
+                    <span>배송지 좌표 분석 중... (${i + 1} / ${items.length})</span>
                 </div>`;
         }
 
@@ -757,7 +920,7 @@ async function batchGeocodeExcelList(items) {
                 item.lng = coords.lng;
                 successCount++;
             }
-            // 50ms 딜레이 부여로 안전 호출
+            // 50ms 딜레이 부여로 카카오 API 차단 방어
             await new Promise(r => setTimeout(r, 50));
         }
     }
@@ -785,14 +948,17 @@ window.toggleRowCheckbox = function(e, idx) {
     if(cb) cb.checked = !cb.checked;
 };
 
+// 🌟 [수정] 5개의 핵심 칼럼만 보여주는 심플 테이블 렌더링
 function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody');
     if (!tbody) return;
 
     if (parsedExcelList.length === 0) {
-        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="16" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">데이터가 없습니다.<br>상단 영역에 엑셀 주문서 파일을 드래그하여 업로드하세요.</span></td></tr>`;
+        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
         const chkAll = document.getElementById('chk-excel-all');
         if (chkAll) chkAll.checked = false;
+        
+        window.renderDispatchDriverDetail(); // 상세 표기 동기화
         return;
     }
 
@@ -802,7 +968,7 @@ function renderExcelTable() {
             `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` : 
             `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
 
-        // 🌟 좌표 변환 성공 여부 아이콘 표시
+        // 좌표 변환 성공 여부 아이콘 표시
         const coordIcon = (item.lat && item.lng) ? 
             `<i class="fa-solid fa-map-pin text-emerald-500 mr-1" title="위치 확인됨 (${item.lat.toFixed(4)}, ${item.lng.toFixed(4)})"></i>` : 
             `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
@@ -812,20 +978,9 @@ function renderExcelTable() {
             <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
             <td class="text-center font-bold text-gray-500">${idx + 1}</td>
             <td class="text-center">${assignedBadge}</td>
-            <td class="font-bold">${item.senderName || '-'}</td>
-            <td class="text-gray-500 font-mono text-[10px]">${item.orderNo || '-'}</td>
-            <td class="text-gray-500 font-mono">${item.bizNo || '-'}</td>
-            <td class="truncate max-w-[200px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
-            <td class="font-black text-gray-900">${item.storeName || '-'}</td>
-            <td class="font-bold text-blue-600">${item.phone || '-'}</td>
-            <td class="font-bold truncate max-w-[150px]" title="${item.itemName}">${item.itemName || '-'}</td>
-            <td class="text-gray-700">${item.unit || '-'}</td>
-            <td class="text-right font-black">${formatNumber(item.qty)}</td>
-            <td class="text-right text-gray-600">${formatNumber(item.price)}</td>
-            <td class="text-right font-black text-red-600">${formatNumber(item.total)}</td>
-            <td class="truncate max-w-[150px] text-gray-500 text-[10px]" title="${item.memo}">${item.memo || '-'}</td>
+            <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
             <td class="text-center" onclick="event.stopPropagation()">
-                <button onclick="deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95" title="삭제"><i class="fa-solid fa-trash-can"></i></button>
+                <button onclick="deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95" title="삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
             </td>
         </tr>`;
     });
@@ -839,6 +994,9 @@ function renderExcelTable() {
             document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = isChecked; });
         };
     }
+
+    // 🌟 리스트가 갱신될 때 우측 기사 상세 내역 뷰어도 동기화 업데이트
+    window.renderDispatchDriverDetail(); 
 }
 
 window.deleteExcelRow = async function(idx) {
@@ -872,7 +1030,7 @@ window.clearAllExcelRows = async function() {
 };
 
 // =====================================================================
-// 🌟 엑셀 드롭존 초기화 및 업로드 이벤트 (확실한 이벤트 바인딩)
+// 🌟 엑셀 드롭존 초기화 및 업로드 이벤트
 // =====================================================================
 function initExcelDropZone() {
     const dropZone = document.getElementById('excel-drop-zone');
@@ -908,6 +1066,15 @@ function initExcelDropZone() {
     });
     dropZone.addEventListener('click', () => { fileInput.click(); });
     dropZone.dataset.bound = 'true';
+
+    // AI 배차 버튼 이벤트 리스너 임시 추가
+    const btnRunAi = document.getElementById('btn-run-auto-dispatch');
+    if(btnRunAi && !btnRunAi.dataset.bound) {
+        btnRunAi.addEventListener('click', () => {
+            alert("AI 자동 배차 알고리즘은 다음 단계(최종)에서 적용됩니다.\n현재는 엑셀 업로드 좌표 변환 및 기사 권역/본사 설정 테스트를 진행해 주세요.");
+        });
+        btnRunAi.dataset.bound = 'true';
+    }
 }
 
 async function handleExcelUpload(e) {
@@ -922,12 +1089,12 @@ async function handleExcelUpload(e) {
     }
 
     if (newlyAddedList.length > 0) {
-        renderExcelTable(); // 1차 화면 표시
+        renderExcelTable(); // 1차 렌더링 (리스트 채움)
         
-        // 🌟 지오코딩 자동 수행 (안전한 순차 호출)
+        // 지오코딩 자동 수행 (안전한 순차 호출)
         await batchGeocodeExcelList(newlyAddedList);
         
-        renderExcelTable(); // 2차 화면 갱신 (좌표 핀 반영)
+        renderExcelTable(); // 2차 렌더링 (좌표 핀 반영)
         await window.autoSaveExcelToFirebase(); 
         alert(`[업로드 및 위치 분석 완료]\n${files.length}개 파일에서 ${newlyAddedList.length}건의 주문 데이터가 추가 및 분석되었습니다.`);
     } else {
@@ -2168,7 +2335,7 @@ window.handleGlobalSearch = function(query) {
             </div>
         </div>`;
     });
-    dropdown.innerHTML = html; dropdown.classList.remove('hidden');
+    dropdown.innerHTML = html; dropdown.classList.ensure ? dropdown.classList.remove('hidden') : dropdown.classList.remove('hidden');
 };
 
 window.openLinkDriverModal = function() {
@@ -2211,6 +2378,45 @@ window.confirmLinkDriver = async function() {
     } catch (e) { alert("오류: " + e.message); }
 };
 
+window.setDispatchMode = function(mode, keepSelected = false) {
+    dispatchNavState = mode; window.dispatchNavState = mode;
+    if (!keepSelected && mode === 'DELIVERY') selectedDeviceId = null;
+    ['DELIVERY', 'MESSAGE', 'LOCATION'].forEach(m => {
+        const btn = document.getElementById(`nav-btn-${m}`);
+        if (btn) btn.className = (m === mode) ? "px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5" : "px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5";
+    });
+
+    const mapSec = document.getElementById('map-section');
+    const msgSec = document.getElementById('message-section');
+    const dateBar = document.getElementById('sidebar-date-bar');
+    const filterControls = document.getElementById('map-filter-controls');
+    const fitAllBtn = document.getElementById('btn-fit-all-drivers');
+
+    if (mode === 'MESSAGE') {
+        if (mapSec) mapSec.classList.add('hidden');
+        if (msgSec) msgSec.classList.remove('hidden');
+        if (dateBar) dateBar.classList.add('hidden');
+    } else {
+        if (msgSec) msgSec.classList.add('hidden');
+        if (mapSec) mapSec.classList.remove('hidden');
+        if (dateBar) dateBar.classList.remove('hidden');
+        setTimeout(() => { if (map) map.relayout(); }, 100);
+    }
+
+    window.forceClearMap(); 
+
+    if (mode === 'LOCATION') {
+        if (filterControls) filterControls.classList.add('hidden');
+        if (fitAllBtn) fitAllBtn.classList.remove('hidden');
+        window.drawAllDriversOnMap();
+    } else if (mode === 'DELIVERY') {
+        if (filterControls) filterControls.classList.remove('hidden');
+        if (fitAllBtn) fitAllBtn.classList.add('hidden');
+        if (selectedDeviceId) window.drawDriverOnMap(selectedDeviceId);
+    }
+    window.renderSidebar();
+};
+
 function showDispatchPanel() {
     currentUserRole = 'DISPATCH';
     document.getElementById('login-screen').classList.add('hidden');
@@ -2229,52 +2435,4 @@ function showDispatchPanel() {
     initKakaoMap();
     initRealtimeSync();
     window.setDispatchMode('DELIVERY');
-}
-
-function initRealtimeSync() {
-    onSnapshot(collection(db, "licenses"), (snapshot) => {
-        allLicenses = [];
-        snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        
-        if (currentUserRole === 'DISPATCH') {
-            const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-            const localToken = sessionStorage.getItem('deliveryProSessionToken');
-            if (dispatchKey && localToken) {
-                const myLic = allLicenses.find(l => l.id === dispatchKey || l.key === dispatchKey);
-                if (myLic && myLic.currentSessionToken && myLic.currentSessionToken !== localToken) {
-                    if (!localToken.startsWith('MONITOR-')) {
-                        alert("⚠️ [중복 로그인 감지]\n다른 PC 또는 브라우저에서 동일한 관제 계정으로 로그인하여 현재 연결이 종료됩니다.");
-                        sessionStorage.clear(); window.location.reload();
-                    }
-                }
-            }
-        }
-        window.renderSidebar();
-    });
-
-    onSnapshot(collection(db, "routes"), (snapshot) => {
-        activeRoutes = {};
-        snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
-        window.renderSidebar();
-        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
-    });
-
-    onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
-        allCompletions = [];
-        snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
-        window.renderSidebar();
-        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
-    });
-
-    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
-        allDispatchMessages = [];
-        snapshot.forEach(docSnap => { allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
-        window.renderMessageFeed(); window.checkDispatchInboxNotifications(); window.renderMasterNoticeHistoryList();
-    });
-
-    onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
-        allDispatchTemplates = [];
-        snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
-        window.renderCustomTemplates();
-    });
 }
