@@ -48,7 +48,7 @@ import {
     clearCompanyBaseAddress, updateCompanyBaseUI, renderDispatchDriverList, 
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
     formatNumber, processExcelData, getCoordsFromAddress, 
-    batchGeocodeExcelList, sortExcelList, toggleRowCheckbox, renderExcelTable, 
+    sortExcelList, toggleRowCheckbox, renderExcelTable, 
     deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows, initExcelDropZone, 
     handleExcelUpload, processSingleExcelFile, exportToInvoiceModal, previewInvoiceRow, 
     generateInvoiceHTML, executeBatchPrint
