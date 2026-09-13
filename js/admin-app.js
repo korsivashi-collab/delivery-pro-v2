@@ -45,7 +45,7 @@ import {
     clearTerritoryOverlays, drawOtherDriversTerritories, openDriverTerritoryModal, 
     closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, closeAllTerritoriesMap, saveCompanyBaseAddress, 
-    clearCompanyBaseAddress, updateCompanyBaseUI, renderDispatchDriverList, 
+    updateCompanyBaseUI, renderDispatchDriverList, 
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
     formatNumber, processExcelData, getCoordsFromAddress, 
     sortExcelList, toggleRowCheckbox, renderExcelTable, 
