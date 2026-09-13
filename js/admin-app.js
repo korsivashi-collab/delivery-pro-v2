@@ -714,6 +714,7 @@ window.updateCompanyBaseUI = function(baseData) {
     }
 };
 
+// js/admin-app.js 파일 내 renderDispatchDriverList 함수 교체
 window.renderDispatchDriverList = function() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -735,6 +736,8 @@ window.renderDispatchDriverList = function() {
         const tLat = d.territoryLat || '';
         const tLng = d.territoryLng || '';
         const tScale = d.territoryScale || '';
+        const t1 = d.territory1 || '';
+        const t2 = d.territory2 || '';
         
         let territoryBadge = '';
         if (tLat && tLng) {
@@ -742,9 +745,19 @@ window.renderDispatchDriverList = function() {
             if(tScale === 'gu') scaleLabel = '구/군';
             if(tScale === 'si') scaleLabel = '시/도';
             
-            territoryBadge = `<button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap overflow-hidden text-ellipsis max-w-[80px]" title="권역 설정됨"><i class="fa-solid fa-map-location-dot"></i> ${scaleLabel}</button>`;
+            // 설정 완료 시: '권역 설정' 버튼과 함께 하단에 역변환된 기본 주소(지역명) 표시
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap" title="권역 설정됨"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
+                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
+                </div>`;
         } else {
-            territoryBadge = `<button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 미설정</button>`;
+            // 미설정 시: '권역 설정' 버튼으로 명칭 통일
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
+                    <span class="text-[9px] text-gray-400">미설정</span>
+                </div>`;
         }
 
         const isSelected = selectedDispatchDriverId === devId;
