@@ -38,7 +38,7 @@ import {
     drawAllDriversOnMap, fitMapToAllDrivers, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, openLinkDriverModal,
-    closeLinkDriverModal, confirmLinkDriver, handleProFeature, closePremiumModal, 
+    confirmLinkDriver, handleProFeature, closePremiumModal, 
     closeProInvoiceModal, selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
     saveProviderForm,  deleteSavedForm, 
