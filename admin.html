@@ -327,7 +327,7 @@
         </div>
     </div>
 
-    <!-- 🌟 기사 권역 설정 팝업 모달창 (3단 반경 및 흔적 유지 지원) -->
+    <!-- 🌟 기사 권역 설정 팝업 모달창 (3단 반경 및 타 기사 흔적 유지 지원) -->
     <div id="driver-territory-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm animate-pop-in">
         <div class="bg-white w-full max-w-4xl rounded-3xl p-6 shadow-2xl relative flex flex-col h-[85vh]">
             
@@ -336,15 +336,23 @@
                 <button onclick="closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
             </div>
             
-            <div class="mb-4 bg-blue-50 p-3.5 rounded-2xl border border-blue-100 flex-none flex justify-between items-center shadow-inner">
-                <div>
-                    <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-base ml-1">010-0000-0000</span></p>
-                    <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역의 중심점을 지정하세요. 선택한 단위에 맞춰 반경(1, 2, 3차)이 자동 설정됩니다.</p>
+            <div class="mb-4 bg-blue-50 p-4 rounded-2xl border border-blue-100 flex-none flex flex-col gap-3 shadow-inner">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-base ml-1">010-0000-0000</span></p>
+                        <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역 중심을 지정하세요. <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.</p>
+                    </div>
+                    <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
+                        <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                    </div>
                 </div>
-                <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
-                    <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
-                    <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
-                    <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                
+                <!-- 💡 신규 추가: 선택된 주소 실시간 표시 영역 -->
+                <div class="bg-white px-4 py-3 rounded-xl border border-blue-200 flex items-center gap-3 shadow-sm">
+                    <span class="text-xs font-black text-gray-700 whitespace-nowrap border-r border-gray-200 pr-3">지정된 기준 주소</span>
+                    <span id="territory-selected-address" class="text-sm font-black text-blue-600 truncate"><i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요</span>
                 </div>
             </div>
 
@@ -359,7 +367,7 @@
 
             <div class="mt-4 flex-none">
                 <button type="button" onclick="saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-location-crosshairs"></i> 이 위치와 반경으로 권역 저장
+                    <i class="fa-solid fa-save"></i> 이 위치와 반경으로 권역 저장하기
                 </button>
             </div>
         </div>
