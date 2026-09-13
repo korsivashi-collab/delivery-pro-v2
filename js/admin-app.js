@@ -47,7 +47,7 @@ import {
     openAllTerritoriesMap, closeAllTerritoriesMap, saveCompanyBaseAddress, 
     clearCompanyBaseAddress, updateCompanyBaseUI, renderDispatchDriverList, 
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
-    autoSaveExcelToFirebase, formatNumber, processExcelData, getCoordsFromAddress, 
+    formatNumber, processExcelData, getCoordsFromAddress, 
     batchGeocodeExcelList, sortExcelList, toggleRowCheckbox, renderExcelTable, 
     deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows, initExcelDropZone, 
     handleExcelUpload, processSingleExcelFile, exportToInvoiceModal, previewInvoiceRow, 
