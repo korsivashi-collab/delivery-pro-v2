@@ -1352,21 +1352,19 @@ window.renderMasterNoticeHistoryList = function() {
     container.innerHTML = html;
 };
 
-// 🌟 [PRO용 개선] 기사 리스트 필터링 (권역 포함)
+// 🌟 기사 리스트 필터링 (기존 완성버전의 안정적인 로직으로 복구)
 window.getFilteredVisibleDrivers = function() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const isMaster = (currentUserRole === 'MASTER');
-    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
     
+    // 1. 관제용 계정이 아닌 '일반 운행 기사'만 기본적으로 추려냅니다.
+    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch');
+    
+    // 2. 마스터가 아니고 관제 센터(지사)로 접속한 경우, 해당 관제 키에 소속(연결)된 기사만 보여줍니다.
     if (!isMaster && dispatchKey) {
-        const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        const matched = visibleLicenses.filter(l => {
-            const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-            return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
-        });
-        if (matched.length > 0) return matched;
-        else return visibleLicenses; 
+        visibleLicenses = visibleLicenses.filter(l => l.dispatchKey === dispatchKey);
     }
+    
     return visibleLicenses;
 };
 
