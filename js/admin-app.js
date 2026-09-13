@@ -42,7 +42,7 @@ import {
     selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
     saveProviderForm,
-    drawOtherDriversTerritories, openDriverTerritoryModal, 
+    openDriverTerritoryModal, 
     setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, saveCompanyBaseAddress, 
     updateCompanyBaseUI, renderDispatchDriverList, 
