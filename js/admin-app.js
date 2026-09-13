@@ -846,31 +846,26 @@ function generateInvoiceHTML(item, providerInfo) {
     template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
     template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
 
-    // 🌟 안전장치: 각 명세서 반쪽(invoice-half) 내부의 테이블 행(tr)을 정확하게 타겟팅하여 2칸 크기 클래스 강제 부여
-    template.querySelectorAll('.invoice-half').forEach(half => {
-        const tables = half.querySelectorAll('.invoice-table');
-        if (tables.length >= 1) {
-            const rows1 = tables[0].querySelectorAll('tr');
-            // 첫 번째 표에서 주소 행(보통 3번째 index인 세 번째 tr)에 double-height 부여
-            if (rows1[2]) {
-                rows1[2].classList.add('double-height');
-                rows1[2].querySelectorAll('td').forEach(td => {
+    // 🌟 [핵심 수정] 인쇄용으로 복사된 템플릿의 모든 테이블 행(tr)을 검사하여 주소와 배송요청사항에 2칸 높이 강제 적용
+    template.querySelectorAll('.invoice-table').forEach(table => {
+        const rows = table.querySelectorAll('tr');
+        rows.forEach(tr => {
+            const text = tr.innerText;
+            if (text.includes('주 소') && !tr.classList.contains('double-height')) {
+                tr.classList.add('double-height');
+                tr.querySelectorAll('td').forEach(td => {
                     if (!td.classList.contains('invoice-label')) td.classList.add('multi-line-text');
                 });
             }
-        }
-        if (tables.length >= 3) {
-            const rows3 = tables[2].querySelectorAll('tr');
-            // 세 번째 표에서 배송요청사항 행(2번째 index)에 double-height 부여
-            if (rows3[1]) {
-                rows3[1].classList.add('double-height');
-                rows3[1].querySelectorAll('td').forEach(td => {
+            if (text.includes('배 송 요 청 사 항') && !tr.classList.contains('double-height')) {
+                tr.classList.add('double-height');
+                tr.querySelectorAll('td').forEach(td => {
                     if (!td.classList.contains('invoice-label') && !td.classList.contains('inv-text-right')) {
                         td.classList.add('multi-line-text');
                     }
                 });
             }
-        }
+        });
     });
 
     const today = new Date();
