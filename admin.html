@@ -106,16 +106,26 @@
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
         }
         
-        /* 🌟 잘려나간 인수자를 되찾기 위해 모든 셀의 높이를 균일하고 단정하게 고정 (25px) */
+        /* 🌟 잘려나간 인수자를 되찾기 위해 모든 셀의 높이를 균일하고 단정하게 고정 (25px -> 32px로 변경하여 빈 공간 채움) */
         .invoice-table th, .invoice-table td { 
             border: 1px solid #000; 
             padding: 3px 5px; 
-            height: 25px; 
+            height: 32px; 
             vertical-align: middle;
             overflow: hidden; 
         }
         .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
         
+        /* 👇 주소/요청사항 2칸 사이즈 적용을 위한 클래스 추가 👇 */
+        .double-height {
+            height: 64px !important;
+        }
+        .multi-line-text {
+            white-space: normal !important;
+            word-break: break-all;
+            line-height: 1.4;
+        }
+
         .invoice-label { 
             background-color: transparent; 
             font-weight: bold; 
@@ -397,9 +407,10 @@
                                     <td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td>
                                     <td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td>
                                 </tr>
-                                <tr>
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto"></td>
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto"></td>
+                                <!-- 👇 주소: 2칸 사이즈 적용 (double-height 및 multi-line-text) 👇 -->
+                                <tr class="double-height">
+                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td>
+                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td>
                                 </tr>
                                 <tr>
                                     <td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td>
@@ -450,9 +461,10 @@
                                         <td class="invoice-label">배 송 비</td>
                                         <td class="inv-text-right prev-shipping-fee">0원</td>
                                     </tr>
-                                    <tr>
+                                    <!-- 👇 배송요청사항: 2칸 사이즈 적용 (double-height 및 multi-line-text) 👇 -->
+                                    <tr class="double-height">
                                         <td class="invoice-label">배 송 요 청 사 항</td>
-                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto" style="vertical-align: top; padding-top: 3px;"></td>
+                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto multi-line-text" style="vertical-align: top; padding-top: 5px;"></td>
                                         <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
                                         <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
                                     </tr>
@@ -491,9 +503,10 @@
                                     <td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td>
                                     <td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td>
                                 </tr>
-                                <tr>
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto"></td>
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto"></td>
+                                <!-- 👇 하단 주소: 2칸 사이즈 적용 👇 -->
+                                <tr class="double-height">
+                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td>
+                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td>
                                 </tr>
                                 <tr>
                                     <td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td>
@@ -542,9 +555,10 @@
                                         <td class="invoice-label">배 송 비</td>
                                         <td class="inv-text-right prev-shipping-fee">0원</td>
                                     </tr>
-                                    <tr>
+                                    <!-- 👇 하단 배송요청사항: 2칸 사이즈 적용 👇 -->
+                                    <tr class="double-height">
                                         <td class="invoice-label">배 송 요 청 사 항</td>
-                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto" style="vertical-align: top; padding-top: 3px;"></td>
+                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto multi-line-text" style="vertical-align: top; padding-top: 5px;"></td>
                                         <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
                                         <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
                                     </tr>
