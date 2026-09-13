@@ -49,7 +49,7 @@ import {
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
     formatNumber, processExcelData, getCoordsFromAddress, 
     sortExcelList, toggleRowCheckbox, renderExcelTable, 
-    deleteSelectedExcelRows, initExcelDropZone, 
+    initExcelDropZone, 
     handleExcelUpload, processSingleExcelFile, exportToInvoiceModal, previewInvoiceRow, 
     generateInvoiceHTML, executeBatchPrint
 } from "./admin-dispatch.js";
