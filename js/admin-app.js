@@ -42,7 +42,7 @@ import {
     closeProInvoiceModal, closeAutoDispatchModal, selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
     saveProviderForm,  deleteSavedForm, 
-    clearTerritoryOverlays, drawOtherDriversTerritories, openDriverTerritoryModal, 
+    drawOtherDriversTerritories, openDriverTerritoryModal, 
     closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, closeAllTerritoriesMap, saveCompanyBaseAddress, 
     updateCompanyBaseUI, renderDispatchDriverList, 
