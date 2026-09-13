@@ -12,7 +12,7 @@
     <!-- 엑셀 파일(.xlsx) 생성을 위한 라이브러리 (SheetJS) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
-<style>
+    <style>
         .custom-overlay {
             background: #2563eb; color: white; padding: 3px 7px; border-radius: 9999px;
             font-size: 11px; font-weight: 800; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.25);
@@ -89,12 +89,12 @@
             text-align: center; 
             font-size: 22px; 
             font-weight: 900; 
-            letter-spacing: 8px; /* 자간을 자연스럽게 조정하여 글자 벌어짐 방지 */
+            letter-spacing: 8px; 
             text-decoration: underline; 
             margin-bottom: 6px; 
             color: #000; 
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
-            white-space: nowrap; /* 타이틀이 강제로 줄바꿈되거나 벌어지는 현상 차단 */
+            white-space: nowrap; 
         }
         .invoice-table { 
             width: 100%; 
@@ -460,7 +460,14 @@
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <button type="button" onclick="saveProviderForm()" class="w-full bg-slate-800 text-white text-[11px] font-black py-2 rounded-lg"><i class="fa-solid fa-save"></i> 이 폼 저장하기</button>
+                        
+                        <!-- 🌟 [취소] 및 [이 폼 저장하기] 버튼 나란히 배치 -->
+                        <div class="flex gap-1.5 pt-1">
+                            <button type="button" onclick="cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
+                            <button type="button" onclick="saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1">
+                                <i class="fa-solid fa-save"></i> 이 폼 저장하기
+                            </button>
+                        </div>
                     </div>
                 </div>
 
