@@ -162,7 +162,28 @@ function showMasterPanel(name = '마스터') {
     if (mast) { mast.classList.remove('hidden'); mast.classList.add('flex'); }
     
     initMasterDataSync();
-    window.switchMasterTab('regular');
+    if(window.switchMasterTab) window.switchMasterTab('regular');
+}
+
+// 🌟 누락되었던 관제 패널 표시 함수 복원
+function showDispatchPanel() {
+    currentUserRole = 'DISPATCH';
+    document.getElementById('login-screen').classList.add('hidden');
+    document.getElementById('dispatch-panel').classList.remove('hidden');
+    document.getElementById('dispatch-panel').classList.add('flex');
+
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const localToken = sessionStorage.getItem('deliveryProSessionToken');
+    if (currentKey) {
+        if (localToken && localToken.startsWith('MONITOR-')) {
+            document.getElementById('dispatch-sub-title').innerHTML = `<span class="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black flex items-center gap-1"><i class="fa-solid fa-eye animate-pulse"></i> 마스터 모니터링: [${currentKey}]</span>`;
+        } else {
+            document.getElementById('dispatch-sub-title').innerText = `관제 센터 [${currentKey}]`;
+        }
+    }
+    if(typeof initKakaoMap === 'function') initKakaoMap();
+    initRealtimeSync();
+    if(window.setDispatchMode) window.setDispatchMode('DELIVERY');
 }
 
 function initMasterDataSync() {
@@ -170,8 +191,8 @@ function initMasterDataSync() {
         allLicenses = [];
         snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
         renderMasterTables();
-        window.populateDriverSelect ? window.populateDriverSelect() : null;
-        window.renderAccountHistoryView ? window.renderAccountHistoryView() : null;
+        if(window.populateDriverSelect) window.populateDriverSelect();
+        if(window.renderAccountHistoryView) window.renderAccountHistoryView();
         
         if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
             window.renderDispatchDriverList();
@@ -182,19 +203,19 @@ function initMasterDataSync() {
     onSnapshot(collection(db, "memos"), (snapshot) => {
         allMemos = [];
         snapshot.forEach(docSnap => { allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
-        window.renderAccountHistoryView ? window.renderAccountHistoryView() : null;
+        if(window.renderAccountHistoryView) window.renderAccountHistoryView();
     });
 
     onSnapshot(collection(db, "routes"), (snapshot) => {
         activeRoutes = {};
         snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
-        window.renderAccountHistoryView ? window.renderAccountHistoryView() : null;
+        if(window.renderAccountHistoryView) window.renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         allCompletions = [];
         snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
-        window.renderAccountHistoryView ? window.renderAccountHistoryView() : null;
+        if(window.renderAccountHistoryView) window.renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
@@ -661,7 +682,6 @@ function updateCompanyBaseUI(baseData) {
     }
 }
 
-// 🌟 기사 목록 렌더링 (순번 포함)
 window.renderDispatchDriverList = function() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -1336,7 +1356,7 @@ window.executeBatchPrint = function() {
 };
 
 // =====================================================================
-// 🌟 실시간 관제 동기화 루프 함수 (에러 방지용 복원)
+// 🌟 실시간 관제 동기화 루프 함수
 // =====================================================================
 function initRealtimeSync() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
