@@ -43,7 +43,7 @@ import {
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
     saveProviderForm,  deleteSavedForm, 
     drawOtherDriversTerritories, openDriverTerritoryModal, 
-    closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
+    setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, saveCompanyBaseAddress, 
     updateCompanyBaseUI, renderDispatchDriverList, 
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
