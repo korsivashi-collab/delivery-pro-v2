@@ -21,18 +21,14 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
-// 🌟 엑셀 및 출력, 배차 상태 변수
 let excelSortAsc = true; 
 let parsedExcelList = []; 
 let printReadyList = []; 
 let selectedDispatchDriverId = null; 
 
-// 모듈 스코프 충돌 방지용
 window.myMapOverlays = [];
 window.forceClearMap = function() {
-    if (window.myMapOverlays) {
-        window.myMapOverlays.forEach(ov => ov.setMap(null));
-    }
+    if (window.myMapOverlays) window.myMapOverlays.forEach(ov => ov.setMap(null));
     window.myMapOverlays = [];
     if (window.mapPlannedPolyline) { window.mapPlannedPolyline.setMap(null); window.mapPlannedPolyline = null; }
     if (window.mapCompletedPolyline) { window.mapCompletedPolyline.setMap(null); window.mapCompletedPolyline = null; }
@@ -46,18 +42,17 @@ window.historyAccountTypeFilter = 'ALL';
 window.currentSelectedAccountKey = '';
 window.historyMasterSubTab = 'ALL';
 window.historyCurrentPage = 1;
-
 window.historyNoticeMode = false;
 window.historySelectedAccountKeys = new Set();
 window.selectedMessageDrivers = new Set();
 let activeDispatchPopupMsgId = null;
 
-function getLocalDateString(d = new Date()) {
+window.getLocalDateString = function(d = new Date()) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
-const todayStr = getLocalDateString();
+const todayStr = window.getLocalDateString();
 
-// === 1. 초기화 및 로그인/로그아웃 ===
+// 🌟 핵심 초기화 (window 객체에 강제 바인딩)
 window.onload = () => {
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
@@ -71,10 +66,10 @@ window.onload = () => {
     const defaultExpire = new Date();
     defaultExpire.setDate(defaultExpire.getDate() + 30);
     const expEl = document.getElementById('new-key-expire');
-    if (expEl) expEl.value = getLocalDateString(defaultExpire);
+    if (expEl) expEl.value = window.getLocalDateString(defaultExpire);
 
     window.loadSavedForms();
-    initExcelDropZone(); 
+    window.initExcelDropZone(); 
 
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
@@ -83,14 +78,14 @@ window.onload = () => {
         sessionStorage.setItem('deliveryProDispatchKey', monitorKey);
         sessionStorage.setItem('deliveryProSessionToken', 'MONITOR-' + Date.now()); 
         window.history.replaceState({}, document.title, window.location.pathname);
-        showDispatchPanel();
+        window.showDispatchPanel();
         return;
     }
 
     const savedRole = sessionStorage.getItem('deliveryProRole');
     const savedName = sessionStorage.getItem('deliveryProAdminName');
-    if (savedRole === 'MASTER') showMasterPanel(savedName);
-    else if (savedRole === 'DISPATCH') showDispatchPanel();
+    if (savedRole === 'MASTER') window.showMasterPanel(savedName);
+    else if (savedRole === 'DISPATCH') window.showDispatchPanel();
 };
 
 window.handleSingleKeyLogin = async function() {
@@ -113,7 +108,7 @@ window.handleSingleKeyLogin = async function() {
             const adminData = adminSnap.data();
             sessionStorage.setItem('deliveryProRole', 'MASTER');
             sessionStorage.setItem('deliveryProAdminName', adminData.name || '마스터');
-            showMasterPanel(adminData.name || '마스터'); return;
+            window.showMasterPanel(adminData.name || '마스터'); return;
         }
 
         let licRef = doc(db, "licenses", keyInput);
@@ -133,7 +128,7 @@ window.handleSingleKeyLogin = async function() {
             sessionStorage.setItem('deliveryProRole', 'DISPATCH');
             sessionStorage.setItem('deliveryProDispatchKey', licSnap.id);
             sessionStorage.setItem('deliveryProSessionToken', newSessionToken);
-            showDispatchPanel();
+            window.showDispatchPanel();
             return;
         }
         msgEl.innerText = "등록되지 않았거나 권한이 없는 관리자 키입니다.";
@@ -150,7 +145,7 @@ window.systemLogout = function() {
     window.location.reload();
 };
 
-function showMasterPanel(name = '마스터') {
+window.showMasterPanel = function(name = '마스터') {
     currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
     if (badge) badge.innerText = name;
@@ -161,11 +156,11 @@ function showMasterPanel(name = '마스터') {
     const mast = document.getElementById('master-panel');
     if (mast) { mast.classList.remove('hidden'); mast.classList.add('flex'); }
     
-    initMasterDataSync();
+    window.initMasterDataSync();
     if(window.switchMasterTab) window.switchMasterTab('regular');
-}
+};
 
-function showDispatchPanel() {
+window.showDispatchPanel = function() {
     currentUserRole = 'DISPATCH';
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('dispatch-panel').classList.remove('hidden');
@@ -181,15 +176,15 @@ function showDispatchPanel() {
         }
     }
     if(typeof initKakaoMap === 'function') initKakaoMap();
-    initRealtimeSync();
+    window.initRealtimeSync();
     if(window.setDispatchMode) window.setDispatchMode('DELIVERY');
-}
+};
 
-function initMasterDataSync() {
+window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         allLicenses = [];
         snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderMasterTables();
+        window.renderMasterTables();
         if(window.populateDriverSelect) window.populateDriverSelect();
         if(window.renderAccountHistoryView) window.renderAccountHistoryView();
         
@@ -226,7 +221,7 @@ function initMasterDataSync() {
         allDispatchTemplates = [];
         snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
     });
-}
+};
 
 window.generateNewLicense = async function() {
     const type = document.getElementById('new-key-type').value;
@@ -267,10 +262,10 @@ window.switchMasterTab = function(tab) {
 window.changeMasterTabPagination = function(tabKey, targetPage) {
     window.masterPages[tabKey] = targetPage;
     if (tabKey === 'memos' && window.renderMemosTable) window.renderMemosTable(allMemos);
-    else renderMasterTables();
+    else window.renderMasterTables();
 };
 
-function renderMasterTables() {
+window.renderMasterTables = function() {
     const regulars = allLicenses.filter(l => l.type === 'regular' || (!l.type && !l.isTrial && !(l.key || '').startsWith('TRIAL-')));
     const trials = allLicenses.filter(l => l.type === 'trial' || l.isTrial || (l.key || '').startsWith('TRIAL-'));
     const dispatches = allLicenses.filter(l => l.type === 'dispatch');
@@ -282,7 +277,7 @@ function renderMasterTables() {
     if (ct) ct.innerText = trials.length;
     if (cd) cd.innerText = dispatches.length;
 
-    renderPagedTableTab('regular', regulars, 'table-body-regular', 'pagination-regular', (item, idx) => `
+    window.renderPagedTableTab('regular', regulars, 'table-body-regular', 'pagination-regular', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
             <td class="py-3 px-3 font-bold text-gray-400">${idx}</td>
             <td class="py-3 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
@@ -291,13 +286,13 @@ function renderMasterTables() {
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
             <td class="py-3 px-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-black ${item.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">${item.status === 'active' ? '정상' : '정지'}</span></td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
-                <button onclick="openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
-                <button onclick="deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
+                <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
+                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
             </td>
         </tr>
     `);
 
-    renderPagedTableTab('trial', trials, 'table-body-trial', 'pagination-trial', (item, idx) => `
+    window.renderPagedTableTab('trial', trials, 'table-body-trial', 'pagination-trial', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
             <td class="py-3 px-3 font-bold text-gray-400">${idx}</td>
             <td class="py-3 px-3 font-mono font-black text-emerald-600 select-all">${item.key}</td>
@@ -306,13 +301,13 @@ function renderMasterTables() {
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
             <td class="py-3 px-3"><span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-black">7일체험</span></td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
-                <button onclick="openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
-                <button onclick="deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
+                <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
+                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
             </td>
         </tr>
     `);
 
-    renderPagedTableTab('dispatch', dispatches, 'table-body-dispatch', 'pagination-dispatch', (item, idx) => {
+    window.renderPagedTableTab('dispatch', dispatches, 'table-body-dispatch', 'pagination-dispatch', (item, idx) => {
         const connectedDrivers = allLicenses.filter(l => l.dispatchKey === item.key);
         const slotLimitStr = item.maxSlots ? `${item.maxSlots}대 한도` : '무제한';
         const proBadge = item.isPro ? `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-black ml-1 border border-amber-300"><i class="fa-solid fa-crown text-amber-500"></i> PRO</span>` : ``;
@@ -332,14 +327,14 @@ function renderMasterTables() {
             <td class="py-3 px-3"><span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full text-[10px] font-black">관제운영</span>${proBadge}</td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="window.open(window.location.pathname + '?monitor=' + '${item.key}', '_blank')" class="px-2.5 py-1 bg-emerald-600 text-white font-black rounded-lg text-[11px] hover:bg-emerald-700 transition">모니터링</button>
-                <button onclick="openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px] hover:bg-blue-700 transition">수정</button>
-                <button onclick="deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
+                <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px] hover:bg-blue-700 transition">수정</button>
+                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px] hover:bg-red-100 transition">삭제</button>
             </td>
         </tr>`;
     });
-}
+};
 
-function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
+window.renderPagedTableTab = function(tabKey, list, tbodyId, paginationId, rowRenderer) {
     const tbody = document.getElementById(tbodyId);
     const pagEl = document.getElementById(paginationId);
     if (!tbody) return;
@@ -360,9 +355,9 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
 
     tbody.innerHTML = pagedList.map((item, idx) => rowRenderer(item, start + idx + 1)).join('');
     if (pagEl) {
-        pagEl.innerHTML = renderPaginationControls(tabKey, curPage, total, PAGE_SIZE_MASTER, 'changeMasterTabPagination');
+        pagEl.innerHTML = renderPaginationControls(tabKey, curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');
     }
-}
+};
 
 window.openEditLicenseModal = function(key) {
     const target = allLicenses.find(l => l.key === key);
@@ -445,20 +440,30 @@ window.handleProFeature = function(featureName) {
 
     if (isPro) {
         if (featureName === 'AUTO_DISPATCH') {
-            document.getElementById('auto-dispatch-modal').classList.remove('hidden');
+            const modal = document.getElementById('auto-dispatch-modal');
+            if (!modal) {
+                alert("🚨 시스템 안내\n현재 사용 중인 브라우저 화면이 최신 버전이 아닙니다.\n새로고침을 한 번 진행해주세요.");
+                return;
+            }
+            modal.classList.remove('hidden');
             window.renderDispatchDriverList();
             window.loadExcelFromFirebase();
-            initExcelDropZone(); 
+            window.initExcelDropZone(); 
             
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
+            if (savedBase) window.updateCompanyBaseUI(JSON.parse(savedBase));
 
         } else if (featureName === 'INVOICE') {
             if (printReadyList.length === 0) {
                 alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요.");
                 return;
             }
-            document.getElementById('pro-invoice-modal').classList.remove('hidden');
+            const modal = document.getElementById('pro-invoice-modal');
+            if (!modal) {
+                alert("🚨 시스템 안내\n현재 화면에 인쇄 모듈이 없습니다. 최신 파일(admin.html)을 덮어씌워 주세요.");
+                return;
+            }
+            modal.classList.remove('hidden');
             document.getElementById('print-ready-count').innerText = printReadyList.length;
             window.loadSavedForms(); 
             window.previewInvoiceRow(0); 
@@ -532,13 +537,13 @@ window.loadSavedForms = function() {
         html += `
         <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
-                <input type="checkbox" onchange="toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0" title="선택/해제 토글">
-                <div class="min-w-0 cursor-pointer flex-1" onclick="previewSavedForm(${idx})" title="명세서 폼 적용">
+                <input type="checkbox" onchange="window.toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0" title="선택/해제 토글">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="window.previewSavedForm(${idx})" title="명세서 폼 적용">
                     <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
                 </div>
             </div>
-            <button type="button" onclick="deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0" title="폼 삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+            <button type="button" onclick="window.deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0" title="폼 삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
         </div>`;
     });
     listEl.innerHTML = html;
@@ -634,18 +639,17 @@ window.deleteSavedForm = function(idx) {
 };
 
 // =====================================================================
-// 🌟 AI 배송 할당 모달 전용 로직 (강력한 기사 무조건 로드 필터 복원)
+// 🌟 AI 배송 할당 모달 전용 로직 (강력한 전체 기사 로드)
 // =====================================================================
 
-// 🌟 [수정] 필터링 없이 연결된 기사 및 모든 등록 기사를 유연하게 불러오도록 덮어쓰기 복구
-function getFilteredVisibleDrivers() {
+window.getFilteredVisibleDrivers = function() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const isMaster = (currentUserRole === 'MASTER');
     
     // 1. 관제(dispatch) 계정이 아닌 일반 기사만 추출
-    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch');
+    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
     
-    // 2. 마스터가 아닐 경우 현재 관제 키에 연동된 기사만 추출
+    // 2. 마스터가 아닐 경우 현재 관제 키에 연동된 기사만 필터링 시도
     if (!isMaster && dispatchKey) {
         const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
         
@@ -655,7 +659,7 @@ function getFilteredVisibleDrivers() {
         });
         
         // 3. 연동된 기사가 1명이라도 있으면 그 기사들만 보여주고, 
-        // 0명이라면 전체 기사를 무조건 보여주도록 처리 (누락 방어)
+        // 0명이라면 테스트 편의/누락 방지를 위해 등록된 전체 기사를 무조건 반환
         if (matched.length > 0) {
             return matched;
         } else {
@@ -663,7 +667,7 @@ function getFilteredVisibleDrivers() {
         }
     }
     return visibleLicenses;
-}
+};
 
 window.saveCompanyBaseAddress = async function() {
     const input = document.getElementById('company-base-address');
@@ -673,7 +677,7 @@ window.saveCompanyBaseAddress = async function() {
     const btn = document.getElementById('btn-save-company-base');
     btn.disabled = true; btn.innerText = "확인중...";
 
-    const coords = await getCoordsFromAddress(addr);
+    const coords = await window.getCoordsFromAddress(addr);
     btn.disabled = false; btn.innerText = "저장";
 
     if (!coords) {
@@ -683,16 +687,16 @@ window.saveCompanyBaseAddress = async function() {
 
     const baseData = { address: addr, lat: coords.lat, lng: coords.lng };
     localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
-    updateCompanyBaseUI(baseData);
+    window.updateCompanyBaseUI(baseData);
 };
 
 window.clearCompanyBaseAddress = function() {
     localStorage.removeItem('deliveryProCompanyBase');
     document.getElementById('company-base-address').value = '';
-    updateCompanyBaseUI(null);
+    window.updateCompanyBaseUI(null);
 };
 
-function updateCompanyBaseUI(baseData) {
+window.updateCompanyBaseUI = function(baseData) {
     const textEl = document.getElementById('saved-base-address-text');
     const clearBtn = document.getElementById('btn-clear-company-base');
 
@@ -707,14 +711,14 @@ function updateCompanyBaseUI(baseData) {
         textEl.classList.remove('text-indigo-600');
         clearBtn.classList.add('hidden');
     }
-}
+};
 
 window.renderDispatchDriverList = function() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
     if (!listEl || !countEl) return;
     
-    const drivers = getFilteredVisibleDrivers();
+    const drivers = window.getFilteredVisibleDrivers();
     countEl.innerText = `${drivers.length}명`;
     
     if (drivers.length === 0) {
@@ -731,15 +735,15 @@ window.renderDispatchDriverList = function() {
         
         let territoryBadge = '';
         if (t1) {
-            territoryBadge = `<button type="button" onclick="openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${t1}', '${t2}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap overflow-hidden text-ellipsis max-w-[80px]" title="${t1} ${t2}">${t1}</button>`;
+            territoryBadge = `<button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${t1}', '${t2}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap overflow-hidden text-ellipsis max-w-[80px]" title="${t1} ${t2}">${t1}</button>`;
         } else {
-            territoryBadge = `<button type="button" onclick="openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 미설정</button>`;
+            territoryBadge = `<button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 미설정</button>`;
         }
 
         const isSelected = selectedDispatchDriverId === devId;
         
         html += `
-        <div onclick="selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
+        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
             <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0">
                 <span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span>
                 <i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i> 
@@ -851,7 +855,7 @@ window.loadExcelFromFirebase = async function() {
         } else {
             parsedExcelList = []; 
         }
-        renderExcelTable();
+        window.renderExcelTable();
     } catch (error) {
         console.error("Firebase 엑셀 로드 오류:", error);
     }
@@ -877,12 +881,12 @@ window.autoSaveExcelToFirebase = async function() {
     }
 };
 
-function formatNumber(num) {
+window.formatNumber = function(num) {
     if (!num || isNaN(num)) return num || '';
     return Number(num).toLocaleString('ko-KR');
-}
+};
 
-function processExcelData(jsonData) {
+window.processExcelData = function(jsonData) {
     const newItems = [];
     jsonData.forEach((row) => {
         const mappedRow = {
@@ -918,9 +922,9 @@ function processExcelData(jsonData) {
 
     parsedExcelList.push(...newItems);
     return newItems;
-}
+};
 
-function getCoordsFromAddress(address) {
+window.getCoordsFromAddress = function(address) {
     return new Promise((resolve) => {
         if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) {
             resolve(null);
@@ -935,9 +939,9 @@ function getCoordsFromAddress(address) {
             }
         });
     });
-}
+};
 
-async function batchGeocodeExcelList(items) {
+window.batchGeocodeExcelList = async function(items) {
     const dropZone = document.getElementById('excel-drop-zone');
     const originalDropHtml = dropZone ? dropZone.innerHTML : '';
 
@@ -953,7 +957,7 @@ async function batchGeocodeExcelList(items) {
         }
 
         if (item.address && (!item.lat || !item.lng)) {
-            const coords = await getCoordsFromAddress(item.address);
+            const coords = await window.getCoordsFromAddress(item.address);
             if (coords) {
                 item.lat = coords.lat;
                 item.lng = coords.lng;
@@ -965,7 +969,7 @@ async function batchGeocodeExcelList(items) {
 
     if (dropZone) dropZone.innerHTML = originalDropHtml;
     console.log(`좌표 변환 완료: 총 ${items.length}건 중 ${successCount}건 변환 성공`);
-}
+};
 
 window.sortExcelList = function(field) {
     if (!parsedExcelList || parsedExcelList.length === 0) return;
@@ -977,7 +981,7 @@ window.sortExcelList = function(field) {
         if (valA > valB) return excelSortAsc ? 1 : -1;
         return 0;
     });
-    renderExcelTable();
+    window.renderExcelTable();
 };
 
 window.toggleRowCheckbox = function(e, idx) {
@@ -986,7 +990,7 @@ window.toggleRowCheckbox = function(e, idx) {
     if(cb) cb.checked = !cb.checked;
 };
 
-function renderExcelTable() {
+window.renderExcelTable = function() {
     const tbody = document.getElementById('invoice-excel-tbody');
     if (!tbody) return;
 
@@ -1009,13 +1013,13 @@ function renderExcelTable() {
             `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
 
         html += `
-        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="toggleRowCheckbox(event, ${idx})">
+        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="window.toggleRowCheckbox(event, ${idx})">
             <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
             <td class="text-center font-bold text-gray-500">${idx + 1}</td>
             <td class="text-center">${assignedBadge}</td>
             <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
             <td class="text-center" onclick="event.stopPropagation()">
-                <button onclick="deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95" title="삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+                <button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95" title="삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
             </td>
         </tr>`;
     });
@@ -1031,12 +1035,12 @@ function renderExcelTable() {
     }
 
     window.renderDispatchDriverDetail(); 
-}
+};
 
 window.deleteExcelRow = async function(idx) {
     if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
     parsedExcelList.splice(idx, 1);
-    renderExcelTable();
+    window.renderExcelTable();
     await window.autoSaveExcelToFirebase();
 };
 
@@ -1051,7 +1055,7 @@ window.deleteSelectedExcelRows = async function() {
     const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
     parsedExcelList = parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
     
-    renderExcelTable();
+    window.renderExcelTable();
     await window.autoSaveExcelToFirebase(); 
 };
 
@@ -1059,11 +1063,11 @@ window.clearAllExcelRows = async function() {
     if(parsedExcelList.length === 0) return;
     if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?(되돌릴 수 없습니다)")) return;
     parsedExcelList = [];
-    renderExcelTable();
+    window.renderExcelTable();
     await window.autoSaveExcelToFirebase();
 };
 
-function initExcelDropZone() {
+window.initExcelDropZone = function() {
     const dropZone = document.getElementById('excel-drop-zone');
     if (!dropZone || dropZone.dataset.bound === 'true') return;
 
@@ -1076,7 +1080,7 @@ function initExcelDropZone() {
         fileInput.multiple = true; 
         fileInput.style.display = 'none';
         document.body.appendChild(fileInput);
-        fileInput.addEventListener('change', handleExcelUpload);
+        fileInput.addEventListener('change', window.handleExcelUpload);
     }
 
     dropZone.addEventListener('dragover', (e) => {
@@ -1092,7 +1096,7 @@ function initExcelDropZone() {
         dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
         if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
             fileInput.files = e.dataTransfer.files;
-            handleExcelUpload({ target: fileInput });
+            window.handleExcelUpload({ target: fileInput });
         }
     });
     dropZone.addEventListener('click', () => { fileInput.click(); });
@@ -1105,32 +1109,32 @@ function initExcelDropZone() {
         });
         btnRunAi.dataset.bound = 'true';
     }
-}
+};
 
-async function handleExcelUpload(e) {
+window.handleExcelUpload = async function(e) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
 
     const newlyAddedList = [];
 
     for (let i = 0; i < files.length; i++) {
-        const parsed = await processSingleExcelFile(files[i]);
+        const parsed = await window.processSingleExcelFile(files[i]);
         newlyAddedList.push(...parsed);
     }
 
     if (newlyAddedList.length > 0) {
-        renderExcelTable(); 
-        await batchGeocodeExcelList(newlyAddedList);
-        renderExcelTable(); 
+        window.renderExcelTable(); 
+        await window.batchGeocodeExcelList(newlyAddedList);
+        window.renderExcelTable(); 
         await window.autoSaveExcelToFirebase(); 
         alert(`[업로드 및 위치 분석 완료]\n${files.length}개 파일에서 ${newlyAddedList.length}건의 주문 데이터가 추가 및 분석되었습니다.`);
     } else {
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`);
     }
     e.target.value = ''; 
-}
+};
 
-function processSingleExcelFile(file) {
+window.processSingleExcelFile = function(file) {
     return new Promise((resolve) => {
         const reader = new FileReader();
         reader.onload = function(evt) {
@@ -1140,7 +1144,7 @@ function processSingleExcelFile(file) {
                 const firstSheetName = workbook.SheetNames[0];
                 const worksheet = workbook.Sheets[firstSheetName];
                 const json = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-                const added = processExcelData(json);
+                const added = window.processExcelData(json);
                 resolve(added);
             } catch(err) {
                 console.error("파일 파싱 실패:", err);
@@ -1149,7 +1153,7 @@ function processSingleExcelFile(file) {
         };
         reader.readAsArrayBuffer(file);
     });
-}
+};
 
 window.exportToInvoiceModal = function() {
     const checkboxes = document.querySelectorAll('.row-checkbox:checked');
@@ -1165,7 +1169,8 @@ window.exportToInvoiceModal = function() {
     });
 
     window.closeAutoDispatchModal();
-    document.getElementById('pro-invoice-modal').classList.remove('hidden');
+    const invModal = document.getElementById('pro-invoice-modal');
+    if(invModal) invModal.classList.remove('hidden');
     
     document.getElementById('print-ready-count').innerText = printReadyList.length;
     window.loadSavedForms();
@@ -1185,20 +1190,20 @@ window.previewInvoiceRow = function(idx) {
 
     document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
     document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
-    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
-    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
     
     let payMethod = '';
     if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
     else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
     
     document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
     document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
-    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
 
     document.querySelectorAll('span.font-normal.inline-block').forEach(span => {
         if (span.classList.contains('w-32')) {
@@ -1209,7 +1214,7 @@ window.previewInvoiceRow = function(idx) {
     window.syncPreviewData(); 
 };
 
-function generateInvoiceHTML(item, providerInfo) {
+window.generateInvoiceHTML = function(item, providerInfo) {
     const originalTemplate = document.getElementById('print-area');
     if (!originalTemplate) return '';
     const template = originalTemplate.cloneNode(true);
@@ -1229,20 +1234,20 @@ function generateInvoiceHTML(item, providerInfo) {
 
     template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
     template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
-    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
-    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
+    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
+    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
 
     let payMethod = '';
     if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
     else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
 
     template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
     template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
-    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
 
     template.querySelectorAll('.invoice-table').forEach(table => {
         const rows = table.querySelectorAll('tr');
@@ -1278,7 +1283,7 @@ function generateInvoiceHTML(item, providerInfo) {
     });
 
     return template.outerHTML;
-}
+};
 
 window.executeBatchPrint = function() {
     if (printReadyList.length === 0) {
@@ -1303,7 +1308,7 @@ window.executeBatchPrint = function() {
 
     let printContents = '';
     printReadyList.forEach(item => {
-        printContents += generateInvoiceHTML(item, providerInfo);
+        printContents += window.generateInvoiceHTML(item, providerInfo);
     });
 
     const iframe = document.createElement('iframe');
@@ -1483,7 +1488,7 @@ window.openDispatchInboxModal = function() {
             <div class="bg-amber-50/40 border border-amber-200 rounded-2xl p-4 shadow-2xs flex flex-col gap-1.5 hover:border-amber-300 transition">
                 <div class="flex justify-between items-center text-xs">
                     <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">${m.senderTitle || '운영사 알림'}</span>
-                    <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
+                    <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="window.deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
                 </div>
                 <p class="text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed mt-1">${m.content}</p>
             </div>`;
@@ -1558,7 +1563,7 @@ window.renderMasterNoticeHistoryList = function() {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span>
-                    <button type="button" onclick="deleteDispatchMessage('${m.id}')" class="text-red-500 hover:text-red-700 p-1 text-xs transition active:scale-95" title="이 발송 알림 삭제"><i class="fa-solid fa-trash-can"></i></button>
+                    <button type="button" onclick="window.deleteDispatchMessage('${m.id}')" class="text-red-500 hover:text-red-700 p-1 text-xs transition active:scale-95" title="이 발송 알림 삭제"><i class="fa-solid fa-trash-can"></i></button>
                 </div>
             </div>
             <div class="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${m.content}</div>
@@ -1581,11 +1586,11 @@ window.renderSidebar = function() {
 window.renderDriverListView = function() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers();
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-600"></i> 운행 기사 (<span id="driver-count">${visibleLicenses.length}</span>명)</h2>
-        <button onclick="openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
+        <button onclick="window.openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
     `;
 
     if (visibleLicenses.length === 0) {
@@ -1628,10 +1633,10 @@ window.renderDriverListView = function() {
         const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
 
         html += `
-        <div onclick="selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
+        <div onclick="window.selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
             <div class="flex justify-between items-center mb-1.5">
                 <span class="font-black text-sm text-gray-900 tracking-tight flex items-center gap-1.5"><i class="fa-solid fa-phone text-blue-500 text-xs"></i>${phone}<span class="text-[10px] text-gray-400 font-mono font-normal">[${lic.key}]</span></span>
-                <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
+                <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); window.removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
             </div>
             <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden"><div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
             <div class="flex justify-between text-[11px] font-bold text-gray-600"><span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span><span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span></div>
@@ -1654,7 +1659,7 @@ window.renderDriverDetailView = function(devId) {
 
     headerEl.innerHTML = `
         <div class="flex items-center justify-between w-full">
-            <button onclick="clearSelectedDriver()" class="text-xs font-black text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 border border-blue-200"><i class="fa-solid fa-arrow-left"></i> 기사 목록</button>
+            <button onclick="window.clearSelectedDriver()" class="text-xs font-black text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 border border-blue-200"><i class="fa-solid fa-arrow-left"></i> 기사 목록</button>
             <span class="text-xs font-black text-gray-900 bg-white border border-gray-200 shadow-sm px-3 py-1.5 rounded-xl truncate"><i class="fa-solid fa-phone text-blue-500 mr-1 text-[11px]"></i>${phone}</span>
         </div>
     `;
@@ -1703,13 +1708,13 @@ window.renderDriverDetailView = function(devId) {
     </div>
 
     <div class="flex gap-1 mb-3 bg-gray-100 p-1 rounded-xl text-xs font-black">
-        <button onclick="setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+        <button onclick="window.setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-route mr-1"></i> 동선 (${totalCount})
         </button>
-        <button onclick="setDispatchDetailTab('PENDING')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'PENDING' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+        <button onclick="window.setDispatchDetailTab('PENDING')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'PENDING' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-clock mr-1"></i> 미처리 (${pendingCount})
         </button>
-        <button onclick="setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+        <button onclick="window.setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${window.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-circle-check mr-1"></i> 완료 (${doneCount})
         </button>
     </div>`;
@@ -1729,7 +1734,7 @@ window.renderDriverDetailView = function(devId) {
                 let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
                 let photoBtn = comp && comp.photoUrl ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
-                <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">${numberBadge}${addressHtml}</div><div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}${statusBadge}</div>
                 </div>`;
             });
@@ -1742,7 +1747,7 @@ window.renderDriverDetailView = function(devId) {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
                 html += `
-                <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                         <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${d.displayNumber || idx + 1}</span>
                         <span class="font-bold text-gray-900 truncate">${d.address}</span>
@@ -1763,7 +1768,7 @@ window.renderDriverDetailView = function(devId) {
                 let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
                 let photoBtn = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
-                <div onclick="focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                <div onclick="window.focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '완료'}]</span></div>
                 </div>`;
@@ -1793,11 +1798,11 @@ window.removeOrUnlinkDriver = async function(devId, key) {
 window.renderMessageSidebar = function() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers();
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-comments text-blue-600"></i> 수신 기사 선택</h2>
-        <button onclick="toggleAllMessageSelection()" class="text-[11px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 hover:bg-blue-100 transition">
+        <button onclick="window.toggleAllMessageSelection()" class="text-[11px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 hover:bg-blue-100 transition">
             ${window.selectedMessageDrivers.size === visibleLicenses.length && visibleLicenses.length > 0 ? '선택 해제' : '전체 선택'}
         </button>`;
 
@@ -1812,7 +1817,7 @@ window.renderMessageSidebar = function() {
         html += `
         <label class="flex items-center justify-between p-3.5 bg-white border ${isChecked ? 'border-blue-500 bg-blue-50/40 ring-1 ring-blue-300' : 'border-gray-200 hover:bg-gray-50'} rounded-2xl cursor-pointer transition shadow-xs">
             <div class="flex items-center gap-3">
-                <input type="checkbox" onchange="toggleMessageDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                <input type="checkbox" onchange="window.toggleMessageDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
                 <div><span class="font-black text-sm text-gray-900 block leading-tight">${phone}</span><span class="text-[10px] text-gray-400 font-mono">ID: ${lic.key}</span></div>
             </div>
             <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${isChecked ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}">${isChecked ? '선택됨' : '대기'}</span>
@@ -1830,7 +1835,7 @@ window.toggleMessageDriver = function(devId) {
 };
 
 window.toggleAllMessageSelection = function() {
-    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers();
     if (window.selectedMessageDrivers.size === visibleLicenses.length) window.selectedMessageDrivers.clear();
     else visibleLicenses.forEach(lic => window.selectedMessageDrivers.add(lic.deviceId || lic.key));
     window.renderMessageSidebar();
@@ -1855,7 +1860,7 @@ window.sendDispatchMessage = async function() {
     try {
         const now = new Date();
         const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const dateStr = getLocalDateString(now);
+        const dateStr = window.getLocalDateString(now);
 
         const targetPhones = [];
         targets.forEach(tId => {
@@ -1907,7 +1912,7 @@ window.renderMessageFeed = function() {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-[11px] font-mono text-gray-400">${msg.dateStr || ''} ${msg.timeStr || ''}</span>
-                    <button type="button" onclick="deleteDispatchMessage('${msg.id}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                    <button type="button" onclick="window.deleteDispatchMessage('${msg.id}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
                 </div>
             </div>
             <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${msg.content}</div>
@@ -1956,10 +1961,10 @@ window.renderCustomTemplates = function() {
         html += `
         <div class="group p-3 bg-white border border-gray-200 rounded-2xl hover:border-blue-400 hover:shadow-xs transition flex flex-col gap-1.5 relative">
             <div class="flex justify-between items-start gap-2">
-                <span onclick="insertCustomTemplate('${escapedContent}')" class="font-black text-xs text-gray-900 cursor-pointer hover:text-blue-600 flex items-center gap-1.5 truncate flex-1"><i class="fa-solid fa-file-lines text-blue-500 text-[11px] shrink-0"></i><span class="truncate">${tpl.title || '제목 없음'}</span></span>
-                <button onclick="deleteCustomTemplate('${tpl.id}')" class="text-gray-300 hover:text-red-500 p-1 text-xs transition" title="틀 삭제"><i class="fa-solid fa-trash-can text-[11px]"></i></button>
+                <span onclick="window.insertCustomTemplate('${escapedContent}')" class="font-black text-xs text-gray-900 cursor-pointer hover:text-blue-600 flex items-center gap-1.5 truncate flex-1"><i class="fa-solid fa-file-lines text-blue-500 text-[11px] shrink-0"></i><span class="truncate">${tpl.title || '제목 없음'}</span></span>
+                <button onclick="window.deleteCustomTemplate('${tpl.id}')" class="text-gray-300 hover:text-red-500 p-1 text-xs transition" title="틀 삭제"><i class="fa-solid fa-trash-can text-[11px]"></i></button>
             </div>
-            <p onclick="insertCustomTemplate('${escapedContent}')" class="text-[11px] text-gray-600 font-medium line-clamp-2 leading-relaxed cursor-pointer hover:text-gray-800">${tpl.content || ''}</p>
+            <p onclick="window.insertCustomTemplate('${escapedContent}')" class="text-[11px] text-gray-600 font-medium line-clamp-2 leading-relaxed cursor-pointer hover:text-gray-800">${tpl.content || ''}</p>
         </div>`;
     });
     listEl.innerHTML = html;
@@ -1968,7 +1973,7 @@ window.renderCustomTemplates = function() {
 window.renderLocationSidebar = function() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers();
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-tower-broadcast text-blue-600"></i> 실시간 위치 관제 (<span class="text-blue-600">${visibleLicenses.length}</span>대)</h2>
@@ -2006,8 +2011,8 @@ window.renderLocationSidebar = function() {
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100">
-                <button onclick="focusDriverLocationOnMap('${devId}')" class="py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-blue-200 shadow-xs"><i class="fa-solid fa-crosshairs text-[11px]"></i> 위치 확인</button>
-                <button onclick="jumpToDriverDelivery('${devId}')" class="py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"><i class="fa-solid fa-route text-[10px]"></i> 배송 관리</button>
+                <button onclick="window.focusDriverLocationOnMap('${devId}')" class="py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-blue-200 shadow-xs"><i class="fa-solid fa-crosshairs text-[11px]"></i> 위치 확인</button>
+                <button onclick="window.jumpToDriverDelivery('${devId}')" class="py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"><i class="fa-solid fa-route text-[10px]"></i> 배송 관리</button>
             </div>
         </div>`;
     });
@@ -2062,7 +2067,7 @@ window.focusDriverLocationOnMap = async function(devId) {
                             <span class="text-[10px] text-gray-400 font-mono">${timeStr}</span>
                         </div>
                         <div id="loc-overlay-addr" class="font-black text-gray-100 text-[13px] leading-snug py-0.5 break-keep"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-emerald-400"></i>주소 확인 중...</div>
-                        <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-emerald-400 mr-1"></i>${phoneName}</span><button onclick="closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
+                        <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-emerald-400 mr-1"></i>${phoneName}</span><button onclick="window.closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
                         <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
                     </div>`;
                 window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
@@ -2109,7 +2114,7 @@ window.showFallbackLocation = async function(devId) {
         <div style="transform: translate(-50%, -100%); margin-top: -15px;" class="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-sky-400 text-xs flex flex-col gap-1.5 min-w-[240px] max-w-[320px] relative z-50">
             <div class="flex justify-between items-center pb-1.5 border-b border-slate-700"><span class="font-black text-sky-400 flex items-center gap-1.5 text-xs"><i class="fa-solid fa-location-dot text-sky-400"></i> 기사 최근 위치</span><span class="text-[10px] text-gray-400 font-mono">${timeStr}</span></div>
             <div id="loc-overlay-addr" class="font-black text-gray-100 text-[13px] leading-snug py-0.5 break-keep"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-sky-400"></i>주소 확인 중...</div>
-            <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-sky-400 mr-1"></i>${phone}</span><button onclick="closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
+            <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-sky-400 mr-1"></i>${phone}</span><button onclick="window.closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
             <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-sky-400"></div>
         </div>`;
     window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
@@ -2129,7 +2134,7 @@ window.closeCurrentLocationOverlay = function() {
 window.drawAllDriversOnMap = function() {
     window.forceClearMap();
     if (!map) return;
-    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers();
     const bounds = new kakao.maps.LatLngBounds();
     let hasPoints = false;
     visibleLicenses.forEach(lic => {
@@ -2338,7 +2343,7 @@ window.handleGlobalSearch = function(query) {
         html += `
         <div class="border border-gray-200 rounded-2xl p-3 bg-white hover:border-blue-300 transition shadow-xs">
             <div class="flex justify-between items-center mb-1.5"><span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${latest.address}</span><span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span></div>
-            <div onclick="jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
+            <div onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
                 <div class="flex justify-between items-center text-xs">
                     <div class="flex items-center gap-1.5"><span class="text-[10px] font-black px-1.5 py-0.5 rounded ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span><span class="font-bold text-gray-800">${latest.phone}</span></div>
                     <span class="font-black text-[11px] ${latest.type === 'DONE' ? 'text-emerald-700' : 'text-blue-700'}">${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}] ${latest.timeStr}` : `➔ ${latest.displayNumber || 1}번 이동 대기`}</span>
@@ -2346,7 +2351,7 @@ window.handleGlobalSearch = function(query) {
             </div>
         </div>`;
     });
-    dropdown.innerHTML = html; dropdown.classList.ensure ? dropdown.classList.remove('hidden') : dropdown.classList.remove('hidden');
+    dropdown.innerHTML = html; dropdown.classList.remove('hidden');
 };
 
 window.openLinkDriverModal = function() {
@@ -2387,4 +2392,53 @@ window.confirmLinkDriver = async function() {
         alert(`[등록 완료] 기사 [${targetLic.phone || targetLic.key}] 님이 연결되었습니다.`);
         window.closeLinkDriverModal();
     } catch (e) { alert("오류: " + e.message); }
+};
+
+window.initRealtimeSync = function() {
+    onSnapshot(collection(db, "licenses"), (snapshot) => {
+        allLicenses = [];
+        snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
+        
+        if (currentUserRole === 'DISPATCH') {
+            const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+            const localToken = sessionStorage.getItem('deliveryProSessionToken');
+            if (dispatchKey && localToken) {
+                const myLic = allLicenses.find(l => l.id === dispatchKey || l.key === dispatchKey);
+                if (myLic && myLic.currentSessionToken && myLic.currentSessionToken !== localToken) {
+                    if (!localToken.startsWith('MONITOR-')) {
+                        alert("⚠️ [중복 로그인 감지]\n다른 PC 또는 브라우저에서 동일한 관제 계정으로 로그인하여 현재 연결이 종료됩니다.");
+                        sessionStorage.clear(); window.location.reload();
+                    }
+                }
+            }
+        }
+        if (window.renderSidebar) window.renderSidebar();
+        
+        if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
+            window.renderDispatchDriverList();
+            window.renderDispatchDriverDetail();
+        }
+    });
+
+    onSnapshot(collection(db, "routes"), (snapshot) => {
+        activeRoutes = {};
+        snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
+        if (window.renderSidebar) window.renderSidebar();
+    });
+
+    onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
+        allCompletions = [];
+        snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+        if (window.renderSidebar) window.renderSidebar();
+    });
+
+    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
+        allDispatchMessages = [];
+        snapshot.forEach(docSnap => { allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
+    });
+
+    onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
+        allDispatchTemplates = [];
+        snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
+    });
 };
