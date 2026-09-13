@@ -644,144 +644,68 @@ window.deleteSavedForm = function(idx) {
     window.loadSavedForms();
 };
 
-// =====================================================================
-// 🌟 AI 배송 할당 모달 전용 로직
-// =====================================================================
+// === 🌟 권역 설정 모달용 전역 변수 ===
+let territoryMap = null;
+let territoryMarker = null;
+let territoryCircles = [];
+let otherTerritoryOverlays = []; // 💡 타 기사 권역 중복 방지용 렌더링 배열
+let currentTerritoryScale = 'dong';
 
-window.getFilteredVisibleDrivers = function() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const isMaster = (currentUserRole === 'MASTER');
+window.clearTerritoryOverlays = function() {
+    if (territoryMarker) territoryMarker.setMap(null);
+    territoryCircles.forEach(c => c.setMap(null));
+    territoryCircles = [];
     
-    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
-    
-    if (!isMaster && dispatchKey) {
-        const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        const matched = visibleLicenses.filter(l => {
-            const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-            return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
-        });
-        
-        if (matched.length > 0) return matched;
-        else return visibleLicenses; 
-    }
-    return visibleLicenses;
+    // 타 기사 권역 초기화
+    otherTerritoryOverlays.forEach(ov => ov.setMap(null));
+    otherTerritoryOverlays = [];
 };
 
-window.saveCompanyBaseAddress = async function() {
-    const input = document.getElementById('company-base-address');
-    const addr = input.value.trim();
-    if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
+// 💡 타 기사들의 권역을 지도에 회색으로 그려주는 신규 함수
+window.drawOtherDriversTerritories = function(excludeDevId) {
+    const allDrivers = window.getFilteredVisibleDrivers();
     
-    const btn = document.getElementById('btn-save-company-base');
-    btn.disabled = true; btn.innerText = "확인중...";
-
-    const coords = await window.getCoordsFromAddress(addr);
-    btn.disabled = false; btn.innerText = "저장";
-
-    if (!coords) {
-        alert("입력하신 주소의 위치(좌표)를 찾을 수 없습니다.\n정확한 도로명 또는 지번 주소를 입력해주세요.");
-        return;
-    }
-
-    const fullAddress = coords.fullAddress || addr;
-    const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
-    
-    localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
-    window.updateCompanyBaseUI(baseData);
-    input.value = fullAddress; 
-};
-
-window.clearCompanyBaseAddress = function() {
-    localStorage.removeItem('deliveryProCompanyBase');
-    document.getElementById('company-base-address').value = '';
-    window.updateCompanyBaseUI(null);
-};
-
-window.updateCompanyBaseUI = function(baseData) {
-    const textEl = document.getElementById('saved-base-address-text');
-    const clearBtn = document.getElementById('btn-clear-company-base');
-
-    if (baseData) {
-        textEl.innerText = baseData.address;
-        textEl.classList.add('text-indigo-600');
-        textEl.classList.remove('text-gray-500');
-        clearBtn.classList.remove('hidden');
-    } else {
-        textEl.innerText = "저장된 거점이 없습니다.";
-        textEl.classList.add('text-gray-500');
-        textEl.classList.remove('text-indigo-600');
-        clearBtn.classList.add('hidden');
-    }
-};
-
-// js/admin-app.js 파일 내 renderDispatchDriverList 함수 교체
-window.renderDispatchDriverList = function() {
-    const listEl = document.getElementById('dispatch-driver-list');
-    const countEl = document.getElementById('dispatch-driver-count');
-    if (!listEl || !countEl) return;
-    
-    const drivers = window.getFilteredVisibleDrivers();
-    countEl.innerText = `${drivers.length}명`;
-    
-    if (drivers.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`;
-        return;
-    }
-    
-    let html = '';
-    drivers.forEach((d, idx) => {
+    allDrivers.forEach(d => {
         const devId = d.deviceId || d.key;
-        const phoneDisplay = d.phone || d.key;
+        if (devId === excludeDevId) return; // 현재 설정 중인 기사는 제외
         
-        const tLat = d.territoryLat || '';
-        const tLng = d.territoryLng || '';
-        const tScale = d.territoryScale || '';
-        const t1 = d.territory1 || '';
-        const t2 = d.territory2 || '';
-        
-        let territoryBadge = '';
-        if (tLat && tLng) {
-            let scaleLabel = '동/읍/면';
-            if(tScale === 'gu') scaleLabel = '구/군';
-            if(tScale === 'si') scaleLabel = '시/도';
+        if (d.territoryLat && d.territoryLng) {
+            const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
             
-            // 설정 완료 시: '권역 설정' 버튼과 함께 하단에 역변환된 기본 주소(지역명) 표시
-            territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap" title="권역 설정됨"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
-                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
-                </div>`;
-        } else {
-            // 미설정 시: '권역 설정' 버튼으로 명칭 통일
-            territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
-                    <span class="text-[9px] text-gray-400">미설정</span>
-                </div>`;
+            // 타 기사 핀 생성
+            const marker = new kakao.maps.Marker({ 
+                position: pos,
+                image: new kakao.maps.MarkerImage(
+                    'https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png', 
+                    new kakao.maps.Size(24, 35)
+                ) // 구분을 위해 다른 모양/색상 핀 사용
+            });
+            marker.setMap(territoryMap);
+            otherTerritoryOverlays.push(marker);
+
+            // 타 기사 이름 라벨 
+            const label = new kakao.maps.CustomOverlay({
+                position: pos,
+                content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`,
+                yAnchor: 1
+            });
+            label.setMap(territoryMap);
+            otherTerritoryOverlays.push(label);
+
+            // 타 기사 가장 넓은 3차 반경만 회색으로 표시하여 중복 방지
+            let r3 = 5000; // 기본 dong
+            if (d.territoryScale === 'gu') r3 = 15000;
+            else if (d.territoryScale === 'si') r3 = 45000;
+
+            const circle = new kakao.maps.Circle({
+                center: pos, radius: r3,
+                strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6,
+                fillColor: '#d1d5db', fillOpacity: 0.2
+            });
+            circle.setMap(territoryMap);
+            otherTerritoryOverlays.push(circle);
         }
-
-        const isSelected = selectedDispatchDriverId === devId;
-        
-        html += `
-        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
-            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0">
-                <span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span>
-                <i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i> 
-                <span class="truncate">${phoneDisplay}</span>
-            </span>
-            <div class="shrink-0 ml-2">
-                ${territoryBadge}
-            </div>
-        </div>
-        `;
     });
-    listEl.innerHTML = html;
-};
-
-window.selectDispatchDriver = function(devId) {
-    selectedDispatchDriverId = devId;
-    window.renderDispatchDriverList(); 
-    window.renderDispatchDriverDetail(); 
 };
 
 window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
@@ -813,34 +737,30 @@ window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
             });
         }
         
-        // 지도 크기 재조정 및 중심 맞춤
         territoryMap.relayout(); 
+        window.clearTerritoryOverlays(); // 화면 클리어 후 타 기사 렌더링 준비
 
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined') {
             const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
             territoryMap.setCenter(pos);
             window.setTerritoryCenter(pos);
         } else {
-            window.clearTerritoryOverlays();
-            
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
             if (savedBase) {
                 const baseData = JSON.parse(savedBase);
                 if (baseData.lat && baseData.lng) {
                     const basePos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
                     territoryMap.setCenter(basePos);
-                    window.setTerritoryCenter(basePos);
                 }
             } else {
                 territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
             }
         }
         
-        // 렌더링 지연 방지를 위한 추가 relayout
-        setTimeout(() => {
-            if (territoryMap) territoryMap.relayout();
-        }, 200);
+        // 💡 타 기사 권역 함께 그리기 호출
+        window.drawOtherDriversTerritories(devId);
 
+        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
     }, 200);
 };
 
@@ -863,8 +783,8 @@ window.setTerritoryScale = function(scale, skipRedraw = false) {
     });
 
     if (territoryMap) {
-        if (scale === 'dong') territoryMap.setLevel(6); 
-        else if (scale === 'gu') territoryMap.setLevel(8); 
+        if (scale === 'dong') territoryMap.setLevel(7); // 전체 반경이 보이게 레벨 조정
+        else if (scale === 'gu') territoryMap.setLevel(9); 
         else if (scale === 'si') territoryMap.setLevel(11); 
     }
 
@@ -873,37 +793,35 @@ window.setTerritoryScale = function(scale, skipRedraw = false) {
     }
 };
 
-window.clearTerritoryOverlays = function() {
+window.setTerritoryCenter = function(latLng) {
     if (territoryMarker) territoryMarker.setMap(null);
     territoryCircles.forEach(c => c.setMap(null));
     territoryCircles = [];
-};
-
-window.setTerritoryCenter = function(latLng) {
-    window.clearTerritoryOverlays();
 
     document.getElementById('input-territory-lat').value = latLng.getLat();
     document.getElementById('input-territory-lng').value = latLng.getLng();
 
+    // 💡 GPS 역변환: 정확한 지번/도로명 주소 가져오기
     const geocoder = new kakao.maps.services.Geocoder();
-    geocoder.coord2RegionCode(latLng.getLng(), latLng.getLat(), function(result, status) {
+    geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
         if (status === kakao.maps.services.Status.OK) {
-            for(let i=0; i<result.length; i++) {
-                if(result[i].region_type === 'H') { 
-                    document.getElementById('input-territory-1').value = result[i].region_2depth_name; 
-                    document.getElementById('input-territory-2').value = result[i].region_3depth_name; 
-                    break;
-                }
+            let fullAddress = result[0].address.address_name;
+            if (result[0].road_address) {
+                fullAddress = result[0].road_address.address_name; // 도로명 우선
             }
+            // 기존 t1 영역에 상세 주소를 저장하도록 변경
+            document.getElementById('input-territory-1').value = fullAddress; 
+            document.getElementById('input-territory-2').value = ''; 
         }
     });
 
     territoryMarker = new kakao.maps.Marker({ position: latLng });
     territoryMarker.setMap(territoryMap);
 
+    // 💡 추천 공통 반경 적용 (미터 단위)
     let r1, r2, r3;
     if (currentTerritoryScale === 'dong') { 
-        r1 = 1500; r2 = 3000; r3 = 4500; 
+        r1 = 1500; r2 = 3000; r3 = 5000; 
     } else if (currentTerritoryScale === 'gu') { 
         r1 = 5000; r2 = 10000; r3 = 15000; 
     } else if (currentTerritoryScale === 'si') { 
@@ -913,17 +831,17 @@ window.setTerritoryCenter = function(latLng) {
     const c1 = new kakao.maps.Circle({
         center: latLng, radius: r1,
         strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8,
-        fillColor: '#3b82f6', fillOpacity: 0.45
+        fillColor: '#3b82f6', fillOpacity: 0.5 // 진한 원 (1차)
     });
     const c2 = new kakao.maps.Circle({
         center: latLng, radius: r2,
         strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6,
-        fillColor: '#60a5fa', fillOpacity: 0.25
+        fillColor: '#60a5fa', fillOpacity: 0.25 // 연한 원 (2차)
     });
     const c3 = new kakao.maps.Circle({
         center: latLng, radius: r3,
         strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4,
-        fillColor: '#bfdbfe', fillOpacity: 0.1
+        fillColor: '#bfdbfe', fillOpacity: 0.1 // 더 연한 원 (3차)
     });
 
     c3.setMap(territoryMap);
@@ -931,6 +849,35 @@ window.setTerritoryCenter = function(latLng) {
     c1.setMap(territoryMap);
     
     territoryCircles = [c3, c2, c1];
+};
+
+window.saveDriverTerritory = async function() {
+    const devId = document.getElementById('territory-target-devid').value;
+    const lat = document.getElementById('input-territory-lat').value;
+    const lng = document.getElementById('input-territory-lng').value;
+    const scale = document.getElementById('input-territory-scale').value;
+    const t1 = document.getElementById('input-territory-1').value || '상세 주소 확인 불가'; // 여기에 전체 주소가 담깁니다.
+    const t2 = document.getElementById('input-territory-2').value || '';
+
+    if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
+
+    const targetLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (!targetLic) return;
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key), {
+            territoryLat: parseFloat(lat),
+            territoryLng: parseFloat(lng),
+            territoryScale: scale,
+            territory1: t1,
+            territory2: t2
+        });
+        alert("기사 권역(위치 및 반경)이 성공적으로 저장되었습니다.");
+        window.closeDriverTerritoryModal();
+        window.renderDispatchDriverList();
+    } catch(e) {
+        alert("저장 오류: " + e.message);
+    }
 };
 
 window.saveDriverTerritory = async function() {
