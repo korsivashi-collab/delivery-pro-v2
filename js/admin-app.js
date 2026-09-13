@@ -21,10 +21,20 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
+// [PRO 기능용 전역 변수]
 let excelSortAsc = true; 
 let parsedExcelList = []; 
 let printReadyList = []; 
 let selectedDispatchDriverId = null; 
+let currentSelectedFormIndex = null;
+let previewDebounceTimer = null;
+let territoryMap = null;
+let territoryMarker = null;
+let territoryCircles = [];
+let otherTerritoryOverlays = []; 
+let currentTerritoryScale = 'dong';
+let allTerritoriesMap = null;
+let allTerritoriesOverlays = [];
 
 window.myMapOverlays = [];
 window.forceClearMap = function() {
@@ -52,7 +62,7 @@ window.getLocalDateString = function(d = new Date()) {
 }
 const todayStr = window.getLocalDateString();
 
-// 🌟 핵심 초기화
+// === 1. 초기화 및 로그인/로그아웃 ===
 window.onload = () => {
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
@@ -68,8 +78,8 @@ window.onload = () => {
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = window.getLocalDateString(defaultExpire);
 
-    window.loadSavedForms();
-    window.initExcelDropZone(); 
+    if(window.loadSavedForms) window.loadSavedForms();
+    if(window.initExcelDropZone) window.initExcelDropZone(); 
 
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
@@ -145,6 +155,7 @@ window.systemLogout = function() {
     window.location.reload();
 };
 
+// === 2. 마스터 대시보드 로직 ===
 window.showMasterPanel = function(name = '마스터') {
     currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
@@ -160,26 +171,6 @@ window.showMasterPanel = function(name = '마스터') {
     if(window.switchMasterTab) window.switchMasterTab('regular');
 };
 
-window.showDispatchPanel = function() {
-    currentUserRole = 'DISPATCH';
-    document.getElementById('login-screen').classList.add('hidden');
-    document.getElementById('dispatch-panel').classList.remove('hidden');
-    document.getElementById('dispatch-panel').classList.add('flex');
-
-    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const localToken = sessionStorage.getItem('deliveryProSessionToken');
-    if (currentKey) {
-        if (localToken && localToken.startsWith('MONITOR-')) {
-            document.getElementById('dispatch-sub-title').innerHTML = `<span class="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black flex items-center gap-1"><i class="fa-solid fa-eye animate-pulse"></i> 마스터 모니터링: [${currentKey}]</span>`;
-        } else {
-            document.getElementById('dispatch-sub-title').innerText = `관제 센터 [${currentKey}]`;
-        }
-    }
-    if(typeof initKakaoMap === 'function') initKakaoMap();
-    window.initRealtimeSync();
-    if(window.setDispatchMode) window.setDispatchMode('DELIVERY');
-};
-
 window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         allLicenses = [];
@@ -188,38 +179,56 @@ window.initMasterDataSync = function() {
         if(window.populateDriverSelect) window.populateDriverSelect();
         if(window.renderAccountHistoryView) window.renderAccountHistoryView();
         
+        const curKey = document.getElementById('edit-orig-key')?.value;
+        if (curKey) {
+            const target = allLicenses.find(l => l.key === curKey);
+            if (target && target.type === 'dispatch' && window.renderModalConnectedDrivers) window.renderModalConnectedDrivers(target.key);
+        }
+
         if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
-            window.renderDispatchDriverList();
-            window.renderDispatchDriverDetail();
+            if(window.renderDispatchDriverList) window.renderDispatchDriverList();
+            if(window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
         }
     });
 
     onSnapshot(collection(db, "memos"), (snapshot) => {
         allMemos = [];
         snapshot.forEach(docSnap => { allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
+        const countMemosEl = document.getElementById('count-memos');
+        if (countMemosEl) countMemosEl.innerText = allMemos.length;
+        if(window.renderMemosTable) window.renderMemosTable(allMemos);
         if(window.renderAccountHistoryView) window.renderAccountHistoryView();
     });
 
     onSnapshot(collection(db, "routes"), (snapshot) => {
         activeRoutes = {};
         snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
+        if(window.renderSidebar) window.renderSidebar();
+        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
+        if(window.populateDriverSelect) window.populateDriverSelect();
         if(window.renderAccountHistoryView) window.renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         allCompletions = [];
         snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+        if(window.renderSidebar) window.renderSidebar();
+        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
         if(window.renderAccountHistoryView) window.renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
         allDispatchMessages = [];
         snapshot.forEach(docSnap => { allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
+        if(window.renderMessageFeed) window.renderMessageFeed();
+        if(window.checkDispatchInboxNotifications) window.checkDispatchInboxNotifications();
+        if(window.renderMasterNoticeHistoryList) window.renderMasterNoticeHistoryList();
     });
 
     onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
         allDispatchTemplates = [];
         snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
+        if(window.renderCustomTemplates) window.renderCustomTemplates();
     });
 };
 
@@ -359,6 +368,7 @@ window.renderPagedTableTab = function(tabKey, list, tbodyId, paginationId, rowRe
     }
 };
 
+// === 3. 라이선스/계정 관리 모달 ===
 window.openEditLicenseModal = function(key) {
     const target = allLicenses.find(l => l.key === key);
     if (!target) return;
@@ -375,11 +385,117 @@ window.openEditLicenseModal = function(key) {
     document.getElementById('edit-expire-input').value = expFormatted;
     document.getElementById('edit-status-select').value = target.status || 'active';
 
+    const slotsBox = document.getElementById('edit-slots-container');
+    const dispatchSec = document.getElementById('edit-dispatch-connected-section');
+
+    if (target.type === 'dispatch') {
+        if (slotsBox) slotsBox.classList.remove('hidden');
+        document.getElementById('edit-slots-input').value = target.maxSlots || 0;
+        if (dispatchSec) { dispatchSec.classList.remove('hidden'); dispatchSec.classList.add('flex'); }
+        const addInput = document.getElementById('modal-add-driver-input');
+        if (addInput) addInput.value = '';
+        if(window.renderModalConnectedDrivers) window.renderModalConnectedDrivers(target.key);
+    } else {
+        if (slotsBox) slotsBox.classList.add('hidden');
+        if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
+    }
     document.getElementById('edit-license-modal').classList.remove('hidden');
 };
 
 window.closeEditModal = function() { 
     document.getElementById('edit-license-modal').classList.add('hidden'); 
+};
+
+window.renderModalConnectedDrivers = function(dispatchKey) {
+    const listEl = document.getElementById('modal-connected-drivers-list');
+    const badgeEl = document.getElementById('modal-connected-count-badge');
+    if (!listEl) return;
+    const targetDispatch = allLicenses.find(l => l.key === dispatchKey);
+    const connectedDrivers = allLicenses.filter(l => l.dispatchKey === dispatchKey);
+
+    if (badgeEl) {
+        const max = targetDispatch && targetDispatch.maxSlots ? targetDispatch.maxSlots : '무제한';
+        badgeEl.innerText = `${connectedDrivers.length}명 연결됨 (최대 ${max}대)`;
+    }
+
+    if (connectedDrivers.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-xs font-bold bg-white rounded-xl border border-dashed border-gray-300">연결된 소속 기사가 없습니다. 상단에서 기사를 추가해 주세요.</div>`;
+        return;
+    }
+
+    let html = '';
+    connectedDrivers.forEach(d => {
+        html += `
+        <div class="flex items-center justify-between p-2.5 bg-white border border-purple-200 rounded-xl text-xs shadow-2xs">
+            <div class="flex items-center gap-2 min-w-0 flex-1">
+                <i class="fa-solid fa-truck text-purple-600 text-[11px] shrink-0"></i>
+                <span class="font-black text-gray-800 truncate">${d.phone || '연락처 미등록'}</span>
+                <span class="text-[10px] text-gray-400 font-mono shrink-0">[${d.key}]</span>
+            </div>
+            <button type="button" onclick="window.unlinkDriverFromModal('${d.key}')" class="text-red-600 hover:text-red-700 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-1 rounded-lg text-[10px] font-bold transition active:scale-95 shrink-0 ml-2 flex items-center gap-1">
+                <i class="fa-solid fa-link-slash text-[9px]"></i> 연결 해제
+            </button>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+};
+
+window.linkDriverFromModal = async function() {
+    const dispatchKey = document.getElementById('edit-orig-key').value;
+    const inputEl = document.getElementById('modal-add-driver-input');
+    const rawVal = inputEl ? inputEl.value.trim().toUpperCase() : '';
+
+    if (!rawVal) { alert("연결할 기사의 8자리 키 또는 전화번호를 입력해 주세요."); if (inputEl) inputEl.focus(); return; }
+
+    const dispatchLic = allLicenses.find(l => l.key === dispatchKey);
+    const connectedDrivers = allLicenses.filter(l => l.dispatchKey === dispatchKey);
+    if (dispatchLic && dispatchLic.maxSlots > 0 && connectedDrivers.length >= dispatchLic.maxSlots) {
+        alert(`관제 허용 슬롯(${dispatchLic.maxSlots}대)을 모두 채웠습니다.\n기사를 더 연결하려면 상단 슬롯 수를 늘려주세요.`); return;
+    }
+
+    const cleanDigits = rawVal.replace(/[^0-9]/g, '');
+    const rawKeyOnly = rawVal.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+    let targetLic = allLicenses.find(l => {
+        if (l.type === 'dispatch') return false;
+        const lKey = (l.key || '').toUpperCase();
+        const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
+        const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        return lKey === rawVal || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
+    });
+
+    if (!targetLic) {
+        try {
+            let snap = await getDoc(doc(db, "licenses", rawVal));
+            if (!snap.exists()) snap = await getDoc(doc(db, "licenses", `TRIAL-${rawVal}`));
+            if (!snap.exists()) snap = await getDoc(doc(db, "licenses", `PRO-${rawVal}`));
+            if (snap.exists()) targetLic = { id: snap.id, ...snap.data() };
+        } catch(e) {}
+    }
+
+    if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
+    if (targetLic.dispatchKey === dispatchKey) { alert("이미 본 관제 계정에 연결되어 있는 기사입니다."); return; }
+    if (targetLic.dispatchKey && targetLic.dispatchKey !== dispatchKey) {
+        if (!confirm(`해당 기사는 현재 다른 관제소([${targetLic.dispatchKey}])에 소속되어 있습니다.\n본 관제 계정([${dispatchKey}])으로 소속을 이전하시겠습니까?`)) return;
+    }
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: dispatchKey });
+        alert(`기사 [${targetLic.phone || targetLic.key}] 님이 성공적으로 연결되었습니다.`);
+        if (inputEl) inputEl.value = '';
+        window.renderModalConnectedDrivers(dispatchKey);
+    } catch(e) { alert("기사 연결 처리 오류: " + e.message); }
+};
+
+window.unlinkDriverFromModal = async function(driverKey) {
+    const dispatchKey = document.getElementById('edit-orig-key').value;
+    const driver = allLicenses.find(l => l.key === driverKey);
+    const name = driver?.phone || driverKey;
+    if (!confirm(`[${name}] 기사를 관제 연결에서 해제하시겠습니까?`)) return;
+    try {
+        await updateDoc(doc(db, "licenses", driverKey), { dispatchKey: "" });
+        alert(`[${name}] 기사의 관제 연결이 해제되었습니다.`);
+        window.renderModalConnectedDrivers(dispatchKey);
+    } catch(e) { alert("연결 해제 오류: " + e.message); }
 };
 
 window.saveLicenseEdit = async function() {
@@ -396,17 +512,20 @@ window.saveLicenseEdit = async function() {
 
     const expStr = expireDate.replace(/-/g, '.');
     const target = allLicenses.find(l => l.key === origKey);
-
     const updatePayload = {
         key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
         dispatchKey: target ? target.dispatchKey || '' : '',
-        isPro: target ? target.isPro : false
+        maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input')?.value) || 0 : 0
     };
 
     try {
         if (newKey !== origKey) {
             await setDoc(doc(db, "licenses", newKey), updatePayload);
             await deleteDoc(doc(db, "licenses", origKey));
+            if (type === 'dispatch') {
+                const linked = allLicenses.filter(l => l.dispatchKey === origKey);
+                for (const l of linked) await updateDoc(doc(db, "licenses", l.key), { dispatchKey: newKey });
+            }
         } else {
             await updateDoc(doc(db, "licenses", origKey), updatePayload);
         }
@@ -416,1235 +535,616 @@ window.saveLicenseEdit = async function() {
 };
 
 window.deleteLicense = async function(key) {
+    const target = allLicenses.find(l => l.key === key);
     if (!confirm(`정말 [${key}] 계정을 영구 삭제하시겠습니까?`)) return;
     try {
         await deleteDoc(doc(db, "licenses", key));
+        if (target && target.deviceId) {
+            try { await deleteDoc(doc(db, "routes", target.deviceId)); } catch(e){}
+        }
+        if (target && target.type === 'dispatch') {
+            const linked = allLicenses.filter(l => l.dispatchKey === key);
+            for (const l of linked) await updateDoc(doc(db, "licenses", l.key), { dispatchKey: "" });
+        }
         alert(`[${key}] 계정이 삭제되었습니다.`);
+        if (window.currentSelectedAccountKey === key) window.backToAllAccountsView();
     } catch (e) { alert("삭제 오류: " + e.message); }
 };
 
-// =====================================================================
-// 🌟 [PRO 전용] 배송 자동할당 및 명세서 모달 통제 로직
-// =====================================================================
+window.deleteLicenseFromModal = async function() {
+    const origKey = document.getElementById('edit-orig-key').value;
+    if (!origKey) return;
+    window.closeEditModal();
+    await window.deleteLicense(origKey);
+};
 
-window.handleProFeature = function(featureName) {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const role = sessionStorage.getItem('deliveryProRole');
-    let isPro = false;
+// === 4. 내역 조회, 메모 관리 및 히스토리 탭 ===
+window.setHistorySort = function(field) {
+    if (window.historySortField === field) window.historySortAsc = !window.historySortAsc;
+    else { window.historySortField = field; window.historySortAsc = true; }
+    window.renderAccountHistoryView();
+};
 
-    if (dispatchKey) {
-        const myLic = allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
-        if (myLic && myLic.isPro) isPro = true;
-    }
-    if (role === 'MASTER' && !dispatchKey) isPro = true;
-
-    if (isPro) {
-        if (featureName === 'AUTO_DISPATCH') {
-            const modal = document.getElementById('auto-dispatch-modal');
-            if (!modal) {
-                alert("🚨 시스템 안내\n현재 사용 중인 브라우저 화면이 최신 버전이 아닙니다.\n새로고침을 한 번 진행해주세요.");
-                return;
-            }
-            modal.classList.remove('hidden');
-            window.renderDispatchDriverList();
-            window.loadExcelFromFirebase();
-            window.initExcelDropZone(); 
-            
-            const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) window.updateCompanyBaseUI(JSON.parse(savedBase));
-
-        } else if (featureName === 'INVOICE') {
-            if (printReadyList.length === 0) {
-                alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요.");
-                return;
-            }
-            const modal = document.getElementById('pro-invoice-modal');
-            if (!modal) {
-                alert("🚨 시스템 안내\n현재 화면에 인쇄 모듈이 없습니다. 최신 파일(admin.html)을 덮어씌워 주세요.");
-                return;
-            }
-            modal.classList.remove('hidden');
-            document.getElementById('print-ready-count').innerText = printReadyList.length;
-            window.loadSavedForms(); 
-            window.previewInvoiceRow(0); 
-            window.syncPreviewData(); 
+window.setHistoryAccountTypeFilter = function(type) {
+    window.historyAccountTypeFilter = type;
+    window.historyCurrentPage = 1;
+    ['ALL', 'regular', 'trial', 'dispatch'].forEach(t => {
+        const btn = document.getElementById(`htype-btn-${t}`);
+        if (btn) {
+            btn.className = (t === type)
+                ? "px-3 py-1 rounded-lg text-xs font-black bg-blue-600 text-white shadow-xs transition"
+                : "px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition";
         }
+    });
+    window.renderAccountHistoryView();
+};
+
+window.populateDriverSelect = function() {
+    const selectEl = document.getElementById('history-driver-select');
+    if (!selectEl) return;
+    const prevVal = selectEl.value;
+    let html = `<option value="ALL">전체 계정 확인 (목록 보기)</option>`;
+    allLicenses.forEach(l => {
+        const typeTag = l.type === 'dispatch' ? '[관제]' : (l.type === 'trial' ? '[체험]' : '[일반]');
+        html += `<option value="${l.key}">${typeTag} ${l.phone || '번호미등록'} [${l.key}]</option>`;
+    });
+    selectEl.innerHTML = html;
+    if (prevVal && selectEl.querySelector(`option[value="${prevVal}"]`)) selectEl.value = prevVal;
+};
+
+window.filterDriverDropdown = function(query) {
+    window.historyCurrentPage = 1;
+    const q = query.trim().toLowerCase();
+    const selectEl = document.getElementById('history-driver-select');
+    if (!selectEl) return;
+    if (!q) { window.populateDriverSelect(); return; }
+    let html = `<option value="ALL">전체 계정 확인 (목록 보기)</option>`;
+    allLicenses.filter(l => (l.phone && l.phone.includes(q)) || l.key.toLowerCase().includes(q)).forEach(l => {
+        const typeTag = l.type === 'dispatch' ? '[관제]' : (l.type === 'trial' ? '[체험]' : '[일반]');
+        html += `<option value="${l.key}">${typeTag} ${l.phone || '번호미등록'} [${l.key}]</option>`;
+    });
+    selectEl.innerHTML = html;
+    window.renderAccountHistoryView();
+};
+
+window.onDriverSelectChange = function(val) {
+    if (val === 'ALL') window.backToAllAccountsView();
+    else window.selectAccountDirectly(val);
+};
+
+window.selectAccountDirectly = function(key) {
+    if (window.historyNoticeMode) {
+        window.toggleHistoryItemSelection(key, !window.historySelectedAccountKeys.has(key));
+        return;
+    }
+    document.getElementById('history-driver-select').value = key;
+    window.renderAccountHistoryView();
+};
+
+window.backToAllAccountsView = function() {
+    window.currentSelectedAccountKey = '';
+    window.historyCurrentPage = 1;
+    const sel = document.getElementById('history-driver-select');
+    if (sel) sel.value = 'ALL';
+    const searchInput = document.getElementById('history-driver-search');
+    if (searchInput) searchInput.value = '';
+    window.populateDriverSelect();
+    window.renderAccountHistoryView();
+};
+
+window.changeHistoryPage = function(page) {
+    window.historyCurrentPage = page;
+    window.renderAccountHistoryView();
+};
+
+window.toggleHistoryNoticeMode = function(forceState) {
+    if (forceState !== undefined) window.historyNoticeMode = forceState;
+    else window.historyNoticeMode = !window.historyNoticeMode;
+
+    const btn = document.getElementById('btn-toggle-history-notice');
+    const bar = document.getElementById('history-notice-send-bar');
+
+    if (window.historyNoticeMode) {
+        if (btn) btn.className = "px-3.5 py-1.5 rounded-xl text-xs font-black bg-amber-500 text-white shadow-md transition active:scale-95 flex items-center gap-1.5";
+        if (bar) { bar.classList.remove('hidden'); bar.classList.add('flex'); }
     } else {
-        document.getElementById('premium-upgrade-modal').classList.remove('hidden');
+        if (btn) btn.className = "px-3.5 py-1.5 rounded-xl text-xs font-black bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 shadow-2xs transition active:scale-95 flex items-center gap-1.5";
+        if (bar) { bar.classList.add('hidden'); bar.classList.remove('flex'); }
+        window.historySelectedAccountKeys.clear();
+    }
+    window.updateHistorySelectedCount();
+    window.renderAccountHistoryView();
+};
+
+window.toggleHistoryItemSelection = function(key, isChecked) {
+    if (isChecked) window.historySelectedAccountKeys.add(key);
+    else window.historySelectedAccountKeys.delete(key);
+    window.updateHistorySelectedCount();
+    window.renderAccountHistoryView();
+};
+
+window.toggleHistorySelectAll = function(isChecked) {
+    let filteredList = allLicenses;
+    if (window.historyAccountTypeFilter !== 'ALL') filteredList = allLicenses.filter(l => l.type === window.historyAccountTypeFilter);
+    if (isChecked) filteredList.forEach(l => window.historySelectedAccountKeys.add(l.key));
+    else window.historySelectedAccountKeys.clear();
+    window.updateHistorySelectedCount();
+    window.renderAccountHistoryView();
+};
+
+window.updateHistorySelectedCount = function() {
+    const countEl = document.getElementById('history-selected-count');
+    if (countEl) countEl.innerText = window.historySelectedAccountKeys.size;
+};
+
+window.sendHistoryNoticeToSelected = async function() {
+    if (window.historySelectedAccountKeys.size === 0) { alert("알림을 보낼 대상 계정을 최소 1개 이상 선택해 주세요."); return; }
+    const inputEl = document.getElementById('history-notice-input');
+    const content = inputEl ? inputEl.value.trim() : '';
+    if (!content) { alert("알림 내용을 입력해 주세요."); if (inputEl) inputEl.focus(); return; }
+
+    const btn = document.getElementById('btn-send-history-notice');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 발송 중...'; }
+
+    const targetDeviceIds = [];
+    const targetPhones = [];
+    window.historySelectedAccountKeys.forEach(key => {
+        const lic = allLicenses.find(l => l.key === key);
+        targetDeviceIds.push(key);
+        if (lic) {
+            if (lic.deviceId) targetDeviceIds.push(lic.deviceId);
+            if (lic.phone) targetPhones.push(lic.phone);
+        }
+    });
+
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    const dateStr = window.getLocalDateString(now);
+
+    try {
+        await addDoc(collection(db, "dispatch_messages"), {
+            senderKey: "MASTER", senderType: "MASTER", senderTitle: "운영사 알림",
+            targetDeviceIds: Array.from(new Set(targetDeviceIds)),
+            targetPhones: Array.from(new Set(targetPhones)),
+            content: content, createdAt: now.getTime(), dateStr: dateStr, timeStr: timeStr, acknowledged: []
+        });
+        alert(`총 ${window.historySelectedAccountKeys.size}개 계정에 [운영사 알림]이 성공적으로 전송되었습니다.`);
+        if (inputEl) inputEl.value = '';
+        window.toggleHistoryNoticeMode(false);
+    } catch (e) {
+        alert("알림 발송 오류: " + e.message);
+    } finally {
+        if (btn) { btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> 알림 전송'; }
     }
 };
 
-window.closePremiumModal = function() { document.getElementById('premium-upgrade-modal').classList.add('hidden'); };
-window.closeProInvoiceModal = function() { document.getElementById('pro-invoice-modal').classList.add('hidden'); };
-window.closeAutoDispatchModal = function() { document.getElementById('auto-dispatch-modal').classList.add('hidden'); };
-
-window.selectFormTemplate = function(type) {
-    document.getElementById('form-template-modal').classList.add('hidden');
-    const accordion = document.getElementById('form-setup-accordion');
-    if (accordion && accordion.classList.contains('hidden')) {
-        accordion.classList.remove('hidden');
-        accordion.classList.add('flex');
-    }
-    setTimeout(() => {
-        const titleInput = document.getElementById('input-form-title');
-        if (titleInput) titleInput.focus();
-    }, 300);
-};
-
-window.syncPreviewData = function() {
-    const regno = document.getElementById('input-prov-regno')?.value || '';
-    const name = document.getElementById('input-prov-name')?.value || '';
-    const addr = document.getElementById('input-prov-addr')?.value || '';
-    const tel = document.getElementById('input-prov-tel')?.value || '';
-    const addTel = document.getElementById('input-prov-add-tel')?.value || '';
-
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    
-    if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
-    if (document.getElementById('prev-date-2')) document.getElementById('prev-date-2').innerText = dateStr;
-    
-    document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
-    document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
-    document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
-    document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
-    document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
-};
-
-let previewDebounceTimer = null;
-window.updateLivePreview = function() {
-    clearTimeout(previewDebounceTimer);
-    previewDebounceTimer = setTimeout(() => {
-        window.syncPreviewData();
-    }, 150);
-};
-
-let currentSelectedFormIndex = null;
-
-window.loadSavedForms = function() {
-    const listEl = document.getElementById('saved-forms-list');
+window.renderAccountHistoryView = function() {
+    const selectEl = document.getElementById('history-driver-select');
+    const selectedKey = selectEl ? selectEl.value : 'ALL';
+    const listEl = document.getElementById('account-history-main-content');
+    const profileCardEl = document.getElementById('account-profile-card');
+    const topFilterBarEl = document.getElementById('history-top-filter-bar');
+    const backBarEl = document.getElementById('account-back-bar');
     if (!listEl) return;
-    
-    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
-    if (savedForms.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`;
-        return;
-    }
 
-    let html = '';
-    savedForms.forEach((form, idx) => {
-        const isSelected = (currentSelectedFormIndex === idx);
-        html += `
-        <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
-            <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
-                <input type="checkbox" onchange="window.toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0" title="선택/해제 토글">
-                <div class="min-w-0 cursor-pointer flex-1" onclick="window.previewSavedForm(${idx})" title="명세서 폼 적용">
-                    <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
-                    <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
-                </div>
-            </div>
-            <button type="button" onclick="window.deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0" title="폼 삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-        </div>`;
-    });
-    listEl.innerHTML = html;
-};
+    const hAll = document.getElementById('htype-count-all');
+    const hReg = document.getElementById('htype-count-reg');
+    const hTr = document.getElementById('htype-count-trial');
+    const hDisp = document.getElementById('htype-count-dispatch');
+    if (hAll) hAll.innerText = allLicenses.length;
+    if (hReg) hReg.innerText = allLicenses.filter(l => l.type === 'regular' || (!l.type && !l.isTrial)).length;
+    if (hTr) hTr.innerText = allLicenses.filter(l => l.type === 'trial' || l.isTrial).length;
+    if (hDisp) hDisp.innerText = allLicenses.filter(l => l.type === 'dispatch').length;
 
-window.toggleSelectForm = function(idx) {
-    if (currentSelectedFormIndex === idx) {
-        currentSelectedFormIndex = null;
-        window.cancelProviderFormEdit(); 
-        window.loadSavedForms();
-    } else {
-        window.applySavedForm(idx);
-    }
-};
+    if (selectedKey === 'ALL') {
+        window.currentSelectedAccountKey = '';
+        if (profileCardEl) { profileCardEl.classList.add('hidden'); profileCardEl.classList.remove('flex'); }
+        if (backBarEl) { backBarEl.classList.remove('hidden'); backBarEl.classList.add('flex'); }
+        if (topFilterBarEl) topFilterBarEl.classList.remove('hidden');
 
-window.previewSavedForm = function(idx) {
-    window.applySavedForm(idx);
-};
-
-window.cancelProviderFormEdit = function() {
-    currentSelectedFormIndex = null;
-    document.getElementById('input-form-title').value = '';
-    document.getElementById('input-prov-regno').value = '';
-    document.getElementById('input-prov-name').value = '';
-    document.getElementById('input-prov-addr').value = '';
-    document.getElementById('input-prov-tel').value = '';
-    document.getElementById('input-prov-add-tel').value = '';
-    
-    const accordion = document.getElementById('form-setup-accordion');
-    if (accordion) {
-        accordion.classList.add('hidden');
-        accordion.classList.remove('flex');
-    }
-    
-    window.loadSavedForms();
-    window.syncPreviewData();
-};
-
-window.saveProviderForm = function() {
-    const title = document.getElementById('input-form-title').value.trim();
-    const regno = document.getElementById('input-prov-regno').value.trim();
-    const name = document.getElementById('input-prov-name').value.trim();
-    const addr = document.getElementById('input-prov-addr').value.trim();
-    const tel = document.getElementById('input-prov-tel').value.trim();
-    const addTel = document.getElementById('input-prov-add-tel').value.trim();
-
-    if (!title) { alert("저장할 폼의 '제목'을 입력해주세요."); document.getElementById('input-form-title').focus(); return; }
-
-    const newForm = { title, name, regno, addr, tel, addTel, savedAt: Date.now() };
-    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
-    
-    const existingIdx = savedForms.findIndex(f => f.title === title);
-    if(existingIdx >= 0) {
-        if(confirm(`'${title}'(으)로 이미 저장된 폼이 있습니다. 덮어쓰시겠습니까?`)) {
-            savedForms[existingIdx] = newForm;
-        } else return;
-    } else {
-        savedForms.push(newForm);
-    }
-
-    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
-    window.loadSavedForms();
-};
-
-window.applySavedForm = function(idx) {
-    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
-    const form = savedForms[idx];
-    if (!form) return;
-
-    currentSelectedFormIndex = idx;
-
-    document.getElementById('input-form-title').value = form.title || '';
-    document.getElementById('input-prov-regno').value = form.regno || '';
-    document.getElementById('input-prov-name').value = form.name || '';
-    document.getElementById('input-prov-addr').value = form.addr || '';
-    document.getElementById('input-prov-tel').value = form.tel || '';
-    document.getElementById('input-prov-add-tel').value = form.addTel || '';
-
-    window.loadSavedForms(); 
-    window.syncPreviewData();
-};
-
-window.deleteSavedForm = function(idx) {
-    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
-    const form = savedForms[idx];
-    if(!confirm(`[${form.title}] 폼을 삭제하시겠습니까?`)) return;
-
-    savedForms.splice(idx, 1);
-    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    if (currentSelectedFormIndex === idx) currentSelectedFormIndex = null;
-    window.loadSavedForms();
-};
-
-// =====================================================================
-// 🌟 권역 설정 모달 전용 로직 (중복 제거 및 최적화 완료 최종본)
-// =====================================================================
-let territoryMap = null;
-let territoryMarker = null;
-let territoryCircles = [];
-let otherTerritoryOverlays = []; 
-let currentTerritoryScale = 'dong';
-
-window.clearTerritoryOverlays = function() {
-    if (territoryMarker) territoryMarker.setMap(null);
-    territoryCircles.forEach(c => c.setMap(null));
-    territoryCircles = [];
-    otherTerritoryOverlays.forEach(ov => ov.setMap(null));
-    otherTerritoryOverlays = [];
-};
-
-window.drawOtherDriversTerritories = function(excludeDevId) {
-    const allDrivers = window.getFilteredVisibleDrivers();
-    allDrivers.forEach(d => {
-        const devId = d.deviceId || d.key;
-        if (devId === excludeDevId) return; 
-        
-        if (d.territoryLat && d.territoryLng) {
-            const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
-            const marker = new kakao.maps.Marker({ 
-                position: pos,
-                image: new kakao.maps.MarkerImage('https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png', new kakao.maps.Size(24, 35)) 
-            });
-            marker.setMap(territoryMap);
-            otherTerritoryOverlays.push(marker);
-
-            const label = new kakao.maps.CustomOverlay({
-                position: pos,
-                content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`,
-                yAnchor: 1
-            });
-            label.setMap(territoryMap);
-            otherTerritoryOverlays.push(label);
-
-            let r3 = 5000; 
-            if (d.territoryScale === 'gu') r3 = 15000;
-            else if (d.territoryScale === 'si') r3 = 45000;
-
-            const circle = new kakao.maps.Circle({
-                center: pos, radius: r3,
-                strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6,
-                fillColor: '#d1d5db', fillOpacity: 0.2
-            });
-            circle.setMap(territoryMap);
-            otherTerritoryOverlays.push(circle);
-        }
-    });
-};
-
-window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
-    try { if (window.event) window.event.stopPropagation(); } catch(e) {}
-
-    document.getElementById('territory-target-devid').value = devId;
-    document.getElementById('territory-target-phone').innerText = phone;
-    
-    const modal = document.getElementById('driver-territory-modal');
-    if(!modal) {
-        alert("권역 설정 모달창을 찾을 수 없습니다. HTML 코드를 확인해주세요.");
-        return;
-    }
-    modal.classList.remove('hidden');
-
-    currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
-    window.setTerritoryScale(currentTerritoryScale, true); 
-
-    setTimeout(() => {
-        const container = document.getElementById('territory-map-container');
-        if (!territoryMap) {
-            const options = { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 };
-            territoryMap = new kakao.maps.Map(container, options);
-            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) {
-                window.setTerritoryCenter(mouseEvent.latLng);
-            });
-        }
-        
-        territoryMap.relayout(); 
-        window.clearTerritoryOverlays(); 
-
-        if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
-            const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
-            territoryMap.setCenter(pos);
-            window.setTerritoryCenter(pos);
-        } else {
-            const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) {
-                const baseData = JSON.parse(savedBase);
-                if (baseData.lat && baseData.lng) {
-                    const basePos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
-                    territoryMap.setCenter(basePos);
-                }
-            } else {
-                territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
-            }
-            const addrDisplayEl = document.getElementById('territory-selected-address');
-            if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
-        }
-        
-        window.drawOtherDriversTerritories(devId);
-        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
-    }, 200);
-};
-
-window.closeDriverTerritoryModal = function() {
-    document.getElementById('driver-territory-modal').classList.add('hidden');
-};
-
-window.setTerritoryScale = function(scale, skipRedraw = false) {
-    currentTerritoryScale = scale;
-    const scaleInput = document.getElementById('input-territory-scale');
-    if(scaleInput) scaleInput.value = scale;
-
-    ['dong', 'gu', 'si'].forEach(s => {
-        const btn = document.getElementById(`btn-scale-${s}`);
-        if (!btn) return;
-        if (s === scale) btn.className = "px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95";
-        else btn.className = "px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
-    });
-
-    if (territoryMap) {
-        if (scale === 'dong') territoryMap.setLevel(7); 
-        else if (scale === 'gu') territoryMap.setLevel(9); 
-        else if (scale === 'si') territoryMap.setLevel(11); 
-    }
-
-    if (!skipRedraw && territoryMarker) {
-        window.setTerritoryCenter(territoryMarker.getPosition());
-    }
-};
-
-window.setTerritoryCenter = function(latLng) {
-    if (territoryMarker) territoryMarker.setMap(null);
-    territoryCircles.forEach(c => c.setMap(null));
-    territoryCircles = [];
-
-    document.getElementById('input-territory-lat').value = latLng.getLat();
-    document.getElementById('input-territory-lng').value = latLng.getLng();
-
-    const geocoder = new kakao.maps.services.Geocoder();
-    geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
-        let displayAddr = "주소를 찾을 수 없는 지역입니다";
-        if (status === kakao.maps.services.Status.OK) {
-            let fullAddress = result[0].address.address_name;
-            if (result[0].road_address) fullAddress = result[0].road_address.address_name;
-            document.getElementById('input-territory-1').value = fullAddress; 
-            document.getElementById('input-territory-2').value = ''; 
-            displayAddr = fullAddress;
-        }
-        const addrDisplayEl = document.getElementById('territory-selected-address');
-        if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
-    });
-
-    territoryMarker = new kakao.maps.Marker({ position: latLng });
-    territoryMarker.setMap(territoryMap);
-
-    let r1, r2, r3;
-    if (currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
-    else if (currentTerritoryScale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
-    else if (currentTerritoryScale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
-
-    const c1 = new kakao.maps.Circle({ center: latLng, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.5 });
-    const c2 = new kakao.maps.Circle({ center: latLng, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.25 });
-    const c3 = new kakao.maps.Circle({ center: latLng, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.1 });
-
-    c3.setMap(territoryMap); c2.setMap(territoryMap); c1.setMap(territoryMap);
-    territoryCircles = [c3, c2, c1];
-};
-
-window.saveDriverTerritory = async function() {
-    const devId = document.getElementById('territory-target-devid').value;
-    const lat = document.getElementById('input-territory-lat').value;
-    const lng = document.getElementById('input-territory-lng').value;
-    const scale = document.getElementById('input-territory-scale').value;
-    const t1 = document.getElementById('input-territory-1').value || '상세 주소 확인 불가'; 
-    const t2 = document.getElementById('input-territory-2').value || '';
-
-    if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
-
-    const targetLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    if (!targetLic) return;
-
-    try {
-        await updateDoc(doc(db, "licenses", targetLic.key), {
-            territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
-            territoryScale: scale, territory1: t1, territory2: t2
-        });
-        alert("기사 권역(위치 및 반경)이 성공적으로 저장되었습니다.");
-        window.closeDriverTerritoryModal();
-        window.renderDispatchDriverList();
-    } catch(e) { alert("저장 오류: " + e.message); }
-};
-
-// =====================================================================
-// 🌟 신규 기능: 전체 기사 권역 설정 현황 지도 보기 로직
-// =====================================================================
-let allTerritoriesMap = null;
-let allTerritoriesOverlays = [];
-
-window.openAllTerritoriesMap = function() {
-    const modal = document.getElementById('all-territories-modal');
-    if (!modal) return;
-    modal.classList.remove('hidden');
-
-    setTimeout(() => {
-        const container = document.getElementById('all-territories-map-container');
-        if (!allTerritoriesMap) {
-            const options = { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 };
-            allTerritoriesMap = new kakao.maps.Map(container, options);
-        }
-        allTerritoriesMap.relayout();
-        
-        allTerritoriesOverlays.forEach(ov => ov.setMap(null));
-        allTerritoriesOverlays = [];
-
-        const allDrivers = window.getFilteredVisibleDrivers();
-        let bounds = new kakao.maps.LatLngBounds();
-        let hasValidPoint = false;
-
-        allDrivers.forEach(d => {
-            if (d.territoryLat && d.territoryLng) {
-                hasValidPoint = true;
-                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
-                bounds.extend(pos);
-
-                const marker = new kakao.maps.Marker({ position: pos });
-                marker.setMap(allTerritoriesMap);
-                allTerritoriesOverlays.push(marker);
-
-                const label = new kakao.maps.CustomOverlay({
-                    position: pos,
-                    content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`,
-                    yAnchor: 1
-                });
-                label.setMap(allTerritoriesMap);
-                allTerritoriesOverlays.push(label);
-
-                let r1, r2, r3;
-                const scale = d.territoryScale || 'dong';
-                if (scale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
-                else if (scale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
-                else if (scale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
-
-                const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
-                const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
-                const c3 = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.05 });
-
-                c3.setMap(allTerritoriesMap); c2.setMap(allTerritoriesMap); c1.setMap(allTerritoriesMap);
-                allTerritoriesOverlays.push(c3, c2, c1);
-            }
-        });
-
-        if (hasValidPoint) {
-            allTerritoriesMap.setBounds(bounds);
-        } else {
-            const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) {
-                const baseData = JSON.parse(savedBase);
-                if (baseData.lat && baseData.lng) {
-                    allTerritoriesMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
-                }
-            }
-        }
-    }, 200);
-};
-
-window.closeAllTerritoriesMap = function() {
-    document.getElementById('all-territories-modal').classList.add('hidden');
-};
-
-// =====================================================================
-// 🌟 배송 할당 및 기사 리스트 필터링 로직
-// =====================================================================
-
-window.getFilteredVisibleDrivers = function() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const isMaster = (currentUserRole === 'MASTER');
-    
-    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
-    
-    if (!isMaster && dispatchKey) {
-        const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        const matched = visibleLicenses.filter(l => {
-            const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-            return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
-        });
-        
-        if (matched.length > 0) return matched;
-        else return visibleLicenses; 
-    }
-    return visibleLicenses;
-};
-
-window.saveCompanyBaseAddress = async function() {
-    const input = document.getElementById('company-base-address');
-    const addr = input.value.trim();
-    if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
-    
-    const btn = document.getElementById('btn-save-company-base');
-    btn.disabled = true; btn.innerText = "확인중...";
-
-    const coords = await window.getCoordsFromAddress(addr);
-    btn.disabled = false; btn.innerText = "저장";
-
-    if (!coords) {
-        alert("입력하신 주소의 위치(좌표)를 찾을 수 정 없습니다.\n정확한 도로명 또는 지번 주소를 입력해주세요.");
-        return;
-    }
-
-    const fullAddress = coords.fullAddress || addr;
-    const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
-    
-    localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
-    window.updateCompanyBaseUI(baseData);
-    input.value = fullAddress; 
-};
-
-window.clearCompanyBaseAddress = function() {
-    localStorage.removeItem('deliveryProCompanyBase');
-    document.getElementById('company-base-address').value = '';
-    window.updateCompanyBaseUI(null);
-};
-
-window.updateCompanyBaseUI = function(baseData) {
-    const textEl = document.getElementById('saved-base-address-text');
-    const clearBtn = document.getElementById('btn-clear-company-base');
-
-    if (baseData) {
-        textEl.innerText = baseData.address;
-        textEl.classList.add('text-indigo-600');
-        textEl.classList.remove('text-gray-500');
-        clearBtn.classList.remove('hidden');
-    } else {
-        textEl.innerText = "저장된 거점이 없습니다.";
-        textEl.classList.add('text-gray-500');
-        textEl.classList.remove('text-indigo-600');
-        clearBtn.classList.add('hidden');
-    }
-};
-
-window.renderDispatchDriverList = function() {
-    const listEl = document.getElementById('dispatch-driver-list');
-    const countEl = document.getElementById('dispatch-driver-count');
-    if (!listEl || !countEl) return;
-    
-    const drivers = window.getFilteredVisibleDrivers();
-    countEl.innerText = `${drivers.length}명`;
-    
-    if (drivers.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`;
-        return;
-    }
-    
-    let html = '';
-    drivers.forEach((d, idx) => {
-        const devId = d.deviceId || d.key;
-        const phoneDisplay = d.phone || d.key;
-        
-        const tLat = d.territoryLat || '';
-        const tLng = d.territoryLng || '';
-        const tScale = d.territoryScale || '';
-        const t1 = d.territory1 || '';
-        const t2 = d.territory2 || '';
-        
-        let territoryBadge = '';
-        if (tLat && tLng) {
-            let scaleLabel = '동/읍/면';
-            if(tScale === 'gu') scaleLabel = '구/군';
-            if(tScale === 'si') scaleLabel = '시/도';
-            
-            territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap" title="권역 설정됨"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
-                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
-                </div>`;
-        } else {
-            territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
-                    <span class="text-[9px] text-gray-400">미설정</span>
-                </div>`;
+        let filteredList = allLicenses;
+        if (window.historyAccountTypeFilter !== 'ALL') {
+            filteredList = allLicenses.filter(l => l.type === window.historyAccountTypeFilter);
         }
 
-        const isSelected = selectedDispatchDriverId === devId;
-        
-        html += `
-        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
-            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0">
-                <span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span>
-                <i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i> 
-                <span class="truncate">${phoneDisplay}</span>
-            </span>
-            <div class="shrink-0 ml-2">
-                ${territoryBadge}
-            </div>
-        </div>
-        `;
-    });
-    listEl.innerHTML = html;
-};
-
-window.selectDispatchDriver = function(devId) {
-    selectedDispatchDriverId = devId;
-    window.renderDispatchDriverList(); 
-    window.renderDispatchDriverDetail(); 
-};
-
-window.renderDispatchDriverDetail = function() {
-    const header = document.getElementById('detail-driver-header');
-    const table = document.getElementById('detail-driver-table');
-    const tbody = document.getElementById('detail-driver-tbody');
-    const badge = document.getElementById('detail-driver-count-badge');
-    
-    if (!selectedDispatchDriverId) {
-        header.classList.remove('hidden');
-        table.classList.add('hidden');
-        badge.classList.add('hidden');
-        return;
-    }
-
-    const targetLic = allLicenses.find(l => l.deviceId === selectedDispatchDriverId || l.key === selectedDispatchDriverId);
-    const driverName = targetLic ? (targetLic.phone || targetLic.key) : selectedDispatchDriverId;
-
-    const assignedItems = parsedExcelList.filter(item => item.assignedDriver === driverName);
-
-    header.classList.add('hidden');
-    table.classList.remove('hidden');
-    badge.classList.remove('hidden');
-    badge.innerText = `총 ${assignedItems.length}건`;
-
-    if (assignedItems.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="2" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`;
-        return;
-    }
-
-    let html = '';
-    assignedItems.forEach((item, idx) => {
-        html += `
-        <tr class="hover:bg-blue-50/50 transition">
-            <td class="text-center font-bold text-gray-500">${item.displayNumber || idx + 1}</td>
-            <td class="font-bold text-gray-800 whitespace-normal break-keep">${item.address || '-'}</td>
-        </tr>`;
-    });
-    tbody.innerHTML = html;
-};
-
-// ---------------------------------------------------------------------
-
-window.loadExcelFromFirebase = async function() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    if (!dispatchKey) return;
-    
-    const datePicker = document.getElementById('dispatch-assign-date');
-    const dateVal = datePicker ? datePicker.value : getLocalDateString();
-    const docId = `${dateVal}_${dispatchKey}`;
-    
-    try {
-        const snap = await getDoc(doc(db, "dispatch_orders", docId));
-        if (snap.exists() && snap.data().orders) {
-            parsedExcelList = snap.data().orders;
-        } else {
-            parsedExcelList = []; 
-        }
-        window.renderExcelTable();
-    } catch (error) {
-        console.error("Firebase 엑셀 로드 오류:", error);
-    }
-};
-
-window.autoSaveExcelToFirebase = async function() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    if (!dispatchKey) return; 
-
-    const datePicker = document.getElementById('dispatch-assign-date');
-    const dateVal = datePicker ? datePicker.value : getLocalDateString(); 
-    const docId = `${dateVal}_${dispatchKey}`; 
-    
-    try {
-        await setDoc(doc(db, "dispatch_orders", docId), {
-            date: dateVal,
-            dispatchKey: dispatchKey,
-            orders: parsedExcelList || [],
-            updatedAt: Date.now()
-        }, { merge: true });
-    } catch (error) {
-        console.error("Firebase 주문 리스트 자동 저장 오류:", error);
-    }
-};
-
-window.formatNumber = function(num) {
-    if (!num || isNaN(num)) return num || '';
-    return Number(num).toLocaleString('ko-KR');
-};
-
-window.processExcelData = function(jsonData) {
-    const newItems = [];
-    jsonData.forEach((row) => {
-        const mappedRow = {
-            id: Date.now() + Math.random(), 
-            assignedDriver: null,
-            senderName: '', orderNo: '', bizNo: '', address: '', storeName: '',
-            phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: '',
-            lat: null, lng: null 
-        };
-
-        for (let key in row) {
-            const val = row[key];
-            const k = key.replace(/\s+/g, ''); 
-            
-            if (/보내는분|발송자|주문자|고객명/.test(k)) mappedRow.senderName = val;
-            else if (/주문번호|오더번호|주문코드/.test(k)) mappedRow.orderNo = val;
-            else if (/사업자/.test(k)) mappedRow.bizNo = val;
-            else if (/상호|간판|배송지명|받는분|수령인|수신자/.test(k)) mappedRow.storeName = val;
-            else if (/주소|배송지(?!(명|간판))/.test(k)) mappedRow.address = val;
-            else if (/연락처|전화|핸드폰|휴대폰|폰/.test(k)) mappedRow.phone = val;
-            else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
-            else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
-            else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
-            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val; 
-            else if (/단가|가격|금액/.test(k)) mappedRow.price = val; 
-            else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
-        }
-        
-        if (mappedRow.senderName || mappedRow.address || mappedRow.itemName || mappedRow.storeName) {
-            newItems.push(mappedRow);
-        }
-    });
-
-    parsedExcelList.push(...newItems);
-    return newItems;
-};
-
-window.getCoordsFromAddress = function(address) {
-    return new Promise((resolve) => {
-        if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) {
-            resolve(null);
+        if (filteredList.length === 0) {
+            listEl.innerHTML = `<div class="text-center text-gray-400 py-24 text-xs font-bold">해당 조건의 계정이 없습니다.</div>`;
             return;
         }
-        const geocoder = new kakao.maps.services.Geocoder();
-        geocoder.addressSearch(address.trim(), (result, status) => {
-            if (status === kakao.maps.services.Status.OK && result[0]) {
-                let fullAddress = result[0].address_name;
-                if (result[0].road_address && result[0].road_address.address_name) {
-                    fullAddress = result[0].road_address.address_name;
-                }
-                resolve({ 
-                    lat: parseFloat(result[0].y), 
-                    lng: parseFloat(result[0].x),
-                    fullAddress: fullAddress 
-                });
-            } else {
-                resolve(null);
-            }
+
+        const processedItems = filteredList.map((lic, idx) => {
+            const devId = lic.deviceId || '';
+            const phone = lic.phone || '';
+            const driverComps = allCompletions.filter(c => (devId && c.deviceId === devId) || (phone && c.phone === phone));
+            const totalCompCount = driverComps.length;
+            const activeDatesSet = new Set();
+            driverComps.forEach(c => {
+                let d = '';
+                if (c.timeString && c.timeString.includes(' ')) d = c.timeString.split(' ')[0].replace(/\./g, '-');
+                else if (c.completedAt) d = window.getLocalDateString(new Date(c.completedAt));
+                if (d) activeDatesSet.add(d);
+            });
+            if (activeRoutes[devId] && activeRoutes[devId].destinations && activeRoutes[devId].destinations.length > 0) activeDatesSet.add(todayStr);
+            const routeRegCount = (lic.type === 'dispatch') ? 0 : activeDatesSet.size;
+            const memoCount = allMemos.filter(m => devId && m.deviceId === devId).length;
+
+            return {
+                originalIndex: idx + 1, type: lic.type || 'regular', key: lic.key, phone: phone, deviceId: devId,
+                routeCount: routeRegCount, compCount: totalCompCount, memoCount: memoCount, expireDate: lic.expireDate || '', status: lic.status || 'active'
+            };
         });
-    });
-};
 
-window.batchGeocodeExcelList = async function(items) {
-    const dropZone = document.getElementById('excel-drop-zone');
-    const originalDropHtml = dropZone ? dropZone.innerHTML : '';
+        processedItems.sort((a, b) => {
+            let vA = a[window.historySortField];
+            let vB = b[window.historySortField];
+            if (typeof vA === 'string') return window.historySortAsc ? vA.localeCompare(vB) : vB.localeCompare(vA);
+            else return window.historySortAsc ? (vA - vB) : (vB - vA);
+        });
 
-    let successCount = 0;
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (dropZone) {
-            dropZone.innerHTML = `
-                <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
-                    <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                    <span>배송지 좌표 분석 중... (${i + 1} / ${items.length})</span>
+        const totalItems = processedItems.length;
+        const totalPages = Math.ceil(totalItems / PAGE_SIZE_MASTER) || 1;
+        if (window.historyCurrentPage > totalPages) window.historyCurrentPage = totalPages;
+        if (window.historyCurrentPage < 1) window.historyCurrentPage = 1;
+
+        const startIndex = (window.historyCurrentPage - 1) * PAGE_SIZE_MASTER;
+        const endIndex = Math.min(startIndex + PAGE_SIZE_MASTER, totalItems);
+        const pagedItems = processedItems.slice(startIndex, endIndex);
+
+        const getArrow = (f) => (window.historySortField === f ? (window.historySortAsc ? ' ▲' : ' ▼') : ' ↕');
+        const isAllSelected = filteredList.length > 0 && filteredList.every(l => window.historySelectedAccountKeys.has(l.key));
+
+        let checkHeaderTh = window.historyNoticeMode 
+            ? `<th class="py-3.5 px-3 text-center w-10 bg-amber-50/90 border-r border-amber-200">
+                <input type="checkbox" onchange="window.toggleHistorySelectAll(this.checked)" ${isAllSelected ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500 cursor-pointer" title="전체 선택">
+               </th>` 
+            : '';
+
+        let tableHtml = `
+        <div class="border border-gray-200 rounded-2xl bg-white shadow-xs overflow-hidden flex flex-col">
+            <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left border-collapse text-xs whitespace-nowrap min-w-[1150px]">
+                    <thead>
+                        <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
+                            ${checkHeaderTh}
+                            <th onclick="window.setHistorySort('originalIndex')" class="sortable-th py-3.5 px-3">순번${getArrow('originalIndex')}</th>
+                            <th onclick="window.setHistorySort('type')" class="sortable-th py-3.5 px-3 min-w-[120px]">계정 유형${getArrow('type')}</th>
+                            <th onclick="window.setHistorySort('key')" class="sortable-th py-3.5 px-3">라이선스 키${getArrow('key')}</th>
+                            <th onclick="window.setHistorySort('phone')" class="sortable-th py-3.5 px-3">전화번호${getArrow('phone')}</th>
+                            <th onclick="window.setHistorySort('deviceId')" class="sortable-th py-3.5 px-3">기기 고유번호 (deviceId)${getArrow('deviceId')}</th>
+                            <th onclick="window.setHistorySort('routeCount')" class="sortable-th py-3.5 px-3 text-center">배송 리스트 등록 건수${getArrow('routeCount')}</th>
+                            <th onclick="window.setHistorySort('compCount')" class="sortable-th py-3.5 px-3 text-center">총 완료 건수${getArrow('compCount')}</th>
+                            <th onclick="window.setHistorySort('memoCount')" class="sortable-th py-3.5 px-3 text-center">작성 메모${getArrow('memoCount')}</th>
+                            <th onclick="window.setHistorySort('expireDate')" class="sortable-th py-3.5 px-3">만료일${getArrow('expireDate')}</th>
+                            <th class="py-3.5 px-4 text-center">관리 / 삭제</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 font-medium text-gray-700">
+        `;
+
+        pagedItems.forEach(item => {
+            let typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-blue-50 text-blue-700 border border-blue-200 shadow-xs"><i class="fa-solid fa-user text-[10px]"></i> 일반 계정</span>`;
+            if (item.type === 'trial') typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs"><i class="fa-solid fa-clock text-[10px]"></i> 7일 체험</span>`;
+            else if (item.type === 'dispatch') typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200 shadow-xs"><i class="fa-solid fa-building-user text-[10px]"></i> 관제 계정</span>`;
+
+            const isChecked = window.historySelectedAccountKeys.has(item.key);
+            let checkRowTd = window.historyNoticeMode
+                ? `<td class="py-3.5 px-3 text-center bg-amber-50/30 border-r border-amber-100" onclick="event.stopPropagation()">
+                    <input type="checkbox" onchange="window.toggleHistoryItemSelection('${item.key}', this.checked)" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500 cursor-pointer">
+                   </td>`
+                : '';
+
+            tableHtml += `
+            <tr onclick="window.selectAccountDirectly('${item.key}')" class="hover:bg-blue-50/60 cursor-pointer transition ${isChecked ? 'bg-amber-50/50' : ''}">
+                ${checkRowTd}
+                <td class="py-3.5 px-3 font-bold text-gray-400">${item.originalIndex}</td>
+                <td class="py-3.5 px-3">${typeBadge}</td>
+                <td class="py-3.5 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
+                <td class="py-3.5 px-3 font-black text-gray-900">${item.phone ? `<i class="fa-solid fa-phone text-blue-500 mr-1 text-[10px]"></i>${item.phone}` : '<span class="text-gray-400 text-[11px] font-normal">미등록</span>'}</td>
+                <td class="py-3.5 px-3 font-mono text-gray-600 text-[11px]">${item.deviceId || '<span class="text-amber-500 font-bold">미등록</span>'}</td>
+                <td class="py-3.5 px-3 text-center font-black ${item.type === 'dispatch' ? 'text-gray-400' : 'text-blue-600 bg-blue-50/30'}">${item.type === 'dispatch' ? '-' : item.routeCount + '일(건)'}</td>
+                <td class="py-3.5 px-3 text-center font-black ${item.compCount > 0 ? 'text-emerald-600 bg-emerald-50/30' : 'text-gray-400'}">${item.compCount}건</td>
+                <td class="py-3.5 px-3 text-center font-bold text-yellow-600">${item.memoCount}건</td>
+                <td class="py-3.5 px-3 font-bold text-gray-500">${item.expireDate || '-'}</td>
+                <td class="py-3.5 px-4 text-center whitespace-nowrap space-x-1.5">
+                    <button onclick="event.stopPropagation(); window.selectAccountDirectly('${item.key}')" class="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-black rounded-lg text-[11px] transition shadow-2xs active:scale-95">내역 조회</button>
+                    <button onclick="event.stopPropagation(); window.deleteLicense('${item.key}')" class="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">삭제</button>
+                </td>
+            </tr>`;
+        });
+
+        tableHtml += `</tbody></table></div>`;
+
+        let pageBtnsHtml = '';
+        for (let p = 1; p <= totalPages; p++) {
+            if (p === 1 || p === totalPages || (p >= window.historyCurrentPage - 2 && p <= window.historyCurrentPage + 2)) {
+                if (p === window.historyCurrentPage) {
+                    pageBtnsHtml += `<button class="w-8 h-8 rounded-xl text-xs font-black bg-blue-600 text-white shadow-xs">${p}</button>`;
+                } else {
+                    pageBtnsHtml += `<button onclick="window.changeHistoryPage(${p})" class="w-8 h-8 rounded-xl text-xs font-bold text-gray-700 bg-white hover:bg-gray-100 border border-gray-200 transition active:scale-95">${p}</button>`;
+                }
+            } else if (p === window.historyCurrentPage - 3 || p === window.historyCurrentPage + 3) {
+                pageBtnsHtml += `<span class="px-1 text-gray-400 text-xs font-bold">...</span>`;
+            }
+        }
+
+        tableHtml += `
+            <div class="flex flex-wrap items-center justify-between px-5 py-3 border-t border-gray-200 bg-gray-50/80 gap-2">
+                <span class="text-xs text-gray-500 font-bold">총 <b class="text-blue-600 font-black">${totalItems}</b>개 계정 중 <b class="text-gray-900">${totalItems > 0 ? startIndex + 1 : 0} - ${endIndex}</b>번째 표시</span>
+                <div class="flex items-center gap-1.5">
+                    <button onclick="window.changeHistoryPage(${window.historyCurrentPage - 1})" ${window.historyCurrentPage === 1 ? 'disabled class="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-300 bg-gray-100 cursor-not-allowed"' : 'class="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 bg-white hover:bg-gray-100 border border-gray-200 shadow-2xs transition active:scale-95"'}>이전</button>
+                    ${pageBtnsHtml}
+                    <button onclick="window.changeHistoryPage(${window.historyCurrentPage + 1})" ${window.historyCurrentPage === totalPages ? 'disabled class="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-300 bg-gray-100 cursor-not-allowed"' : 'class="px-3 py-1.5 rounded-xl text-xs font-bold text-gray-600 bg-white hover:bg-gray-100 border border-gray-200 shadow-2xs transition active:scale-95"'}>다음</button>
+                </div>
+            </div>
+        </div>`;
+        listEl.innerHTML = tableHtml;
+        return;
+    }
+
+    const targetLic = allLicenses.find(l => l.key === selectedKey);
+    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 없습니다.</div>`; return; }
+
+    window.currentSelectedAccountKey = targetLic.key;
+    if (topFilterBarEl) topFilterBarEl.classList.add('hidden');
+
+    const targetPhone = targetLic.phone || '';
+    const targetDeviceId = targetLic.deviceId || '';
+
+    document.getElementById('top-selected-account-label').innerText = `${targetPhone || '연락처 미등록'} [${targetLic.key}]`;
+    if (backBarEl) { backBarEl.classList.remove('hidden'); backBarEl.classList.add('flex'); }
+
+    document.getElementById('acc-phone').innerText = targetPhone || '연락처 미등록';
+    document.getElementById('acc-key').innerText = targetLic.key;
+    document.getElementById('acc-device').innerText = targetDeviceId || '기기 미등록 (대기)';
+    document.getElementById('acc-expire').innerText = `만료일: ${targetLic.expireDate || '-'}`;
+    document.getElementById('acc-status-badge').innerText = targetLic.status === 'active' ? '정상' : '정지';
+    document.getElementById('acc-status-badge').className = targetLic.status === 'active' ? 'bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full' : 'bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full';
+    document.getElementById('acc-type-badge').innerText = targetLic.type === 'dispatch' ? '관제 계정' : (targetLic.type === 'trial' ? '7일 무료 체험' : '일반 계정');
+
+    if (profileCardEl) { profileCardEl.classList.remove('hidden'); profileCardEl.classList.add('flex'); }
+
+    const driverRoute = (targetDeviceId && activeRoutes[targetDeviceId]) ? activeRoutes[targetDeviceId] : null;
+    const rawDests = driverRoute ? driverRoute.destinations || [] : [];
+    const driverDone = allCompletions.filter(c => (c.deviceId === targetDeviceId || (targetPhone && c.phone === targetPhone)));
+
+    const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
+    const remainingDests = rawDests.filter(d => !doneMap[d.address]);
+
+    const pendingCount = remainingDests.length;
+    const doneCount = driverDone.length;
+    const totalCount = pendingCount + doneCount;
+    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
+    const driverMemos = allMemos.filter(m => targetDeviceId && m.deviceId === targetDeviceId);
+
+    let html = `
+    <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
+        <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black">
+            <span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도 요약</span>
+            <span>완료 ${doneCount} / 전체 ${totalCount} 건 (${rate}%)</span>
+        </div>
+        <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2">
+            <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div>
+        </div>
+        <div class="flex justify-between items-center text-[11px] font-bold text-blue-800 pt-1.5 border-t border-blue-200/50">
+            <span>미배송 대기: <b class="text-blue-600 font-black">${pendingCount}</b>곳</span>
+            <span>등록 공유 메모: <b class="text-yellow-600 font-black">${driverMemos.length}</b>건</span>
+        </div>
+    </div>
+
+    <div class="flex gap-1.5 mb-4 bg-gray-100 p-1.5 rounded-2xl text-xs font-black">
+        <button onclick="window.setHistoryMasterSubTab('ALL')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'ALL' ? 'bg-white text-blue-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">배송 리스트 (${totalCount})</button>
+        <button onclick="window.setHistoryMasterSubTab('DONE')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'DONE' ? 'bg-white text-emerald-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">배송 완료 (${doneCount})</button>
+        <button onclick="window.setHistoryMasterSubTab('PENDING')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'PENDING' ? 'bg-white text-blue-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">미배송 (${pendingCount})</button>
+        <button onclick="window.setHistoryMasterSubTab('MEMOS')" class="flex-1 py-2.5 rounded-xl transition ${window.historyMasterSubTab === 'MEMOS' ? 'bg-white text-yellow-600 shadow-sm border border-gray-200' : 'text-gray-500 hover:text-gray-800'}">등록한 메모 (${driverMemos.length})</button>
+    </div>
+    <div class="space-y-3">`;
+
+    if (window.historyMasterSubTab === 'ALL') {
+        if (rawDests.length === 0) {
+            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">등록된 배송 동선이 없습니다.</div>`;
+        } else {
+            html += `
+            <div class="border border-blue-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+                <div onclick="document.getElementById('route-accordion-body').classList.toggle('hidden')" class="bg-blue-50 hover:bg-blue-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
+                    <span class="font-black text-xs text-blue-950 flex items-center gap-2"><i class="fa-solid fa-route text-blue-600"></i> 배송 동선 목록 (총 ${rawDests.length}개 목적지)</span>
+                    <div class="flex items-center gap-2"><span class="text-[11px] text-blue-700 font-bold">클릭하여 펼치기/접기</span><i class="fa-solid fa-chevron-down text-blue-600 text-xs"></i></div>
+                </div>
+                <div id="route-accordion-body" class="hidden p-3 bg-slate-50 border-t border-blue-100 space-y-1.5">
+            `;
+            rawDests.forEach((dest, idx) => {
+                const isDone = !!doneMap[dest.address];
+                html += `
+                <div class="p-3 ${isDone ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white border-gray-200'} border rounded-xl flex items-center justify-between text-xs shadow-xs">
+                    <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span class="w-5 h-5 ${isDone ? 'bg-emerald-600' : 'bg-blue-600'} text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span>
+                        <span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span>
+                    </div>
+                    <span class="text-[10px] font-black px-2 py-0.5 rounded ${isDone ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-50 text-blue-700 border border-blue-200'} shrink-0 ml-2">${isDone ? '✓ 완료' : '대기'}</span>
                 </div>`;
+            });
+            html += `</div></div>`;
         }
-
-        if (item.address && (!item.lat || !item.lng)) {
-            const coords = await window.getCoordsFromAddress(item.address);
-            if (coords) {
-                item.lat = coords.lat;
-                item.lng = coords.lng;
-                successCount++;
-            }
-            await new Promise(r => setTimeout(r, 50));
+    } else if (window.historyMasterSubTab === 'DONE') {
+        if (driverDone.length === 0) {
+            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">배송 완료 내역이 없습니다.</div>`;
+        } else {
+            const completionsByDate = {};
+            driverDone.forEach(c => {
+                let dStr = '기타 일자';
+                if (c.timeString && c.timeString.includes(' ')) dStr = c.timeString.split(' ')[0].replace(/\./g, '-');
+                else if (c.completedAt) dStr = window.getLocalDateString(new Date(c.completedAt));
+                if (!completionsByDate[dStr]) completionsByDate[dStr] = [];
+                completionsByDate[dStr].push(c);
+            });
+            const sortedCompDates = Object.keys(completionsByDate).sort().reverse();
+            sortedCompDates.forEach((dKey, idx) => {
+                const dayList = completionsByDate[dKey];
+                const folderId = `done-acc-${idx}`;
+                html += `
+                <div class="border border-emerald-200 rounded-2xl overflow-hidden bg-white shadow-xs mb-2.5">
+                    <div onclick="document.getElementById('${folderId}').classList.toggle('hidden')" class="bg-emerald-50 hover:bg-emerald-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
+                        <span class="font-black text-xs text-emerald-950 flex items-center gap-2"><i class="fa-regular fa-calendar-check text-emerald-600"></i> ${dKey} 배송 완료 이력<span class="bg-emerald-200/80 text-emerald-900 text-[10px] font-black px-2 py-0.5 rounded-full">${dayList.length}건 완료</span></span>
+                        <div class="flex items-center gap-2"><span class="text-[11px] text-emerald-700 font-bold">클릭하여 펼치기/접기</span><i class="fa-solid fa-chevron-down text-emerald-600 text-xs"></i></div>
+                    </div>
+                    <div id="${folderId}" class="hidden p-3 bg-slate-50 border-t border-emerald-100 space-y-1.5">
+                        ${dayList.map((c, cIdx) => {
+                            let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
+                            let photoBadge = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" class="bg-blue-600 text-white text-[9px] font-black px-2 py-1 rounded shadow-sm hover:bg-blue-700 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진보기</a>` : '';
+                            return `
+                            <div class="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
+                                <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${cIdx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${c.address}</span></div>
+                                <div class="flex items-center gap-2 shrink-0 ml-2">${photoBadge}<span class="bg-emerald-600 text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '전달완료'}]</span></div>
+                            </div>`;
+                        }).join('')}
+                    </div>
+                </div>`;
+            });
+        }
+    } else if (window.historyMasterSubTab === 'PENDING') {
+        if (remainingDests.length === 0) {
+            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">미배송된 목적지가 없습니다 (전원 완료).</div>`;
+        } else {
+            html += `
+            <div class="border border-gray-200 rounded-2xl overflow-hidden bg-white shadow-xs">
+                <div onclick="document.getElementById('pending-accordion-body').classList.toggle('hidden')" class="bg-gray-100 hover:bg-gray-200 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
+                    <span class="font-black text-xs text-gray-800 flex items-center gap-2"><i class="fa-solid fa-clock text-blue-600"></i> 미배송 대기 목적지 (총 ${remainingDests.length}곳)</span>
+                    <div class="flex items-center gap-2"><span class="text-[11px] text-gray-500 font-bold">클릭하여 펼치기/접기</span><i class="fa-solid fa-chevron-down text-gray-400 text-xs"></i></div>
+                </div>
+                <div id="pending-accordion-body" class="hidden p-3 bg-slate-50 border-t border-gray-200 space-y-1.5">
+            `;
+            remainingDests.forEach((dest, idx) => {
+                html += `
+                <div class="p-3 bg-white border border-gray-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
+                    <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span></div>
+                    <span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shrink-0 ml-2">배송 대기중</span>
+                </div>`;
+            });
+            html += `</div></div>`;
+        }
+    } else if (window.historyMasterSubTab === 'MEMOS') {
+        if (driverMemos.length === 0) {
+            html += `<div class="text-center text-gray-400 py-20 text-xs font-bold">이 기사가 현장에서 등록한 주차/건물 메모가 없습니다.</div>`;
+        } else {
+            const memosByDate = {};
+            driverMemos.forEach(m => {
+                let dStr = '최근 등록';
+                if (m.time && m.time.includes(' ')) dStr = m.time.split(' ')[0].replace(/\./g, '-');
+                if (!memosByDate[dStr]) memosByDate[dStr] = [];
+                memosByDate[dStr].push(m);
+            });
+            const sortedMemoDates = Object.keys(memosByDate).sort().reverse();
+            sortedMemoDates.forEach((dKey, idx) => {
+                const mList = memosByDate[dKey];
+                const mFolderId = `memo-acc-${idx}`;
+                html += `
+                <div class="border border-yellow-200 rounded-2xl overflow-hidden bg-white shadow-xs mb-2.5">
+                    <div onclick="document.getElementById('${mFolderId}').classList.toggle('hidden')" class="bg-yellow-50 hover:bg-yellow-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
+                        <span class="font-black text-xs text-yellow-950 flex items-center gap-2"><i class="fa-regular fa-calendar-days text-yellow-600"></i> ${dKey} 등록 메모<span class="bg-yellow-200 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full">${mList.length}건 등록</span></span>
+                        <div class="flex items-center gap-2"><span class="text-[11px] text-yellow-700 font-bold">어느 주소에 어떤 내용인지 펼치기/접기</span><i class="fa-solid fa-chevron-down text-yellow-600 text-xs"></i></div>
+                    </div>
+                    <div id="${mFolderId}" class="hidden p-3 bg-slate-50 border-t border-yellow-100 space-y-2">
+                        ${mList.map(m => `
+                        <div class="p-3 bg-white border border-gray-200 rounded-xl flex flex-col gap-1.5 shadow-xs">
+                            <div class="flex justify-between items-center text-xs"><span class="font-black text-gray-900 flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-red-500 text-[11px]"></i> ${m.address}</span><span class="text-[10px] font-mono text-gray-400">${m.time || ''}</span></div>
+                            <p class="bg-yellow-50/50 p-2.5 rounded-lg border border-yellow-100 text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${m.memo}</p>
+                        </div>`).join('')}
+                    </div>
+                </div>`;
+            });
         }
     }
-
-    if (dropZone) dropZone.innerHTML = originalDropHtml;
-    console.log(`좌표 변환 완료: 총 ${items.length}건 중 ${successCount}건 변환 성공`);
+    html += `</div>`;
+    listEl.innerHTML = html;
 };
 
-window.sortExcelList = function(field) {
-    if (!parsedExcelList || parsedExcelList.length === 0) return;
-    excelSortAsc = !excelSortAsc; 
-    parsedExcelList.sort((a, b) => {
-        let valA = (a[field] || '').toString().trim();
-        let valB = (b[field] || '').toString().trim();
-        if (valA < valB) return excelSortAsc ? -1 : 1;
-        if (valA > valB) return excelSortAsc ? 1 : -1;
-        return 0;
-    });
-    window.renderExcelTable();
+window.setHistoryMasterSubTab = function(tab) {
+    window.historyMasterSubTab = tab;
+    window.renderAccountHistoryView();
 };
 
-window.toggleRowCheckbox = function(e, idx) {
-    if (e && e.target.tagName === 'INPUT') return; 
-    const cb = document.querySelector(`.row-checkbox[data-idx="${idx}"]`);
-    if(cb) cb.checked = !cb.checked;
+window.deleteAccountFromHistory = async function() {
+    if (!window.currentSelectedAccountKey) return;
+    const key = window.currentSelectedAccountKey;
+    if (!confirm(`정말 [${key}] 계정을 완전히 영구 삭제하시겠습니까?`)) return;
+    await window.deleteLicense(key);
+    window.backToAllAccountsView();
 };
 
-window.renderExcelTable = function() {
-    const tbody = document.getElementById('invoice-excel-tbody');
+window.renderMemosTable = function(memos) {
+    const tbody = document.getElementById('table-body-memos');
+    const pagEl = document.getElementById('pagination-memos');
     if (!tbody) return;
-
-    if (parsedExcelList.length === 0) {
-        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
-        const chkAll = document.getElementById('chk-excel-all');
-        if (chkAll) chkAll.checked = false;
-        window.renderDispatchDriverDetail();
+    if (!memos || memos.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-gray-400 font-bold">등록된 주차 메모가 없습니다.</td></tr>`;
+        if (pagEl) pagEl.innerHTML = '';
         return;
     }
+    const total = memos.length;
+    const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
+    let curPage = window.masterPages['memos'] || 1;
+    if (curPage > totalPages) curPage = totalPages;
+    if (curPage < 1) curPage = 1;
+    window.masterPages['memos'] = curPage;
 
-    let html = '';
-    parsedExcelList.forEach((item, idx) => {
-        const assignedBadge = item.assignedDriver ? 
-            `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` : 
-            `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
+    const start = (curPage - 1) * PAGE_SIZE_MASTER;
+    const pagedMemos = memos.slice(start, start + PAGE_SIZE_MASTER);
 
-        const coordIcon = (item.lat && item.lng) ? 
-            `<i class="fa-solid fa-map-pin text-emerald-500 mr-1" title="위치 확인됨"></i>` : 
-            `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
+    tbody.innerHTML = pagedMemos.map((m, idx) => `
+        <tr class="hover:bg-gray-50 transition">
+            <td class="py-3 px-3 font-bold text-gray-400">${start + idx + 1}</td>
+            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate">${m.address}</td>
+            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate">${m.memo}</td>
+            <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap">${m.time || '-'}</td>
+            <td class="py-3 px-3 text-center font-bold text-blue-600">${m.likes || 0}</td>
+            <td class="py-3 px-3 text-center whitespace-nowrap"><button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px]">삭제</button></td>
+        </tr>
+    `).join('');
+    if (pagEl) pagEl.innerHTML = renderPaginationControls('memos', curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');
+};
 
-        html += `
-        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="window.toggleRowCheckbox(event, ${idx})">
-            <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
-            <td class="text-center font-bold text-gray-500">${idx + 1}</td>
-            <td class="text-center">${assignedBadge}</td>
-            <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
-            <td class="text-center" onclick="event.stopPropagation()">
-                <button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95" title="삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
-            </td>
-        </tr>`;
+window.deleteParkingMemo = async function(id) {
+    if (!confirm("이 주차 메모를 삭제하시겠습니까?")) return;
+    try { await deleteDoc(doc(db, "memos", id)); } catch (e) { alert("삭제 오류: " + e.message); }
+};
+
+// === 5. 관제 사이드바, 지도 및 알림 기능 ===
+window.setDispatchMode = function(mode, keepSelected = false) {
+    dispatchNavState = mode; window.dispatchNavState = mode;
+    if (!keepSelected && mode === 'DELIVERY') selectedDeviceId = null;
+    ['DELIVERY', 'MESSAGE', 'LOCATION'].forEach(m => {
+        const btn = document.getElementById(`nav-btn-${m}`);
+        if (btn) btn.className = (m === mode) ? "px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5" : "px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5";
     });
-    tbody.innerHTML = html;
-    
-    const chkAll = document.getElementById('chk-excel-all');
-    if (chkAll) {
-        chkAll.checked = false;
-        chkAll.onchange = (e) => {
-            const isChecked = e.target.checked;
-            document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = isChecked; });
-        };
-    }
 
-    window.renderDispatchDriverDetail(); 
-};
+    const mapSec = document.getElementById('map-section');
+    const msgSec = document.getElementById('message-section');
+    const dateBar = document.getElementById('sidebar-date-bar');
+    const filterControls = document.getElementById('map-filter-controls');
+    const fitAllBtn = document.getElementById('btn-fit-all-drivers');
 
-window.deleteExcelRow = async function(idx) {
-    if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
-    parsedExcelList.splice(idx, 1);
-    window.renderExcelTable();
-    await window.autoSaveExcelToFirebase();
-};
-
-window.deleteSelectedExcelRows = async function() {
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
-    if(checkboxes.length === 0) {
-        alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요.");
-        return;
-    }
-    if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 리스트에서 삭제하시겠습니까?`)) return;
-    
-    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
-    parsedExcelList = parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
-    
-    window.renderExcelTable();
-    await window.autoSaveExcelToFirebase(); 
-};
-
-window.clearAllExcelRows = async function() {
-    if(parsedExcelList.length === 0) return;
-    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?(되돌릴 수 없습니다)")) return;
-    parsedExcelList = [];
-    window.renderExcelTable();
-    await window.autoSaveExcelToFirebase();
-};
-
-window.initExcelDropZone = function() {
-    const dropZone = document.getElementById('excel-drop-zone');
-    if (!dropZone || dropZone.dataset.bound === 'true') return;
-
-    let fileInput = document.getElementById('global-excel-file-input');
-    if (!fileInput) {
-        fileInput = document.createElement('input');
-        fileInput.id = 'global-excel-file-input';
-        fileInput.type = 'file';
-        fileInput.accept = '.xlsx, .xls, .csv';
-        fileInput.multiple = true; 
-        fileInput.style.display = 'none';
-        document.body.appendChild(fileInput);
-        fileInput.addEventListener('change', window.handleExcelUpload);
-    }
-
-    dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropZone.classList.add('bg-indigo-100', 'border-indigo-500');
-    });
-    dropZone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
-    });
-    dropZone.addEventListener('drop', (e) => {
-        e.preventDefault();
-        dropZone.classList.remove('bg-indigo-100', 'border-indigo-500');
-        if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-            fileInput.files = e.dataTransfer.files;
-            window.handleExcelUpload({ target: fileInput });
-        }
-    });
-    dropZone.addEventListener('click', () => { fileInput.click(); });
-    dropZone.dataset.bound = 'true';
-
-    const btnRunAi = document.getElementById('btn-run-auto-dispatch');
-    if(btnRunAi && !btnRunAi.dataset.bound) {
-        btnRunAi.addEventListener('click', () => {
-            alert("AI 자동 배차 알고리즘은 다음 단계(최종)에서 적용됩니다.\n현재는 엑셀 업로드 좌표 변환 및 기사 권역/본사 설정 테스트를 진행해 주세요.");
-        });
-        btnRunAi.dataset.bound = 'true';
-    }
-};
-
-window.handleExcelUpload = async function(e) {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-
-    const newlyAddedList = [];
-
-    for (let i = 0; i < files.length; i++) {
-        const parsed = await window.processSingleExcelFile(files[i]);
-        newlyAddedList.push(...parsed);
-    }
-
-    if (newlyAddedList.length > 0) {
-        window.renderExcelTable(); 
-        await window.batchGeocodeExcelList(newlyAddedList);
-        window.renderExcelTable(); 
-        await window.autoSaveExcelToFirebase(); 
-        alert(`[업로드 및 위치 분석 완료]\n${files.length}개 파일에서 ${newlyAddedList.length}건의 주문 데이터가 추가 및 분석되었습니다.`);
+    if (mode === 'MESSAGE') {
+        if (mapSec) mapSec.classList.add('hidden');
+        if (msgSec) msgSec.classList.remove('hidden');
+        if (dateBar) dateBar.classList.add('hidden');
     } else {
-        alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`);
-    }
-    e.target.value = ''; 
-};
-
-window.processSingleExcelFile = function(file) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = function(evt) {
-            try {
-                const data = new Uint8Array(evt.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const json = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
-                const added = window.processExcelData(json);
-                resolve(added);
-            } catch(err) {
-                console.error("파일 파싱 실패:", err);
-                resolve([]); 
-            }
-        };
-        reader.readAsArrayBuffer(file);
-    });
-};
-
-window.exportToInvoiceModal = function() {
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
-    if (checkboxes.length === 0) {
-        alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요.");
-        return;
+        if (msgSec) msgSec.classList.add('hidden');
+        if (mapSec) mapSec.classList.remove('hidden');
+        if (dateBar) dateBar.classList.remove('hidden');
+        setTimeout(() => { if (map) map.relayout(); }, 100);
     }
 
-    printReadyList = [];
-    checkboxes.forEach(cb => {
-        const idx = parseInt(cb.getAttribute('data-idx'));
-        if (parsedExcelList[idx]) printReadyList.push(parsedExcelList[idx]);
-    });
+    window.forceClearMap();
 
-    window.closeAutoDispatchModal();
-    const invModal = document.getElementById('pro-invoice-modal');
-    if(invModal) invModal.classList.remove('hidden');
-    
-    document.getElementById('print-ready-count').innerText = printReadyList.length;
-    window.loadSavedForms();
-    window.previewInvoiceRow(0);
-    window.syncPreviewData();
-};
-
-window.previewInvoiceRow = function(idx) {
-    if (!printReadyList || !printReadyList[idx]) return;
-    const item = printReadyList[idx];
-
-    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
-    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
-    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
-    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
-    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
-
-    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
-    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
-    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
-    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
-    
-    let payMethod = '';
-    if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
-    else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
-    
-    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
-    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
-    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
-    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
-
-    document.querySelectorAll('span.font-normal.inline-block').forEach(span => {
-        if (span.classList.contains('w-32')) {
-            span.innerText = item.orderNo || '';
-        }
-    });
-
-    window.syncPreviewData(); 
-};
-
-window.generateInvoiceHTML = function(item, providerInfo) {
-    const originalTemplate = document.getElementById('print-area');
-    if (!originalTemplate) return '';
-    const template = originalTemplate.cloneNode(true);
-    template.id = ''; 
-
-    template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
-    template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
-    template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
-    template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
-    template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
-
-    template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
-    template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
-    template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
-    template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
-    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
-
-    template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
-    template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
-    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
-    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
-
-    let payMethod = '';
-    if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이';
-    else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
-
-    template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
-    template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
-    template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
-    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
-
-    template.querySelectorAll('.invoice-table').forEach(table => {
-        const rows = table.querySelectorAll('tr');
-        rows.forEach(tr => {
-            const text = tr.innerText;
-            if (text.includes('주 소') && !tr.classList.contains('double-height')) {
-                tr.classList.add('double-height');
-                tr.querySelectorAll('td').forEach(td => {
-                    if (!td.classList.contains('invoice-label')) td.classList.add('multi-line-text');
-                });
-            }
-            if (text.includes('배 송 요 청 사 항') && !tr.classList.contains('double-height')) {
-                tr.classList.add('double-height');
-                tr.querySelectorAll('td').forEach(td => {
-                    if (!td.classList.contains('invoice-label') && !td.classList.contains('inv-text-right')) {
-                        td.classList.add('multi-line-text');
-                    }
-                });
-            }
-        });
-    });
-
-    const today = new Date();
-    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-    
-    const dateSpan1 = template.querySelector('#prev-date-1');
-    if (dateSpan1) { dateSpan1.id = ''; dateSpan1.innerText = dateStr; }
-    const dateSpan2 = template.querySelector('#prev-date-2');
-    if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
-
-    template.querySelectorAll('span.font-normal.inline-block').forEach(span => {
-        if (span.classList.contains('w-32')) {
-            span.innerText = item.orderNo || '';
-        }
-    });
-
-    return template.outerHTML;
-};
-
-window.executeBatchPrint = function() {
-    if (printReadyList.length === 0) {
-        alert("출력할 주문건이 없습니다. 배송 자동할당 창에서 내보내기를 먼저 진행해주세요.");
-        return;
+    if (mode === 'LOCATION') {
+        if (filterControls) filterControls.classList.add('hidden');
+        if (fitAllBtn) fitAllBtn.classList.remove('hidden');
+        window.drawAllDriversOnMap();
+    } else if (mode === 'DELIVERY') {
+        if (filterControls) filterControls.classList.remove('hidden');
+        if (fitAllBtn) fitAllBtn.classList.add('hidden');
+        if (selectedDeviceId) window.drawDriverOnMap(selectedDeviceId);
     }
-
-    const btn = document.getElementById('btn-batch-print');
-    if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 문서 생성 중...';
-    }
-
-    const providerInfo = {
-        title: document.getElementById('input-form-title')?.value || '',
-        regno: document.getElementById('input-prov-regno')?.value || '',
-        name: document.getElementById('input-prov-name')?.value || '',
-        addr: document.getElementById('input-prov-addr')?.value || '',
-        tel: document.getElementById('input-prov-tel')?.value || '',
-        addTel: document.getElementById('input-prov-add-tel')?.value || ''
-    };
-
-    let printContents = '';
-    printReadyList.forEach(item => {
-        printContents += window.generateInvoiceHTML(item, providerInfo);
-    });
-
-    const iframe = document.createElement('iframe');
-    iframe.style.position = 'fixed';
-    iframe.style.right = '0';
-    iframe.style.bottom = '0';
-    iframe.style.width = '0';
-    iframe.style.height = '0';
-    iframe.style.border = '0';
-    iframe.style.zIndex = '-1';
-    document.body.appendChild(iframe);
-
-    const doc = iframe.contentWindow.document;
-    doc.open();
-    doc.write(`
-        <!DOCTYPE html>
-        <html lang="ko">
-        <head>
-            <meta charset="UTF-8">
-            <title>배송 동선 PRO - 표준 거래명세표 출력</title>
-            <style>
-                * { box-sizing: border-box; }
-                @media print {
-                    @page { size: A4 portrait; margin: 0; }
-                    body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
-                    .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; }
-                    .invoice-half { height: 148mm; page-break-inside: avoid; }
-                }
-                body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; }
-                
-                .invoice-container { background-color: white; width: 210mm; height: 297mm; margin: 0 auto; position: relative; display: flex; flex-direction: column; overflow: hidden; }
-                .invoice-half { height: 148mm; background-color: #ffeb5c !important; padding: 5mm 8mm; display: flex; flex-direction: column; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-                .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; }
-                
-                .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; color: #000; }
-                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; color: #000; }
-                
-                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
-
-                .double-height { height: 54px !important; min-height: 54px !important; }
-                .double-height td { height: 54px !important; }
-
-                .multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
-
-                .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
-                .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; white-space: nowrap; letter-spacing: -0.2px; }
-                .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; padding: 2px !important; line-height: 1.2; }
-                .text-fit-auto { font-size: 9.5px; letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-                .inv-text-center { text-align: center; }
-                .inv-text-left { text-align: left; padding-left: 6px !important; }
-                .inv-text-right { text-align: right; padding-right: 6px !important; }
-                .inv-font-bold { font-weight: bold; }
-                .empty-row td { height: 27px; }
-            </style>
-        </head>
-        <body>
-            ${printContents}
-        </body>
-        </html>
-    `);
-    doc.close();
-
-    iframe.onload = function() {
-        setTimeout(() => {
-            iframe.contentWindow.focus();
-            iframe.contentWindow.print();
-            
-            setTimeout(() => {
-                document.body.removeChild(iframe);
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력`;
-                }
-            }, 1000);
-        }, 800); 
-    };
+    window.renderSidebar();
 };
 
 window.showDispatchPopupAlert = function(msg) {
@@ -1832,6 +1332,24 @@ window.renderMasterNoticeHistoryList = function() {
     container.innerHTML = html;
 };
 
+// 🌟 [PRO용 개선] 기사 리스트 필터링 (권역 포함)
+window.getFilteredVisibleDrivers = function() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const isMaster = (currentUserRole === 'MASTER');
+    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
+    
+    if (!isMaster && dispatchKey) {
+        const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        const matched = visibleLicenses.filter(l => {
+            const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+            return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
+        });
+        if (matched.length > 0) return matched;
+        else return visibleLicenses; 
+    }
+    return visibleLicenses;
+};
+
 window.renderSidebar = function() {
     if (dispatchNavState === 'DELIVERY') {
         if (selectedDeviceId) window.renderDriverDetailView(selectedDeviceId);
@@ -1859,7 +1377,6 @@ window.renderDriverListView = function() {
 
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
-    
     const isToday = (selectedDate === todayStr);
 
     let html = '';
@@ -1870,7 +1387,7 @@ window.renderDriverListView = function() {
         const routeData = (lic.deviceId && activeRoutes[lic.deviceId]) ? activeRoutes[lic.deviceId] : null;
         let driverRoute = null;
         if (routeData && routeData.updatedAt) {
-            const routeDateStr = getLocalDateString(new Date(routeData.updatedAt));
+            const routeDateStr = window.getLocalDateString(new Date(routeData.updatedAt));
             if (isToday || routeDateStr === selectedDate) {
                 driverRoute = routeData;
             }
@@ -1880,7 +1397,7 @@ window.renderDriverListView = function() {
         const driverDone = allCompletions.filter(c => {
             const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || (lic.phone && c.phone === lic.phone);
             const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                                (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
+                                (c.completedAt && window.getLocalDateString(new Date(c.completedAt)) === selectedDate);
             return matchesDev && matchesDate;
         });
 
@@ -1930,7 +1447,7 @@ window.renderDriverDetailView = function(devId) {
 
     let driverRoute = null;
     if (driver && driver.updatedAt) {
-        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
+        const routeDateStr = window.getLocalDateString(new Date(driver.updatedAt));
         if (isToday || routeDateStr === selectedDate) {
             driverRoute = driver;
         }
@@ -1940,7 +1457,7 @@ window.renderDriverDetailView = function(devId) {
     const driverDone = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
+                            (c.completedAt && window.getLocalDateString(new Date(c.completedAt)) === selectedDate);
         return matchesDev && matchesDate;
     }).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
 
@@ -2429,7 +1946,7 @@ window.drawDriverOnMap = function(devId) {
 
     let driverRoute = null;
     if (driver && driver.updatedAt) {
-        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
+        const routeDateStr = window.getLocalDateString(new Date(driver.updatedAt));
         if (isToday || routeDateStr === selectedDate) {
             driverRoute = driver;
         }
@@ -2439,7 +1956,7 @@ window.drawDriverOnMap = function(devId) {
     const completions = allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
+                            (c.completedAt && window.getLocalDateString(new Date(c.completedAt)) === selectedDate);
         return matchesDev && matchesDate;
     });
 
@@ -2525,7 +2042,7 @@ window.changeDispatchDate = function(days) {
     let parts = (picker.value || todayStr).split('-');
     const curDate = new Date(parts[0], parts[1] - 1, parts[2]);
     curDate.setDate(curDate.getDate() + days);
-    picker.value = getLocalDateString(curDate);
+    picker.value = window.getLocalDateString(curDate);
     window.onDispatchDateChange();
 };
 window.onDispatchDateChange = function() {
@@ -2581,7 +2098,7 @@ window.handleGlobalSearch = function(query) {
             let dStr = todayStr; let tStr = '';
             if (c.timeString && c.timeString.includes(' ')) { dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); tStr = c.timeString.split(' ')[1]; } 
             else if (c.completedAt) { 
-                dStr = getLocalDateString(new Date(c.completedAt)); 
+                dStr = window.getLocalDateString(new Date(c.completedAt)); 
                 const dt = new Date(c.completedAt); 
                 tStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; 
             }
@@ -2644,7 +2161,7 @@ window.confirmLinkDriver = async function() {
             if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
         }
 
-        if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
+        if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
         if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
             alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
         }
@@ -2654,51 +2171,775 @@ window.confirmLinkDriver = async function() {
     } catch (e) { alert("오류: " + e.message); }
 };
 
-window.initRealtimeSync = function() {
-    onSnapshot(collection(db, "licenses"), (snapshot) => {
-        allLicenses = [];
-        snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        
-        if (currentUserRole === 'DISPATCH') {
-            const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-            const localToken = sessionStorage.getItem('deliveryProSessionToken');
-            if (dispatchKey && localToken) {
-                const myLic = allLicenses.find(l => l.id === dispatchKey || l.key === dispatchKey);
-                if (myLic && myLic.currentSessionToken && myLic.currentSessionToken !== localToken) {
-                    if (!localToken.startsWith('MONITOR-')) {
-                        alert("⚠️ [중복 로그인 감지]\n다른 PC 또는 브라우저에서 동일한 관제 계정으로 로그인하여 현재 연결이 종료됩니다.");
-                        sessionStorage.clear(); window.location.reload();
-                    }
-                }
-            }
-        }
-        if (window.renderSidebar) window.renderSidebar();
-        
-        if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
+// =====================================================================
+// 🌟 [PRO 전용] 배송 자동할당 및 명세서 모달, 권역 통제 로직
+// =====================================================================
+window.handleProFeature = function(featureName) {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const role = sessionStorage.getItem('deliveryProRole');
+    let isPro = false;
+
+    if (dispatchKey) {
+        const myLic = allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
+        if (myLic && myLic.isPro) isPro = true;
+    }
+    if (role === 'MASTER' && !dispatchKey) isPro = true;
+
+    if (isPro) {
+        if (featureName === 'AUTO_DISPATCH') {
+            const modal = document.getElementById('auto-dispatch-modal');
+            if (!modal) { alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); return; }
+            modal.classList.remove('hidden');
             window.renderDispatchDriverList();
-            window.renderDispatchDriverDetail();
+            window.loadExcelFromFirebase();
+            if(window.initExcelDropZone) window.initExcelDropZone(); 
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) window.updateCompanyBaseUI(JSON.parse(savedBase));
+
+        } else if (featureName === 'INVOICE') {
+            if (printReadyList.length === 0) { alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요."); return; }
+            const modal = document.getElementById('pro-invoice-modal');
+            if (!modal) { alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); return; }
+            modal.classList.remove('hidden');
+            document.getElementById('print-ready-count').innerText = printReadyList.length;
+            window.loadSavedForms(); window.previewInvoiceRow(0); window.syncPreviewData(); 
+        }
+    } else {
+        document.getElementById('premium-upgrade-modal')?.classList.remove('hidden');
+    }
+};
+
+window.closePremiumModal = function() { document.getElementById('premium-upgrade-modal')?.classList.add('hidden'); };
+window.closeProInvoiceModal = function() { document.getElementById('pro-invoice-modal')?.classList.add('hidden'); };
+window.closeAutoDispatchModal = function() { document.getElementById('auto-dispatch-modal')?.classList.add('hidden'); };
+
+window.selectFormTemplate = function(type) {
+    document.getElementById('form-template-modal')?.classList.add('hidden');
+    const accordion = document.getElementById('form-setup-accordion');
+    if (accordion && accordion.classList.contains('hidden')) { accordion.classList.remove('hidden'); accordion.classList.add('flex'); }
+    setTimeout(() => { document.getElementById('input-form-title')?.focus(); }, 300);
+};
+
+window.syncPreviewData = function() {
+    const regno = document.getElementById('input-prov-regno')?.value || '';
+    const name = document.getElementById('input-prov-name')?.value || '';
+    const addr = document.getElementById('input-prov-addr')?.value || '';
+    const tel = document.getElementById('input-prov-tel')?.value || '';
+    const addTel = document.getElementById('input-prov-add-tel')?.value || '';
+
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
+    if (document.getElementById('prev-date-2')) document.getElementById('prev-date-2').innerText = dateStr;
+    
+    document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
+    document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
+    document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
+    document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
+    document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
+};
+
+window.updateLivePreview = function() {
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = setTimeout(() => { window.syncPreviewData(); }, 150);
+};
+
+window.loadSavedForms = function() {
+    const listEl = document.getElementById('saved-forms-list');
+    if (!listEl) return;
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    if (savedForms.length === 0) { listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`; return; }
+
+    let html = '';
+    savedForms.forEach((form, idx) => {
+        const isSelected = (currentSelectedFormIndex === idx);
+        html += `
+        <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
+            <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
+                <input type="checkbox" onchange="window.toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="window.previewSavedForm(${idx})">
+                    <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
+                    <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
+                </div>
+            </div>
+            <button type="button" onclick="window.deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+};
+
+window.toggleSelectForm = function(idx) {
+    if (currentSelectedFormIndex === idx) { currentSelectedFormIndex = null; window.cancelProviderFormEdit(); window.loadSavedForms(); } 
+    else { window.applySavedForm(idx); }
+};
+window.previewSavedForm = function(idx) { window.applySavedForm(idx); };
+
+window.cancelProviderFormEdit = function() {
+    currentSelectedFormIndex = null;
+    ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
+        if(document.getElementById(id)) document.getElementById(id).value = '';
+    });
+    const accordion = document.getElementById('form-setup-accordion');
+    if (accordion) { accordion.classList.add('hidden'); accordion.classList.remove('flex'); }
+    window.loadSavedForms(); window.syncPreviewData();
+};
+
+window.saveProviderForm = function() {
+    const title = document.getElementById('input-form-title')?.value.trim();
+    if (!title) { alert("저장할 폼의 '제목'을 입력해주세요."); return; }
+
+    const newForm = {
+        title, 
+        regno: document.getElementById('input-prov-regno')?.value.trim(),
+        name: document.getElementById('input-prov-name')?.value.trim(),
+        addr: document.getElementById('input-prov-addr')?.value.trim(),
+        tel: document.getElementById('input-prov-tel')?.value.trim(),
+        addTel: document.getElementById('input-prov-add-tel')?.value.trim(),
+        savedAt: Date.now()
+    };
+
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const existingIdx = savedForms.findIndex(f => f.title === title);
+    if(existingIdx >= 0) {
+        if(confirm(`'${title}'(으)로 이미 저장된 폼이 있습니다. 덮어쓰시겠습니까?`)) savedForms[existingIdx] = newForm;
+        else return;
+    } else { savedForms.push(newForm); }
+
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
+    window.loadSavedForms();
+};
+
+window.applySavedForm = function(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const form = savedForms[idx]; if (!form) return;
+    currentSelectedFormIndex = idx;
+
+    document.getElementById('input-form-title').value = form.title || '';
+    document.getElementById('input-prov-regno').value = form.regno || '';
+    document.getElementById('input-prov-name').value = form.name || '';
+    document.getElementById('input-prov-addr').value = form.addr || '';
+    document.getElementById('input-prov-tel').value = form.tel || '';
+    document.getElementById('input-prov-add-tel').value = form.addTel || '';
+
+    window.loadSavedForms(); window.syncPreviewData();
+};
+
+window.deleteSavedForm = function(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    if(!confirm(`[${savedForms[idx].title}] 폼을 삭제하시겠습니까?`)) return;
+    savedForms.splice(idx, 1);
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    if (currentSelectedFormIndex === idx) currentSelectedFormIndex = null;
+    window.loadSavedForms();
+};
+
+window.clearTerritoryOverlays = function() {
+    if (territoryMarker) territoryMarker.setMap(null);
+    territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
+    otherTerritoryOverlays.forEach(ov => ov.setMap(null)); otherTerritoryOverlays = [];
+};
+
+window.drawOtherDriversTerritories = function(excludeDevId) {
+    const allDrivers = window.getFilteredVisibleDrivers();
+    allDrivers.forEach(d => {
+        const devId = d.deviceId || d.key;
+        if (devId === excludeDevId) return; 
+        if (d.territoryLat && d.territoryLng) {
+            const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+            const marker = new kakao.maps.Marker({ position: pos, image: new kakao.maps.MarkerImage('https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png', new kakao.maps.Size(24, 35)) });
+            marker.setMap(territoryMap); otherTerritoryOverlays.push(marker);
+            const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
+            label.setMap(territoryMap); otherTerritoryOverlays.push(label);
+            let r3 = 5000; if (d.territoryScale === 'gu') r3 = 15000; else if (d.territoryScale === 'si') r3 = 45000;
+            const circle = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6, fillColor: '#d1d5db', fillOpacity: 0.2 });
+            circle.setMap(territoryMap); otherTerritoryOverlays.push(circle);
         }
     });
+};
 
-    onSnapshot(collection(db, "routes"), (snapshot) => {
-        activeRoutes = {};
-        snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
-        if (window.renderSidebar) window.renderSidebar();
+window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
+    try { if (window.event) window.event.stopPropagation(); } catch(e) {}
+    document.getElementById('territory-target-devid').value = devId;
+    document.getElementById('territory-target-phone').innerText = phone;
+    const modal = document.getElementById('driver-territory-modal');
+    if(!modal) return; modal.classList.remove('hidden');
+    currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
+    window.setTerritoryScale(currentTerritoryScale, true); 
+
+    setTimeout(() => {
+        const container = document.getElementById('territory-map-container');
+        if (!territoryMap) {
+            territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
+            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { window.setTerritoryCenter(mouseEvent.latLng); });
+        }
+        territoryMap.relayout(); window.clearTerritoryOverlays(); 
+
+        if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
+            const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
+            territoryMap.setCenter(pos); window.setTerritoryCenter(pos);
+        } else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) {
+                const baseData = JSON.parse(savedBase);
+                if (baseData.lat && baseData.lng) territoryMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
+            } else territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
+            const addrDisplayEl = document.getElementById('territory-selected-address');
+            if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
+        }
+        window.drawOtherDriversTerritories(devId);
+        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
+    }, 200);
+};
+
+window.closeDriverTerritoryModal = function() { document.getElementById('driver-territory-modal')?.classList.add('hidden'); };
+
+window.setTerritoryScale = function(scale, skipRedraw = false) {
+    currentTerritoryScale = scale;
+    const scaleInput = document.getElementById('input-territory-scale');
+    if(scaleInput) scaleInput.value = scale;
+
+    ['dong', 'gu', 'si'].forEach(s => {
+        const btn = document.getElementById(`btn-scale-${s}`);
+        if (!btn) return;
+        if (s === scale) btn.className = "px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95";
+        else btn.className = "px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
     });
 
-    onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
-        allCompletions = [];
-        snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
-        if (window.renderSidebar) window.renderSidebar();
+    if (territoryMap) {
+        if (scale === 'dong') territoryMap.setLevel(7); 
+        else if (scale === 'gu') territoryMap.setLevel(9); 
+        else if (scale === 'si') territoryMap.setLevel(11); 
+    }
+    if (!skipRedraw && territoryMarker) window.setTerritoryCenter(territoryMarker.getPosition());
+};
+
+window.setTerritoryCenter = function(latLng) {
+    if (territoryMarker) territoryMarker.setMap(null);
+    territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
+
+    document.getElementById('input-territory-lat').value = latLng.getLat();
+    document.getElementById('input-territory-lng').value = latLng.getLng();
+
+    const geocoder = new kakao.maps.services.Geocoder();
+    geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
+        let displayAddr = "주소를 찾을 수 없는 지역입니다";
+        if (status === kakao.maps.services.Status.OK) {
+            let fullAddress = result[0].address.address_name;
+            if (result[0].road_address) fullAddress = result[0].road_address.address_name;
+            document.getElementById('input-territory-1').value = fullAddress; 
+            document.getElementById('input-territory-2').value = ''; 
+            displayAddr = fullAddress;
+        }
+        const addrDisplayEl = document.getElementById('territory-selected-address');
+        if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
     });
 
-    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
-        allDispatchMessages = [];
-        snapshot.forEach(docSnap => { allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
+    territoryMarker = new kakao.maps.Marker({ position: latLng });
+    territoryMarker.setMap(territoryMap);
+
+    let r1, r2, r3;
+    if (currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
+    else if (currentTerritoryScale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
+    else if (currentTerritoryScale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+    const c1 = new kakao.maps.Circle({ center: latLng, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.5 });
+    const c2 = new kakao.maps.Circle({ center: latLng, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.25 });
+    const c3 = new kakao.maps.Circle({ center: latLng, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.1 });
+
+    c3.setMap(territoryMap); c2.setMap(territoryMap); c1.setMap(territoryMap);
+    territoryCircles = [c3, c2, c1];
+};
+
+window.saveDriverTerritory = async function() {
+    const devId = document.getElementById('territory-target-devid').value;
+    const lat = document.getElementById('input-territory-lat').value;
+    const lng = document.getElementById('input-territory-lng').value;
+    const scale = document.getElementById('input-territory-scale').value;
+    const t1 = document.getElementById('input-territory-1').value || '상세 주소 확인 불가'; 
+    const t2 = document.getElementById('input-territory-2').value || '';
+
+    if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
+
+    const targetLic = allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (!targetLic) return;
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key), {
+            territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
+            territoryScale: scale, territory1: t1, territory2: t2
+        });
+        alert("기사 권역이 저장되었습니다.");
+        window.closeDriverTerritoryModal();
+        window.renderDispatchDriverList();
+    } catch(e) { alert("저장 오류: " + e.message); }
+};
+
+window.openAllTerritoriesMap = function() {
+    const modal = document.getElementById('all-territories-modal');
+    if (!modal) return; modal.classList.remove('hidden');
+
+    setTimeout(() => {
+        const container = document.getElementById('all-territories-map-container');
+        if (!allTerritoriesMap) { allTerritoriesMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 }); }
+        allTerritoriesMap.relayout();
+        
+        allTerritoriesOverlays.forEach(ov => ov.setMap(null)); allTerritoriesOverlays = [];
+
+        const allDrivers = window.getFilteredVisibleDrivers();
+        let bounds = new kakao.maps.LatLngBounds();
+        let hasValidPoint = false;
+
+        allDrivers.forEach(d => {
+            if (d.territoryLat && d.territoryLng) {
+                hasValidPoint = true;
+                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                bounds.extend(pos);
+
+                const marker = new kakao.maps.Marker({ position: pos });
+                marker.setMap(allTerritoriesMap); allTerritoriesOverlays.push(marker);
+
+                const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
+                label.setMap(allTerritoriesMap); allTerritoriesOverlays.push(label);
+
+                let r1, r2, r3; const scale = d.territoryScale || 'dong';
+                if (scale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } else if (scale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } else if (scale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+                const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
+                const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
+                const c3 = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.05 });
+
+                c3.setMap(allTerritoriesMap); c2.setMap(allTerritoriesMap); c1.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(c3, c2, c1);
+            }
+        });
+
+        if (hasValidPoint) allTerritoriesMap.setBounds(bounds);
+        else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) { const baseData = JSON.parse(savedBase); if (baseData.lat && baseData.lng) allTerritoriesMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng)); }
+        }
+    }, 200);
+};
+
+window.closeAllTerritoriesMap = function() { document.getElementById('all-territories-modal')?.classList.add('hidden'); };
+
+window.saveCompanyBaseAddress = async function() {
+    const input = document.getElementById('company-base-address');
+    const addr = input.value.trim();
+    if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
+    
+    const btn = document.getElementById('btn-save-company-base');
+    btn.disabled = true; btn.innerText = "확인중...";
+
+    const coords = await window.getCoordsFromAddress(addr);
+    btn.disabled = false; btn.innerText = "저장";
+
+    if (!coords) { alert("주소 위치를 찾을 수 없습니다."); return; }
+
+    const fullAddress = coords.fullAddress || addr;
+    const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
+    
+    localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
+    window.updateCompanyBaseUI(baseData);
+    input.value = fullAddress; 
+};
+
+window.clearCompanyBaseAddress = function() {
+    localStorage.removeItem('deliveryProCompanyBase');
+    document.getElementById('company-base-address').value = '';
+    window.updateCompanyBaseUI(null);
+};
+
+window.updateCompanyBaseUI = function(baseData) {
+    const textEl = document.getElementById('saved-base-address-text');
+    const clearBtn = document.getElementById('btn-clear-company-base');
+
+    if (baseData) {
+        textEl.innerText = baseData.address; textEl.classList.add('text-indigo-600'); textEl.classList.remove('text-gray-500'); clearBtn.classList.remove('hidden');
+    } else {
+        textEl.innerText = "저장된 거점이 없습니다."; textEl.classList.add('text-gray-500'); textEl.classList.remove('text-indigo-600'); clearBtn.classList.add('hidden');
+    }
+};
+
+window.renderDispatchDriverList = function() {
+    const listEl = document.getElementById('dispatch-driver-list');
+    const countEl = document.getElementById('dispatch-driver-count');
+    if (!listEl || !countEl) return;
+    
+    const drivers = window.getFilteredVisibleDrivers();
+    countEl.innerText = `${drivers.length}명`;
+    
+    if (drivers.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`; return;
+    }
+    
+    let html = '';
+    drivers.forEach((d, idx) => {
+        const devId = d.deviceId || d.key; const phoneDisplay = d.phone || d.key;
+        const tLat = d.territoryLat || ''; const tLng = d.territoryLng || ''; const tScale = d.territoryScale || ''; const t1 = d.territory1 || ''; const t2 = d.territory2 || '';
+        
+        let territoryBadge = '';
+        if (tLat && tLng) {
+            let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
+                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
+                </div>`;
+        } else {
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
+                    <span class="text-[9px] text-gray-400">미설정</span>
+                </div>`;
+        }
+
+        const isSelected = selectedDispatchDriverId === devId;
+        html += `
+        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
+            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0"><span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span><i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i><span class="truncate">${phoneDisplay}</span></span>
+            <div class="shrink-0 ml-2">${territoryBadge}</div>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+};
+
+window.selectDispatchDriver = function(devId) {
+    selectedDispatchDriverId = devId;
+    window.renderDispatchDriverList(); window.renderDispatchDriverDetail(); 
+};
+
+window.renderDispatchDriverDetail = function() {
+    const header = document.getElementById('detail-driver-header');
+    const table = document.getElementById('detail-driver-table');
+    const tbody = document.getElementById('detail-driver-tbody');
+    const badge = document.getElementById('detail-driver-count-badge');
+    
+    if (!selectedDispatchDriverId) {
+        header.classList.remove('hidden'); table.classList.add('hidden'); badge.classList.add('hidden'); return;
+    }
+
+    const targetLic = allLicenses.find(l => l.deviceId === selectedDispatchDriverId || l.key === selectedDispatchDriverId);
+    const driverName = targetLic ? (targetLic.phone || targetLic.key) : selectedDispatchDriverId;
+    const assignedItems = parsedExcelList.filter(item => item.assignedDriver === driverName);
+
+    header.classList.add('hidden'); table.classList.remove('hidden'); badge.classList.remove('hidden');
+    badge.innerText = `총 ${assignedItems.length}건`;
+
+    if (assignedItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; return;
+    }
+
+    let html = '';
+    assignedItems.forEach((item, idx) => { html += `<tr class="hover:bg-blue-50/50 transition"><td class="text-center font-bold text-gray-500">${item.displayNumber || idx + 1}</td><td class="font-bold text-gray-800 whitespace-normal break-keep">${item.address || '-'}</td></tr>`; });
+    tbody.innerHTML = html;
+};
+
+window.loadExcelFromFirebase = async function() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return;
+    const dateVal = document.getElementById('dispatch-assign-date')?.value || window.getLocalDateString();
+    try {
+        const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
+        parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
+        window.renderExcelTable();
+    } catch (error) {}
+};
+
+window.autoSaveExcelToFirebase = async function() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
+    const dateVal = document.getElementById('dispatch-assign-date')?.value || window.getLocalDateString(); 
+    try {
+        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
+    } catch (error) {}
+};
+
+window.formatNumber = function(num) { if (!num || isNaN(num)) return num || ''; return Number(num).toLocaleString('ko-KR'); };
+
+window.processExcelData = function(jsonData) {
+    const newItems = [];
+    jsonData.forEach((row) => {
+        const mappedRow = { id: Date.now() + Math.random(), assignedDriver: null, senderName: '', orderNo: '', bizNo: '', address: '', storeName: '', phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: '', lat: null, lng: null };
+        for (let key in row) {
+            const val = row[key]; const k = key.replace(/\s+/g, ''); 
+            if (/보내는분|발송자|주문자|고객명/.test(k)) mappedRow.senderName = val;
+            else if (/주문번호|오더번호|주문코드/.test(k)) mappedRow.orderNo = val;
+            else if (/사업자/.test(k)) mappedRow.bizNo = val;
+            else if (/상호|간판|배송지명|받는분|수령인|수신자/.test(k)) mappedRow.storeName = val;
+            else if (/주소|배송지(?!(명|간판))/.test(k)) mappedRow.address = val;
+            else if (/연락처|전화|핸드폰|휴대폰|폰/.test(k)) mappedRow.phone = val;
+            else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
+            else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
+            else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
+            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val; 
+            else if (/단가|가격|금액/.test(k)) mappedRow.price = val; 
+            else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
+        }
+        if (mappedRow.senderName || mappedRow.address || mappedRow.itemName || mappedRow.storeName) newItems.push(mappedRow);
+    });
+    parsedExcelList.push(...newItems); return newItems;
+};
+
+window.getCoordsFromAddress = function(address) {
+    return new Promise((resolve) => {
+        if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { resolve(null); return; }
+        const geocoder = new kakao.maps.services.Geocoder();
+        geocoder.addressSearch(address.trim(), (result, status) => {
+            if (status === kakao.maps.services.Status.OK && result[0]) {
+                let fullAddress = result[0].address_name;
+                if (result[0].road_address && result[0].road_address.address_name) fullAddress = result[0].road_address.address_name;
+                resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x), fullAddress: fullAddress });
+            } else { resolve(null); }
+        });
+    });
+};
+
+window.batchGeocodeExcelList = async function(items) {
+    const dropZone = document.getElementById('excel-drop-zone');
+    const originalDropHtml = dropZone ? dropZone.innerHTML : '';
+    let successCount = 0;
+    for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (dropZone) dropZone.innerHTML = `<div class="flex items-center gap-3 text-indigo-600 font-black text-sm"><i class="fa-solid fa-circle-notch fa-spin text-xl"></i><span>배송지 좌표 분석 중... (${i + 1} / ${items.length})</span></div>`;
+        if (item.address && (!item.lat || !item.lng)) {
+            const coords = await window.getCoordsFromAddress(item.address);
+            if (coords) { item.lat = coords.lat; item.lng = coords.lng; successCount++; }
+            await new Promise(r => setTimeout(r, 50));
+        }
+    }
+    if (dropZone) dropZone.innerHTML = originalDropHtml;
+};
+
+window.sortExcelList = function(field) {
+    if (!parsedExcelList || parsedExcelList.length === 0) return;
+    excelSortAsc = !excelSortAsc; 
+    parsedExcelList.sort((a, b) => {
+        let valA = (a[field] || '').toString().trim(); let valB = (b[field] || '').toString().trim();
+        if (valA < valB) return excelSortAsc ? -1 : 1; if (valA > valB) return excelSortAsc ? 1 : -1; return 0;
+    });
+    window.renderExcelTable();
+};
+
+window.toggleRowCheckbox = function(e, idx) {
+    if (e && e.target.tagName === 'INPUT') return; 
+    const cb = document.querySelector(`.row-checkbox[data-idx="${idx}"]`); if(cb) cb.checked = !cb.checked;
+};
+
+window.renderExcelTable = function() {
+    const tbody = document.getElementById('invoice-excel-tbody'); if (!tbody) return;
+    if (parsedExcelList.length === 0) {
+        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
+        const chkAll = document.getElementById('chk-excel-all'); if (chkAll) chkAll.checked = false;
+        window.renderDispatchDriverDetail(); return;
+    }
+
+    let html = '';
+    parsedExcelList.forEach((item, idx) => {
+        const assignedBadge = item.assignedDriver ? `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` : `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
+        const coordIcon = (item.lat && item.lng) ? `<i class="fa-solid fa-map-pin text-emerald-500 mr-1" title="위치 확인됨"></i>` : `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
+
+        html += `
+        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="window.toggleRowCheckbox(event, ${idx})">
+            <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
+            <td class="text-center font-bold text-gray-500">${idx + 1}</td>
+            <td class="text-center">${assignedBadge}</td>
+            <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
+            <td class="text-center" onclick="event.stopPropagation()"><button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95"><i class="fa-solid fa-trash-can text-[10px]"></i></button></td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+    
+    const chkAll = document.getElementById('chk-excel-all');
+    if (chkAll) { chkAll.checked = false; chkAll.onchange = (e) => { const isChecked = e.target.checked; document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = isChecked; }); }; }
+    window.renderDispatchDriverDetail(); 
+};
+
+window.deleteExcelRow = async function(idx) {
+    if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
+    parsedExcelList.splice(idx, 1); window.renderExcelTable(); await window.autoSaveExcelToFirebase();
+};
+
+window.deleteSelectedExcelRows = async function() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if(checkboxes.length === 0) { alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); return; }
+    if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
+    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
+    parsedExcelList = parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
+    window.renderExcelTable(); await window.autoSaveExcelToFirebase(); 
+};
+
+window.clearAllExcelRows = async function() {
+    if(parsedExcelList.length === 0) return;
+    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?")) return;
+    parsedExcelList = []; window.renderExcelTable(); await window.autoSaveExcelToFirebase();
+};
+
+window.initExcelDropZone = function() {
+    const dropZone = document.getElementById('excel-drop-zone');
+    if (!dropZone || dropZone.dataset.bound === 'true') return;
+
+    let fileInput = document.getElementById('global-excel-file-input');
+    if (!fileInput) {
+        fileInput = document.createElement('input'); fileInput.id = 'global-excel-file-input'; fileInput.type = 'file'; fileInput.accept = '.xlsx, .xls, .csv'; fileInput.multiple = true; fileInput.style.display = 'none'; document.body.appendChild(fileInput);
+        fileInput.addEventListener('change', window.handleExcelUpload);
+    }
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-100', 'border-indigo-500'); });
+    dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); });
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { fileInput.files = e.dataTransfer.files; window.handleExcelUpload({ target: fileInput }); } });
+    dropZone.addEventListener('click', () => { fileInput.click(); }); dropZone.dataset.bound = 'true';
+
+    const btnRunAi = document.getElementById('btn-run-auto-dispatch');
+    if(btnRunAi && !btnRunAi.dataset.bound) {
+        btnRunAi.addEventListener('click', () => { alert("AI 자동 배차 알고리즘은 다음 단계(최종)에서 적용됩니다.\n현재는 엑셀 업로드 좌표 변환 및 기사 권역/본사 설정 테스트를 진행해 주세요."); });
+        btnRunAi.dataset.bound = 'true';
+    }
+};
+
+window.handleExcelUpload = async function(e) {
+    const files = e.target.files; if (!files || files.length === 0) return;
+    const newlyAddedList = [];
+    for (let i = 0; i < files.length; i++) {
+        const parsed = await window.processSingleExcelFile(files[i]);
+        newlyAddedList.push(...parsed);
+    }
+    if (newlyAddedList.length > 0) {
+        window.renderExcelTable(); await window.batchGeocodeExcelList(newlyAddedList); window.renderExcelTable(); await window.autoSaveExcelToFirebase(); 
+        alert(`[업로드 및 위치 분석 완료]\n${files.length}개 파일에서 ${newlyAddedList.length}건의 주문 데이터가 추가 및 분석되었습니다.`);
+    } else { alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); }
+    e.target.value = ''; 
+};
+
+window.processSingleExcelFile = function(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+                resolve(window.processExcelData(json));
+            } catch(err) { resolve([]); }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+};
+
+window.exportToInvoiceModal = function() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkboxes.length === 0) { alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요."); return; }
+    printReadyList = [];
+    checkboxes.forEach(cb => { const idx = parseInt(cb.getAttribute('data-idx')); if (parsedExcelList[idx]) printReadyList.push(parsedExcelList[idx]); });
+
+    window.closeAutoDispatchModal(); document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
+    document.getElementById('print-ready-count').innerText = printReadyList.length;
+    window.loadSavedForms(); window.previewInvoiceRow(0); window.syncPreviewData();
+};
+
+window.previewInvoiceRow = function(idx) {
+    if (!printReadyList || !printReadyList[idx]) return;
+    const item = printReadyList[idx];
+
+    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
+    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+
+    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
+    
+    let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    
+    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
+    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
+
+    window.syncPreviewData(); 
+};
+
+window.generateInvoiceHTML = function(item, providerInfo) {
+    const originalTemplate = document.getElementById('print-area'); if (!originalTemplate) return '';
+    const template = originalTemplate.cloneNode(true); template.id = ''; 
+
+    template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
+    template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
+    template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
+    template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
+    template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
+
+    template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
+    template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+
+    template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
+    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
+    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
+
+    let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
+    template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+
+    template.querySelectorAll('.invoice-table').forEach(table => {
+        table.querySelectorAll('tr').forEach(tr => {
+            const text = tr.innerText;
+            if ((text.includes('주 소') || text.includes('배 송 요 청 사 항')) && !tr.classList.contains('double-height')) {
+                tr.classList.add('double-height');
+                tr.querySelectorAll('td').forEach(td => { if (!td.classList.contains('invoice-label') && !td.classList.contains('inv-text-right')) td.classList.add('multi-line-text'); });
+            }
+        });
     });
 
-    onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
-        allDispatchTemplates = [];
-        snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
-    });
+    const dateStr = window.getLocalDateString();
+    const dateSpan1 = template.querySelector('#prev-date-1'); if (dateSpan1) { dateSpan1.id = ''; dateSpan1.innerText = dateStr; }
+    const dateSpan2 = template.querySelector('#prev-date-2'); if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
+    template.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
+
+    return template.outerHTML;
+};
+
+window.executeBatchPrint = function() {
+    if (printReadyList.length === 0) { alert("출력할 주문건이 없습니다."); return; }
+    const btn = document.getElementById('btn-batch-print');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 문서 생성 중...'; }
+
+    const providerInfo = {
+        title: document.getElementById('input-form-title')?.value || '', regno: document.getElementById('input-prov-regno')?.value || '',
+        name: document.getElementById('input-prov-name')?.value || '', addr: document.getElementById('input-prov-addr')?.value || '',
+        tel: document.getElementById('input-prov-tel')?.value || '', addTel: document.getElementById('input-prov-add-tel')?.value || ''
+    };
+
+    let printContents = ''; printReadyList.forEach(item => { printContents += window.generateInvoiceHTML(item, providerInfo); });
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document; doc.open();
+    doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 동선 PRO - 거래명세표 출력</title><style>
+        * { box-sizing: border-box; } @media print { @page { size: A4 portrait; margin: 0; } body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; } .invoice-half { height: 148mm; page-break-inside: avoid; } }
+        body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; } .invoice-container { width: 210mm; height: 297mm; margin: 0 auto; display: flex; flex-direction: column; } .invoice-half { height: 148mm; background-color: #ffeb5c !important; padding: 5mm 8mm; display: flex; flex-direction: column; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; } .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; } .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; } .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; } .double-height { height: 54px !important; } .double-height td { height: 54px !important; } .multi-line-text { white-space: normal !important; line-height: 1.3; } .invoice-table th { font-weight: bold; text-align: center; } .invoice-label { font-weight: bold; text-align: center; white-space: nowrap; } .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; } .text-fit-auto { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .inv-text-center { text-align: center; } .inv-text-left { text-align: left; padding-left: 6px !important; } .inv-text-right { text-align: right; padding-right: 6px !important; } .inv-font-bold { font-weight: bold; }
+    </style></head><body>${printContents}</body></html>`);
+    doc.close();
+
+    iframe.onload = function() {
+        setTimeout(() => {
+            iframe.contentWindow.focus(); iframe.contentWindow.print();
+            setTimeout(() => { document.body.removeChild(iframe); if (btn) { btn.disabled = false; btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력`; } }, 1000);
+        }, 800); 
+    };
 };
