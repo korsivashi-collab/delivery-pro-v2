@@ -1163,34 +1163,34 @@ window.selectFormTemplate = function(type) {
     }, 300);
 };
 
-// 🌟 2차 수정: 엑셀 뷰 / 명세서 미리보기 뷰 탭 전환 기능 (뒤로가기 버튼 컨트롤 포함)
+// 🌟 6차 수정: 엑셀 리스트와 명세서 미리보기 명시적 탭 전환 (뷰 전환 로직 분리)
 window.switchInvoiceTab = function(tabName) {
     const btnExcel = document.getElementById('inv-tab-excel');
+    const btnPreview = document.getElementById('inv-tab-preview'); // 새로 추가된 탭 버튼
     const viewExcel = document.getElementById('inv-view-excel');
     const viewPreview = document.getElementById('inv-view-preview');
     
-    const btnBack = document.getElementById('inv-btn-back');
     const listActions = document.getElementById('inv-list-actions');
 
     if (!btnExcel || !viewExcel || !viewPreview) return;
 
     if (tabName === 'EXCEL') {
         btnExcel.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
+        if(btnPreview) btnPreview.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
+        
         viewExcel.classList.remove('hidden');
         viewPreview.classList.add('hidden');
         viewPreview.classList.remove('flex');
         
-        // 엑셀 리스트일 때는 뒤로가기 숨기고 삭제 버튼 그룹 보이기
-        if (btnBack) btnBack.classList.add('hidden');
         if (listActions) listActions.classList.remove('hidden');
     } else {
+        if(btnPreview) btnPreview.className = "px-4 py-2 bg-white text-indigo-600 font-black text-xs rounded-lg border border-gray-200 shadow-sm transition";
         btnExcel.className = "px-4 py-2 bg-transparent text-gray-500 hover:bg-gray-100 font-black text-xs rounded-lg transition";
+        
         viewPreview.classList.remove('hidden');
         viewPreview.classList.add('flex');
         viewExcel.classList.add('hidden');
         
-        // 미리보기일 때는 뒤로가기 보이고 삭제 버튼 그룹 숨기기
-        if (btnBack) btnBack.classList.remove('hidden');
         if (listActions) listActions.classList.add('hidden');
         
         window.updateLivePreview();
@@ -1292,6 +1292,7 @@ window.applySavedForm = function(idx) {
 
     currentSelectedFormIndex = idx;
 
+    // 인풋 필드 값 갱신
     document.getElementById('input-form-title').value = form.title || '';
     document.getElementById('input-prov-regno').value = form.regno || '';
     document.getElementById('input-prov-name').value = form.name || '';
@@ -1299,9 +1300,11 @@ window.applySavedForm = function(idx) {
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
+    // UI 리렌더링 (테두리 활성화 표시 등)
     window.loadSavedForms(); 
+    
+    // 미리보기 데이터는 즉시 갱신해두되, 화면 전환(Tab Switch)은 시키지 않습니다. (강제 뷰 전환 문제 해결)
     window.updateLivePreview();
-    window.switchInvoiceTab('PREVIEW');
 };
 
 window.deleteSavedForm = function(idx) {
@@ -1312,6 +1315,57 @@ window.deleteSavedForm = function(idx) {
     savedForms.splice(idx, 1);
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     window.loadSavedForms();
+};
+
+// 🌟 6차 수정: 파이어베이스(Firestore) 영구 저장 기능 신규 추가
+window.saveExcelToFirebase = async function() {
+    if (!parsedExcelList || parsedExcelList.length === 0) {
+        alert("저장할 주문 데이터가 없습니다.\n먼저 엑셀 파일을 업로드해주세요.");
+        return;
+    }
+    
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    if (!dispatchKey) {
+        alert("관제 키(Dispatch Key) 정보를 찾을 수 없어 서버에 저장할 수 없습니다.\n관리자 권한을 확인해주세요.");
+        return;
+    }
+
+    const today = getLocalDateString(); // 예: '2026-09-13'
+    const docId = `${today}_${dispatchKey}`; // 날짜와 관제키를 조합하여 고유한 문서 ID 생성
+    
+    if(!confirm(`오늘 날짜(${today}) 기준으로 총 ${parsedExcelList.length}건의 주문 리스트를 서버에 저장하시겠습니까?\n(기존 동일 날짜의 저장 내역이 있다면 업데이트됩니다.)`)) {
+        return;
+    }
+    
+    try {
+        // UI 로딩 처리
+        const saveBtns = document.querySelectorAll('button[onclick="saveExcelToFirebase()"]');
+        saveBtns.forEach(btn => {
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 저장 중...';
+        });
+
+        // Firestore에 통째로 문서 엎어치기 (merge: true로 기존 데이터 보존 속성 유지)
+        await setDoc(doc(db, "dispatch_orders", docId), {
+            date: today,
+            dispatchKey: dispatchKey,
+            orders: parsedExcelList,
+            updatedAt: Date.now()
+        }, { merge: true });
+
+        alert(`[저장 완료] ${parsedExcelList.length}건의 주문 리스트가 서버에 안전하게 저장되었습니다.`);
+        
+    } catch (error) {
+        console.error("Firebase 주문 리스트 저장 오류:", error);
+        alert("서버 저장 중 오류가 발생했습니다: " + error.message);
+    } finally {
+        // UI 버튼 복구
+        const saveBtns = document.querySelectorAll('button[onclick="saveExcelToFirebase()"]');
+        saveBtns.forEach(btn => {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> 서버에 저장';
+        });
+    }
 };
 
 // 숫자 포맷팅 유틸리티 (콤마 찍기)
@@ -1604,28 +1658,29 @@ window.executeBatchPrint = function() {
                 .invoice-container { 
                     background-color: white; 
                     width: 210mm; 
-                    min-height: 297mm; 
+                    height: 297mm; /* min-height에서 height로 완벽 고정 (하단 밀림 방지) */
                     margin: 0 auto; 
                     position: relative;
                     display: flex;
                     flex-direction: column;
                     box-sizing: border-box;
+                    overflow: hidden;
                 }
                 .invoice-half {
                     flex: 1; 
                     background-color: #ffeb5c !important; 
-                    padding: 8mm 12mm; 
+                    padding: 5mm 10mm; /* 안전 여백(Safety Margin) 적용 */
                     box-sizing: border-box;
                     display: flex;
                     flex-direction: column;
-                    overflow: visible; 
+                    overflow: hidden; 
                     -webkit-print-color-adjust: exact; 
                     print-color-adjust: exact;
                 }
                 .invoice-cut-line { border-top: 1px dashed #9ca3af; width: 100%; margin: 0; }
-                .invoice-title { text-align: center; font-size: 24px; font-weight: 900; letter-spacing: 12px; text-decoration: underline; margin-bottom: 8px; color: #000; }
+                .invoice-title { text-align: center; font-size: 24px; font-weight: 900; letter-spacing: 12px; text-decoration: underline; margin-bottom: 5px; color: #000; }
                 .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; color: #000; }
-                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 5px 6px; word-break: break-all; overflow-wrap: break-word; }
+                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 4px 6px; word-break: break-all; overflow-wrap: break-word; }
                 .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
                 .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 1px; }
                 .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 4px; padding: 5px 2px !important; line-height: 1.2; }
@@ -2864,7 +2919,7 @@ window.executeExcelExport = function() {
     }
 
     if (!hasData) {
-        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 봉랎습니다.`);
+        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
         return;
     }
 
