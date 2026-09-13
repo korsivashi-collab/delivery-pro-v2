@@ -115,12 +115,10 @@
         }
 
         .double-height { height: 54px !important; }
-
         .multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
 
         .invoice-label { background-color: transparent; font-weight: bold; text-align: center; white-space: nowrap; letter-spacing: -0.2px; }
         .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; padding: 2px !important; }
-
         .text-fit-auto { font-size: 9.5px; letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
         .inv-text-center { text-align: center; }
@@ -289,106 +287,176 @@
     </div>
 
     <!-- ======================================================== -->
-    <!-- 🌟 배송 자동할당 (AI 배차) 모달창 -->
+    <!-- 🌟 [개편] 배송 자동할당 (AI 배차) 모달창 -->
     <!-- ======================================================== -->
     <div id="auto-dispatch-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col animate-slide-up overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-xl flex items-center justify-center text-xl shadow-md"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
                 <div>
-                    <h2 class="text-lg font-black text-gray-900 flex items-center gap-2">배송 자동할당 (AI 배차) <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-300">PRO</span></h2>
-                    <p class="text-xs text-gray-500 font-bold">엑셀을 업로드하고 기사별 권역을 설정하여 물량을 자동으로 균등하게 배분합니다.</p>
+                    <h2 class="text-lg font-black text-gray-900 flex items-center gap-2">배송 자동할당 <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-300">PRO</span></h2>
+                    <p class="text-xs text-gray-500 font-bold">기사별 권역별 물량을 자동으로 균등하게 배분합니다.</p>
                 </div>
             </div>
             <button onclick="closeAutoDispatchModal()" class="w-10 h-10 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl flex items-center justify-center"><i class="fa-solid fa-xmark text-lg"></i></button>
         </header>
 
-        <div class="flex-1 flex gap-4 p-4 overflow-hidden">
-            <!-- 좌측: 설정 및 기사 목록 -->
-            <div class="w-[320px] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden flex-none">
-                
-                <!-- 🌟 [수정] 본사 거점 설정 UI (저장 버튼 및 완료 표시창 추가) -->
-                <div class="p-4 border-b border-gray-100 bg-slate-50 relative">
-                    <h3 class="text-xs font-black text-gray-800 mb-2"><i class="fa-solid fa-building text-blue-600"></i> 본사(출발지) 거점 설정</h3>
+        <div class="flex-1 flex flex-col overflow-hidden p-4 gap-4">
+            
+            <!-- 🌟 상단 통합 컨트롤 패널 -->
+            <div class="flex gap-4 flex-none">
+                <!-- 1. 본사 거점 설정 -->
+                <div class="w-[300px] bg-white p-4 rounded-2xl border border-gray-200 shadow-sm flex flex-col justify-center relative">
+                    <h3 class="text-[11px] font-black text-gray-800 mb-2"><i class="fa-solid fa-building text-blue-600 mr-1"></i> 본사(출발지) 거점 설정</h3>
                     <div class="flex gap-1.5">
-                        <input type="text" id="company-base-address" placeholder="예: 서울시 서대문구 덕릉로..." class="flex-1 bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold shadow-sm outline-none focus:border-blue-500 transition">
-                        <button type="button" id="btn-save-company-base" onclick="saveCompanyBaseAddress()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-2 rounded-lg text-xs font-black shadow-sm transition active:scale-95 whitespace-nowrap">저장</button>
+                        <input type="text" id="company-base-address" placeholder="본사 주소 입력 (예: 은평구 통일로...)" class="flex-1 bg-gray-50 border border-gray-300 rounded-lg p-2 text-[11px] font-bold outline-none focus:border-blue-500">
+                        <button type="button" id="btn-save-company-base" onclick="saveCompanyBaseAddress()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 rounded-lg text-xs font-black shadow-sm active:scale-95">저장</button>
                     </div>
-                    <!-- 좌표 확인 메시지 (숨김) -->
-                    <div id="company-base-info" class="hidden mt-2 p-2 bg-emerald-50 border border-emerald-200 rounded-lg flex items-center justify-between">
-                        <span class="text-[10px] font-black text-emerald-800"><i class="fa-solid fa-map-pin"></i> 거점 좌표가 저장되었습니다.</span>
-                        <button type="button" onclick="clearCompanyBaseAddress()" class="text-[10px] text-gray-500 hover:text-red-500 font-bold underline">초기화</button>
+                    <!-- 저장된 주소 텍스트 표시 영역 -->
+                    <div class="mt-1.5 text-[10px] font-bold text-gray-500 flex justify-between items-center">
+                        <span class="truncate pr-2" id="saved-base-address-text">저장된 거점이 없습니다.</span>
+                        <button id="btn-clear-company-base" onclick="clearCompanyBaseAddress()" class="hidden text-red-500 hover:underline shrink-0">초기화</button>
                     </div>
                 </div>
+
+                <!-- 2. 슬림해진 엑셀 업로드 존 -->
+                <div id="excel-drop-zone" class="flex-1 bg-white border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-2xl p-3 flex items-center justify-center text-center transition cursor-pointer shadow-sm">
+                    <div class="flex items-center gap-4">
+                        <div class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-lg"><i class="fa-solid fa-file-excel"></i></div>
+                        <div class="text-left">
+                            <h4 class="font-black text-gray-800 text-sm">엑셀 주문서 업로드 (클릭 또는 드래그)</h4>
+                            <p class="text-[10px] text-gray-500 font-bold">다중 파일 업로드 지원 (주소 좌표 자동 변환)</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 3. 액션 버튼 -->
+                <div class="w-[240px] flex flex-col gap-2 justify-center">
+                    <button type="button" id="btn-run-auto-dispatch" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-black rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-robot"></i> AI 자동 할당 실행
+                    </button>
+                    <button type="button" id="btn-export-to-invoice" onclick="exportToInvoiceModal()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-black rounded-xl transition shadow-sm active:scale-95 flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-file-export"></i> 명세서 출력으로 내보내기
+                    </button>
+                </div>
+            </div>
+
+            <!-- 하단 메인 콘텐츠 영역 -->
+            <div class="flex-1 flex gap-4 overflow-hidden">
                 
-                <!-- 기사 목록 및 권역 설정 -->
-                <div class="p-3 bg-white border-b border-gray-100 flex justify-between items-center shadow-sm z-10">
-                    <span class="text-xs font-black text-gray-700">배송 기사별 거점/권역 설정</span>
-                    <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-black shadow-sm" id="dispatch-driver-count">0명</span>
-                </div>
-                <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-3 bg-slate-50/50">
-                    <!-- 기사 목록 렌더링 구역 -->
-                    <div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>
-                </div>
-            </div>
-
-            <!-- 우측: 엑셀 드롭존 및 배차 데이터 테이블 -->
-            <div class="flex-1 flex flex-col gap-4 overflow-hidden">
-                <div class="flex gap-4 flex-none">
-                    <div id="excel-drop-zone" class="flex-1 bg-white border-2 border-dashed border-indigo-300 hover:border-indigo-500 rounded-2xl p-4 flex items-center justify-center text-center transition cursor-pointer shadow-sm h-[90px]">
-                        <div class="flex items-center gap-4">
-                            <div class="w-12 h-12 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center text-xl"><i class="fa-solid fa-file-excel"></i></div>
-                            <div class="text-left">
-                                <h4 class="font-black text-gray-800 text-sm mb-0.5">엑셀 주문서 업로드 (드래그 앤 드롭)</h4>
-                                <p class="text-[11px] text-gray-500 font-bold">여러 개의 엑셀 또는 CSV 파일을 한 번에 업로드할 수 있습니다.</p>
-                            </div>
-                        </div>
+                <!-- 좌측 기사 목록 패널 -->
+                <div class="w-[260px] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden flex-none">
+                    <div class="bg-gray-50 border-b border-gray-200 p-3 flex justify-between items-center shadow-sm z-10">
+                        <span class="text-[11px] font-black text-gray-700"><i class="fa-solid fa-users text-blue-500 mr-1"></i> 운행 기사 권역 설정</span>
+                        <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-black shadow-sm" id="dispatch-driver-count">0명</span>
                     </div>
+                    <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-2.5">
+                        <!-- JS 렌더링 영역 (순번 표시 포함) -->
+                    </div>
+                </div>
+
+                <!-- 🌟 가운데/우측 분할 메인 뷰어 -->
+                <div class="flex-1 flex gap-4 overflow-hidden">
                     
-                    <div class="w-[300px] flex flex-col gap-2">
-                        <button type="button" id="btn-run-auto-dispatch" class="flex-1 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-sm font-black rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-robot"></i> AI 자동 할당 실행
-                        </button>
-                        <button type="button" id="btn-export-to-invoice" onclick="exportToInvoiceModal()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-xs font-black rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
-                            <i class="fa-solid fa-file-export"></i> 명세서 출력으로 내보내기
-                        </button>
-                    </div>
-                </div>
-
-                <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden relative">
-                    <div class="bg-gray-50 border-b border-gray-200 p-3 flex justify-between items-center z-20">
-                        <div class="flex items-center gap-3">
-                            <span class="px-3 py-1.5 bg-white border border-gray-200 rounded-lg text-indigo-800 font-black text-xs flex items-center gap-1.5 shadow-sm"><i class="fa-solid fa-list-check"></i> 배차 대기 주문 리스트</span>
-                            <div class="flex items-center gap-1.5 ml-2">
-                                <label class="text-[11px] font-black text-gray-500">배차일자</label>
-                                <input type="date" id="dispatch-assign-date" class="px-2 py-1.5 bg-white border border-gray-300 text-gray-900 rounded-md text-xs font-black shadow-sm outline-none cursor-pointer">
+                    <!-- 가운데 창: 전체 할당 현황 -->
+                    <div class="w-[55%] bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                        <div class="bg-gray-50 border-b border-gray-200 p-3 flex justify-between items-center z-10">
+                            <div class="flex items-center gap-3">
+                                <span class="px-2 py-1 bg-white border border-gray-200 rounded-md text-gray-800 font-black text-xs flex items-center gap-1.5 shadow-sm">
+                                    <i class="fa-solid fa-list-check text-blue-600"></i> 전체 배송지 현황
+                                </span>
+                                <input type="date" id="dispatch-assign-date" class="px-2 py-1 bg-white border border-gray-300 text-gray-900 rounded-md text-[11px] font-black shadow-sm outline-none cursor-pointer">
+                            </div>
+                            <div class="flex gap-1.5 items-center">
+                                <button onclick="deleteSelectedExcelRows()" class="px-2 py-1 bg-red-50 text-red-600 font-bold text-[10px] rounded border border-red-200 hover:bg-red-100">선택 삭제</button>
+                                <button onclick="clearAllExcelRows()" class="px-2 py-1 bg-gray-100 text-gray-600 font-bold text-[10px] rounded border border-gray-200 hover:bg-gray-200">초기화</button>
                             </div>
                         </div>
-                        <div class="flex gap-1.5 items-center">
-                            <button onclick="deleteSelectedExcelRows()" class="px-3 py-1.5 bg-red-50 text-red-600 font-bold text-xs rounded-lg border border-red-200 hover:bg-red-100 flex items-center gap-1"><i class="fa-solid fa-trash-can"></i> 선택 삭제</button>
-                            <button onclick="clearAllExcelRows()" class="px-3 py-1.5 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg border border-gray-200 hover:bg-gray-200 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> 데이터 초기화</button>
+
+                        <!-- 🌟 간소화된 데이터 리스트 테이블 -->
+                        <div class="flex-1 overflow-auto custom-scrollbar bg-white">
+                            <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table">
+                                <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm">
+                                    <tr class="border-b border-gray-200 text-gray-700">
+                                        <th class="font-black text-center w-8"><input type="checkbox" id="chk-excel-all" class="cursor-pointer"></th>
+                                        <th class="font-black text-center w-10">순번</th>
+                                        <th class="font-black text-center text-blue-700 w-24"><i class="fa-solid fa-truck-fast"></i> 담당 기사</th>
+                                        <th class="font-black">배송 목적지 (주소)</th>
+                                        <th class="font-black text-center w-12">관리</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="invoice-excel-tbody" class="divide-y divide-gray-200 bg-white">
+                                    <tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
 
-                    <div class="flex-1 overflow-auto custom-scrollbar bg-white">
-                        <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table min-w-[1700px]">
-                            <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm">
-                                <tr class="border-b border-gray-200 text-gray-700">
-                                    <th class="font-black text-center w-10"><input type="checkbox" id="chk-excel-all" class="cursor-pointer"></th>
-                                    <th class="font-black text-center w-12">순번</th>
-                                    <th class="font-black text-center text-blue-700 w-28"><i class="fa-solid fa-truck-fast"></i> 담당 기사</th>
-                                    <th class="font-black sortable-th hover:bg-gray-200 transition px-2 py-1" onclick="sortExcelList('senderName')">발송자(고객) <i class="fa-solid fa-sort text-gray-400 ml-1"></i></th>
-                                    <th class="font-black">주문번호</th><th class="font-black">사업자번호</th><th class="font-black">배송 주소</th><th class="font-black">배송지명(상호)</th><th class="font-black">연락처</th>
-                                    <th class="font-black text-blue-600">상품명</th><th class="font-black text-blue-600">규격(단위)</th><th class="font-black text-blue-600 text-right">수량</th><th class="font-black text-blue-600 text-right">단가</th><th class="font-black text-blue-600 text-right">총액</th><th class="font-black">결제/배송 메모</th><th class="font-black text-center w-16">관리</th>
-                                </tr>
-                            </thead>
-                            <tbody id="invoice-excel-tbody" class="divide-y divide-gray-200 bg-white">
-                                <tr id="empty-excel-row"><td colspan="16" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">데이터가 없습니다.<br>상단 영역에 엑셀 주문서 파일을 드래그하여 업로드하세요.</span></td></tr>
-                            </tbody>
-                        </table>
+                    <!-- 오른쪽 창: 선택된 기사의 할당 상세 내역 -->
+                    <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col overflow-hidden">
+                        <div class="bg-blue-50 border-b border-blue-100 p-3 flex justify-between items-center z-10">
+                            <span class="font-black text-blue-900 text-xs flex items-center gap-1.5"><i class="fa-solid fa-user-check text-blue-600"></i> 기사별 할당 상세 내역</span>
+                            <span id="detail-driver-count-badge" class="bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-sm hidden">총 0건</span>
+                        </div>
+                        
+                        <!-- 기사 선택 안내 또는 기사 정보 표시 영역 -->
+                        <div id="detail-driver-header" class="p-4 border-b border-gray-100 bg-white">
+                            <p class="text-xs text-gray-400 font-bold text-center">좌측 목록에서 기사를 선택하면 상세 내역이 표시됩니다.</p>
+                        </div>
+
+                        <!-- 선택 기사의 할당 리스트 테이블 -->
+                        <div class="flex-1 overflow-auto custom-scrollbar bg-slate-50">
+                            <table class="w-full text-left border-collapse text-[11px] whitespace-nowrap excel-table hidden" id="detail-driver-table">
+                                <thead class="bg-white sticky top-0 z-10 shadow-sm border-b">
+                                    <tr class="text-gray-600">
+                                        <th class="font-black text-center w-10">배송순서</th>
+                                        <th class="font-black">배송지 주소</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="detail-driver-tbody" class="divide-y divide-gray-100 bg-white">
+                                    <!-- 상세 내역 렌더링 -->
+                                </tbody>
+                            </table>
+                        </div>
                     </div>
+
                 </div>
             </div>
+        </div>
+    </div>
+
+
+    <!-- ======================================================== -->
+    <!-- 🌟 기사 권역 설정 팝업 모달창 (우선순위 2 진행용) -->
+    <!-- ======================================================== -->
+    <div id="driver-territory-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm animate-pop-in">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative flex flex-col">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-base font-black text-gray-900"><i class="fa-solid fa-map-location-dot text-blue-600"></i> 기사 배송 권역 설정</h3>
+                <button onclick="closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            
+            <div class="mb-4 bg-blue-50 p-3 rounded-xl border border-blue-100">
+                <p class="text-xs font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600">010-0000-0000</span></p>
+                <p class="text-[10px] font-bold text-blue-700">설정한 지역과 가까운 배송지가 우선 할당됩니다.</p>
+            </div>
+
+            <input type="hidden" id="territory-target-devid">
+
+            <div class="space-y-3 mb-5">
+                <div>
+                    <label class="block text-xs font-black text-gray-700 mb-1">1차 핵심 권역 (시/군/구)</label>
+                    <input type="text" id="input-territory-1" placeholder="예) 은평구, 서대문구" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 focus:bg-white transition">
+                </div>
+                <div>
+                    <label class="block text-xs font-black text-gray-700 mb-1">2차 예비 권역 (시/군/구)</label>
+                    <input type="text" id="input-territory-2" placeholder="예) 종로구, 마포구" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 focus:bg-white transition">
+                </div>
+            </div>
+
+            <button type="button" onclick="saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95">
+                권역 저장 및 적용
+            </button>
         </div>
     </div>
 
@@ -420,7 +488,6 @@
                     <span class="text-xs font-black text-gray-700 flex items-center gap-1.5"><i class="fa-solid fa-eye"></i> 표준 거래명세표 미리보기 (A4 용지 규격)</span>
                 </div>
                 
-                <!-- 기존 뷰어 코드 완벽 보존 -->
                 <div id="inv-view-preview" class="flex-1 overflow-auto bg-gray-300 p-8 flex-col items-center gap-6 flex custom-scrollbar">
                     <div id="print-area" class="invoice-container">
                         
@@ -433,47 +500,16 @@
                             </div>
                             
                             <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
-                                <colgroup>
-                                    <col style="width: 4%;">  <!-- 공급자 세로칸 -->
-                                    <col style="width: 17%;"> <!-- 라벨 칸 -->
-                                    <col style="width: 29%;"> <!-- 주소/상호 와이드 데이터 칸 -->
-                                    <col style="width: 4%;">  <!-- 공급받는자 세로칸 -->
-                                    <col style="width: 17%;"> <!-- 라벨 칸 -->
-                                    <col style="width: 29%;"> <!-- 주소/상호 와이드 데이터 칸 -->
-                                </colgroup>
-                                <tr>
-                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td>
-                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td>
-                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td>
-                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td>
-                                    <td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td>
-                                </tr>
-                               <tr class="double-height">
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td>
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td>
-                                    <td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td>
-                                    <td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td>
-                                </tr>
+                                <colgroup><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"></colgroup>
+                                <tr><td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td><td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td><td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td><td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td></tr>
+                                <tr><td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td><td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td></tr>
+                               <tr class="double-height"><td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td><td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td></tr>
+                                <tr><td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td><td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td></tr>
+                                <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
                             </table>
 
                             <table class="invoice-table" style="margin-bottom: 0;">
-                                <colgroup>
-                                    <col style="width: 5%;">  <!-- No -->
-                                    <col style="width: 38%;"> <!-- 상품명 와이드 -->
-                                    <col style="width: 14%;"> <!-- 규격 -->
-                                    <col style="width: 10%;"> <!-- 수량 -->
-                                    <col style="width: 15%;"> <!-- 단가 -->
-                                    <col style="width: 18%;"> <!-- 총액 -->
-                                </colgroup>
+                                <colgroup><col style="width: 5%;"><col style="width: 38%;"><col style="width: 14%;"><col style="width: 10%;"><col style="width: 15%;"><col style="width: 18%;"></colgroup>
                                 <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
                                 <tbody>
                                     <tr class="empty-row"><td class="inv-text-center">1</td><td class="inv-text-left inv-font-bold prev-item-name text-fit-auto"></td><td class="inv-text-center prev-item-unit text-fit-auto"></td><td class="inv-text-center prev-item-qty"></td><td class="inv-text-right prev-item-price"></td><td class="inv-text-right prev-item-total"></td></tr>
@@ -485,29 +521,10 @@
                             </table>
 
                             <table class="invoice-table" style="border-top: none;">
-                                <colgroup>
-                                    <col style="width: 16%;">
-                                    <col style="width: 32%;">
-                                    <col style="width: 16%;">
-                                    <col style="width: 10%;">
-                                    <col style="width: 10%;">
-                                    <col style="width: 16%;">
-                                </colgroup>
+                                <colgroup><col style="width: 16%;"><col style="width: 32%;"><col style="width: 16%;"><col style="width: 10%;"><col style="width: 10%;"><col style="width: 16%;"></colgroup>
                                 <tbody>
-                                    <tr>
-                                        <td class="invoice-label">결 제 수 단</td>
-                                        <td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td>
-                                        <td class="invoice-label">총 상품수량</td>
-                                        <td class="inv-text-center inv-font-bold prev-total-qty"></td>
-                                        <td class="invoice-label">배 송 비</td>
-                                        <td class="inv-text-right prev-shipping-fee">0원</td>
-                                    </tr>
-                                    <tr class="double-height">
-                                        <td class="invoice-label">배 송 요 청 사 항</td>
-                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto multi-line-text" style="vertical-align: top; padding-top: 5px;"></td>
-                                        <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
-                                        <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
-                                    </tr>
+                                    <tr><td class="invoice-label">결 제 수 단</td><td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td><td class="invoice-label">총 상품수량</td><td class="inv-text-center inv-font-bold prev-total-qty"></td><td class="invoice-label">배 송 비</td><td class="inv-text-right prev-shipping-fee">0원</td></tr>
+                                    <tr class="double-height"><td class="invoice-label">배 송 요 청 사 항</td><td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto multi-line-text" style="vertical-align: top; padding-top: 5px;"></td><td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td><td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td></tr>
                                 </tbody>
                             </table>
                             <div style="text-align: right; font-size: 11px; font-weight: bold; margin-top: 5px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
@@ -524,37 +541,16 @@
                             </div>
                             
                             <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
-                                <colgroup>
-                                    <col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;">
-                                </colgroup>
-                                <tr>
-                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td>
-                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td>
-                                    <td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td>
-                                    <td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td>
-                                    <td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td>
-                                </tr>
-                                <tr class="double-height">
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td>
-                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td>
-                                    <td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td>
-                                </tr>
-                                <tr>
-                                    <td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td>
-                                    <td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td>
-                                </tr>
+                                <colgroup><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"></colgroup>
+                                <tr><td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td><td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td><td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td><td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td></tr>
+                                <tr><td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td><td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td></tr>
+                                <tr class="double-height"><td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td><td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td></tr>
+                                <tr><td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td><td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td></tr>
+                                <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
                             </table>
 
                             <table class="invoice-table" style="margin-bottom: 0;">
-                                <colgroup>
-                                    <col style="width: 5%;"><col style="width: 38%;"><col style="width: 14%;"><col style="width: 10%;"><col style="width: 15%;"><col style="width: 18%;">
-                                </colgroup>
+                                <colgroup><col style="width: 5%;"><col style="width: 38%;"><col style="width: 14%;"><col style="width: 10%;"><col style="width: 15%;"><col style="width: 18%;"></colgroup>
                                 <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
                                 <tbody>
                                     <tr class="empty-row"><td class="inv-text-center">1</td><td class="inv-text-left inv-font-bold prev-item-name text-fit-auto"></td><td class="inv-text-center prev-item-unit text-fit-auto"></td><td class="inv-text-center prev-item-qty"></td><td class="inv-text-right prev-item-price"></td><td class="inv-text-right prev-item-total"></td></tr>
@@ -566,24 +562,10 @@
                             </table>
 
                             <table class="invoice-table" style="border-top: none;">
-                                <colgroup>
-                                    <col style="width: 16%;"><col style="width: 32%;"><col style="width: 16%;"><col style="width: 10%;"><col style="width: 10%;"><col style="width: 16%;">
-                                </colgroup>
+                                <colgroup><col style="width: 16%;"><col style="width: 32%;"><col style="width: 16%;"><col style="width: 10%;"><col style="width: 10%;"><col style="width: 16%;"></colgroup>
                                 <tbody>
-                                    <tr>
-                                        <td class="invoice-label">결 제 수 단</td>
-                                        <td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td>
-                                        <td class="invoice-label">총 상품수량</td>
-                                        <td class="inv-text-center inv-font-bold prev-total-qty"></td>
-                                        <td class="invoice-label">배 송 비</td>
-                                        <td class="inv-text-right prev-shipping-fee">0원</td>
-                                    </tr>
-                                    <tr class="double-height">
-                                        <td class="invoice-label">배 송 요 청 사 항</td>
-                                        <td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto multi-line-text" style="vertical-align: top; padding-top: 5px;"></td>
-                                        <td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td>
-                                        <td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td>
-                                    </tr>
+                                    <tr><td class="invoice-label">결 제 수 단</td><td class="inv-text-left prev-pay-method text-fit-auto" style="padding-left: 5px;"></td><td class="invoice-label">총 상품수량</td><td class="inv-text-center inv-font-bold prev-total-qty"></td><td class="invoice-label">배 송 비</td><td class="inv-text-right prev-shipping-fee">0원</td></tr>
+                                    <tr class="double-height"><td class="invoice-label">배 송 요 청 사 항</td><td colspan="3" class="inv-text-left prev-cust-memo text-fit-auto multi-line-text" style="vertical-align: top; padding-top: 5px;"></td><td class="invoice-label" style="background-color: #f1f5f9 !important;">총주문금액</td><td class="inv-text-right inv-font-bold prev-total-order-amt" style="background-color: #f1f5f9 !important; color: #dc2626;"></td></tr>
                                 </tbody>
                             </table>
                             <div style="text-align: right; font-size: 11px; font-weight: bold; margin-top: 5px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
@@ -592,21 +574,17 @@
                 </div>
             </div>
 
-            <!-- 우측: 템플릿/공급자 설정 및 출력 패널 (고정폭 320px) -->
+            <!-- 우측: 템플릿/공급자 설정 및 출력 패널 -->
             <div class="w-[320px] flex flex-col gap-3 flex-none">
                 <button type="button" onclick="document.getElementById('form-template-modal').classList.remove('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-3.5 rounded-2xl transition shadow-lg active:scale-95 flex items-center justify-center gap-2">
                     <i class="fa-solid fa-layer-group"></i> 기본 템플릿(양식) 변경
                 </button>
 
-                <!-- 공급자 폼 목록 -->
                 <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col min-h-0 overflow-hidden">
                     <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex justify-between items-center"><span class="text-[11px] font-black text-gray-700"><i class="fa-solid fa-list"></i> 저장된 공급자 폼 목록</span></div>
-                    <div id="saved-forms-list" class="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-1.5 bg-slate-50/50">
-                        <div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.</div>
-                    </div>
+                    <div id="saved-forms-list" class="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-1.5 bg-slate-50/50"></div>
                 </div>
 
-                <!-- 공급자 정보 입력란 -->
                 <div class="bg-white border border-gray-200 rounded-2xl shadow-sm flex flex-col flex-none overflow-hidden">
                     <div onclick="document.getElementById('form-setup-accordion').classList.toggle('hidden')" class="bg-indigo-50 border-b p-2.5 flex justify-between items-center cursor-pointer hover:bg-indigo-100">
                         <span class="text-[11px] font-black text-indigo-800"><i class="fa-solid fa-pen-to-square"></i> 공급자 정보 확인 및 수정</span>
@@ -622,14 +600,11 @@
                         
                         <div class="flex gap-1.5 pt-1">
                             <button type="button" onclick="cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
-                            <button type="button" onclick="saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1">
-                                <i class="fa-solid fa-save"></i> 이 폼 저장하기
-                            </button>
+                            <button type="button" onclick="saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 저장</button>
                         </div>
                     </div>
                 </div>
 
-                <!-- 일괄 출력 버튼 -->
                 <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none mt-auto border-t">
                     <button id="btn-batch-print" onclick="executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
                         <i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력
@@ -663,40 +638,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-
-    <!-- ======================================================== -->
-    <!-- 🌟 [신설] 기사 권역 설정 팝업 모달창 -->
-    <!-- ======================================================== -->
-    <div id="driver-territory-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm animate-pop-in">
-        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative flex flex-col">
-            <div class="flex justify-between items-center mb-4">
-                <h3 class="text-base font-black text-gray-900"><i class="fa-solid fa-map-location-dot text-blue-600"></i> 기사 배송 권역 설정</h3>
-                <button onclick="closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600"><i class="fa-solid fa-xmark text-lg"></i></button>
-            </div>
-            
-            <div class="mb-4 bg-blue-50 p-3 rounded-xl border border-blue-100">
-                <p class="text-xs font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600">010-0000-0000</span></p>
-                <p class="text-[10px] font-bold text-blue-700">설정한 지역과 가까운 배송지가 우선 할당됩니다.</p>
-            </div>
-
-            <input type="hidden" id="territory-target-devid">
-
-            <div class="space-y-3 mb-5">
-                <div>
-                    <label class="block text-xs font-black text-gray-700 mb-1">1차 핵심 권역 (시/군/구)</label>
-                    <input type="text" id="input-territory-1" placeholder="예) 은평구, 서대문구" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 focus:bg-white transition">
-                </div>
-                <div>
-                    <label class="block text-xs font-black text-gray-700 mb-1">2차 예비 권역 (시/군/구)</label>
-                    <input type="text" id="input-territory-2" placeholder="예) 종로구, 마포구" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 focus:bg-white transition">
-                </div>
-            </div>
-
-            <button type="button" onclick="saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95">
-                권역 저장 및 적용
-            </button>
         </div>
     </div>
 
