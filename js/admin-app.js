@@ -945,7 +945,9 @@ window.executeBatchPrint = function() {
                 .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; }
                 .invoice-title { text-align: center; font-size: 22px; font-weight: 900; letter-spacing: 8px; text-decoration: underline; margin-bottom: 5px; color: #000; }
                 .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; color: #000; }
-                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 3px 5px; word-break: break-all; overflow-wrap: break-word; }
+                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 28px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
+                .double-height { height: 56px !important; }
+                .multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
                 .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
                 .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 0.5px; }
                 .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; padding: 5px 2px !important; line-height: 1.2; }
