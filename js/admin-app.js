@@ -1264,7 +1264,7 @@ window.previewSavedForm = function(idx) {
     window.switchInvoiceTab('PREVIEW');
 };
 
-// 🌟 요구사항 1 반영: 입력창 초기화 및 선택 해제 함수
+// 🌟 취소 버튼 기능: 입력 내용 초기화 + 공급자 정보 입력 창(아코디언) 닫기
 window.cancelProviderFormEdit = function() {
     currentSelectedFormIndex = null;
     document.getElementById('input-form-title').value = '';
@@ -1273,6 +1273,14 @@ window.cancelProviderFormEdit = function() {
     document.getElementById('input-prov-addr').value = '';
     document.getElementById('input-prov-tel').value = '';
     document.getElementById('input-prov-add-tel').value = '';
+    
+    // 공급자 정보 입력 아코디언 창 닫기
+    const accordion = document.getElementById('form-setup-accordion');
+    if (accordion) {
+        accordion.classList.add('hidden');
+        accordion.classList.remove('flex');
+    }
+    
     window.loadSavedForms();
     window.updateLivePreview();
 };
