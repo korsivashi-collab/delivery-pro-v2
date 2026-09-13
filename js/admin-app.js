@@ -41,7 +41,7 @@ import {
     closeLinkDriverModal, confirmLinkDriver, handleProFeature, closePremiumModal, 
     closeProInvoiceModal, closeAutoDispatchModal, selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
-    cancelProviderFormEdit, saveProviderForm, applySavedForm, deleteSavedForm, 
+    cancelProviderFormEdit, saveProviderForm,  deleteSavedForm, 
     clearTerritoryOverlays, drawOtherDriversTerritories, openDriverTerritoryModal, 
     closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, closeAllTerritoriesMap, saveCompanyBaseAddress, 
@@ -321,7 +321,6 @@ window.selectFormTemplate = selectFormTemplate;
 window.updateLivePreview = updateLivePreview;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
-window.applySavedForm = applySavedForm; // [추가됨] HTML 로그인/양식 적용 연결
 window.toggleSelectForm = toggleSelectForm;
 window.previewSavedForm = previewSavedForm;
 window.deleteSavedForm = deleteSavedForm;
