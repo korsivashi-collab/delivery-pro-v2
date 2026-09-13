@@ -26,12 +26,6 @@ let parsedExcelList = [];
 let printReadyList = []; 
 let selectedDispatchDriverId = null; 
 
-// === 🌟 권역 설정 모달용 전역 변수 ===
-let territoryMap = null;
-let territoryMarker = null;
-let territoryCircles = [];
-let currentTerritoryScale = 'dong';
-
 window.myMapOverlays = [];
 window.forceClearMap = function() {
     if (window.myMapOverlays) window.myMapOverlays.forEach(ov => ov.setMap(null));
