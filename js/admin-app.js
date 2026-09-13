@@ -669,6 +669,7 @@ window.getFilteredVisibleDrivers = function() {
     return visibleLicenses;
 };
 
+// 🌟 카카오 API 검색 결과 기반 풀 주소 반환 처리로 업데이트된 함수
 window.saveCompanyBaseAddress = async function() {
     const input = document.getElementById('company-base-address');
     const addr = input.value.trim();
@@ -685,9 +686,13 @@ window.saveCompanyBaseAddress = async function() {
         return;
     }
 
-    const baseData = { address: addr, lat: coords.lat, lng: coords.lng };
+    // 카카오 API 검색으로 나온 풀 주소 적용 (만약 결과가 없다면 기존 입력값 사용)
+    const fullAddress = coords.fullAddress || addr;
+    const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
+    
     localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
     window.updateCompanyBaseUI(baseData);
+    input.value = fullAddress; // 입력 필드도 검색된 전체 주소로 깔끔하게 덮어쓰기
 };
 
 window.clearCompanyBaseAddress = function() {
@@ -924,6 +929,7 @@ window.processExcelData = function(jsonData) {
     return newItems;
 };
 
+// 🌟 카카오 API에서 전체 주소(fullAddress)까지 파싱해서 반환하도록 수정된 함수
 window.getCoordsFromAddress = function(address) {
     return new Promise((resolve) => {
         if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) {
@@ -933,7 +939,17 @@ window.getCoordsFromAddress = function(address) {
         const geocoder = new kakao.maps.services.Geocoder();
         geocoder.addressSearch(address.trim(), (result, status) => {
             if (status === kakao.maps.services.Status.OK && result[0]) {
-                resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) });
+                // 도로명 주소가 우선순위, 없으면 지번 주소(address_name) 사용
+                let fullAddress = result[0].address_name;
+                if (result[0].road_address && result[0].road_address.address_name) {
+                    fullAddress = result[0].road_address.address_name;
+                }
+                
+                resolve({ 
+                    lat: parseFloat(result[0].y), 
+                    lng: parseFloat(result[0].x),
+                    fullAddress: fullAddress 
+                });
             } else {
                 resolve(null);
             }
