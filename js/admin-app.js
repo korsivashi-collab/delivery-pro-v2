@@ -21,10 +21,12 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
+// 🌟 엑셀 및 출력 상태 변수
 let excelSortAsc = true; 
 let parsedExcelList = []; 
+let printReadyList = []; // 🌟 명세서 출력을 위해 대기 중인 리스트
 
-// 모듈 스코프 충돌을 막기 위한 admin-app.js 전용 지도 초기화 변수
+// 모듈 스코프 충돌 방지용
 window.myMapOverlays = [];
 window.forceClearMap = function() {
     if (window.myMapOverlays) {
@@ -49,7 +51,6 @@ window.historySelectedAccountKeys = new Set();
 window.selectedMessageDrivers = new Set();
 let activeDispatchPopupMsgId = null;
 
-// 한국 시간(로컬) 기준 YYYY-MM-DD 변환 전역 함수
 function getLocalDateString(d = new Date()) {
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
@@ -59,6 +60,10 @@ const todayStr = getLocalDateString();
 window.onload = () => {
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
+    
+    // 🌟 배송 자동할당 기준일자 기본 세팅
+    const assignDateInput = document.getElementById('dispatch-assign-date');
+    if (assignDateInput) assignDateInput.value = todayStr;
 
     const defaultExpire = new Date();
     defaultExpire.setDate(defaultExpire.getDate() + 30);
@@ -394,7 +399,10 @@ window.deleteLicense = async function(key) {
     } catch (e) { alert("삭제 오류: " + e.message); }
 };
 
-// === 🌟 [PRO 전용] 주문서 통합관리 및 엑셀 파싱 기능 로직 ===
+
+// =====================================================================
+// 🌟 [PRO 전용] 배송 자동할당 및 명세서 모달 통제 로직 (분리됨)
+// =====================================================================
 
 window.handleProFeature = function(featureName) {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
@@ -408,26 +416,22 @@ window.handleProFeature = function(featureName) {
     if (role === 'MASTER' && !dispatchKey) isPro = true;
 
     if (isPro) {
-        if (featureName === 'INVOICE') {
-            document.getElementById('pro-invoice-modal').classList.remove('hidden');
-            
-            // 🌟 엑셀 날짜 필터(달력) UI 동적 주입 (없을 경우에만 추가)
-            const listActions = document.getElementById('inv-list-actions');
-            if (listActions && !document.getElementById('inv-date-picker')) {
-                const dateInputHtml = `
-                    <div class="flex items-center gap-1.5 mr-2">
-                        <label class="text-[11px] font-black text-gray-500 bg-white px-2 py-1.5 rounded-lg border border-gray-200">저장일자</label>
-                        <input type="date" id="inv-date-picker" class="px-2 py-1 bg-white border border-indigo-200 text-indigo-900 rounded-lg text-xs font-black shadow-sm outline-none focus:border-indigo-500 cursor-pointer" onchange="loadExcelFromFirebase()">
-                    </div>`;
-                listActions.insertAdjacentHTML('afterbegin', dateInputHtml);
-                document.getElementById('inv-date-picker').value = getLocalDateString(); // 오늘 날짜 기본 세팅
+        if (featureName === 'AUTO_DISPATCH') {
+            // 🌟 1. 자동할당 모달 열기
+            document.getElementById('auto-dispatch-modal').classList.remove('hidden');
+            window.renderDispatchDriverList();
+            window.loadExcelFromFirebase();
+        } else if (featureName === 'INVOICE') {
+            // 🌟 2. 명세서 출력 모달 열기 (데이터 전송 검증 포함)
+            if (printReadyList.length === 0) {
+                alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요.");
+                return;
             }
-
+            document.getElementById('pro-invoice-modal').classList.remove('hidden');
+            document.getElementById('print-ready-count').innerText = printReadyList.length;
             window.loadSavedForms(); 
-            window.loadExcelFromFirebase(); // 🌟 모달 켤때 파이어베이스에서 리스트 불러오기
+            window.previewInvoiceRow(0); 
             window.syncPreviewData(); 
-        } else if (featureName === 'AUTO_DISPATCH') {
-            alert("👑 PRO 권한 확인됨:\n[AI 자동배차] 화면 레이아웃도 곧 업데이트됩니다.");
         }
     } else {
         document.getElementById('premium-upgrade-modal').classList.remove('hidden');
@@ -436,6 +440,7 @@ window.handleProFeature = function(featureName) {
 
 window.closePremiumModal = function() { document.getElementById('premium-upgrade-modal').classList.add('hidden'); };
 window.closeProInvoiceModal = function() { document.getElementById('pro-invoice-modal').classList.add('hidden'); };
+window.closeAutoDispatchModal = function() { document.getElementById('auto-dispatch-modal').classList.add('hidden'); };
 
 window.selectFormTemplate = function(type) {
     document.getElementById('form-template-modal').classList.add('hidden');
@@ -444,44 +449,13 @@ window.selectFormTemplate = function(type) {
         accordion.classList.remove('hidden');
         accordion.classList.add('flex');
     }
-    window.switchInvoiceTab('PREVIEW');
     setTimeout(() => {
         const titleInput = document.getElementById('input-form-title');
         if (titleInput) titleInput.focus();
     }, 300);
 };
 
-window.switchInvoiceTab = function(tabName) {
-    const btnBack = document.getElementById('inv-btn-back');
-    const labelExcel = document.getElementById('inv-tab-excel-label');
-    const viewExcel = document.getElementById('inv-view-excel');
-    const viewPreview = document.getElementById('inv-view-preview');
-    const listActions = document.getElementById('inv-list-actions');
-
-    if (!viewExcel || !viewPreview) return;
-
-    if (tabName === 'EXCEL') {
-        viewExcel.classList.remove('hidden');
-        viewPreview.classList.add('hidden');
-        viewPreview.classList.remove('flex');
-        
-        if (btnBack) btnBack.classList.add('hidden');
-        if (labelExcel) { labelExcel.classList.remove('hidden'); labelExcel.classList.add('flex'); }
-        if (listActions) listActions.classList.remove('hidden');
-    } else {
-        viewPreview.classList.remove('hidden');
-        viewPreview.classList.add('flex');
-        viewExcel.classList.add('hidden');
-        
-        if (btnBack) btnBack.classList.remove('hidden');
-        if (labelExcel) labelExcel.classList.add('hidden');
-        if (listActions) listActions.classList.add('hidden');
-        
-        window.syncPreviewData(); // 무한루프 방지용 순수 DOM 업데이트만 호출
-    }
-};
-
-// 🌟 디바운싱 처리가 안된 순수 돔 업데이트 함수 분리 (렉 방지용)
+// 🌟 입력 지연 방지용 순수 DOM 업데이트
 window.syncPreviewData = function() {
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const name = document.getElementById('input-prov-name')?.value || '';
@@ -502,24 +476,15 @@ window.syncPreviewData = function() {
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 };
 
-// 🌟 입력 지연(렉) 제거용 디바운싱(Debounce) 타이머 적용
+// 🌟 디바운싱 타이머 적용
 let previewDebounceTimer = null;
 window.updateLivePreview = function() {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = setTimeout(() => {
         window.syncPreviewData();
-        
-        // 사용자가 인풋창에서 타이핑 중일때만 뷰어를 넘기도록 체크 (중복 호출 루프 방지)
-        if (document.activeElement && document.activeElement.id && document.activeElement.id.startsWith('input-prov-')) {
-            const viewPreview = document.getElementById('inv-view-preview');
-            if (viewPreview && viewPreview.classList.contains('hidden')) {
-                window.switchInvoiceTab('PREVIEW');
-            }
-        }
-    }, 150); // 0.15초 대기 후 한 번만 화면 반영
+    }, 150);
 };
 
-// === [수정] 명세서 폼 저장 및 불러오기 ===
 let currentSelectedFormIndex = null;
 
 window.loadSavedForms = function() {
@@ -539,7 +504,7 @@ window.loadSavedForms = function() {
         <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
                 <input type="checkbox" onchange="toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0" title="선택/해제 토글">
-                <div class="min-w-0 cursor-pointer flex-1" onclick="previewSavedForm(${idx})" title="명세서 미리보기">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="previewSavedForm(${idx})" title="명세서 폼 적용">
                     <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
                 </div>
@@ -562,7 +527,6 @@ window.toggleSelectForm = function(idx) {
 
 window.previewSavedForm = function(idx) {
     window.applySavedForm(idx);
-    window.switchInvoiceTab('PREVIEW');
 };
 
 window.cancelProviderFormEdit = function() {
@@ -640,12 +604,43 @@ window.deleteSavedForm = function(idx) {
     window.loadSavedForms();
 };
 
-// 🌟 [추가] 파이어베이스에서 선택한 날짜의 엑셀 데이터를 불러오는 함수
+// =====================================================================
+// 🌟 AI 배송 할당 모달 전용 로직 (엑셀 업로드/리스트 렌더링/기사 연동)
+// =====================================================================
+
+// 자동할당 창 좌측 기사 리스트 렌더링
+window.renderDispatchDriverList = function() {
+    const listEl = document.getElementById('dispatch-driver-list');
+    const countEl = document.getElementById('dispatch-driver-count');
+    if (!listEl || !countEl) return;
+    
+    const drivers = getFilteredVisibleDrivers();
+    countEl.innerText = `${drivers.length}명`;
+    
+    if (drivers.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`;
+        return;
+    }
+    
+    let html = '';
+    drivers.forEach(d => {
+        const phoneDisplay = d.phone || d.key;
+        html += `
+        <div class="bg-white border border-gray-200 p-2.5 rounded-xl flex items-center justify-between shadow-xs mb-2 hover:border-blue-300 transition">
+            <span class="font-black text-xs text-gray-800 flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-500"></i> ${phoneDisplay}</span>
+            <span class="bg-gray-100 text-gray-500 border border-gray-200 text-[10px] px-1.5 py-0.5 rounded font-bold">권역 미설정</span>
+        </div>
+        `;
+    });
+    listEl.innerHTML = html;
+};
+
+// 파이어베이스에서 엑셀 리스트 불러오기 (자동할당 창 기준)
 window.loadExcelFromFirebase = async function() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     if (!dispatchKey) return;
     
-    const datePicker = document.getElementById('inv-date-picker');
+    const datePicker = document.getElementById('dispatch-assign-date');
     const dateVal = datePicker ? datePicker.value : getLocalDateString();
     const docId = `${dateVal}_${dispatchKey}`;
     
@@ -654,7 +649,7 @@ window.loadExcelFromFirebase = async function() {
         if (snap.exists() && snap.data().orders) {
             parsedExcelList = snap.data().orders;
         } else {
-            parsedExcelList = []; // 해당 날짜에 데이터가 없으면 비움
+            parsedExcelList = []; 
         }
         renderExcelTable();
     } catch (error) {
@@ -662,12 +657,11 @@ window.loadExcelFromFirebase = async function() {
     }
 };
 
-// 🌟 엑셀 데이터 자동 저장 (선택된 날짜 기준으로 저장)
 window.autoSaveExcelToFirebase = async function() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     if (!dispatchKey) return; 
 
-    const datePicker = document.getElementById('inv-date-picker');
+    const datePicker = document.getElementById('dispatch-assign-date');
     const dateVal = datePicker ? datePicker.value : getLocalDateString(); 
     const docId = `${dateVal}_${dispatchKey}`; 
     
@@ -678,21 +672,16 @@ window.autoSaveExcelToFirebase = async function() {
             orders: parsedExcelList || [],
             updatedAt: Date.now()
         }, { merge: true });
-        console.log("엑셀 데이터 자동 저장 완료");
     } catch (error) {
         console.error("Firebase 주문 리스트 자동 저장 오류:", error);
     }
 };
 
-function formatNumber(num) {
-    if (!num || isNaN(num)) return num || '';
-    return Number(num).toLocaleString('ko-KR');
-}
-
 function processExcelData(jsonData) {
     jsonData.forEach((row) => {
         const mappedRow = {
             id: Date.now() + Math.random(), 
+            assignedDriver: null, // 🌟 배정 기사 정보
             senderName: '', orderNo: '', bizNo: '', address: '', storeName: '',
             phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: ''
         };
@@ -723,28 +712,30 @@ function processExcelData(jsonData) {
 
 window.sortExcelList = function(field) {
     if (!parsedExcelList || parsedExcelList.length === 0) return;
-    
     excelSortAsc = !excelSortAsc; 
-    
     parsedExcelList.sort((a, b) => {
         let valA = (a[field] || '').toString().trim();
         let valB = (b[field] || '').toString().trim();
-        
         if (valA < valB) return excelSortAsc ? -1 : 1;
         if (valA > valB) return excelSortAsc ? 1 : -1;
         return 0;
     });
-    
     renderExcelTable();
 };
 
+window.toggleRowCheckbox = function(e, idx) {
+    if (e && e.target.tagName === 'INPUT') return; // 체크박스 직접 클릭 방어
+    const cb = document.querySelector(`.row-checkbox[data-idx="${idx}"]`);
+    if(cb) cb.checked = !cb.checked;
+};
+
+// 🌟 자동할당 리스트 렌더링 (담당 기사 칼럼 포함)
 function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody');
     if (!tbody) return;
 
     if (parsedExcelList.length === 0) {
-        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="15" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">데이터가 없습니다.<br>우측 패널에 엑셀 주문서 파일을 업로드해주세요.</span></td></tr>`;
-        
+        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="16" class="text-center py-32"><i class="fa-solid fa-file-excel text-4xl text-gray-300 mb-3 block"></i><span class="text-gray-400 font-bold text-sm">데이터가 없습니다.<br>상단 영역에 엑셀 주문서 파일을 드래그하여 업로드하세요.</span></td></tr>`;
         const chkAll = document.getElementById('chk-excel-all');
         if (chkAll) chkAll.checked = false;
         return;
@@ -752,10 +743,15 @@ function renderExcelTable() {
 
     let html = '';
     parsedExcelList.forEach((item, idx) => {
+        const assignedBadge = item.assignedDriver ? 
+            `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` : 
+            `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
+
         html += `
-        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="previewInvoiceRow(${idx})">
-            <td class="text-center" onclick="event.stopPropagation()"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
+        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="toggleRowCheckbox(event, ${idx})">
+            <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
             <td class="text-center font-bold text-gray-500">${idx + 1}</td>
+            <td class="text-center">${assignedBadge}</td>
             <td class="font-bold">${item.senderName || '-'}</td>
             <td class="text-gray-500 font-mono text-[10px]">${item.orderNo || '-'}</td>
             <td class="text-gray-500 font-mono">${item.bizNo || '-'}</td>
@@ -783,8 +779,6 @@ function renderExcelTable() {
             document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = isChecked; });
         };
     }
-
-    window.switchInvoiceTab('EXCEL'); 
 }
 
 window.deleteExcelRow = async function(idx) {
@@ -817,9 +811,37 @@ window.clearAllExcelRows = async function() {
     await window.autoSaveExcelToFirebase();
 };
 
+
+// =====================================================================
+// 🌟 명세서 전송 파이프라인 (Export) 및 인쇄 렌더링 로직
+// =====================================================================
+
+window.exportToInvoiceModal = function() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkboxes.length === 0) {
+        alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요.");
+        return;
+    }
+
+    printReadyList = [];
+    checkboxes.forEach(cb => {
+        const idx = parseInt(cb.getAttribute('data-idx'));
+        if (parsedExcelList[idx]) printReadyList.push(parsedExcelList[idx]);
+    });
+
+    // 화면 스위칭
+    window.closeAutoDispatchModal();
+    document.getElementById('pro-invoice-modal').classList.remove('hidden');
+    
+    document.getElementById('print-ready-count').innerText = printReadyList.length;
+    window.loadSavedForms();
+    window.previewInvoiceRow(0); // 첫번째 아이템을 뷰어에 표시
+    window.syncPreviewData();
+};
+
 window.previewInvoiceRow = function(idx) {
-    if (!parsedExcelList || !parsedExcelList[idx]) return;
-    const item = parsedExcelList[idx];
+    if (!printReadyList || !printReadyList[idx]) return;
+    const item = printReadyList[idx];
 
     document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
@@ -850,8 +872,7 @@ window.previewInvoiceRow = function(idx) {
         }
     });
 
-    window.syncPreviewData(); // 렌더링 호출을 간소화한 함수로 대체
-    window.switchInvoiceTab('PREVIEW');
+    window.syncPreviewData(); 
 };
 
 function generateInvoiceHTML(item, providerInfo) {
@@ -926,9 +947,8 @@ function generateInvoiceHTML(item, providerInfo) {
 }
 
 window.executeBatchPrint = function() {
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
-    if (checkboxes.length === 0) {
-        alert("출력할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요.");
+    if (printReadyList.length === 0) {
+        alert("출력할 주문건이 없습니다. 배송 자동할당 창에서 내보내기를 먼저 진행해주세요.");
         return;
     }
 
@@ -949,11 +969,8 @@ window.executeBatchPrint = function() {
 
     let printContents = '';
 
-    checkboxes.forEach(cb => {
-        const idx = parseInt(cb.getAttribute('data-idx'));
-        const item = parsedExcelList[idx];
-        if (!item) return;
-
+    // 🌟 전달받은 printReadyList를 기반으로 반복 출력 생성
+    printReadyList.forEach(item => {
         printContents += generateInvoiceHTML(item, providerInfo);
     });
 
@@ -1033,6 +1050,7 @@ window.executeBatchPrint = function() {
     };
 };
 
+// 엑셀 업로드 구역 이벤트 리스너 연결
 setTimeout(() => {
     const dropZone = document.getElementById('excel-drop-zone');
     if (dropZone) {
@@ -1062,6 +1080,14 @@ setTimeout(() => {
             }
         });
         dropZone.addEventListener('click', () => { fileInput.click(); });
+    }
+    
+    // AI 배차 버튼 클릭 이벤트 (임시 알림 처리, 향후 구현)
+    const btnRunAi = document.getElementById('btn-run-auto-dispatch');
+    if(btnRunAi) {
+        btnRunAi.addEventListener('click', () => {
+            alert("AI 자동 배차 알고리즘은 다음 단계(STEP 3/4)에서 적용됩니다.\n현재는 엑셀 업로드 및 명세서 내보내기 연동 테스트를 진행해 주세요.");
+        });
     }
 }, 1000);
 
@@ -1106,6 +1132,11 @@ function processSingleExcelFile(file) {
         reader.readAsArrayBuffer(file);
     });
 }
+
+
+// =====================================================================
+// 이하 기존 알림/관제/통계 로직 (그대로 유지)
+// =====================================================================
 
 window.showDispatchPopupAlert = function(msg) {
     activeDispatchPopupMsgId = msg.id;
@@ -2120,137 +2151,6 @@ window.confirmLinkDriver = async function() {
         alert(`[등록 완료] 기사 [${targetLic.phone || targetLic.key}] 님이 연결되었습니다.`);
         window.closeLinkDriverModal();
     } catch (e) { alert("오류: " + e.message); }
-};
-
-window.openExcelExportModal = function() {
-    const today = getLocalDateString();
-    document.getElementById('export-start-date').value = today;
-    document.getElementById('export-end-date').value = today;
-    document.getElementById('excel-export-modal').classList.remove('hidden');
-};
-
-window.closeExcelExportModal = function() {
-    document.getElementById('excel-export-modal').classList.add('hidden');
-};
-
-window.executeExcelExport = function() {
-    const startDateStr = document.getElementById('export-start-date').value;
-    const endDateStr = document.getElementById('export-end-date').value;
-    const isCompleted = document.getElementById('chk-export-completed').checked;
-    const isPending = document.getElementById('chk-export-pending').checked;
-    const isCanceled = document.getElementById('chk-export-canceled').checked;
-
-    if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
-    if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
-
-    const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
-    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
-
-    const visibleLicenses = getFilteredVisibleDrivers();
-    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
-    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
-
-    const wb = XLSX.utils.book_new();
-    let hasData = false;
-
-    if (isCompleted) {
-        const targetCompletions = allCompletions.filter(c => {
-            if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
-            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && !isCancelTag; 
-        }).sort((a, b) => a.completedAt - b.completedAt);
-
-        if (targetCompletions.length > 0) {
-            hasData = true;
-            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
-            
-            targetCompletions.forEach((c, idx) => {
-                const dt = new Date(c.completedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([
-                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
-                ]);
-            });
-
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
-        }
-    }
-
-    if (isPending) {
-        let pendingList = [];
-        for (const devId in activeRoutes) {
-            if (!visibleDeviceIds.includes(devId)) continue;
-            const driver = activeRoutes[devId];
-            if (!driver || !driver.updatedAt) continue;
-
-            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
-                const dests = driver.destinations || [];
-                dests.forEach(d => {
-                    const isDone = allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
-                    if (!isDone) {
-                        pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
-                    }
-                });
-            }
-        }
-
-        if (pendingList.length > 0) {
-            hasData = true;
-            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
-            pendingList.forEach((p, idx) => {
-                const dt = new Date(p.updatedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([
-                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
-                ]);
-            });
-
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
-            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
-        }
-    }
-
-    if (isCanceled) {
-        const targetCanceled = allCompletions.filter(c => {
-            if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
-            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && isCancelTag; 
-        }).sort((a, b) => a.completedAt - b.completedAt);
-
-        if (targetCanceled.length > 0) {
-            hasData = true;
-            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
-            
-            targetCanceled.forEach((c, idx) => {
-                const dt = new Date(c.completedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([
-                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음'
-                ]);
-            });
-
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송취소");
-        }
-    }
-
-    if (!hasData) {
-        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
-        return;
-    }
-
-    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
-    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
-    window.closeExcelExportModal();
 };
 
 window.setDispatchMode = function(mode, keepSelected = false) {
