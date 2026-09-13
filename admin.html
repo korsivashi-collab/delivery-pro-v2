@@ -106,18 +106,18 @@
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
         }
         
-/* 🌟 셀 높이를 26px로 최적화하여 하단 서명란이 잘리지 않도록 조정 */
+/* 🌟 기본 칸 높이를 28px로 미세 조정하여 하단 공간을 꽉 채우도록 설정 */
 .invoice-table th, .invoice-table td { 
     border: 1px solid #000; 
-    padding: 2px 5px; /* 패딩을 살짝 줄여 공간 확보 */
-    height: 26px; /* 기존 32px에서 26px로 축소 */
+    padding: 2px 5px; 
+    height: 28px; /* 기존 26px에서 28px로 상향 조정 */
     vertical-align: middle;
     overflow: hidden; 
 }
 
-/* 🌟 주소 및 배송요청사항 2칸 사이즈 행 (26px의 2배인 52px로 설정) */
+/* 🌟 주소 및 배송요청사항 2칸 사이즈 행 (28px의 2배인 56px로 설정) */
 .double-height {
-    height: 52px !important; 
+    height: 56px !important; 
 }
 
 /* 긴 글씨가 줄바꿈 되도록 하는 클래스 */
