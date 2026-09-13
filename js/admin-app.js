@@ -785,21 +785,23 @@ window.selectDispatchDriver = function(devId) {
 };
 
 window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
-    // 모듈 환경에서 안전하게 이벤트 전파 중지 처리
     try {
         if (window.event) window.event.stopPropagation();
     } catch(e) {}
 
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
-    document.getElementById('driver-territory-modal').classList.remove('hidden');
+    
+    const modal = document.getElementById('driver-territory-modal');
+    modal.classList.remove('hidden');
 
     currentTerritoryScale = scale && scale !== 'undefined' ? scale : 'dong';
     window.setTerritoryScale(currentTerritoryScale, true); 
 
     setTimeout(() => {
+        const container = document.getElementById('territory-map-container');
+        
         if (!territoryMap) {
-            const container = document.getElementById('territory-map-container');
             const options = {
                 center: new kakao.maps.LatLng(37.566826, 126.978656), 
                 level: 6 
@@ -811,6 +813,7 @@ window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
             });
         }
         
+        // 지도 크기 재조정 및 중심 맞춤
         territoryMap.relayout(); 
 
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined') {
@@ -824,11 +827,21 @@ window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
             if (savedBase) {
                 const baseData = JSON.parse(savedBase);
                 if (baseData.lat && baseData.lng) {
-                    territoryMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
+                    const basePos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
+                    territoryMap.setCenter(basePos);
+                    window.setTerritoryCenter(basePos);
                 }
+            } else {
+                territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
             }
         }
-    }, 150);
+        
+        // 렌더링 지연 방지를 위한 추가 relayout
+        setTimeout(() => {
+            if (territoryMap) territoryMap.relayout();
+        }, 200);
+
+    }, 200);
 };
 
 window.closeDriverTerritoryModal = function() {
