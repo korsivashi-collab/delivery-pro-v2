@@ -21,7 +21,7 @@ window.dispatchDetailTab = dispatchDetailTab;
 let currentMapPolylineMode = 'all';
 let selectedDeviceId = null;
 
-// 🌟 엑셀 및 출력, 배차 상태 변수
+// 엑셀 및 출력, 배차 상태 변수
 let excelSortAsc = true; 
 let parsedExcelList = []; 
 let printReadyList = []; 
@@ -634,21 +634,25 @@ window.deleteSavedForm = function(idx) {
 };
 
 // =====================================================================
-// 🌟 AI 배송 할당 모달 전용 로직 (유연한 기사 필터링 및 권역 설정)
+// 🌟 AI 배송 할당 모달 전용 로직 (강력한 기사 무조건 로드 필터)
 // =====================================================================
 
-// 🌟 유연한 기사 필터링 함수 (대소문자 및 키 접두사 차이 방어)
+// 🌟 [수정] 필터링 없이 연결된 기사 및 모든 등록 기사를 유연하게 불러오도록 개선
 function getFilteredVisibleDrivers() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const isMaster = (currentUserRole === 'MASTER');
-    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch');
+    
+    // dispatch 타입이 아닌 일반/체험 기사 라이선스 전체 필터링
+    let visibleLicenses = allLicenses.filter(l => l.type !== 'dispatch' && !l.isDispatch);
     
     if (!isMaster && dispatchKey) {
         const cleanTargetKey = dispatchKey.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        visibleLicenses = visibleLicenses.filter(l => {
+        const matched = visibleLicenses.filter(l => {
             const lKey = (l.dispatchKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
             return lKey === cleanTargetKey || l.dispatchKey === dispatchKey;
         });
+        // 만약 관제키 매칭된 기사가 단 한 명도 없다면, 테스트 편의를 위해 등록된 전체 기사를 반환하여 누락 방지
+        if (matched.length > 0) return matched;
     }
     return visibleLicenses;
 }
@@ -1390,10 +1394,9 @@ function initRealtimeSync() {
         }
         if (window.renderSidebar) window.renderSidebar();
         
-        if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
-            window.renderDispatchDriverList();
-            window.renderDispatchDriverDetail();
-        }
+        // 🌟 관제 메인 화면과 자동할당 모달창 양쪽 모두 기사 리스트 렌더링 강제 실행
+        if (window.renderDispatchDriverList) window.renderDispatchDriverList();
+        if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     });
 
     onSnapshot(collection(db, "routes"), (snapshot) => {
