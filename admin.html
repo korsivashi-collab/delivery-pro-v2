@@ -106,26 +106,26 @@
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
         }
         
-/* 🌟 기본 칸 높이를 28px로 미세 조정하여 하단 공간을 꽉 채우도록 설정 */
-.invoice-table th, .invoice-table td { 
-    border: 1px solid #000; 
-    padding: 2px 5px; 
-    height: 27px; /* 기존 26px에서 28px로 상향 조정 */
-    vertical-align: middle;
-    overflow: hidden; 
-}
+        /* 🌟 기본 칸 높이를 28px로 미세 조정하여 하단 공간을 꽉 채우도록 설정 */
+        .invoice-table th, .invoice-table td { 
+            border: 1px solid #000; 
+            padding: 2px 5px; 
+            height: 27px; /* 기존 26px에서 28px로 상향 조정 */
+            vertical-align: middle;
+            overflow: hidden; 
+        }
 
-/* 🌟 주소 및 배송요청사항 2칸 사이즈 행 (28px의 2배인 56px로 설정) */
-.double-height {
-    height: 54px !important; 
-}
+        /* 🌟 주소 및 배송요청사항 2칸 사이즈 행 (28px의 2배인 56px로 설정) */
+        .double-height {
+            height: 54px !important; 
+        }
 
-/* 긴 글씨가 줄바꿈 되도록 하는 클래스 */
-.multi-line-text {
-    white-space: normal !important; 
-    word-break: break-all; 
-    line-height: 1.3; 
-}
+        /* 긴 글씨가 줄바꿈 되도록 하는 클래스 */
+        .multi-line-text {
+            white-space: normal !important; 
+            word-break: break-all; 
+            line-height: 1.3; 
+        }
 
         .invoice-label { 
             background-color: transparent; 
@@ -332,7 +332,7 @@
         </main>
     </div>
 
-    <!-- PRO 전용: 명세서 템플릿 모달창 (세로 높이 원복 & 100% 절대비율 락온 버전) -->
+    <!-- PRO 전용: 명세서 템플릿 모달창 -->
     <div id="pro-invoice-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col animate-slide-up overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
             <div class="flex items-center gap-3">
@@ -352,7 +352,15 @@
                     <span id="inv-tab-excel-label" class="px-3 py-1.5 text-indigo-800 font-black text-xs flex items-center gap-1.5"><i class="fa-solid fa-list-check"></i> 업로드된 주문 리스트</span>
                     <button id="inv-btn-back" onclick="switchInvoiceTab('EXCEL')" class="hidden px-4 py-1.5 bg-slate-800 text-white font-black text-xs rounded-lg shadow-sm hover:bg-slate-700 transition flex items-center gap-1.5"><i class="fa-solid fa-arrow-left"></i> 리스트로 돌아가기</button>
                 </div>
+                
+                <!-- 🌟 우측 상단 기능 버튼 모음 영역 -->
                 <div id="inv-list-actions" class="absolute top-3 right-4 flex gap-1.5 z-20 items-center">
+                    <!-- 🌟 새롭게 추가된 날짜 선택 달력 UI -->
+                    <div class="flex items-center gap-1.5 mr-2">
+                        <label class="text-[11px] font-black text-gray-500 bg-white px-2 py-1.5 rounded-lg border border-gray-200">저장일자</label>
+                        <input type="date" id="inv-date-picker" class="px-2 py-1 bg-white border border-indigo-200 text-indigo-900 rounded-lg text-xs font-black shadow-sm outline-none focus:border-indigo-500 cursor-pointer" onchange="loadExcelFromFirebase()">
+                    </div>
+                    
                     <button onclick="deleteSelectedExcelRows()" class="px-3 py-1.5 bg-red-50 text-red-600 font-bold text-xs rounded-lg border border-red-200 hover:bg-red-100 flex items-center gap-1"><i class="fa-solid fa-trash-can"></i> 선택 삭제</button>
                     <button onclick="clearAllExcelRows()" class="px-3 py-1.5 bg-gray-100 text-gray-600 font-bold text-xs rounded-lg border border-gray-200 hover:bg-gray-200 flex items-center gap-1"><i class="fa-solid fa-rotate-right"></i> 목록 비우기</button>
                 </div>
@@ -410,9 +418,9 @@
                                 </tr>
                                 <!-- 👇 주소: 2칸 사이즈 적용 (double-height 및 multi-line-text) 👇 -->
                                <tr class="double-height">
-    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td>
-    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td>
-</tr>
+                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td>
+                                    <td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td>
+                                </tr>
                                 <tr>
                                     <td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td>
                                     <td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td>
