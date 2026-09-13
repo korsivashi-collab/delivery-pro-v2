@@ -191,13 +191,24 @@ window.showDispatchPanel = function() {
     if(window.setDispatchMode) window.setDispatchMode('DELIVERY');
 };
 
+// 1. 누락된 실시간 동기화 함수 복구 (관제 패널용 데이터를 불러오기 위해 추가)
+window.initRealtimeSync = function() {
+    window.initMasterDataSync();
+};
+
+// 2. 기존 함수 업데이트 (licenses 로드 시 사이드바 갱신 로직 추가)
 window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         allLicenses = [];
         snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
+        
+        // 기존 대시보드 갱신 로직
         window.renderMasterTables();
         if(window.populateDriverSelect) window.populateDriverSelect();
         if(window.renderAccountHistoryView) window.renderAccountHistoryView();
+        
+        // ⭐ [수정 핵심] 기사 계정 데이터가 수신되면 관제 화면 좌측 운행기사 목록을 즉시 갱신합니다.
+        if(window.renderSidebar) window.renderSidebar();
         
         const curKey = document.getElementById('edit-orig-key')?.value;
         if (curKey) {
@@ -210,6 +221,10 @@ window.initMasterDataSync = function() {
             if(window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
         }
     });
+
+    // 💡 아래 routes, completions, memos 등의 나머지 onSnapshot 이벤트는 기존 파일에 있는 코드 그대로 유지해 주시면 됩니다.
+    onSnapshot(collection(db, "memos"), (snapshot) => {
+        // ... (기존 코드 유지)
 
     onSnapshot(collection(db, "memos"), (snapshot) => {
         allMemos = [];
