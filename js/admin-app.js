@@ -927,6 +927,7 @@ window.executeBatchPrint = function() {
 
     const doc = iframe.contentWindow.document;
     doc.open();
+    // 🌟 100% 동일한 CSS 튜닝: Box-Sizing을 넣고 admin.html의 CSS를 완벽히 가져옴
     doc.write(`
         <!DOCTYPE html>
         <html lang="ko">
@@ -934,10 +935,11 @@ window.executeBatchPrint = function() {
             <meta charset="UTF-8">
             <title>배송 동선 PRO - 표준 거래명세표 출력</title>
             <style>
+                * { box-sizing: border-box; }
                 @media print {
                     @page { size: A4 portrait; margin: 0; }
                     body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
-                    .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 296mm; }
+                    .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; }
                     .invoice-half { height: 148mm; page-break-inside: avoid; }
                 }
                 body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; }
@@ -945,19 +947,17 @@ window.executeBatchPrint = function() {
                 .invoice-container { 
                     background-color: white; 
                     width: 210mm; 
-                    height: 296mm; 
+                    height: 297mm; 
                     margin: 0 auto; 
                     position: relative;
                     display: flex;
                     flex-direction: column;
-                    box-sizing: border-box;
                     overflow: hidden;
                 }
                 .invoice-half {
                     height: 148mm; 
                     background-color: #ffeb5c !important; 
-                    padding: 5mm 10mm; 
-                    box-sizing: border-box;
+                    padding: 5mm 8mm; /* 🌟 미리보기와 동일하게 패딩 축소 */
                     display: flex;
                     flex-direction: column;
                     overflow: hidden; 
@@ -965,26 +965,28 @@ window.executeBatchPrint = function() {
                     print-color-adjust: exact;
                 }
                 .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; }
-                .invoice-title { text-align: center; font-size: 22px; font-weight: 900; letter-spacing: 8px; text-decoration: underline; margin-bottom: 5px; color: #000; }
-                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 11px; margin-bottom: 4px; table-layout: fixed; color: #000; }
                 
-   .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
+                /* 🌟 미리보기 화면과 완벽히 동일한 폰트 및 여백 설정 적용 */
+                .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; color: #000; }
+                .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; color: #000; }
+                
+                .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; overflow-wrap: break-word; }
 
-/* 🌟 높이가 확실하게 적용되도록 min-height와 height를 동시에 강제 고정 */
-.double-height { height: 54px !important; min-height: 54px !important; }
-.double-height td { height: 54px !important; }
+                /* 높이가 확실하게 적용되도록 강제 고정 */
+                .double-height { height: 54px !important; min-height: 54px !important; }
+                .double-height td { height: 54px !important; }
 
-.multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
+                .multi-line-text { white-space: normal !important; word-break: break-all; line-height: 1.3; }
 
                 .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
-                .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; letter-spacing: 0.5px; }
-                .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; padding: 5px 2px !important; line-height: 1.2; }
-                .text-fit-auto { font-size: 10px; letter-spacing: -0.5px; line-height: 1.15; overflow: hidden; text-overflow: ellipsis; }
+                .invoice-label { background-color: transparent !important; font-weight: bold; text-align: center; white-space: nowrap; letter-spacing: -0.2px; }
+                .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; padding: 2px !important; line-height: 1.2; }
+                .text-fit-auto { font-size: 9.5px; letter-spacing: -0.3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
                 .inv-text-center { text-align: center; }
                 .inv-text-left { text-align: left; padding-left: 6px !important; }
                 .inv-text-right { text-align: right; padding-right: 6px !important; }
                 .inv-font-bold { font-weight: bold; }
-                .empty-row td { height: 24px; }
+                .empty-row td { height: 27px; }
             </style>
         </head>
         <body>
@@ -2089,7 +2091,7 @@ window.confirmLinkDriver = async function() {
             if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
         }
 
-        if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
+        if (!targetLic) { alert("해당 기사 계정을 찾을 수 정없습니다."); return; }
         if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
             alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
         }
