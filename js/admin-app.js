@@ -784,12 +784,12 @@ window.selectDispatchDriver = function(devId) {
     window.renderDispatchDriverDetail(); 
 };
 
-// =====================================================================
-// 🌟 신규 권역 설정 지도 로직 (3단 반경) - 함수명 완벽 일치 보장
-// =====================================================================
-
 window.openDriverTerritoryModal = function(devId, phone, lat, lng, scale) {
-    if(event) event.stopPropagation(); 
+    // 모듈 환경에서 안전하게 이벤트 전파 중지 처리
+    try {
+        if (window.event) window.event.stopPropagation();
+    } catch(e) {}
+
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
     document.getElementById('driver-territory-modal').classList.remove('hidden');
