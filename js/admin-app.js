@@ -41,7 +41,7 @@ import {
     handleProFeature,
     selectFormTemplate, syncPreviewData, 
     updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
-    saveProviderForm,  deleteSavedForm, 
+    saveProviderForm,
     drawOtherDriversTerritories, openDriverTerritoryModal, 
     setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
     openAllTerritoriesMap, saveCompanyBaseAddress, 
