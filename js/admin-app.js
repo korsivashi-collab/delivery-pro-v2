@@ -44,7 +44,7 @@ import {
     saveProviderForm,  deleteSavedForm, 
     drawOtherDriversTerritories, openDriverTerritoryModal, 
     closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
-    openAllTerritoriesMap, closeAllTerritoriesMap, saveCompanyBaseAddress, 
+    openAllTerritoriesMap, saveCompanyBaseAddress, 
     updateCompanyBaseUI, renderDispatchDriverList, 
     selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
     formatNumber, processExcelData, getCoordsFromAddress, 
