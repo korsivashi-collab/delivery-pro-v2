@@ -54,13 +54,15 @@
         .excel-table td, .excel-table th { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; font-size: 11px; }
         .excel-table tr:hover td { background-color: #eef2ff; }
 
-        /* 🌟 완벽한 문서 템플릿 규격 (A4 사이즈 및 균형 잡힌 꽉 찬 레이아웃) */
+        /* ========================================================
+           📋 [템플릿 표준 규칙 6대 룰 적용 CSS 스타일]
+           ======================================================== */
         .invoice-container { 
             background-color: white; 
             border: 1px solid #d1d5db; 
             box-shadow: 0 10px 25px rgba(0,0,0,0.15); 
             width: 210mm; 
-            height: 296mm; 
+            height: 296mm; /* A4 1장 절대 사수 규격 */
             margin: 0 auto; 
             position: relative;
             display: flex; 
@@ -72,7 +74,7 @@
         .invoice-half {
             height: 148mm; 
             background-color: #ffeb5c !important; 
-            padding: 5mm 10mm; 
+            padding: 4mm 8mm; 
             box-sizing: border-box;
             display: flex; 
             flex-direction: column; 
@@ -87,11 +89,11 @@
         }
         .invoice-title {
             text-align: center; 
-            font-size: 21px; 
+            font-size: 20px; 
             font-weight: 900; 
-            letter-spacing: 8px; 
+            letter-spacing: 6px; 
             text-decoration: underline; 
-            margin-bottom: 5px; 
+            margin-bottom: 4px; 
             color: #000; 
             font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
             white-space: nowrap; 
@@ -100,7 +102,7 @@
             width: 100%; 
             border-collapse: collapse; 
             border: 2px solid #000; 
-            font-size: 10.5px; 
+            font-size: 10px; /* 룰 2: 기준 폰트 규격 고정 */
             margin-bottom: 3px; 
             table-layout: fixed; 
             color: #000; 
@@ -108,12 +110,12 @@
         }
         .invoice-table th, .invoice-table td { 
             border: 1px solid #000; 
-            padding: 3.5px 5px; 
+            padding: 3px 4px; /* 룰 2: 표준 패딩 */
             word-break: break-all; 
             overflow-wrap: break-word; 
         }
         .invoice-table th { font-weight: bold; text-align: center; background-color: transparent !important; }
-        .invoice-label { background-color: transparent; font-weight: bold; text-align: center; letter-spacing: 0.5px; }
+        .invoice-label { background-color: transparent; font-weight: bold; text-align: center; letter-spacing: 0.2px; white-space: nowrap; }
         
         .writing-mode-vertical { 
             writing-mode: vertical-rl; 
@@ -124,19 +126,24 @@
             line-height: 1.1;
         }
 
+        /* 룰 1: 글자 자동 압축 및 줄바꿈 방지 (.text-fit-auto) */
         .text-fit-auto {
-            font-size: 10px;
-            letter-spacing: -0.3px;
-            line-height: 1.15;
+            font-size: 9.5px;
+            letter-spacing: -0.4px;
+            line-height: 1.1;
+            white-space: nowrap;
             overflow: hidden;
             text-overflow: ellipsis;
         }
 
+        /* 룰 4: 속성별 정렬 클래스 */
         .inv-text-center { text-align: center; }
-        .inv-text-left { text-align: left; padding-left: 6px !important; }
-        .inv-text-right { text-align: right; padding-right: 6px !important; }
+        .inv-text-left { text-align: left; padding-left: 5px !important; }
+        .inv-text-right { text-align: right; padding-right: 5px !important; }
         .inv-font-bold { font-weight: bold; }
-        .empty-row td { height: 23px; }
+        
+        /* 룰 5: 품목 리스트 행 개수 고정 (5개) 및 높이 락 */
+        .empty-row td { height: 21.5px; }
 
         @media print {
             @page { size: A4 portrait; margin: 0; }
@@ -315,7 +322,7 @@
         </main>
     </div>
 
-    <!-- PRO 전용: 주문서 통합관리 및 명세서 모달창 (실물 영수증 비율 100% 최적화) -->
+    <!-- PRO 전용: 주문서 통합관리 및 명세서 모달창 (6대 표준 규칙 반영 최종본) -->
     <div id="pro-invoice-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col animate-slide-up overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
             <div class="flex items-center gap-3">
@@ -359,7 +366,7 @@
                     </div>
                 </div>
 
-                <!-- 🌟 실물 영수증 비율 100% 최적화된 명세서 미리보기 뷰 -->
+                <!-- 🌟 6대 표준 규칙 반영된 명세서 미리보기 뷰 (주소/상호명 2칸 와이드 할당) -->
                 <div id="inv-view-preview" class="hidden flex-1 overflow-auto bg-gray-300 p-8 flex-col items-center gap-6">
                     <div id="print-area" class="invoice-container">
                         
@@ -371,15 +378,15 @@
                                 <div style="font-size: 10.5px; font-weight: bold; text-align: right; width: 45%;">주문번호: <span class="font-normal inline-block w-32" style="text-align: left;"></span></div>
                             </div>
                             
-                            <!-- 🌟 표 1: 실물 영수증 비율 반영 (주소/상호명 칸 최대로 넓게, 라벨 슬림화) -->
+                            <!-- 🌟 룰 3 & 6: 주소 및 상호명 칸을 최우선 와이드(auto)로 할당하고 라벨은 최소 폭으로 고정 -->
                             <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
                                 <colgroup>
-                                    <col style="width: 22px;">  <!-- 공급자 세로 글씨 -->
-                                    <col style="width: 82px;">  <!-- 사업자번호 등 라벨 -->
-                                    <col style="width: auto;"> <!-- 주소/상호명 (가장 넓게 확보) -->
-                                    <col style="width: 22px;">  <!-- 공급받는자 세로 글씨 -->
-                                    <col style="width: 82px;">  <!-- 구매자명 등 라벨 -->
-                                    <col style="width: auto;"> <!-- 배송지명/주소 (가장 넓게 확보) -->
+                                    <col style="width: 20px;">  <!-- 공급자 세로 글씨 -->
+                                    <col style="width: 85px;">  <!-- 사업자번호 라벨 (글자 쪼개짐 방지 충분한 폭) -->
+                                    <col style="width: auto;"> <!-- 주소/상호명 (가장 넓은 와이드 2칸 공간) -->
+                                    <col style="width: 20px;">  <!-- 공급받는자 세로 글씨 -->
+                                    <col style="width: 78px;">  <!-- 구매자명 라벨 -->
+                                    <col style="width: auto;"> <!-- 배송지명/주소 (가장 넓은 와이드 2칸 공간) -->
                                 </colgroup>
                                 <tr>
                                     <td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td>
@@ -393,15 +400,15 @@
                                 <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
                             </table>
 
-                            <!-- 🌟 표 2: 상품 리스트 (상품명 칸 최대로 넓게 확보) -->
+                            <!-- 🌟 룰 5: 상품 리스트 (상품명 칸 최대로 넓게 확보) -->
                             <table class="invoice-table" style="margin-bottom: 0;">
                                 <colgroup>
-                                    <col style="width: 25px;">  <!-- No -->
+                                    <col style="width: 24px;">  <!-- No -->
                                     <col style="width: auto;"> <!-- 상품명 (최대로 넓게 확보) -->
                                     <col style="width: 72px;">  <!-- 규격(단위) -->
-                                    <col style="width: 38px;">  <!-- 수량 -->
-                                    <col style="width: 60px;">  <!-- 단가 -->
-                                    <col style="width: 70px;">  <!-- 총액 -->
+                                    <col style="width: 36px;">  <!-- 수량 -->
+                                    <col style="width: 58px;">  <!-- 단가 -->
+                                    <col style="width: 68px;">  <!-- 총액 -->
                                 </colgroup>
                                 <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
                                 <tbody>
@@ -413,15 +420,15 @@
                                 </tbody>
                             </table>
 
-                            <!-- 🌟 표 3: 하단 요약 (결제수단, 배송요청사항, 총주문금액 깔끔한 격자 정렬) -->
+                            <!-- 🌟 룰 4: 하단 요약 (숫자 우측 정렬 및 포맷팅) -->
                             <table class="invoice-table" style="border-top: none;">
                                 <colgroup>
-                                    <col style="width: 80px;">
+                                    <col style="width: 75px;">
                                     <col style="width: auto;">
                                     <col style="width: 65px;">
                                     <col style="width: 45px;">
                                     <col style="width: 50px;">
-                                    <col style="width: 70px;">
+                                    <col style="width: 68px;">
                                 </colgroup>
                                 <tbody>
                                     <tr>
@@ -441,7 +448,7 @@
                                 </tbody>
                             </table>
 
-                            <div style="text-align: right; font-size: 10.5px; font-weight: bold; margin-top: 6px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
+                            <div style="text-align: right; font-size: 10.5px; font-weight: bold; margin-top: 5px; padding-right: 15px;">인수자: <span style="display: inline-block; width: 90px; border-bottom: 1px solid black; text-align: center;">서 명</span></div>
                         </div>
 
                         <div class="invoice-cut-line"></div>
@@ -456,11 +463,11 @@
                             
                             <table class="invoice-table" style="margin-bottom: 0; border-bottom: none;">
                                 <colgroup>
-                                    <col style="width: 22px;">
-                                    <col style="width: 82px;">
+                                    <col style="width: 20px;">
+                                    <col style="width: 85px;">
                                     <col style="width: auto;">
-                                    <col style="width: 22px;">
-                                    <col style="width: 82px;">
+                                    <col style="width: 20px;">
+                                    <col style="width: 78px;">
                                     <col style="width: auto;">
                                 </colgroup>
                                 <tr>
@@ -477,12 +484,12 @@
 
                             <table class="invoice-table" style="margin-bottom: 0;">
                                 <colgroup>
-                                    <col style="width: 25px;">
+                                    <col style="width: 24px;">
                                     <col style="width: auto;">
                                     <col style="width: 72px;">
-                                    <col style="width: 38px;">
-                                    <col style="width: 60px;">
-                                    <col style="width: 70px;">
+                                    <col style="width: 36px;">
+                                    <col style="width: 58px;">
+                                    <col style="width: 68px;">
                                 </colgroup>
                                 <thead><tr><th>No.</th><th>상 품 명</th><th>규격(단위)</th><th>수 량</th><th>단 가</th><th>총 액</th></tr></thead>
                                 <tbody>
@@ -496,12 +503,12 @@
 
                             <table class="invoice-table" style="border-top: none;">
                                 <colgroup>
-                                    <col style="width: 80px;">
+                                    <col style="width: 75px;">
                                     <col style="width: auto;">
                                     <col style="width: 65px;">
                                     <col style="width: 45px;">
                                     <col style="width: 50px;">
-                                    <col style="width: 70px;">
+                                    <col style="width: 68px;">
                                 </colgroup>
                                 <tbody>
                                     <tr>
@@ -536,7 +543,7 @@
                     </div>
                 </div>
 
-                <button type="button" onclick="document.getElementById('form-template-modal').classList.remove('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-3.5 rounded-2xl transition shadow-lg active:scale-95 flex items-center justify-center gap-2">
+                <button type="button" onclick="document.getElementById('form-template-modal').classList.add('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-3.5 rounded-2xl transition shadow-lg active:scale-95 flex items-center justify-center gap-2">
                     <i class="fa-solid fa-layer-group"></i> 기본 템플릿(양식) 선택
                 </button>
 
@@ -558,7 +565,7 @@
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label><input type="text" id="input-prov-name" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500, p-2 text-xs font-bold">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         
                         <div class="flex gap-1.5 pt-1">
                             <button type="button" onclick="cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
