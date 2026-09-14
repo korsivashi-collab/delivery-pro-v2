@@ -37,7 +37,8 @@ import {
     focusDriverLocationOnMap, showFallbackLocation, closeCurrentLocationOverlay,
     drawAllDriversOnMap, fitMapToAllDrivers, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
-    clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, openLinkDriverModal,
+    clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, 
+    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver, // 👈 추가된 기사 연결 함수들 임포트
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
     renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
     loadExcelFromFirebase, autoSaveExcelToFirebase, renderExcelTable, processExcelData,
@@ -307,9 +308,11 @@ window.clearSearchInput = clearSearchInput;
 window.jumpToDeliveryTarget = jumpToDeliveryTarget;
 window.handleGlobalSearch = handleGlobalSearch;
 window.openLinkDriverModal = openLinkDriverModal;
+window.closeLinkDriverModal = closeLinkDriverModal; // 👈 닫기 바인딩 추가
+window.confirmLinkDriver = confirmLinkDriver;     // 👈 [필수] 기사 연결 확인 바인딩 추가
 window.focusMapPosition = focusMapPosition;
 
-// --- 복구된 PRO 기능 바인딩 ---
+// --- PRO 기능 바인딩 ---
 window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
 window.closeProInvoiceModal = closeProInvoiceModal;
