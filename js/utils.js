@@ -100,23 +100,28 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. OCR 텍스트에서 주소 추출 로직 (실전 명세서 변형 패턴 대응 보완)
+// 3. OCR 텍스트에서 주소 추출 로직 (표 서식 레이블 자동 차단 및 시/도 시작 주소 추출)
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
         
-        let strictRegex = /([가-힣\s]+(?:특별시|광역시|시|도)\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣]+\))?)/g;
+        // 🌟 핵심: 앞에 '사업장 주소', '주소', '소재지' 같은 표 서식 글자가 붙어 있더라도 무시하고,
+        // 대한민국 시·도(서울특별시, 경기도 등) 이름부터 시작하는 진짜 주소 패턴만 정확히 타겟팅합니다.
+        let regionPrefixedRegex = /((?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:도)?|충청북(?:도)?|충청남(?:도)?|전라북(?:도)?|전라남(?:도)?|경상북(?:도)?|경상남(?:도)?|제주(?:특별자치도)?)\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣]+\))?)/g;
         
-        let matches = [...flatText.matchAll(strictRegex)];
+        let matches = [...flatText.matchAll(regionPrefixedRegex)];
         if (matches && matches.length > 0) {
+            // 명세서 아래쪽에 있는 진짜 배송지 주소 선택
             return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
         }
 
+        // 시/도가 생략된 경우의 예비 패턴 (앞에 딸려온 '사업장 주소' 등의 레이블 단어가 있다면 강제로 잘라냄)
         let regex2 = /([가-힣a-zA-Z0-9\s,\-\(\)]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches2 = [...flatText.matchAll(regex2)];
         if (matches2 && matches2.length > 0) {
             let candidate = matches2[matches2.length - 1][0].trim();
+            candidate = candidate.replace(/^.*?(사업장\s*주소|주소|소재지)\s*/i, '');
             if (candidate.length > 5) return candidate.replace(/\s+/g, ' ');
         }
     } catch (e) {} 
