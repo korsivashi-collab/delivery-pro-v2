@@ -119,84 +119,66 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 동적 블랙리스트 기반 상호명 추출 로직 (구매자명 필터링 추가)
+// 4. 🌟 코드 다이어트 & 주소 파편(구수 동) 방어 로직이 적용된 최종 상호명 추출
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         let tokens = fullText.split(/[\s\n]+/);
-        
-        // 1. 동적 블랙리스트 생성: '구매자명'을 스캔하여 상호명 탐색 시 함정을 파놓음
-        let dynamicBlacklist = [];
-        for (let k = 0; k < tokens.length; k++) {
-            let t = tokens[k].trim();
-            let cleanT = t.replace(/[\(\)\[\]\,\-\.]/g, '').trim();
-            
-            // 패턴 A: 사업자번호(10자리 숫자) 바로 다음 토큰은 구매자명일 확률이 매우 높음
-            if (/^\d{10}$/.test(cleanT) && k + 1 < tokens.length) {
-                let nextT = tokens[k+1].replace(/[\(\)\[\]\,\-\.]/g, '').trim();
-                if (nextT.length >= 2 && nextT.length <= 5 && !/^\d/.test(nextT)) {
-                    dynamicBlacklist.push(nextT);
-                }
-            }
-            // 패턴 B: '구매자명' 라벨 자체의 다음 토큰
-            if ((t.includes('구매자명') || t.includes('성명')) && k + 1 < tokens.length) {
-                let nextT = tokens[k+1].replace(/[\(\)\[\]\,\-\.]/g, '').trim();
-                if (nextT.length >= 2 && nextT.length <= 5 && !/^\d/.test(nextT) && !nextT.includes('명')) {
-                    dynamicBlacklist.push(nextT);
-                }
-            }
+        let badWords = new Set(); // 🚫 전규복 등 구매자명 동적 블랙리스트
+
+        // 블랙리스트 탐색 최적화
+        for (let i = 0; i < tokens.length; i++) {
+            let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
+            if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+            if (/구매자명|성명/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        const targetKeywords = ['배송지명', '간판명', '상호명', '상호'];
-        const skipLabels = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '합계', '단가', '수량', '공급받는자', '공급자', '보관용', '제조사', '원산지', '국내산', '총액', '비고'];
+        const targets = ['배송지명', '간판명', '상호명', '상호'];
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액'];
 
-        // 주소나 쓸데없는 단어를 가려내는 함수 (블랙리스트에 잡힌 이름도 무시함)
-        const isJunkOrAddress = (str) => {
-            let s = str.replace(/[\(\)\[\]\,\-\.]/g, '').trim();
-            if (/^\d+$/.test(s)) return true;
-            if (/^010|^050|^070|^02|^0[3-9]\d/.test(s) && s.length >= 8) return true;
-            // 지명 관련 오작동을 막기 위해 정확하게 분절된 행정구역만 스킵
-            if (/^(서울특별시|서울시|서울|부산광역시|부산시|부산|대구광역시|대구시|대구|인천광역시|인천시|인천|광주광역시|광주시|광주|대전광역시|대전시|대전|울산광역시|울산시|울산|세종특별자치시|세종시|세종|경기도|경기|강원도|강원|충청북도|충북|충청남도|충남|전라북도|전북|전라남도|전남|경상북도|경북|경상남도|경남|제주도|제주)$/.test(s)) return true;
-            if (/^[가-힣]+(시|구|군|동|읍|면|로|길)$/.test(s)) return true;
-            if (/^\d+층$/.test(s) || /^\[\d{5}\]$/.test(s) || /^\(\d{5}\)$/.test(s)) return true;
+        // 쓸데없는 데이터(주소, 번호, 이름, 기호)를 판독하는 공통 필터
+        const isJunk = (rawStr) => {
+            let s = rawStr.replace(/[^\w가-힣]/g, ''); 
+            if (!s || s.length < 2) return true; // 1글자 찌꺼기 무시
+            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; // 숫자/전화번호
+            if (badWords.has(s)) return true; // 블랙리스트(이름) 차단
             
-            // 🌟 동적으로 찾아낸 구매자 이름(전규복 등)이면 쓰레기 데이터로 취급하고 건너뜀
-            if (dynamicBlacklist.includes(s)) return true; 
-            
+            // 🛑 주소 파편화 필터링 (구수동, 마포구, 토정로 등)
+            if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
+            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
+            // 괄호나 대괄호가 온전히 남아있는 경우(예: [04087]) 차단
+            if (rawStr.includes('[') || rawStr.includes(']')) return true; 
             return false;
         };
 
         for (let i = 0; i < tokens.length; i++) {
-            let isTarget = targetKeywords.some(kw => tokens[i].includes(kw));
-
-            if (isTarget) {
+            if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                for (let j = i + 1; j < Math.min(i + 25, tokens.length); j++) {
-                    let tok = tokens[j].trim();
-                    if (!tok) continue;
+                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                    let tok = tokens[j];
+                    if (skips.some(skw => tok.includes(skw))) {
+                        if (collected.length > 0) break; // 상호를 하나라도 건졌으면 즉시 종료
+                        continue; 
+                    }
+                    
+                    if (isJunk(tok)) continue; // 기본 주소나 이름 패스
 
-                    let cleanTok = tok.replace(/[\(\)\[\]]/g, '');
-                    let isSkipLabel = skipLabels.some(skw => cleanTok.includes(skw));
-                    let isJunk = isJunkOrAddress(tok);
-
-                    if (isSkipLabel || isJunk) {
-                        if (collected.length === 0) continue; // 아직 유효한 단어를 못 찾았으면 계속 전진
-                        else break; // 상호명을 수집하던 중에 라벨이나 전화번호를 만나면 수집 종료
+                    // 🚨 핵심 방어: '구수' 처럼 앞 단어가 주소 파편이고, 바로 다음 단어가 '동/구/로'인 경우 스킵
+                    if (j + 1 < tokens.length) {
+                        let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
+                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
+                            continue;
+                        }
                     }
 
-                    collected.push(tok);
+                    // 순수 한글, 영문, 숫자만 깔끔하게 저장
+                    collected.push(tok.replace(/[^\w가-힣]/g, ''));
                 }
 
                 if (collected.length > 0) {
-                    // 동일한 단어가 연속으로 인식되었을 때 깔끔하게 중복 제거 (예: 사브항 샤브항)
-                    let unique = [];
-                    collected.forEach(w => { if(unique[unique.length-1] !== w) unique.push(w); });
-                    
-                    let candidate = unique.join(' ').replace(/[\(\)\:\-\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-                    candidate = candidate.replace(/간판명|배송지명|상호명/g, '').trim();
-                    if (candidate.length >= 2) {
-                        return candidate;
-                    }
+                    let unique = [...new Set(collected)]; // '샤브항 샤브항' 중복 방지
+                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호/g, '').trim();
+                    if (result.length >= 2) return result;
                 }
             }
         }
