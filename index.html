@@ -239,17 +239,15 @@
                     <i class="fa-solid fa-camera text-base"></i> 스캔
                 </button>
                 
-                <div id="swipe-container" class="flex-1 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[52px]">
-                    <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[13px] z-0 select-none pointer-events-none tracking-tight">
-                        밀어서 동선 최적화 <i class="fa-solid fa-angles-right ml-1.5 animate-pulse"></i>
-                    </div>
-                    <div id="swipe-btn" class="absolute left-1 w-[44px] h-[44px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
-                        <i class="fa-solid fa-wand-magic-sparkles text-lg"></i>
-                    </div>
-                </div>
-            </div>
-        </footer>
+<div id="swipe-container" class="flex-1 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[52px]">
+    <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[13px] z-0 select-none pointer-events-none tracking-tight">
+        밀어서 동선 최적화 <i class="fa-solid fa-angles-right ml-1.5 animate-pulse"></i>
     </div>
+    <!-- 아이폰 스타일의 우측 방향 화살표(>>) 아이콘으로 변경 -->
+    <div id="swipe-btn" class="absolute left-1 w-[44px] h-[44px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
+        <i class="fa-solid fa-angles-right text-lg"></i>
+    </div>
+</div>
 
     <!-- 시작 지점 선택 모달 -->
     <div id="start-select-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[130] flex flex-col items-center justify-end sm:justify-center p-0 sm:p-4 pb-0 transition-opacity">
