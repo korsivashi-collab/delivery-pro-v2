@@ -119,62 +119,56 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 앵커(주소) 기반 상호명·배송지명 추출 로직 (신규 추가)
+// 4. 🌟 엄격한 상호명·배송지명 추출 로직 (인명/수령인 완벽 차단)
 export function extractStoreNameLogic(fullText, extractedAddress) {
     if (!fullText || !extractedAddress) return null;
     try {
         const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         
-        // 주소의 앞부분 키워드로 주소가 위치한 줄 인덱스 찾기
         const addrSnippet = extractedAddress.substring(0, 8);
         let targetIndex = lines.findIndex(line => line.includes(addrSnippet));
-        
-        // 만약 정확한 매칭이 안되면 전체 포함 여부 확인
         if (targetIndex === -1) {
             targetIndex = lines.findIndex(line => extractedAddress.includes(line.substring(0, 6)));
         }
 
-        // 탐색할 후보 라인들 수집 (주소 라인 위아래 2~3줄 반경 탐색)
         let candidateLines = [];
         if (targetIndex !== -1) {
-            // 주소 바로 윗줄과 아랫줄 우선순위 부여
             if (targetIndex > 0) candidateLines.push({ text: lines[targetIndex - 1], weight: 2 });
             if (targetIndex > 1) candidateLines.push({ text: lines[targetIndex - 2], weight: 1 });
             if (targetIndex < lines.length - 1) candidateLines.push({ text: lines[targetIndex + 1], weight: 1 });
         } else {
-            // 주소 라인을 못 찾았으면 전체 라인을 후보로 사용
             lines.forEach(l => candidateLines.push({ text: l, weight: 0 }));
         }
 
-        // 상호명/배송지명 레이블 또는 특징 키워드 정규식
-        const labelPrefixRegex = /^(상호|상호명|거래처|거래처명|납품처|현장|현장명|매장|매장명|업체명|배송지)[\s:]+(.+)$/;
-        const storeKeywords = /(주)|마트|상회|상사|유통|식당|가든|카페|커피|베이커리|마트|클리닉|센터|빌딩|타워|오피스|공사|현장|스토어|약국|병원|학원|마트|구내식당/i;
+        // 🛑 [필터 1] 절대 상호로 보면 안 되는 수령인/인명 관련 레이블 및 단어
+        const excludeKeywords = /성명|받는분|수령인|고객명|고객|담당자|연락처|전화번호|핸드폰|주소|소재지/i;
+        
+        // ✅ [필터 2] 상호/배송지명임을 명확히 보장하는 레이블
+        const explicitStoreLabelRegex = /^(상호|상호명|거래처|거래처명|납품처|현장|현장명|매장|매장명|업체명|배송지)[\s:]+(.+)$/;
+        
+        // ✅ [필터 3] 상호 특유의 업종/법인 키워드
+        const storeKeywords = /(주)|마트|상회|상사|유통|식당|가든|카페|커피|베이커리|클리닉|센터|빌딩|타워|오피스|공사|현장|스토어|약국|병원|학원|구내식당|상가|공업|농원|축산|영농|조합|건설|기업|상사|엔지니어링|물류|종합/i;
 
         for (let cand of candidateLines) {
             let txt = cand.text;
             
-            // 레이블이 붙어 있는 경우 (예: "상호: OO상사" -> "OO상사" 추출)
-            let match = txt.match(labelPrefixRegex);
-            if (match && match[2].trim().length > 1) {
-                return match[2].trim();
-            }
+            // 제외 키워드가 포함된 줄은 무조건 스킵 (예: "성명: 홍길동" 등)
+            if (excludeKeywords.test(txt)) continue;
 
-            // 전화번호나 주소 자체, 사업자번호인 경우 제외
-            if (txt.includes('010-') || txt.includes('전화') || txt.includes('사업자') || txt.length < 2) continue;
+            // 전화번호, 사업자번호, 주소 형태인 경우 스킵
+            if (txt.includes('010-') || txt.includes('사업자') || txt.length < 2) continue;
             if (txt.includes('시 ') || txt.includes('구 ') || txt.includes('로 ') || txt.includes('길 ')) continue;
 
-            // 상호 특유의 키워드가 포함되어 있거나 가중치가 높은 경우 상호로 채택
-            if (storeKeywords.test(txt) || cand.weight >= 2) {
-                // 불필요한 특수문자 제거 후 반환
-                return txt.replace(/^[^가-힣a-zA-Z0-9]+/, '').trim();
+            // 1) 명시적 상호 레이블이 있는 경우 (예: "거래처: OO상사" -> "OO상사")
+            let match = txt.match(explicitStoreLabelRegex);
+            if (match && match[2].trim().length > 1) {
+                let cleaned = match[2].trim();
+                if (!excludeKeywords.test(cleaned)) return cleaned;
             }
-        }
 
-        // 만약 위 조건에 안 걸리더라도 주소 바로 윗줄이 존재하면 예비 상호명으로 활용
-        if (targetIndex > 0 && lines[targetIndex - 1].length > 1) {
-            let fallback = lines[targetIndex - 1];
-            if (!fallback.includes('전화') && !fallback.includes('사업자')) {
-                return fallback.replace(/^[^가-힣a-zA-Z0-9]+/, '').trim();
+            // 2) 상호 키워드가 포함되어 있는 경우 상호로 인정
+            if (storeKeywords.test(txt)) {
+                return txt.replace(/^[^가-힣a-zA-Z0-9]+/, '').trim();
             }
         }
 
