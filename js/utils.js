@@ -100,22 +100,25 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. OCR 텍스트에서 주소 추출 로직
+// 3. OCR 텍스트에서 주소 추출 로직 (실전 명세서 변형 패턴 대응 보완)
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
-        // 줄바꿈 및 괄호(역촌동 등) 제거하여 한 줄로 평탄화
-        let flatText = text.replace(/\n/g, ' ').replace(/\([^)]+\)/g, ' ').replace(/\s+/g, ' ');
+        let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
         
-        // 특별시, 광역시 등 주소 패턴 유연하게 탐색
-        let regex1 = /(([가-힣]+(?:시|도|특별시|광역시|특별자치시|특별자치도))?\s*[가-힣]+(?:시|군|구)\s+[가-힣a-zA-Z0-9\s]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
-        let matches1 = [...flatText.matchAll(regex1)];
-        if (matches1 && matches1.length > 0) return matches1[matches1.length - 1][0].trim();
+        let strictRegex = /([가-힣\s]+(?:특별시|광역시|시|도)\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣]+\))?)/g;
         
-        // 구/시가 생략된 경우 (예: 역촌동 123-45)
-        let regex2 = /([가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
+        let matches = [...flatText.matchAll(strictRegex)];
+        if (matches && matches.length > 0) {
+            return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
+        }
+
+        let regex2 = /([가-힣a-zA-Z0-9\s,\-\(\)]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches2 = [...flatText.matchAll(regex2)];
-        if (matches2 && matches2.length > 0) return matches2[matches2.length - 1][0].trim();
+        if (matches2 && matches2.length > 0) {
+            let candidate = matches2[matches2.length - 1][0].trim();
+            if (candidate.length > 5) return candidate.replace(/\s+/g, ' ');
+        }
     } catch (e) {} 
     return null;
 }
