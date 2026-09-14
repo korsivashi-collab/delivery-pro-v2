@@ -1,44 +1,7 @@
 // js/utils.js
 
-// 0. 스마트폰 사진의 EXIF(메타데이터) 방향 정보를 읽어내는 헬퍼 함수
-function getExifOrientation(file) {
-    return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = function(e) {
-            const view = new DataView(e.target.result);
-            if (view.getUint16(0, false) != 0xFFD8) return resolve(1);
-            const length = view.byteLength;
-            let offset = 2;
-            while (offset < length) {
-                if (offset + 2 >= length) break;
-                const marker = view.getUint16(offset, false);
-                offset += 2;
-                if (marker == 0xFFE1) {
-                    if (view.getUint32(offset += 2, false) != 0x45786966) return resolve(1);
-                    const little = view.getUint16(offset += 6, false) == 0x4949;
-                    offset += view.getUint32(offset + 4, little);
-                    const tags = view.getUint16(offset, little);
-                    offset += 2;
-                    for (let i = 0; i < tags; i++) {
-                        if (view.getUint16(offset + (i * 12), little) == 0x0112) {
-                            return resolve(view.getUint16(offset + (i * 12) + 8, little));
-                        }
-                    }
-                }
-                else if ((marker & 0xFF00) != 0xFF00) break;
-                else offset += view.getUint16(offset, false);
-            }
-            return resolve(1);
-        };
-        reader.readAsArrayBuffer(file);
-    });
-}
-
-// 1. 클라이언트단 사진 안전 압축 및 EXIF 회전/흑백/대비 전처리 (OCR 인식률 대폭 향상)
-export async function toBase64_SafeCompress(file) {
-    // 파일의 원본 회전 상태 파악
-    const orientation = await getExifOrientation(file);
-
+// 1. 클라이언트단 사진 안전 압축 (왜곡 및 명암 필터 제거)
+export function toBase64_SafeCompress(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -50,39 +13,20 @@ export async function toBase64_SafeCompress(file) {
                 const MAX_SIZE = 1600; 
                 let width = img.width, height = img.height;
                 
-                // 비율에 맞게 리사이징
+                // 비율에 맞게 리사이징 (찌그러짐 방지)
                 if (width > height) { 
                     if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } 
                 } else { 
                     if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } 
                 }
 
+                canvas.width = width; 
+                canvas.height = height;
                 const ctx = canvas.getContext('2d'); 
                 
-                // EXIF 방향 정보에 따라 캔버스의 실제 가로/세로 길이를 뒤집어 줌 (중요)
-                if (orientation >= 5 && orientation <= 8) {
-                    canvas.width = height;
-                    canvas.height = width;
-                } else {
-                    canvas.width = width;
-                    canvas.height = height;
-                }
-
-                // 사진을 올바른 각도로 캔버스에 회전시켜 그리기
-                switch (orientation) {
-                    case 2: ctx.transform(-1, 0, 0, 1, width, 0); break;
-                    case 3: ctx.transform(-1, 0, 0, -1, width, height); break;
-                    case 4: ctx.transform(1, 0, 0, -1, 0, height); break;
-                    case 5: ctx.transform(0, 1, 1, 0, 0, 0); break;
-                    case 6: ctx.transform(0, 1, -1, 0, height, 0); break; // 아이폰 세로 사진 90도 회전 보정
-                    case 7: ctx.transform(0, -1, -1, 0, height, width); break;
-                    case 8: ctx.transform(0, -1, 1, 0, 0, width); break;
-                    default: break;
-                }
-                
-                // 흑백 및 대비(Contrast)를 높여 텍스트 경계선을 선명하게 전처리 (OCR 정확도 상승)
-                ctx.filter = 'grayscale(100%) contrast(150%)'; 
-                
+                // 🌟 [핵심 수정]: EXIF 수동 회전 및 contrast(150%) 제거
+                // 명세서의 회색 음영이 검게 변해 글자를 가려버리는 현상 및 
+                // 모바일 브라우저의 자동 회전과 충돌하여 이미지가 왜곡되는 현상을 방지합니다.
                 ctx.drawImage(img, 0, 0, width, height);
                 resolve(canvas.toDataURL('image/jpeg', 0.85)); // 용량 최적화 (품질 85%)
             };
@@ -160,11 +104,15 @@ export function extractPhoneLogic(text) {
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
+        // 줄바꿈 및 괄호(역촌동 등) 제거하여 한 줄로 평탄화
         let flatText = text.replace(/\n/g, ' ').replace(/\([^)]+\)/g, ' ').replace(/\s+/g, ' ');
-        let regex1 = /(([가-힣]+(?:시|도))?\s*[가-힣]+(?:시|군|구)\s+[가-힣a-zA-Z0-9\s]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
+        
+        // 특별시, 광역시 등 주소 패턴 유연하게 탐색
+        let regex1 = /(([가-힣]+(?:시|도|특별시|광역시|특별자치시|특별자치도))?\s*[가-힣]+(?:시|군|구)\s+[가-힣a-zA-Z0-9\s]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches1 = [...flatText.matchAll(regex1)];
         if (matches1 && matches1.length > 0) return matches1[matches1.length - 1][0].trim();
         
+        // 구/시가 생략된 경우 (예: 역촌동 123-45)
         let regex2 = /([가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches2 = [...flatText.matchAll(regex2)];
         if (matches2 && matches2.length > 0) return matches2[matches2.length - 1][0].trim();
