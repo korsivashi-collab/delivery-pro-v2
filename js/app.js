@@ -7,7 +7,7 @@ import {
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
     deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto 
 } from './api.js';
-import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic } from './utils.js';
+import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 
 // 전역 상태 변수들
 let sortableInstance = null;
@@ -29,7 +29,6 @@ let currentActiveAlertMsgId = null;
 let lastKnownGps = null;
 let gpsWatchId = null;
 
-// 디바이스 고유 ID 생성
 export function getOrCreateDeviceId() {
     let deviceId = localStorage.getItem('deliveryProDeviceId');
     if (!deviceId) {
@@ -39,7 +38,6 @@ export function getOrCreateDeviceId() {
     return deviceId;
 }
 
-// GPS 와처 시작
 export function startGpsWatcher() {
     if (!navigator.geolocation || gpsWatchId !== null) return;
     gpsWatchId = navigator.geolocation.watchPosition(
@@ -51,7 +49,6 @@ export function startGpsWatcher() {
     );
 }
 
-// 실시간 GPS 가져오기
 export function getDeviceRealGPS() {
     return new Promise((resolve) => {
         if (lastKnownGps && (Date.now() - lastKnownGps.timestamp < 120000)) {
@@ -74,7 +71,6 @@ export function getDeviceRealGPS() {
     });
 }
 
-// 앱 초기화 및 이벤트 바인딩
 export async function initApp() {
     localStorage.removeItem('deliveryPro_start_location'); 
     loadActiveData();
@@ -83,7 +79,6 @@ export async function initApp() {
     startGpsWatcher();
     checkUnreadNotices();
     
-    // 메모 글자 수 카운터 이벤트 바인딩 (수정된 부분)
     const memoInputEl = document.getElementById('memo-input');
     if (memoInputEl) {
         memoInputEl.addEventListener('input', function() {
@@ -92,7 +87,6 @@ export async function initApp() {
         });
     }
     
-    // 카메라/스캔 및 사진 완료 전송 초기화
     initCameraScan();
     initPhotoCompletion(); 
     
@@ -164,13 +158,10 @@ function startLicenseRealtimeWatcher(key) {
     licenseWatcherUnsub = watchLicenseStatus(key, (status, msg) => {
         alert(`⚠️ [라이선스 알림]\n${msg}`);
         clearAuthStorage();
-        
-        // 🌟 수정된 부분: 계정 삭제 감지 시 화면을 즉시 로그인 창으로 덮어 강제 로그아웃 체감 강화
         const mainApp = document.getElementById('main-app');
         const authScreen = document.getElementById('auth-screen');
         if (mainApp) { mainApp.classList.add('hidden'); mainApp.classList.remove('flex'); }
         if (authScreen) authScreen.classList.remove('hidden');
-        
         window.location.reload();
     }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
@@ -280,7 +271,6 @@ export async function verifyLicense() {
             if (msgEl) msgEl.innerText = (res && res.msg) ? res.msg : "인증에 실패했습니다. 키와 번호를 확인해 주세요.";
         }
     } catch (e) {
-        console.error("인증 통신 예외 발생:", e);
         if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
     } finally {
         if (btn) {
@@ -366,7 +356,6 @@ export async function startFreeTrial() {
     }
 }
 
-// 팝업 및 알림함 관리
 export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, senderType) {
     currentActiveAlertMsgId = msgId;
     const isMaster = (senderType === 'MASTER' || senderTitle === '운영사 알림');
@@ -510,15 +499,13 @@ export function openHistoryModal() {
             grouped[date].forEach((h, idx) => { 
                 let sequentialNum = dailyTotal - idx;
                 let tagBadge = "";
-if (h.tag) {
-    if (h.tag === "배송 취소") {
-        // 취소인 경우 붉은색 테마 적용
-        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
-    } else {
-        // 그 외 완료 건은 기존 에메랄드색 테마 적용
-        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
-    }
-}
+                if (h.tag) {
+                    if (h.tag === "배송 취소") {
+                        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
+                    } else {
+                        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
+                    }
+                }
                 let photoBadge = h.photoUrl 
                     ? `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0 flex items-center gap-0.5 shadow-sm active:bg-blue-100"><i class="fa-solid fa-camera"></i> 사진</a>`
                     : (h.hasPhoto ? `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0"><i class="fa-solid fa-camera"></i></span>` : "");
@@ -634,7 +621,6 @@ export function selectStartDest(id) {
     }
 }
 
-// 메인 최적화 실행 함수
 export function optimizeRouteAction() {
     if (destinations.length < 2) { 
         alert("출발지를 포함하여 최소 2곳의 배송지가 필요합니다."); 
@@ -689,7 +675,6 @@ function loadActiveData() {
     renderList();
 }
 
-// 리스트 렌더링 및 UI 연동 함수
 function initSortable() {
     const el = document.getElementById('destination-list');
     if (!el) return;
@@ -835,7 +820,6 @@ export async function renderList() {
     initSortable();
 }
 
-// 주소 및 내비, 종료지 관련 헬퍼 함수들
 export async function setEndLocationGPS() {
     showLoading("현위치 파악 중...");
     if (lastKnownGps) {
@@ -914,7 +898,6 @@ export function openKakaoNaviDirect(lat, lng, name) {
     else alert("카카오 내비 모듈 오류입니다.");
 }
 
-// 주차 메모 모달 제어 함수들 (🌟 1번 누락 수정 완료)
 export function selectHeightTag(btn, val) {
     const isActive = btn.dataset.active === "true";
     document.querySelectorAll('.height-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
@@ -1066,7 +1049,6 @@ export async function reportMemo(docId) {
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
 
-// 배송 취소 및 완료 처리 함수들
 export async function cancelDestination(id) {
     if (!confirm("이 배송지를 취소하시겠습니까?\n취소된 내역은 '지난배송' 목록에 기록됩니다.")) return;
     const item = destinations.find(d => d.id === id);
@@ -1244,7 +1226,6 @@ export async function restoreHistoryItem(timestamp) {
     }
 }
 
-// 주소 직접 수정 시 커스텀 모달 호출 적용
 export async function editDestinationAddress(id) {
     const item = destinations.find(d => d.id === id); if (!item) return;
     
@@ -1290,7 +1271,6 @@ function hideLoading() {
     if (elOverlay) elOverlay.classList.add('hidden'); 
 }
 
-// 로그아웃 함수
 export async function logout() {
     if (!confirm("로그아웃 하시겠습니까?\n로그아웃 시 기기 정보가 초기화되어 다른 기기에서 로그인할 수 있습니다.")) return;
     const currentKey = localStorage.getItem('deliveryProKey');
@@ -1311,7 +1291,6 @@ export async function logout() {
     window.location.reload();
 }
 
-// OCR 스캔 및 카메라 이벤트 처리 로직
 const MAX_MONTHLY_SCANS = 1250; 
 const SCAN_COOLDOWN_MS = 1000;
 
@@ -1382,6 +1361,7 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
     });
 }
 
+// 🌟 카메라 스캔 이벤트: 주소와 상호명을 동시에 추출하여 결합하도록 수정
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
     if (!cameraInput) return;
@@ -1391,15 +1371,19 @@ export function initCameraScan() {
         if (!file) return;
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
-        let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
+        let addressStr = null; let rawOCRText = ""; let extractedPhone = null; let storeName = null;
         showLoading("사진 판독 중...");
         try {
-            // 🌟 3번 수정: 모바일 사진 EXIF 회전 문제를 방지하는 안전 압축(toBase64_SafeCompress) 사용
             const base64Image = await toBase64_SafeCompress(file);
             const imageContent = base64Image.split(',')[1];
             rawOCRText = await performOCR(imageContent);
             addressStr = extractAddressLogic(rawOCRText);
             extractedPhone = extractPhoneLogic(rawOCRText);
+            
+            // 🌟 상호명/배송지명 추출 로직 결합
+            if (addressStr) {
+                storeName = extractStoreNameLogic(rawOCRText, addressStr);
+            }
             hideLoading();
         } catch (error) {
             hideLoading();
@@ -1430,10 +1414,16 @@ export function initCameraScan() {
         }
 
         if (coords) {
+            // 🌟 상호명이 감지된 경우 "[상호명] 주소" 형태로 최종 표시명 구성
+            let resolvedAddress = coords.address_name || addressStr;
+            if (storeName && !resolvedAddress.includes(storeName)) {
+                resolvedAddress = `[${storeName}] ${resolvedAddress}`;
+            }
+
             let nextNum = destinations.length > 0 ? Math.max(...destinations.map(d => d.displayNumber)) + 1 : 1;
             const newDestId = idCounter++; 
             destinations.push({
-                id: newDestId, address: coords.address_name || addressStr,
+                id: newDestId, address: resolvedAddress,
                 lat: coords.lat, lng: coords.lng, phone: extractedPhone, displayNumber: nextNum
             });
             saveActiveData(); renderList();
@@ -1470,7 +1460,6 @@ export function initPhotoCompletion() {
     });
 }
 
-// 🌟 HTML과의 연결을 위한 전역 바인딩 (1번 수정: 누락된 메모 함수들 추가)
 window.logout = logout;
 window.renderList = renderList;
 window.verifyLicense = verifyLicense;
@@ -1507,7 +1496,6 @@ window.closeDispatchAlertModal = closeDispatchAlertModal;
 window.optimizeRoute = optimizeRouteAction;
 window.initPhotoCompletion = initPhotoCompletion;
 
-// 추가된 메모 보조 함수들
 window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
