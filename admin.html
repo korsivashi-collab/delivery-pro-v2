@@ -43,7 +43,7 @@
         .excel-table td, .excel-table th { border: 1px solid #e2e8f0; padding: 0.5rem 0.75rem; font-size: 11px; }
         .excel-table tr:hover td { background-color: #eef2ff; }
 
-        /* 📋 명세서 인쇄용 절대비율 CSS */
+        /* 명세서 인쇄용 절대비율 CSS */
         .invoice-container { background-color: white; border: 1px solid #d1d5db; box-shadow: 0 10px 25px rgba(0,0,0,0.15); width: 210mm; height: 296mm; margin: 0 auto; position: relative; display: flex; flex-direction: column; box-sizing: border-box; overflow: hidden; flex-shrink: 0; }
         .invoice-half { height: 148mm; background-color: #ffeb5c !important; padding: 5mm 8mm; box-sizing: border-box; display: flex; flex-direction: column; overflow: hidden; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; }
@@ -70,7 +70,7 @@
 </head>
 <body class="bg-gray-100 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
 
-    <!-- 1. 로그인 화면 -->
+    <!-- 로그인 화면 -->
     <div id="login-screen" class="fixed inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center p-6">
         <div class="w-full max-w-sm bg-white rounded-3xl p-8 shadow-2xl text-center relative overflow-hidden border border-gray-100">
             <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
@@ -94,7 +94,7 @@
         </div>
     </div>
 
-    <!-- 2. 마스터 대시보드 -->
+    <!-- 마스터 대시보드 -->
     <div id="master-panel" class="hidden flex-col h-full w-full bg-slate-50 overflow-hidden">
         <header class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md flex-none">
             <div class="flex items-center gap-3">
@@ -163,7 +163,6 @@
                 <div id="tab-content-dispatch" class="hidden flex-col flex-1"><div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[1000px]"><tbody id="table-body-dispatch"></tbody></table></div><div id="pagination-dispatch"></div></div>
                 <div id="tab-content-memos" class="hidden flex-col flex-1"><div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-memos"></tbody></table></div><div id="pagination-memos"></div></div>
                 
-                <!-- 탭 5: 계정/내역 조회 통합 뷰 -->
                 <div id="tab-content-history" class="hidden p-5 flex flex-col gap-3.5">
                     <div id="account-back-bar" class="hidden justify-between items-center bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-xs">
                         <button onclick="backToAllAccountsView()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow transition active:scale-95">
@@ -284,7 +283,7 @@
         </div>
     </div>
 
-    <!-- 3. 계정 정보 직접 수정 모달 (관제 슬롯 포함) -->
+    <!-- 계정 정보 직접 수정 모달 -->
     <div id="edit-license-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
         <div id="edit-modal-card" class="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
             <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2">
@@ -347,8 +346,8 @@
                     </div>
 
                     <div class="flex gap-1.5">
-                        <input type="text" id="modal-add-driver-input" placeholder="기사 8자리 키 또는 전화번호 입력" class="flex-1 bg-white border border-purple-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-purple-600 uppercase" onkeyup="if(window.event.keyCode==13){window.linkDriverFromModal()}">
-                        <button type="button" onclick="window.linkDriverFromModal()" class="bg-purple-600 hover:bg-purple-700 text-white font-black text-xs px-3.5 py-2 rounded-xl transition shadow-xs whitespace-nowrap active:scale-95 flex items-center gap-1">
+                        <input type="text" id="modal-add-driver-input" placeholder="기사 8자리 키 또는 전화번호 입력" class="flex-1 bg-white border border-purple-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-purple-600 uppercase" onkeyup="if(window.event.keyCode==13){linkDriverFromModal()}">
+                        <button type="button" onclick="linkDriverFromModal()" class="bg-purple-600 hover:bg-purple-700 text-white font-black text-xs px-3.5 py-2 rounded-xl transition shadow-xs whitespace-nowrap active:scale-95 flex items-center gap-1">
                             <i class="fa-solid fa-plus"></i> 연결 추가
                         </button>
                     </div>
@@ -365,7 +364,7 @@
         </div>
     </div>
 
-    <!-- 4. 실시간 관제 화면 (통합) -->
+    <!-- 실시간 관제 화면 -->
     <div id="dispatch-panel" class="hidden flex-col h-full w-full bg-gray-100">
         <header class="bg-white border-b border-gray-200 px-5 py-2 flex justify-between items-center z-20 shadow-sm flex-none gap-4">
             <div class="flex items-center gap-3.5 flex-none">
@@ -397,7 +396,7 @@
                     </button>
                 </div>
                 
-                <!-- 🌟 [PRO 통합] 자동할당 및 명세서 버튼 추가 -->
+                <!-- PRO 기능 버튼 -->
                 <div class="flex items-center gap-1.5 flex-none ml-2">
                     <button type="button" id="btn-pro-auto-dispatch" onclick="handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
                         <span class="absolute -top-2 -right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white">PRO</span>
@@ -529,10 +528,7 @@
         </main>
     </div>
 
-    <!-- ======================================================== -->
-    <!-- 🌟 [PRO 통합] 배송 자동할당 및 권역, 명세서 인쇄 모달들 -->
-    <!-- ======================================================== -->
-
+    <!-- PRO 배송 자동할당 모달 -->
     <div id="auto-dispatch-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex items-center justify-between shadow-sm flex-none gap-4">
             <div class="flex items-center gap-3 flex-none w-[260px]">
@@ -586,11 +582,9 @@
                         <span class="text-[11px] font-black text-gray-700"><i class="fa-solid fa-users text-blue-500 mr-1"></i> 운행 기사 권역 설정</span>
                         <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-black shadow-sm" id="dispatch-driver-count">0명</span>
                     </div>
-                    <button type="button" onclick="window.openAllTerritoriesMap()" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-[11px] font-black transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"><i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기</button>
+                    <button type="button" onclick="openAllTerritoriesMap()" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-[11px] font-black transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"><i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기</button>
                 </div>
-                <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-2.5">
-                    <div class="text-center text-gray-400 py-10 text-[10px] font-bold">데이터 로딩중...</div>
-                </div>
+                <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-2.5"></div>
             </div>
 
             <div class="flex-1 flex gap-4 overflow-hidden">
@@ -649,58 +643,7 @@
         </div>
     </div>
 
-    <!-- 기사 권역 설정 팝업 모달창 -->
-    <div id="driver-territory-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-[95vw] rounded-3xl p-6 shadow-2xl relative flex flex-col h-[95vh]">
-            <div class="flex justify-between items-center mb-4 flex-none">
-                <h3 class="text-lg font-black text-gray-900"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1.5"></i> 기사 배송 권역 설정</h3>
-                <button onclick="closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
-            </div>
-            
-            <div class="mb-4 bg-blue-50 p-4 rounded-2xl border border-blue-100 flex-none flex flex-col gap-3 shadow-inner">
-                <div class="flex justify-between items-center">
-                    <div>
-                        <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-base ml-1">010-0000-0000</span></p>
-                        <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역 중심을 지정하세요. <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.</p>
-                    </div>
-                    <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
-                        <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
-                        <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
-                        <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
-                    </div>
-                </div>
-                <div class="bg-white px-4 py-3 rounded-xl border border-blue-200 flex items-center gap-3 shadow-sm">
-                    <span class="text-xs font-black text-gray-700 whitespace-nowrap border-r border-gray-200 pr-3">지정된 기준 주소</span>
-                    <span id="territory-selected-address" class="text-sm font-black text-blue-600 truncate"><i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요</span>
-                </div>
-            </div>
-
-            <input type="hidden" id="territory-target-devid"><input type="hidden" id="input-territory-1"><input type="hidden" id="input-territory-2"><input type="hidden" id="input-territory-lat"><input type="hidden" id="input-territory-lng"><input type="hidden" id="input-territory-scale" value="dong">
-            <div id="territory-map-container" class="flex-1 w-full bg-gray-200 rounded-2xl overflow-hidden relative shadow-inner border border-gray-300"></div>
-
-            <div class="mt-4 flex-none">
-                <button type="button" onclick="saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-save"></i> 이 위치와 반경으로 권역 저장하기
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <!-- 전체 권역 설정 현황 모달창 -->
-    <div id="all-territories-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-[95vw] rounded-3xl p-6 shadow-2xl relative flex flex-col h-[95vh]">
-            <div class="flex justify-between items-center mb-4 flex-none">
-                <div>
-                    <h3 class="text-lg font-black text-gray-900"><i class="fa-solid fa-map text-blue-600 mr-1.5"></i> 전체 기사 권역 설정 현황</h3>
-                    <p class="text-xs font-bold text-gray-500 mt-1">현재 설정된 모든 기사님의 배송 커버리지를 한눈에 확인합니다.</p>
-                </div>
-                <button onclick="window.closeAllTerritoriesMap()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
-            </div>
-            <div id="all-territories-map-container" class="flex-1 w-full bg-gray-200 rounded-2xl overflow-hidden relative shadow-inner border border-gray-300"></div>
-        </div>
-    </div>
-
-    <!-- 주문서 통합관리 모달창 -->
+    <!-- PRO 주문서 명세서 출력 모달 -->
     <div id="pro-invoice-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-4 flex justify-between items-center shadow-sm flex-none">
             <div class="flex items-center gap-3">
@@ -817,19 +760,19 @@
                     </div>
                     <div id="form-setup-accordion" class="hidden flex-col p-3 space-y-3 custom-scrollbar overflow-y-auto max-h-[300px]">
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">폼 제목</label><input type="text" id="input-form-title" class="w-full bg-indigo-50/50 border rounded-lg p-2 text-xs font-black"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label><input type="text" id="input-prov-regno" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label><input type="text" id="input-prov-name" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label><input type="text" id="input-prov-regno" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label><input type="text" id="input-prov-name" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div class="flex gap-1.5 pt-1">
-                            <button type="button" onclick="window.cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
-                            <button type="button" onclick="window.saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 저장</button>
+                            <button type="button" onclick="cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
+                            <button type="button" onclick="saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 저장</button>
                         </div>
                     </div>
                 </div>
                 <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none mt-auto border-t">
-                    <button id="btn-batch-print" onclick="window.executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
+                    <button id="btn-batch-print" onclick="executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
                         <i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력
                     </button>
                 </div>
@@ -837,67 +780,63 @@
         </div>
     </div>
 
-    <!-- 🌟 관제 알림함, 이력, 다운로드 등 기타 모달 통합 -->
-    <div id="dispatch-popup-alert-modal" class="hidden fixed inset-0 bg-black/75 z-[250] flex items-center justify-center p-5 backdrop-blur-sm animate-slide-up">
-        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border-2 border-amber-500 text-center">
-            <div class="w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 shadow-inner animate-bounce">
-                <i class="fa-solid fa-bullhorn"></i>
+    <!-- 기사 권역 설정 팝업 모달창 -->
+    <div id="driver-territory-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-[95vw] rounded-3xl p-6 shadow-2xl relative flex flex-col h-[95vh]">
+            <div class="flex justify-between items-center mb-4 flex-none">
+                <h3 class="text-lg font-black text-gray-900"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1.5"></i> 기사 배송 권역 설정</h3>
+                <button onclick="closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
             </div>
-            <span class="bg-amber-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">운영사 알림</span>
-            <h3 class="text-base font-black text-gray-900 mt-2 mb-1" id="dispatch-popup-alert-time">수신 시간</h3>
-            <div class="bg-slate-50 border border-gray-200 rounded-2xl p-4 my-3 text-left shadow-inner">
-                <p id="dispatch-popup-alert-content" class="text-sm font-bold text-gray-800 whitespace-pre-line leading-relaxed"></p>
-            </div>
-            <button onclick="closeDispatchPopupAlertModal()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-xl shadow-lg transition active:scale-95 text-sm">
-                확인했습니다
-            </button>
-        </div>
-    </div>
-
-    <div id="dispatch-inbox-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative max-h-[85vh] flex flex-col animate-slide-up">
-            <div class="flex justify-between items-center pb-3 border-b border-gray-100">
-                <div class="flex items-center gap-2">
-                    <span class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-sm shadow-inner"><i class="fa-solid fa-envelope-open-text"></i></span>
-                    <div><h3 class="font-black text-gray-900 text-sm">알림함</h3><p class="text-[10px] text-gray-400 font-bold">운영사로부터 수신된 알림 목록입니다.</p></div>
+            
+            <div class="mb-4 bg-blue-50 p-4 rounded-2xl border border-blue-100 flex-none flex flex-col gap-3 shadow-inner">
+                <div class="flex justify-between items-center">
+                    <div>
+                        <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-base ml-1">010-0000-0000</span></p>
+                        <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역 중심을 지정하세요. <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.</p>
+                    </div>
+                    <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
+                        <button type="button" onclick="setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
+                        <button type="button" onclick="setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
+                        <button type="button" onclick="setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                    </div>
                 </div>
-                <button onclick="closeDispatchInboxModal()" class="text-gray-400 hover:text-gray-700 text-lg p-1"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div id="dispatch-inbox-container" class="flex-1 overflow-y-auto p-2 space-y-2.5 hide-scrollbar my-2"></div>
-            <div class="pt-3 border-t border-gray-100 flex justify-between items-center">
-                <button onclick="clearAllDispatchInbox()" class="text-xs text-red-500 hover:text-red-700 font-bold px-2 py-1">알림함 비우기</button>
-                <button onclick="closeDispatchInboxModal()" class="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl">닫기</button>
-            </div>
-        </div>
-    </div>
-
-    <div id="master-notice-history-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-xl rounded-3xl p-6 shadow-2xl relative max-h-[85vh] flex flex-col animate-slide-up">
-            <div class="flex justify-between items-center pb-3 border-b border-gray-100">
-                <div class="flex items-center gap-2">
-                    <span class="w-8 h-8 rounded-xl bg-slate-900 text-amber-400 flex items-center justify-center text-sm shadow-inner"><i class="fa-solid fa-clock-rotate-left"></i></span>
-                    <div><h3 class="font-black text-gray-900 text-sm">운영사 알림 발송 이력 관리</h3><p class="text-[10px] text-gray-400 font-bold">마스터 계정에서 보낸 전체 알림 내역 조회 및 삭제</p></div>
+                <div class="bg-white px-4 py-3 rounded-xl border border-blue-200 flex items-center gap-3 shadow-sm">
+                    <span class="text-xs font-black text-gray-700 whitespace-nowrap border-r border-gray-200 pr-3">지정된 기준 주소</span>
+                    <span id="territory-selected-address" class="text-sm font-black text-blue-600 truncate"><i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요</span>
                 </div>
-                <button onclick="closeMasterNoticeHistoryModal()" class="text-gray-400 hover:text-gray-700 text-lg p-1"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div id="master-notice-history-container" class="flex-1 overflow-y-auto p-2 space-y-2.5 hide-scrollbar my-2"></div>
-            <div class="pt-3 border-t border-gray-100 flex justify-end"><button onclick="closeMasterNoticeHistoryModal()" class="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl">닫기</button></div>
+
+            <input type="hidden" id="territory-target-devid">
+            <input type="hidden" id="input-territory-1">
+            <input type="hidden" id="input-territory-2">
+            <input type="hidden" id="input-territory-lat">
+            <input type="hidden" id="input-territory-lng">
+            <input type="hidden" id="input-territory-scale" value="dong">
+            <div id="territory-map-container" class="flex-1 w-full bg-gray-200 rounded-2xl overflow-hidden relative shadow-inner border border-gray-300"></div>
+
+            <div class="mt-4 flex-none">
+                <button type="button" onclick="saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2">
+                    <i class="fa-solid fa-save"></i> 이 위치와 반경으로 권역 저장하기
+                </button>
+            </div>
         </div>
     </div>
 
-    <div id="link-driver-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
-            <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2"><i class="fa-solid fa-user-plus text-blue-600"></i> 관제 기사 연결 등록</h3>
-            <p class="text-xs text-gray-400 font-bold mb-4">기사의 8자리 키 또는 전화번호를 입력하세요.</p>
-            <input type="text" id="link-driver-key-input" placeholder="예: 7K9A-4M2X 또는 010-1234-5678" class="w-full bg-gray-50 border border-gray-300 rounded-xl p-3 text-xs font-mono font-black uppercase outline-none focus:border-blue-500 text-center mb-4">
-            <div class="flex gap-2">
-                <button onclick="closeLinkDriverModal()" class="flex-1 bg-gray-100 text-gray-600 font-bold py-3 rounded-xl text-xs">취소</button>
-                <button onclick="window.confirmLinkDriver()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow">기사 연결하기</button>
+    <!-- 전체 권역 설정 현황 모달창 -->
+    <div id="all-territories-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-[95vw] rounded-3xl p-6 shadow-2xl relative flex flex-col h-[95vh]">
+            <div class="flex justify-between items-center mb-4 flex-none">
+                <div>
+                    <h3 class="text-lg font-black text-gray-900"><i class="fa-solid fa-map text-blue-600 mr-1.5"></i> 전체 기사 권역 설정 현황</h3>
+                    <p class="text-xs font-bold text-gray-500 mt-1">현재 설정된 모든 기사님의 배송 커버리지를 한눈에 확인합니다.</p>
+                </div>
+                <button onclick="closeAllTerritoriesMap()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
             </div>
+            <div id="all-territories-map-container" class="flex-1 w-full bg-gray-200 rounded-2xl overflow-hidden relative shadow-inner border border-gray-300"></div>
         </div>
     </div>
 
-    <!-- 엑셀 데이터 추출 기간/항목 설정 모달 -->
+    <!-- 엑셀 데이터 추출 모달 -->
     <div id="excel-export-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative">
             <div class="flex justify-between items-center pb-3 border-b border-gray-100 mb-4">
@@ -932,7 +871,6 @@
                         <span class="text-xs font-black text-gray-800">배송 취소</span>
                     </label>
                 </div>
-                <p class="text-[10px] text-gray-400 font-bold mt-2 leading-relaxed">* 선택한 항목별로 엑셀 파일 내에 각각의 페이지(시트)가 나뉘어 생성됩니다.</p>
             </div>
 
             <div class="flex gap-2">
@@ -944,7 +882,8 @@
         </div>
     </div>
 
-    <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
+    <!-- 🌟 유일한 단일 연결 메인 JS 파일 (다음 단계에서 제공할 파일) -->
     <script type="module" src="./js/admin-app.js"></script>
+
 </body>
 </html>
