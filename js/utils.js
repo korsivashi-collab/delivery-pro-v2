@@ -119,69 +119,63 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 필터링 단어(레이블) 자체를 철저히 배제하고 우측의 진짜 상호명만 추출하는 로직
+// 4. 🌟 정확한 레이블(배송지명, 간판명 등) 뒤에 오는 실제 상호 데이터만 타겟팅하는 추출 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        // 배제해야 할 필터링 단어들 (레이블 성격의 단어들)
-        const filterKeywords = ['배송지명', '간판명', '배송', '상호', '간판', '법인', '거래처', '도착', '회사', '공급받는자', '연락처', '사업자등록번호', '주소'];
-
-        // 공백 및 줄바꿈 단위로 토큰 분리 또는 단어 단위 분석
-        // 텍스트 전체에서 단어들을 순서대로 확인하며 필터 단어에 걸리면 건너뛰고 다음 데이터를 채택
         let tokens = fullText.split(/[\s\n]+/);
-        let validCandidates = [];
+        
+        // 상호/배송지명을 나타내는 핵심 타겟 레이블
+        const targetKeywords = ['배송지명', '간판명', '상호명', '상호'];
+        // 데이터 수집을 중단해야 하는 다른 항목의 레이블들
+        const stopKeywords = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '합계', '단가', '수량'];
 
         for (let i = 0; i < tokens.length; i++) {
             let token = tokens[i].trim();
-            if (!token) continue;
+            let isTarget = targetKeywords.some(kw => token.includes(kw));
 
-            // 현재 토큰이 필터링 단어(레이블)를 포함하고 있는지 검사
-            let isFilterWord = filterKeywords.some(kw => token.includes(kw));
-
-            if (isFilterWord) {
-                // 필터 단어 자체는 상호명이 될 수 없으므로 무시하고,
-                // 바로 우측이나 다음 인덱스에 있는 실질적인 데이터 조각들을 모음
+            if (isTarget) {
                 let collected = [];
-                let step = 1;
-                while (i + step < tokens.length && step <= 4) {
-                    let nextToken = tokens[i + step].trim();
-                    // 다음 토큰도 또 필터 단어나 번호, 전화번호, 주소 형태면 중단
-                    if (filterKeywords.some(kw => nextToken.includes(kw)) || 
-                        /^\d+$/.test(nextToken) || 
-                        /010-|050|02-|토정로|동작대로|마포구|동작구/.test(nextToken)) {
-                        break;
-                    }
-                    if (nextToken.length > 0) {
-                        collected.push(nextToken);
-                    }
-                    step++;
+                // 타겟 레이블 바로 다음 토큰부터 최대 5개 단어 수집
+                for (let j = i + 1; j < Math.min(i + 6, tokens.length); j++) {
+                    let nextTok = tokens[j].trim();
+                    if (!nextTok) continue;
+                    // 다른 항목 레이블이나 전화번호, 주소 형태를 만나면 수집 중단
+                    if (stopKeywords.some(skw => nextTok.includes(skw))) break;
+                    if (/^010-|^\d{8,}|서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주/.test(nextTok)) break;
+                    
+                    collected.push(nextTok);
                 }
 
                 if (collected.length > 0) {
-                    let candidateStr = collected.join(' ');
-                    // 불필요한 기호나 단어 제거
-                    candidateStr = candidateStr.replace(/[\(\)\:\-\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-                    if (candidateStr.length >= 2) {
-                        validCandidates.push(candidateStr);
+                    let candidate = collected.join(' ').replace(/[\(\)\:\-\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+                    candidate = candidate.replace(/간판명|배송지명/g, '').trim();
+                    if (candidate.length >= 2) {
+                        return candidate;
                     }
                 }
             }
         }
 
-        // 유효한 후보군이 있다면 가장 적절한 상호명 반환
-        if (validCandidates.length > 0) {
-            // 중복 제거 및 너무 긴 주소 형태 제외
-            for (let cand of validCandidates) {
-                if (!cand.includes('시 ') && !cand.includes('로 ') && !cand.includes('구 ')) {
-                    return cand;
+        // 백업 라인 단위 검색
+        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        for (let line of lines) {
+            if (line.includes('배송지명') || line.includes('간판명') || line.includes('상호')) {
+                let cleaned = line
+                    .replace(/.*(?:배송지명|간판명|상호명|상호)\s*[\(\)\:\-\s]*/, '')
+                    .replace(/연락처|전화번호|주소|구매자명.*/g, '')
+                    .replace(/[\(\)\:\-\[\]]/g, ' ')
+                    .replace(/\s+/g, ' ')
+                    .trim();
+                
+                if (cleaned.length >= 2 && !cleaned.includes('서울') && !cleaned.includes('마포구')) {
+                    return cleaned;
                 }
             }
-            return validCandidates[0];
         }
 
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
-
     return null;
 }
