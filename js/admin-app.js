@@ -19,9 +19,9 @@ import {
     closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
 } from "./admin-master.js";
 
-// [관제 기능 모듈 가져오기]
+// [관제/PRO 기능 모듈 가져오기]
 import {
-    forceClearMap, setDispatchMode, renderSidebar, getFilteredVisibleDrivers,
+    formatNumber, forceClearMap, setDispatchMode, renderSidebar, getFilteredVisibleDrivers,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView,
     selectDriver, clearSelectedDriver, removeOrUnlinkDriver, renderMessageSidebar,
     toggleMessageDriver, toggleAllMessageSelection, updateMessageCharCount,
@@ -46,11 +46,11 @@ import {
     openAllTerritoriesMap, closeAllTerritoriesMap, executeBatchPrint, selectFormTemplate,
     cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
     openExcelExportModal, closeExcelExportModal, executeExcelExport, runAutoDispatchAlgorithm,
-    switchInvoiceTab
+    switchInvoiceTab, updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm
 } from "./admin-dispatch.js";
 
 // ==========================================
-// 2. 초기화 및 인증 관리 (App Lifecycle)
+// 1. 초기화 및 인증 관리 (App Lifecycle)
 // ==========================================
 window.onload = () => {
     const todayInput = document.getElementById('dispatch-date-picker');
@@ -180,24 +180,21 @@ window.showDispatchPanel = function() {
 };
 
 // ==========================================
-// 3. 실시간 데이터 동기화
+// 2. 실시간 데이터 동기화
 // ==========================================
 window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        
         renderMasterTables();
         populateDriverSelect();
         renderAccountHistoryView();
         renderSidebar();
-        
         const curKey = document.getElementById('edit-orig-key')?.value;
         if (curKey) {
             const target = state.allLicenses.find(l => l.key === curKey);
             if (target && target.type === 'dispatch') renderModalConnectedDrivers(target.key);
         }
-
         if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
             renderDispatchDriverList();
             renderDispatchDriverDetail();
@@ -233,9 +230,7 @@ window.initMasterDataSync = function() {
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderMessageFeed();
-        checkDispatchInboxNotifications();
-        renderMasterNoticeHistoryList();
+        renderMessageFeed(); checkDispatchInboxNotifications(); renderMasterNoticeHistoryList();
     });
 
     onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
@@ -246,8 +241,9 @@ window.initMasterDataSync = function() {
 };
 
 // ==========================================
-// 4. HTML 인라인 이벤트 바인딩 (window 객체 연결)
+// 3. HTML 인라인 이벤트를 위한 window 전역 객체 맵핑
 // ==========================================
+window.formatNumber = formatNumber;
 window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
 window.generateNewLicense = generateNewLicense;
@@ -326,7 +322,6 @@ window.closeLinkDriverModal = closeLinkDriverModal;
 window.confirmLinkDriver = confirmLinkDriver;
 window.focusMapPosition = focusMapPosition;
 
-// --- PRO 기능 바인딩 (수정 완료) ---
 window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
 window.closeProInvoiceModal = closeProInvoiceModal;
@@ -369,3 +364,7 @@ window.closeExcelExportModal = closeExcelExportModal;
 window.executeExcelExport = executeExcelExport;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.switchInvoiceTab = switchInvoiceTab;
+window.updateLivePreview = updateLivePreview;
+window.previewSavedForm = previewSavedForm;
+window.toggleSelectForm = toggleSelectForm;
+window.applySavedForm = applySavedForm;

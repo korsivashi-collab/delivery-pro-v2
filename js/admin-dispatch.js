@@ -3,11 +3,13 @@ import { db } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { map, focusMapPosition } from "./admin-map.js";
 import { playBeepSound, getAddressFromCoords } from "./admin-utils.js";
-import { collection, doc, setDoc, updateDoc, deleteDoc, addDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { collection, doc, setDoc, updateDoc, deleteDoc, addDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
-// ==========================================
-// 1. 공통 및 관제 지도 제어
-// ==========================================
+export function formatNumber(num) {
+    if (!num || isNaN(num)) return num || ''; 
+    return Number(num).toLocaleString('ko-KR');
+}
+
 window.myMapOverlays = [];
 let territoryMap = null;
 let territoryMarker = null;
@@ -26,7 +28,6 @@ export function forceClearMap() {
 
 export function setDispatchMode(mode, keepSelected = false) {
     state.dispatchNavState = mode; 
-    window.dispatchNavState = mode;
     if (!keepSelected && mode === 'DELIVERY') state.selectedDeviceId = null;
     
     ['DELIVERY', 'MESSAGE', 'LOCATION'].forEach(m => {
@@ -76,9 +77,6 @@ export function renderSidebar() {
     }
 }
 
-// ==========================================
-// 2. 기사 목록 및 배송 현황 렌더링
-// ==========================================
 export function getFilteredVisibleDrivers() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
@@ -150,7 +148,6 @@ export function renderDriverListView() {
 
 export function setDispatchDetailTab(tab) {
     state.dispatchDetailTab = tab; 
-    window.dispatchDetailTab = tab;
     if (state.selectedDeviceId) renderDriverDetailView(state.selectedDeviceId);
 }
 
@@ -298,9 +295,6 @@ export async function removeOrUnlinkDriver(devId, key) {
     try { await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); alert("연결이 해제되었습니다."); } catch (e) { alert("오류: " + e.message); }
 }
 
-// ==========================================
-// 3. 메시지(알림) 센터 및 템플릿
-// ==========================================
 export function renderMessageSidebar() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
@@ -1054,6 +1048,49 @@ export function closeAutoDispatchModal() { document.getElementById('auto-dispatc
 export function closeProInvoiceModal() { document.getElementById('pro-invoice-modal')?.classList.add('hidden'); }
 export function closePremiumModal() { document.getElementById('premium-upgrade-modal')?.classList.add('hidden'); }
 
+export function openLinkDriverModal() {
+    document.getElementById('link-driver-key-input').value = '';
+    document.getElementById('link-driver-modal').classList.remove('hidden');
+    setTimeout(() => document.getElementById('link-driver-key-input').focus(), 100);
+}
+
+export function closeLinkDriverModal() {
+    document.getElementById('link-driver-modal').classList.add('hidden');
+}
+
+export async function confirmLinkDriver() {
+    const rawInput = document.getElementById('link-driver-key-input').value.trim().toUpperCase();
+    if (!rawInput) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
+
+    try {
+        const cleanDigits = rawInput.replace(/[^0-9]/g, '');
+        const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        let targetLic = state.allLicenses.find(l => {
+            if (l.type === 'dispatch') return false;
+            const lKey = (l.key || '').toUpperCase();
+            const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
+            const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+            return lKey === rawInput || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
+        });
+
+        if (!targetLic) {
+            let directSnap = await getDoc(doc(db, "licenses", rawInput));
+            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `TRIAL-${rawInput}`));
+            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `PRO-${rawInput}`));
+            if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
+        }
+
+        if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
+        if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
+            alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
+        }
+        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: currentKey });
+        alert(`[등록 완료] 기사 [${targetLic.phone || targetLic.key}] 님이 연결되었습니다.`);
+        closeLinkDriverModal();
+    } catch (e) { alert("오류: " + e.message); }
+}
+
 export function renderDispatchDriverList() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -1135,6 +1172,14 @@ export async function loadExcelFromFirebase() {
         const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
         state.parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
         renderExcelTable();
+    } catch (error) {}
+}
+
+export async function autoSaveExcelToFirebase() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
+    const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
+    try {
+        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: state.parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
     } catch (error) {}
 }
 
@@ -1267,6 +1312,161 @@ async function batchGeocodeExcelList(items) {
     if (dropZone) dropZone.innerHTML = originalDropHtml;
 }
 
+export function toggleRowCheckbox(e, idx) {
+    if (e && e.target.tagName === 'INPUT') return; 
+    const cb = document.querySelector(`.row-checkbox[data-idx="${idx}"]`); 
+    if(cb) cb.checked = !cb.checked;
+}
+
+export async function deleteExcelRow(idx) {
+    if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
+    state.parsedExcelList.splice(idx, 1); 
+    renderExcelTable(); 
+    await autoSaveExcelToFirebase();
+}
+
+export async function deleteSelectedExcelRows() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if(checkboxes.length === 0) { alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); return; }
+    if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
+    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
+    state.parsedExcelList = state.parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
+    renderExcelTable(); 
+    await autoSaveExcelToFirebase(); 
+}
+
+export async function clearAllExcelRows() {
+    if(state.parsedExcelList.length === 0) return;
+    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?")) return;
+    state.parsedExcelList = []; 
+    renderExcelTable(); 
+    await autoSaveExcelToFirebase();
+}
+
+export function exportToInvoiceModal() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkboxes.length === 0) { alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요."); return; }
+    state.printReadyList = [];
+    checkboxes.forEach(cb => { 
+        const idx = parseInt(cb.getAttribute('data-idx')); 
+        if (state.parsedExcelList[idx]) state.printReadyList.push(state.parsedExcelList[idx]); 
+    });
+
+    closeAutoDispatchModal(); 
+    document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
+    document.getElementById('print-ready-count').innerText = state.printReadyList.length;
+    loadSavedForms(); 
+    previewInvoiceRow(0); 
+    syncPreviewData();
+}
+
+export function previewInvoiceRow(idx) {
+    if (!state.printReadyList || !state.printReadyList[idx]) return;
+    const item = state.printReadyList[idx];
+
+    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
+    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+
+    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    
+    let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    
+    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
+    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
+
+    syncPreviewData(); 
+}
+
+function generateInvoiceHTML(item, providerInfo) {
+    const originalTemplate = document.getElementById('print-area'); if (!originalTemplate) return '';
+    const template = originalTemplate.cloneNode(true); template.id = ''; 
+
+    template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
+    template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
+    template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
+    template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
+    template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
+
+    template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || '');
+    template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+
+    template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+
+    let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
+    template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+
+    template.querySelectorAll('.invoice-table').forEach(table => {
+        table.querySelectorAll('tr').forEach(tr => {
+            const text = tr.innerText;
+            if ((text.includes('주 소') || text.includes('배 송 요 청 사 항')) && !tr.classList.contains('double-height')) {
+                tr.classList.add('double-height');
+                tr.querySelectorAll('td').forEach(td => { if (!td.classList.contains('invoice-label') && !td.classList.contains('inv-text-right')) td.classList.add('multi-line-text'); });
+            }
+        });
+    });
+
+    const dateStr = getLocalDateString();
+    const dateSpan1 = template.querySelector('#prev-date-1'); if (dateSpan1) { dateSpan1.id = ''; dateSpan1.innerText = dateStr; }
+    const dateSpan2 = template.querySelector('#prev-date-2'); if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
+    template.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
+
+    return template.outerHTML;
+}
+
+export function executeBatchPrint() {
+    if (state.printReadyList.length === 0) { alert("출력할 주문건이 없습니다."); return; }
+    const btn = document.getElementById('btn-batch-print');
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 문서 생성 중...'; }
+
+    const providerInfo = {
+        title: document.getElementById('input-form-title')?.value || '', regno: document.getElementById('input-prov-regno')?.value || '',
+        name: document.getElementById('input-prov-name')?.value || '', addr: document.getElementById('input-prov-addr')?.value || '',
+        tel: document.getElementById('input-prov-tel')?.value || '', addTel: document.getElementById('input-prov-add-tel')?.value || ''
+    };
+
+    let printContents = ''; state.printReadyList.forEach(item => { printContents += generateInvoiceHTML(item, providerInfo); });
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; document.body.appendChild(iframe);
+    const doc = iframe.contentWindow.document; doc.open();
+    doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 동선 PRO - 거래명세표 출력</title><style>
+        * { box-sizing: border-box; } @media print { @page { size: A4 portrait; margin: 0; } body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; } .invoice-half { height: 148mm; page-break-inside: avoid; } }
+        body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; } .invoice-container { width: 210mm; height: 297mm; margin: 0 auto; display: flex; flex-direction: column; } .invoice-half { height: 148mm; background-color: #ffeb5c !important; padding: 5mm 8mm; display: flex; flex-direction: column; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; } .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; } .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; } .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; } .double-height { height: 54px !important; } .double-height td { height: 54px !important; } .multi-line-text { white-space: normal !important; line-height: 1.3; } .invoice-table th { font-weight: bold; text-align: center; } .invoice-label { font-weight: bold; text-align: center; white-space: nowrap; } .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; } .text-fit-auto { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .inv-text-center { text-align: center; } .inv-text-left { text-align: left; padding-left: 6px !important; } .inv-text-right { text-align: right; padding-right: 6px !important; } .inv-font-bold { font-weight: bold; }
+    </style></head><body>${printContents}</body></html>`);
+    doc.close();
+
+    iframe.onload = function() {
+        setTimeout(() => {
+            iframe.contentWindow.focus(); iframe.contentWindow.print();
+            setTimeout(() => { document.body.removeChild(iframe); if (btn) { btn.disabled = false; btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력`; } }, 1000);
+        }, 800); 
+    };
+}
+
 export function syncPreviewData() {
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const name = document.getElementById('input-prov-name')?.value || '';
@@ -1285,6 +1485,11 @@ export function syncPreviewData() {
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 }
 
+export function updateLivePreview() {
+    clearTimeout(state.previewDebounceTimer);
+    state.previewDebounceTimer = setTimeout(() => { syncPreviewData(); }, 150);
+}
+
 export function loadSavedForms() {
     const listEl = document.getElementById('saved-forms-list');
     if (!listEl) return;
@@ -1292,12 +1497,13 @@ export function loadSavedForms() {
     if (savedForms.length === 0) { listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`; return; }
     let html = '';
     savedForms.forEach((form, idx) => {
+        const isSelected = (state.currentSelectedFormIndex === idx);
         html += `
-        <div class="border border-gray-200 bg-white hover:border-indigo-300 rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
+        <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
-                <input type="checkbox" onchange="window.selectFormTemplate(${idx})" class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
-                <div class="min-w-0 cursor-pointer flex-1" onclick="window.selectFormTemplate(${idx})">
-                    <p class="text-[11px] font-black text-gray-800 truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
+                <input type="checkbox" onchange="window.toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="window.previewSavedForm(${idx})">
+                    <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
                 </div>
             </div>
@@ -1307,16 +1513,36 @@ export function loadSavedForms() {
     listEl.innerHTML = html;
 }
 
-export function selectFormTemplate(idx) {
+export function toggleSelectForm(idx) {
+    if (state.currentSelectedFormIndex === idx) { 
+        state.currentSelectedFormIndex = null; 
+        cancelProviderFormEdit(); 
+        loadSavedForms(); 
+    } else { applySavedForm(idx); }
+}
+
+export function previewSavedForm(idx) { applySavedForm(idx); }
+
+export function applySavedForm(idx) {
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     const form = savedForms[idx]; if (!form) return;
+    state.currentSelectedFormIndex = idx;
+
     document.getElementById('input-form-title').value = form.title || '';
     document.getElementById('input-prov-regno').value = form.regno || '';
     document.getElementById('input-prov-name').value = form.name || '';
     document.getElementById('input-prov-addr').value = form.addr || '';
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
-    syncPreviewData();
+
+    loadSavedForms(); syncPreviewData();
+}
+
+export function selectFormTemplate(type) {
+    document.getElementById('form-template-modal')?.classList.add('hidden');
+    const accordion = document.getElementById('form-setup-accordion');
+    if (accordion && accordion.classList.contains('hidden')) { accordion.classList.remove('hidden'); accordion.classList.add('flex'); }
+    setTimeout(() => { document.getElementById('input-form-title')?.focus(); }, 300);
 }
 
 export function saveProviderForm() {
@@ -1346,30 +1572,46 @@ export function deleteSavedForm(idx) {
     if(!confirm(`[${savedForms[idx].title}] 폼을 삭제하시겠습니까?`)) return;
     savedForms.splice(idx, 1);
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    if (state.currentSelectedFormIndex === idx) state.currentSelectedFormIndex = null;
     loadSavedForms();
 }
 
-export function saveCompanyBaseAddress() {
+export function cancelProviderFormEdit() {
+    state.currentSelectedFormIndex = null;
+    ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
+        if(document.getElementById(id)) document.getElementById(id).value = '';
+    });
+    const accordion = document.getElementById('form-setup-accordion');
+    if (accordion) { accordion.classList.add('hidden'); accordion.classList.remove('flex'); }
+    loadSavedForms(); syncPreviewData();
+}
+
+export async function saveCompanyBaseAddress() {
     const input = document.getElementById('company-base-address');
     const addr = input.value.trim();
     if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
     const btn = document.getElementById('btn-save-company-base');
     btn.disabled = true; btn.innerText = "확인중...";
-    getCoordsFromAddress(addr).then(coords => {
+    
+    const geocoder = new kakao.maps.services.Geocoder();
+    geocoder.addressSearch(addr, function(result, status) {
         btn.disabled = false; btn.innerText = "저장";
-        if (!coords) { alert("주소 위치를 찾을 수 없습니다."); return; }
-        const fullAddress = coords.fullAddress || addr;
-        const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
-        localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
-        updateCompanyBaseUI(baseData);
-        input.value = fullAddress; 
+        if (status === kakao.maps.services.Status.OK) {
+            const fullAddress = result[0].address_name;
+            const baseData = { address: fullAddress, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
+            localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
+            updateCompanyBaseUI(baseData);
+            input.value = fullAddress; 
+        } else { alert("주소 위치를 찾을 수 없습니다."); }
     });
 }
+
 export function clearCompanyBaseAddress() {
     localStorage.removeItem('deliveryProCompanyBase');
     document.getElementById('company-base-address').value = '';
     updateCompanyBaseUI(null);
 }
+
 export function updateCompanyBaseUI(baseData) {
     const textEl = document.getElementById('saved-base-address-text');
     const clearBtn = document.getElementById('btn-clear-company-base');
@@ -1379,12 +1621,324 @@ export function updateCompanyBaseUI(baseData) {
         textEl.innerText = "저장된 거점이 없습니다."; textEl.classList.add('text-gray-500'); textEl.classList.remove('text-indigo-600'); clearBtn.classList.add('hidden');
     }
 }
-export function openDriverTerritoryModal() {}
-export function closeDriverTerritoryModal() {}
-export function setTerritoryScale() {}
-export function setTerritoryCenter() {}
-export function saveDriverTerritory() {}
-export function openAllTerritoriesMap() {}
-export function closeAllTerritoriesMap() {}
-export function executeBatchPrint() {}
-export function cancelProviderFormEdit() {}
+
+export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
+    try { if (window.event) window.event.stopPropagation(); } catch(e) {}
+    document.getElementById('territory-target-devid').value = devId;
+    document.getElementById('territory-target-phone').innerText = phone;
+    const modal = document.getElementById('driver-territory-modal');
+    if(!modal) return; modal.classList.remove('hidden');
+    
+    state.currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
+    setTerritoryScale(state.currentTerritoryScale, true); 
+
+    setTimeout(() => {
+        const container = document.getElementById('territory-map-container');
+        if (!territoryMap) {
+            territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
+            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { setTerritoryCenter(mouseEvent.latLng); });
+        }
+        territoryMap.relayout(); 
+        
+        if (territoryMarker) territoryMarker.setMap(null);
+        territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
+        otherTerritoryOverlays.forEach(ov => ov.setMap(null)); otherTerritoryOverlays = [];
+
+        if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
+            const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
+            territoryMap.setCenter(pos); setTerritoryCenter(pos);
+        } else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) {
+                const baseData = JSON.parse(savedBase);
+                if (baseData.lat && baseData.lng) territoryMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
+            } else territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
+            const addrDisplayEl = document.getElementById('territory-selected-address');
+            if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
+        }
+        
+        const allDrivers = getFilteredVisibleDrivers();
+        allDrivers.forEach(d => {
+            const dId = d.deviceId || d.key;
+            if (dId === devId) return; 
+            if (d.territoryLat && d.territoryLng) {
+                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                const marker = new kakao.maps.Marker({ position: pos, image: new kakao.maps.MarkerImage('https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png', new kakao.maps.Size(24, 35)) });
+                marker.setMap(territoryMap); otherTerritoryOverlays.push(marker);
+                const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
+                label.setMap(territoryMap); otherTerritoryOverlays.push(label);
+                let r3 = 5000; if (d.territoryScale === 'gu') r3 = 15000; else if (d.territoryScale === 'si') r3 = 45000;
+                const circle = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6, fillColor: '#d1d5db', fillOpacity: 0.2 });
+                circle.setMap(territoryMap); otherTerritoryOverlays.push(circle);
+            }
+        });
+
+        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
+    }, 200);
+}
+
+export function closeDriverTerritoryModal() { document.getElementById('driver-territory-modal')?.classList.add('hidden'); }
+
+export function setTerritoryScale(scale, skipRedraw = false) {
+    state.currentTerritoryScale = scale;
+    const scaleInput = document.getElementById('input-territory-scale');
+    if(scaleInput) scaleInput.value = scale;
+
+    ['dong', 'gu', 'si'].forEach(s => {
+        const btn = document.getElementById(`btn-scale-${s}`);
+        if (!btn) return;
+        if (s === scale) btn.className = "px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95";
+        else btn.className = "px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
+    });
+
+    if (territoryMap) {
+        if (scale === 'dong') territoryMap.setLevel(7); 
+        else if (scale === 'gu') territoryMap.setLevel(9); 
+        else if (scale === 'si') territoryMap.setLevel(11); 
+    }
+    if (!skipRedraw && territoryMarker) setTerritoryCenter(territoryMarker.getPosition());
+}
+
+export function setTerritoryCenter(latLng) {
+    if (territoryMarker) territoryMarker.setMap(null);
+    territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
+
+    document.getElementById('input-territory-lat').value = latLng.getLat();
+    document.getElementById('input-territory-lng').value = latLng.getLng();
+
+    const geocoder = new kakao.maps.services.Geocoder();
+    geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
+        let displayAddr = "주소를 찾을 수 없는 지역입니다";
+        if (status === kakao.maps.services.Status.OK) {
+            let fullAddress = result[0].address.address_name;
+            if (result[0].road_address) fullAddress = result[0].road_address.address_name;
+            document.getElementById('input-territory-1').value = fullAddress; 
+            document.getElementById('input-territory-2').value = ''; 
+            displayAddr = fullAddress;
+        }
+        const addrDisplayEl = document.getElementById('territory-selected-address');
+        if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
+    });
+
+    territoryMarker = new kakao.maps.Marker({ position: latLng });
+    territoryMarker.setMap(territoryMap);
+
+    let r1, r2, r3;
+    if (state.currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
+    else if (state.currentTerritoryScale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
+    else if (state.currentTerritoryScale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+    const c1 = new kakao.maps.Circle({ center: latLng, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.5 });
+    const c2 = new kakao.maps.Circle({ center: latLng, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.25 });
+    const c3 = new kakao.maps.Circle({ center: latLng, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.1 });
+
+    c3.setMap(territoryMap); c2.setMap(territoryMap); c1.setMap(territoryMap);
+    territoryCircles = [c3, c2, c1];
+}
+
+export async function saveDriverTerritory() {
+    const devId = document.getElementById('territory-target-devid').value;
+    const lat = document.getElementById('input-territory-lat').value;
+    const lng = document.getElementById('input-territory-lng').value;
+    const scale = document.getElementById('input-territory-scale').value;
+    const t1 = document.getElementById('input-territory-1').value || '상세 주소 확인 불가'; 
+    const t2 = document.getElementById('input-territory-2').value || '';
+
+    if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
+
+    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (!targetLic) return;
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key), {
+            territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
+            territoryScale: scale, territory1: t1, territory2: t2
+        });
+        alert("기사 권역이 저장되었습니다.");
+        closeDriverTerritoryModal();
+        renderDispatchDriverList();
+    } catch(e) { alert("저장 오류: " + e.message); }
+}
+
+export function openAllTerritoriesMap() {
+    const modal = document.getElementById('all-territories-modal');
+    if (!modal) return; modal.classList.remove('hidden');
+
+    setTimeout(() => {
+        const container = document.getElementById('all-territories-map-container');
+        if (!allTerritoriesMap) { allTerritoriesMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 }); }
+        allTerritoriesMap.relayout();
+        
+        allTerritoriesOverlays.forEach(ov => ov.setMap(null)); allTerritoriesOverlays = [];
+
+        const allDrivers = getFilteredVisibleDrivers();
+        let bounds = new kakao.maps.LatLngBounds();
+        let hasValidPoint = false;
+
+        allDrivers.forEach(d => {
+            if (d.territoryLat && d.territoryLng) {
+                hasValidPoint = true;
+                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                bounds.extend(pos);
+
+                const marker = new kakao.maps.Marker({ position: pos });
+                marker.setMap(allTerritoriesMap); allTerritoriesOverlays.push(marker);
+
+                const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
+                label.setMap(allTerritoriesMap); allTerritoriesOverlays.push(label);
+
+                let r1, r2, r3; const scale = d.territoryScale || 'dong';
+                if (scale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } else if (scale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } else if (scale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
+
+                const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
+                const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
+                const c3 = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.05 });
+
+                c3.setMap(allTerritoriesMap); c2.setMap(allTerritoriesMap); c1.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(c3, c2, c1);
+            }
+        });
+
+        if (hasValidPoint) allTerritoriesMap.setBounds(bounds);
+        else {
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) { const baseData = JSON.parse(savedBase); if (baseData.lat && baseData.lng) allTerritoriesMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng)); }
+        }
+    }, 200);
+}
+
+export function closeAllTerritoriesMap() { document.getElementById('all-territories-modal')?.classList.add('hidden'); }
+
+export function openExcelExportModal() {
+    const today = getLocalDateString();
+    document.getElementById('export-start-date').value = today;
+    document.getElementById('export-end-date').value = today;
+    document.getElementById('excel-export-modal').classList.remove('hidden');
+}
+
+export function closeExcelExportModal() {
+    document.getElementById('excel-export-modal').classList.add('hidden');
+}
+
+export function executeExcelExport() {
+    const startDateStr = document.getElementById('export-start-date').value;
+    const endDateStr = document.getElementById('export-end-date').value;
+    const isCompleted = document.getElementById('chk-export-completed').checked;
+    const isPending = document.getElementById('chk-export-pending').checked;
+    const isCanceled = document.getElementById('chk-export-canceled').checked;
+
+    if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
+
+    const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
+    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
+
+    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
+    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
+
+    const wb = XLSX.utils.book_new();
+    let hasData = false;
+
+    if (isCompleted) {
+        const targetCompletions = state.allCompletions.filter(c => {
+            if (!c.completedAt) return false;
+            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
+            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
+            return matchesDev && inRange && !isCancelTag;
+        }).sort((a, b) => a.completedAt - b.completedAt);
+
+        if (targetCompletions.length > 0) {
+            hasData = true;
+            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
+            
+            targetCompletions.forEach((c, idx) => {
+                const dt = new Date(c.completedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
+                ]);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
+        }
+    }
+
+    if (isPending) {
+        let pendingList = [];
+        for (const devId in state.activeRoutes) {
+            if (!visibleDeviceIds.includes(devId)) continue;
+            const driver = state.activeRoutes[devId];
+            if (!driver || !driver.updatedAt) continue;
+
+            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
+                const dests = driver.destinations || [];
+                dests.forEach(d => {
+                    const isDone = state.allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
+                    if (!isDone) {
+                        pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
+                    }
+                });
+            }
+        }
+
+        if (pendingList.length > 0) {
+            hasData = true;
+            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
+            pendingList.forEach((p, idx) => {
+                const dt = new Date(p.updatedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
+                ]);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
+            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
+        }
+    }
+
+    if (isCanceled) {
+        const targetCanceled = state.allCompletions.filter(c => {
+            if (!c.completedAt) return false;
+            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
+            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
+            return matchesDev && inRange && isCancelTag;
+        }).sort((a, b) => a.completedAt - b.completedAt);
+
+        if (targetCanceled.length > 0) {
+            hasData = true;
+            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
+            
+            targetCanceled.forEach((c, idx) => {
+                const dt = new Date(c.completedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([
+                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음'
+                ]);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송취소");
+        }
+    }
+
+    if (!hasData) {
+        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
+        return;
+    }
+
+    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
+    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
+    closeExcelExportModal();
+}
+
+export function runAutoDispatchAlgorithm() { 
+    alert("AI 자동 배차 로직은 다음 단계에서 적용될 예정입니다."); 
+}
+
+export function switchInvoiceTab() {}
