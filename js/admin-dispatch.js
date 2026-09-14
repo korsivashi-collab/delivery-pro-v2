@@ -5,6 +5,17 @@ import { map, focusMapPosition } from "./admin-map.js";
 import { playBeepSound, getAddressFromCoords } from "./admin-utils.js";
 import { collection, doc, setDoc, updateDoc, deleteDoc, addDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
+// ==========================================
+// 1. 공통 및 관제 지도 제어
+// ==========================================
+window.myMapOverlays = [];
+let territoryMap = null;
+let territoryMarker = null;
+let territoryCircles = [];
+let otherTerritoryOverlays = [];
+let allTerritoriesMap = null;
+let allTerritoriesOverlays = [];
+
 export function forceClearMap() {
     if (window.myMapOverlays) window.myMapOverlays.forEach(ov => ov.setMap(null));
     window.myMapOverlays = [];
@@ -65,6 +76,9 @@ export function renderSidebar() {
     }
 }
 
+// ==========================================
+// 2. 기사 목록 및 배송 현황 렌더링
+// ==========================================
 export function getFilteredVisibleDrivers() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
@@ -284,6 +298,9 @@ export async function removeOrUnlinkDriver(devId, key) {
     try { await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); alert("연결이 해제되었습니다."); } catch (e) { alert("오류: " + e.message); }
 }
 
+// ==========================================
+// 3. 메시지(알림) 센터 및 템플릿
+// ==========================================
 export function renderMessageSidebar() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
@@ -805,7 +822,9 @@ export function drawDriverOnMap(devId) {
     let driverRoute = null;
     if (driver && driver.updatedAt) {
         const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
-        if (isToday || routeDateStr === selectedDate) driverRoute = driver;
+        if (isToday || routeDateStr === selectedDate) {
+            driverRoute = driver;
+        }
     }
     const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
 
@@ -887,7 +906,7 @@ export function setMapPolylineMode(mode) {
         if (m === mode) btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
         else btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition font-black flex items-center gap-1";
     });
-    if (window.mapPlannedPolyline) window.mapPlannedPolyline.setMap(mode === 'all' || mode === 'planned' ? map : null);
+    if (window.mapPlannedPolyline) window.mapPlannedPolyline.setMap(mode === 'all' || window.mapPlannedPolyline.setMap(mode === 'planned' ? map : null));
     if (window.mapCompletedPolyline) window.mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
 }
 
@@ -988,126 +1007,6 @@ export function handleGlobalSearch(query) {
         </div>`;
     });
     dropdown.innerHTML = html; dropdown.classList.remove('hidden');
-}
-
-export function openExcelExportModal() {
-    const today = getLocalDateString();
-    const startInput = document.getElementById('export-start-date');
-    const endInput = document.getElementById('export-end-date');
-    if(startInput) startInput.value = today;
-    if(endInput) endInput.value = today;
-    document.getElementById('excel-export-modal')?.classList.remove('hidden');
-}
-
-export function closeExcelExportModal() {
-    document.getElementById('excel-export-modal')?.classList.add('hidden');
-}
-
-export function executeExcelExport() {
-    const startDateStr = document.getElementById('export-start-date')?.value;
-    const endDateStr = document.getElementById('export-end-date')?.value;
-    const isCompleted = document.getElementById('chk-export-completed')?.checked;
-    const isPending = document.getElementById('chk-export-pending')?.checked;
-    const isCanceled = document.getElementById('chk-export-canceled')?.checked;
-
-    if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
-    if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
-
-    const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
-    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
-
-    const visibleLicenses = getFilteredVisibleDrivers();
-    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
-    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
-
-    const wb = XLSX.utils.book_new();
-    let hasData = false;
-
-    if (isCompleted) {
-        const targetCompletions = state.allCompletions.filter(c => {
-            if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
-            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && !isCancelTag;
-        }).sort((a, b) => a.completedAt - b.completedAt);
-
-        if (targetCompletions.length > 0) {
-            hasData = true;
-            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
-            targetCompletions.forEach((c, idx) => {
-                const dt = new Date(c.completedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음']);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
-        }
-    }
-
-    if (isPending) {
-        let pendingList = [];
-        for (const devId in state.activeRoutes) {
-            if (!visibleDeviceIds.includes(devId)) continue;
-            const driver = state.activeRoutes[devId];
-            if (!driver || !driver.updatedAt) continue;
-
-            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
-                const dests = driver.destinations || [];
-                dests.forEach(d => {
-                    const isDone = state.allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
-                    if (!isDone) pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
-                });
-            }
-        }
-
-        if (pendingList.length > 0) {
-            hasData = true;
-            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
-            pendingList.forEach((p, idx) => {
-                const dt = new Date(p.updatedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)']);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
-            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
-        }
-    }
-
-    if (isCanceled) {
-        const targetCanceled = state.allCompletions.filter(c => {
-            if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
-            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && isCancelTag;
-        }).sort((a, b) => a.completedAt - b.completedAt);
-
-        if (targetCanceled.length > 0) {
-            hasData = true;
-            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
-            targetCanceled.forEach((c, idx) => {
-                const dt = new Date(c.completedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음']);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송취소");
-        }
-    }
-
-    if (!hasData) {
-        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
-        return;
-    }
-
-    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
-    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
-    closeExcelExportModal();
 }
 
 export function handleProFeature(featureName) {
@@ -1236,14 +1135,6 @@ export async function loadExcelFromFirebase() {
         const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
         state.parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
         renderExcelTable();
-    } catch (error) {}
-}
-
-export async function autoSaveExcelToFirebase() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
-    const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
-    try {
-        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: state.parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
     } catch (error) {}
 }
 
@@ -1376,302 +1267,6 @@ async function batchGeocodeExcelList(items) {
     if (dropZone) dropZone.innerHTML = originalDropHtml;
 }
 
-export function exportToInvoiceModal() {
-    state.printReadyList = [...state.parsedExcelList];
-    if (state.printReadyList.length === 0) { alert("출력할 주문건이 없습니다. 엑셀을 먼저 업로드하세요."); return; }
-    
-    closeAutoDispatchModal(); document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
-    document.getElementById('print-ready-count').innerText = state.printReadyList.length;
-    if(window.loadSavedForms) window.loadSavedForms(); 
-    if(window.previewInvoiceRow) window.previewInvoiceRow(0); 
-    if(window.syncPreviewData) window.syncPreviewData();
-}
-
-export function toggleRowCheckbox(e, idx) {
-    if (e && e.target.tagName === 'INPUT') return; 
-    const cb = document.querySelector(`.row-checkbox[data-idx="${idx}"]`); if(cb) cb.checked = !cb.checked;
-}
-export async function deleteExcelRow(idx) {
-    if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
-    state.parsedExcelList.splice(idx, 1); renderExcelTable(); await autoSaveExcelToFirebase();
-}
-export async function deleteSelectedExcelRows() {
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
-    if(checkboxes.length === 0) { alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); return; }
-    if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
-    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
-    state.parsedExcelList = state.parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
-    renderExcelTable(); await autoSaveExcelToFirebase(); 
-}
-export async function clearAllExcelRows() {
-    if(state.parsedExcelList.length === 0) return;
-    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?")) return;
-    state.parsedExcelList = []; renderExcelTable(); await autoSaveExcelToFirebase();
-}
-
-// ==========================================
-// 🌟 엑셀 데이터 자동 저장 및 AI 배차 알고리즘 🌟
-// ==========================================
-export async function autoSaveExcelToFirebase() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
-    const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
-    try {
-        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: state.parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
-    } catch (error) { console.error("자동 저장 실패:", error); }
-}
-
-export async function runAutoDispatchAlgorithm() {
-    const btn = document.getElementById('btn-run-auto-dispatch');
-    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
-        alert("할당할 주문 데이터가 없습니다. 우측 영역에 엑셀 파일을 먼저 업로드해주세요.");
-        return;
-    }
-
-    const drivers = getFilteredVisibleDrivers();
-    const validDrivers = drivers.filter(d => d.territoryLat && d.territoryLng);
-
-    if (validDrivers.length === 0) {
-        alert("배송 권역(위치)이 설정된 기사가 없습니다.\n좌측 기사 목록에서 '권역 설정'을 먼저 진행해주세요.");
-        return;
-    }
-
-    if (btn) { btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 배분 중...'; btn.disabled = true; }
-    
-    // 로딩 체감을 위한 약간의 대기시간
-    await new Promise(r => setTimeout(r, 800));
-
-    let successCount = 0;
-    state.parsedExcelList.forEach((item, index) => {
-        if (item.lat && item.lng) {
-            let minDist = Infinity;
-            let bestDriver = null;
-
-            validDrivers.forEach(d => {
-                const dist = getDistanceFromLatLonInKm(item.lat, item.lng, d.territoryLat, d.territoryLng);
-                if (dist < minDist) {
-                    minDist = dist;
-                    bestDriver = d;
-                }
-            });
-
-            if (bestDriver) {
-                item.assignedDriver = bestDriver.phone || bestDriver.key;
-                item.displayNumber = index + 1;
-                successCount++;
-            }
-        }
-    });
-
-    renderExcelTable();
-    renderDispatchDriverList();
-    if (state.selectedDispatchDriverId) renderDispatchDriverDetail();
-    await autoSaveExcelToFirebase();
-
-    if (btn) { btn.innerHTML = '<i class="fa-solid fa-satellite-dish text-base"></i> 자동할당 실행'; btn.disabled = false; }
-    
-    alert(`[배송 자동할당 완료]\n총 ${state.parsedExcelList.length}건 중 주소(좌표)가 확인된 ${successCount}건이 기사별 권역 거리에 맞춰 최적 배정되었습니다.`);
-}
-
-function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
-    const R = 6371; 
-    const dLat = (lat2-lat1) * (Math.PI/180);
-    const dLon = (lon2-lon1) * (Math.PI/180); 
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
-    return R * c; 
-}
-
-// ==========================================
-// 🌟 기사 연결 팝업 제어 🌟
-// ==========================================
-export function openLinkDriverModal() {
-    const input = document.getElementById('link-driver-key-input');
-    if (input) input.value = '';
-    document.getElementById('link-driver-modal')?.classList.remove('hidden');
-    setTimeout(() => { document.getElementById('link-driver-key-input')?.focus(); }, 100);
-}
-export function closeLinkDriverModal() { document.getElementById('link-driver-modal')?.classList.add('hidden'); }
-export async function confirmLinkDriver() {
-    const rawInput = document.getElementById('link-driver-key-input')?.value.trim().toUpperCase();
-    if (!rawInput) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
-    const currentKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-    try {
-        const cleanDigits = rawInput.replace(/[^0-9]/g, '');
-        const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        let targetLic = state.allLicenses.find(l => {
-            if (l.type === 'dispatch') return false;
-            const lKey = (l.key || '').toUpperCase();
-            const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
-            const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-            return lKey === rawInput || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
-        });
-        if (!targetLic) {
-            let directSnap = await getDoc(doc(db, "licenses", rawInput));
-            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `TRIAL-${rawInput}`));
-            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `PRO-${rawInput}`));
-            if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
-        }
-        if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
-        if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
-            alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
-        }
-        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: currentKey });
-        alert(`[등록 완료] 기사 [${targetLic.phone || targetLic.key}] 님이 연결되었습니다.`);
-        closeLinkDriverModal();
-    } catch (e) { alert("오류: " + e.message); }
-}
-
-// ==========================================
-// 🌟 엑셀 데이터 추출(다운로드) 모달 제어 🌟
-// ==========================================
-export function openExcelExportModal() {
-    const today = getLocalDateString();
-    const startInput = document.getElementById('export-start-date');
-    const endInput = document.getElementById('export-end-date');
-    if(startInput) startInput.value = today;
-    if(endInput) endInput.value = today;
-    document.getElementById('excel-export-modal')?.classList.remove('hidden');
-}
-
-export function closeExcelExportModal() {
-    document.getElementById('excel-export-modal')?.classList.add('hidden');
-}
-
-export function executeExcelExport() {
-    const startDateStr = document.getElementById('export-start-date')?.value;
-    const endDateStr = document.getElementById('export-end-date')?.value;
-    const isCompleted = document.getElementById('chk-export-completed')?.checked;
-    const isPending = document.getElementById('chk-export-pending')?.checked;
-    const isCanceled = document.getElementById('chk-export-canceled')?.checked;
-
-    if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
-    if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
-
-    const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
-    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
-
-    const visibleLicenses = getFilteredVisibleDrivers();
-    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
-    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
-
-    const wb = XLSX.utils.book_new();
-    let hasData = false;
-
-    if (isCompleted) {
-        const targetCompletions = state.allCompletions.filter(c => {
-            if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
-            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && !isCancelTag;
-        }).sort((a, b) => a.completedAt - b.completedAt);
-
-        if (targetCompletions.length > 0) {
-            hasData = true;
-            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
-            targetCompletions.forEach((c, idx) => {
-                const dt = new Date(c.completedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음']);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
-        }
-    }
-
-    if (isPending) {
-        let pendingList = [];
-        for (const devId in state.activeRoutes) {
-            if (!visibleDeviceIds.includes(devId)) continue;
-            const driver = state.activeRoutes[devId];
-            if (!driver || !driver.updatedAt) continue;
-
-            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
-                const dests = driver.destinations || [];
-                dests.forEach(d => {
-                    const isDone = state.allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
-                    if (!isDone) pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
-                });
-            }
-        }
-
-        if (pendingList.length > 0) {
-            hasData = true;
-            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
-            pendingList.forEach((p, idx) => {
-                const dt = new Date(p.updatedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)']);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
-            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
-        }
-    }
-
-    if (isCanceled) {
-        const targetCanceled = state.allCompletions.filter(c => {
-            if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
-            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
-            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
-            return matchesDev && inRange && isCancelTag;
-        }).sort((a, b) => a.completedAt - b.completedAt);
-
-        if (targetCanceled.length > 0) {
-            hasData = true;
-            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
-            targetCanceled.forEach((c, idx) => {
-                const dt = new Date(c.completedAt);
-                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
-                excelData.push([idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음']);
-            });
-            const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
-            XLSX.utils.book_append_sheet(wb, ws, "배송취소");
-        }
-    }
-
-    if (!hasData) {
-        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
-        return;
-    }
-
-    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
-    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
-    closeExcelExportModal();
-}
-
-// 명세서 관련 및 지도 UI 연동용 유틸 함수 모음
-export function previewInvoiceRow(idx) {
-    if (!state.printReadyList || !state.printReadyList[idx]) return;
-    const item = state.printReadyList[idx];
-    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
-    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
-    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
-    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
-    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
-    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
-    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
-    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
-    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
-    
-    let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
-    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
-    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
-    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
-    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
-    document.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
-    syncPreviewData(); 
-}
-
-function formatNumber(num) { if (!num || isNaN(num)) return num || ''; return Number(num).toLocaleString('ko-KR'); }
-
 export function syncPreviewData() {
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const name = document.getElementById('input-prov-name')?.value || '';
@@ -1700,13 +1295,13 @@ export function loadSavedForms() {
         html += `
         <div class="border border-gray-200 bg-white hover:border-indigo-300 rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
-                <input type="checkbox" onchange="selectFormTemplate(${idx})" class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
-                <div class="min-w-0 cursor-pointer flex-1" onclick="selectFormTemplate(${idx})">
+                <input type="checkbox" onchange="window.selectFormTemplate(${idx})" class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="window.selectFormTemplate(${idx})">
                     <p class="text-[11px] font-black text-gray-800 truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
                 </div>
             </div>
-            <button type="button" onclick="deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+            <button type="button" onclick="window.deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
         </div>`;
     });
     listEl.innerHTML = html;
@@ -1754,9 +1349,36 @@ export function deleteSavedForm(idx) {
     loadSavedForms();
 }
 
-export function saveCompanyBaseAddress() {}
-export function clearCompanyBaseAddress() {}
-export function updateCompanyBaseUI(baseData) {}
+export function saveCompanyBaseAddress() {
+    const input = document.getElementById('company-base-address');
+    const addr = input.value.trim();
+    if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
+    const btn = document.getElementById('btn-save-company-base');
+    btn.disabled = true; btn.innerText = "확인중...";
+    getCoordsFromAddress(addr).then(coords => {
+        btn.disabled = false; btn.innerText = "저장";
+        if (!coords) { alert("주소 위치를 찾을 수 없습니다."); return; }
+        const fullAddress = coords.fullAddress || addr;
+        const baseData = { address: fullAddress, lat: coords.lat, lng: coords.lng };
+        localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
+        updateCompanyBaseUI(baseData);
+        input.value = fullAddress; 
+    });
+}
+export function clearCompanyBaseAddress() {
+    localStorage.removeItem('deliveryProCompanyBase');
+    document.getElementById('company-base-address').value = '';
+    updateCompanyBaseUI(null);
+}
+export function updateCompanyBaseUI(baseData) {
+    const textEl = document.getElementById('saved-base-address-text');
+    const clearBtn = document.getElementById('btn-clear-company-base');
+    if (baseData) {
+        textEl.innerText = baseData.address; textEl.classList.add('text-indigo-600'); textEl.classList.remove('text-gray-500'); clearBtn.classList.remove('hidden');
+    } else {
+        textEl.innerText = "저장된 거점이 없습니다."; textEl.classList.add('text-gray-500'); textEl.classList.remove('text-indigo-600'); clearBtn.classList.add('hidden');
+    }
+}
 export function openDriverTerritoryModal() {}
 export function closeDriverTerritoryModal() {}
 export function setTerritoryScale() {}
