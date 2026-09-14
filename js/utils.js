@@ -1,6 +1,5 @@
 // js/utils.js
 
-// 1. 클라이언트단 사진 안전 압축 (왜곡 및 명암 필터 제거)
 export function toBase64_SafeCompress(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -32,7 +31,6 @@ export function toBase64_SafeCompress(file) {
     });
 }
 
-// 2. OCR 텍스트에서 전화번호 추출 로직
 export function extractPhoneLogic(text) {
     if (!text) return null;
     let candidates = [];
@@ -96,7 +94,6 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. OCR 텍스트에서 주소 추출 로직
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
@@ -119,56 +116,44 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 엄격한 상호명·배송지명 추출 로직 (인명/수령인 완벽 차단)
-export function extractStoreNameLogic(fullText, extractedAddress) {
-    if (!fullText || !extractedAddress) return null;
+// 4. 🌟 송장 표 양식 맞춤형 상호명·배송지명 직접 추출 로직
+export function extractStoreNameLogic(fullText) {
+    if (!fullText || typeof fullText !== 'string') return null;
     try {
-        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        
-        const addrSnippet = extractedAddress.substring(0, 8);
-        let targetIndex = lines.findIndex(line => line.includes(addrSnippet));
-        if (targetIndex === -1) {
-            targetIndex = lines.findIndex(line => extractedAddress.includes(line.substring(0, 6)));
-        }
+        // 텍스트 평탄화 (줄바꿈 공백 처리)
+        let flatText = fullText.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
-        let candidateLines = [];
-        if (targetIndex !== -1) {
-            if (targetIndex > 0) candidateLines.push({ text: lines[targetIndex - 1], weight: 2 });
-            if (targetIndex > 1) candidateLines.push({ text: lines[targetIndex - 2], weight: 1 });
-            if (targetIndex < lines.length - 1) candidateLines.push({ text: lines[targetIndex + 1], weight: 1 });
-        } else {
-            lines.forEach(l => candidateLines.push({ text: l, weight: 0 }));
-        }
+        // 1) "배송지명(간판명)" 또는 "상호(법인명)" 같은 레이블 바로 뒤에 오는 상호 패턴 탐색
+        // 예: "배송지명(간판명) 샤브항 홍창역점" 또는 "상호(법인명) 체이아이에치(JH) 컴퍼니"
+        const labelPatterns = [
+            /(?:배송지명|간판명|상호명|상호|법인명|거래처명|납품처)\s*(?:\([가-힣a-zA-Z\s]+\))?\s*[:\-]?\s*([가-힣a-zA-Z0-9\(\)\-\.\s]{2,25})/g
+        ];
 
-        // 🛑 [필터 1] 절대 상호로 보면 안 되는 수령인/인명 관련 레이블 및 단어
-        const excludeKeywords = /성명|받는분|수령인|고객명|고객|담당자|연락처|전화번호|핸드폰|주소|소재지/i;
-        
-        // ✅ [필터 2] 상호/배송지명임을 명확히 보장하는 레이블
-        const explicitStoreLabelRegex = /^(상호|상호명|거래처|거래처명|납품처|현장|현장명|매장|매장명|업체명|배송지)[\s:]+(.+)$/;
-        
-        // ✅ [필터 3] 상호 특유의 업종/법인 키워드
-        const storeKeywords = /(주)|마트|상회|상사|유통|식당|가든|카페|커피|베이커리|클리닉|센터|빌딩|타워|오피스|공사|현장|스토어|약국|병원|학원|구내식당|상가|공업|농원|축산|영농|조합|건설|기업|상사|엔지니어링|물류|종합/i;
-
-        for (let cand of candidateLines) {
-            let txt = cand.text;
-            
-            // 제외 키워드가 포함된 줄은 무조건 스킵 (예: "성명: 홍길동" 등)
-            if (excludeKeywords.test(txt)) continue;
-
-            // 전화번호, 사업자번호, 주소 형태인 경우 스킵
-            if (txt.includes('010-') || txt.includes('사업자') || txt.length < 2) continue;
-            if (txt.includes('시 ') || txt.includes('구 ') || txt.includes('로 ') || txt.includes('길 ')) continue;
-
-            // 1) 명시적 상호 레이블이 있는 경우 (예: "거래처: OO상사" -> "OO상사")
-            let match = txt.match(explicitStoreLabelRegex);
-            if (match && match[2].trim().length > 1) {
-                let cleaned = match[2].trim();
-                if (!excludeKeywords.test(cleaned)) return cleaned;
+        for (let pat of labelPatterns) {
+            let matches = [...flatText.matchAll(pat)];
+            if (matches && matches.length > 0) {
+                // 가장 마지막에 매칭된 유효한 상호 선택
+                for (let i = matches.length - 1; i >= 0; i--) {
+                    let candidate = matches[i][1].trim();
+                    // 수령인/전화번호 등 제외 키워드 체크
+                    if (/성명|받는분|수령인|고객명|전화번호|010-/.test(candidate)) continue;
+                    if (candidate.length >= 2) {
+                        return candidate.replace(/\s+/g, ' ');
+                    }
+                }
             }
+        }
 
-            // 2) 상호 키워드가 포함되어 있는 경우 상호로 인정
-            if (storeKeywords.test(txt)) {
-                return txt.replace(/^[^가-힣a-zA-Z0-9]+/, '').trim();
+        // 2) 레이블이 명확하지 않은 경우, 줄 단위로 순회하며 상호 키워드 탐색
+        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        const storeKeywords = /(주)|마트|상회|상사|유통|식당|가든|카페|커피|베이커리|클리닉|센터|빌딩|타워|오피스|공사|현장|스토어|약국|병원|학원|구내식당|상가|공업|농원|축산|영농|조합|건설|기업|엔지니어링|물류|종합|점$/i;
+
+        for (let line of lines) {
+            if (/성명|받는분|수령인|고객명|전화번호|010-|사업자등록번호|단가|수량|공급가액/.test(line)) continue;
+            if (line.includes('시 ') || line.includes('구 ') || line.includes('로 ') || line.includes('길 ')) continue;
+            
+            if (storeKeywords.test(line) && line.length >= 2 && line.length <= 25) {
+                return line.replace(/^[^가-힣a-zA-Z0-9]+/, '').trim();
             }
         }
 
