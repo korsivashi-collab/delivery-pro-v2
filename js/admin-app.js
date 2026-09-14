@@ -1,14 +1,11 @@
 // js/admin-app.js
+import { db, storage, generateSecureKey } from "./admin-api.js";
+import { initKakaoMap, map, focusMapPosition } from "./admin-map.js";
+import { playBeepSound, getAddressFromCoords, downloadDispatchExcel as utilDownloadExcel } from "./admin-utils.js";
+import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
+import { collection, doc, setDoc, getDoc, onSnapshot, query, orderBy, updateDoc, deleteDoc, addDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
-// ==========================================
-// 1. 모듈 가져오기 (Imports)
-// ==========================================
-import { db } from "./admin-api.js";
-import { doc, getDoc, onSnapshot, collection, query, orderBy, updateDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
-import { initKakaoMap, focusMapPosition } from "./admin-map.js";
-import { state, todayStr, getLocalDateString } from "./admin-state.js";
-
-// [마스터 기능 모듈]
+// [마스터 기능 모듈 가져오기]
 import {
     switchMasterTab, changeMasterTabPagination, renderMasterTables,
     generateNewLicense, openEditLicenseModal, closeEditModal,
@@ -23,7 +20,7 @@ import {
     closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
 } from "./admin-master.js";
 
-// [관제 기능 모듈]
+// [관제 기능 모듈 가져오기 (추출 및 자동배차 포함)]
 import {
     forceClearMap, setDispatchMode, renderSidebar, getFilteredVisibleDrivers,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView,
@@ -38,7 +35,7 @@ import {
     drawAllDriversOnMap, fitMapToAllDrivers, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, 
-    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver, // 👈 추가된 기사 연결 함수들 임포트
+    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver,
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
     renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
     loadExcelFromFirebase, autoSaveExcelToFirebase, renderExcelTable, processExcelData,
@@ -48,29 +45,67 @@ import {
     clearCompanyBaseAddress, updateCompanyBaseUI, openDriverTerritoryModal,
     closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
     openAllTerritoriesMap, closeAllTerritoriesMap, executeBatchPrint, selectFormTemplate,
-    cancelProviderFormEdit, saveProviderForm, deleteSavedForm
+    cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
+    openExcelExportModal, closeExcelExportModal, executeExcelExport, runAutoDispatchAlgorithm // 👈 복구된 모듈들
 } from "./admin-dispatch.js";
 
-// ==========================================
-// 2. 초기화 및 인증 관리 (App Lifecycle)
-// ==========================================
+// === 전역 상태 관리 변수 ===
+let currentUserRole = null;
+let allLicenses = [];
+let allMemos = [];
+let activeRoutes = {};
+let allCompletions = [];
+let allDispatchMessages = [];
+let allDispatchTemplates = [];
+
+let dispatchNavState = 'DELIVERY';
+window.dispatchNavState = dispatchNavState;
+let dispatchDetailTab = 'ROUTE';
+window.dispatchDetailTab = dispatchDetailTab;
+let currentMapPolylineMode = 'all';
+let selectedDeviceId = null;
+
+window.myMapOverlays = [];
+window.forceClearMap = forceClearMap;
+
+window.masterPages = { regular: 1, trial: 1, dispatch: 1, memos: 1 };
+window.historySortField = 'originalIndex';
+window.historySortAsc = true;
+window.historyAccountTypeFilter = 'ALL';
+window.currentSelectedAccountKey = '';
+window.historyMasterSubTab = 'ALL';
+window.historyCurrentPage = 1;
+
+window.historyNoticeMode = false;
+window.historySelectedAccountKeys = new Set();
+window.selectedMessageDrivers = new Set();
+let activeDispatchPopupMsgId = null;
+
+function getLocalDateString(d = new Date()) {
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+const todayStr = getLocalDateString();
+
+// === 1. 초기화 및 로그인/로그아웃 ===
 window.onload = () => {
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
-    
-    const assignDateInput = document.getElementById('dispatch-assign-date');
-    if (assignDateInput) {
-        assignDateInput.value = todayStr;
-        assignDateInput.onchange = () => { window.loadExcelFromFirebase(); };
-    }
 
     const defaultExpire = new Date();
     defaultExpire.setDate(defaultExpire.getDate() + 30);
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
-    if (typeof loadSavedForms === 'function') loadSavedForms();
-    if (typeof initExcelDropZone === 'function') initExcelDropZone(); 
+    window.loadSavedForms();
+
+    setTimeout(() => {
+        const printBtn = Array.from(document.querySelectorAll('button')).find(b => b.innerText.includes('일괄 출력'));
+        if (printBtn) printBtn.onclick = window.executeBatchPrint;
+        
+        // 🌟 자동 할당 버튼에 실제 알고리즘 함수 바인딩
+        const btnRunAi = document.getElementById('btn-run-auto-dispatch');
+        if (btnRunAi) btnRunAi.onclick = window.runAutoDispatchAlgorithm;
+    }, 1000);
 
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
@@ -141,28 +176,24 @@ window.handleSingleKeyLogin = async function() {
     }
 };
 
-window.systemLogout = function() {
-    sessionStorage.clear();
-    window.location.reload();
-};
+window.systemLogout = function() { sessionStorage.clear(); window.location.reload(); };
 
-window.showMasterPanel = function(name = '마스터') {
-    state.currentUserRole = 'MASTER';
+function showMasterPanel(name = '마스터') {
+    currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
     if (badge) badge.innerText = name;
     
     document.getElementById('login-screen').classList.add('hidden');
-    const disp = document.getElementById('dispatch-panel');
-    if (disp) { disp.classList.add('hidden'); disp.classList.remove('flex'); }
+    document.getElementById('dispatch-panel')?.classList.add('hidden');
     const mast = document.getElementById('master-panel');
     if (mast) { mast.classList.remove('hidden'); mast.classList.add('flex'); }
     
-    window.initMasterDataSync();
-    switchMasterTab('regular');
-};
+    initMasterDataSync();
+    window.switchMasterTab('regular');
+}
 
-window.showDispatchPanel = function() {
-    state.currentUserRole = 'DISPATCH';
+function showDispatchPanel() {
+    currentUserRole = 'DISPATCH';
     document.getElementById('login-screen').classList.add('hidden');
     document.getElementById('dispatch-panel').classList.remove('hidden');
     document.getElementById('dispatch-panel').classList.add('flex');
@@ -176,81 +207,114 @@ window.showDispatchPanel = function() {
             document.getElementById('dispatch-sub-title').innerText = `관제 센터 [${currentKey}]`;
         }
     }
-    if(typeof initKakaoMap === 'function') initKakaoMap();
-    window.initMasterDataSync();
-    setDispatchMode('DELIVERY');
-};
+    initKakaoMap();
+    initRealtimeSync();
+    window.setDispatchMode('DELIVERY');
+}
 
-// ==========================================
-// 3. 실시간 데이터 동기화 (Firestore Listeners)
-// ==========================================
-window.initMasterDataSync = function() {
+function initMasterDataSync() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
-        state.allLicenses = [];
-        snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        
-        renderMasterTables();
-        populateDriverSelect();
-        renderAccountHistoryView();
-        renderSidebar();
-        
+        allLicenses = [];
+        snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderMasterTables();
+        window.populateDriverSelect();
+        window.renderAccountHistoryView();
         const curKey = document.getElementById('edit-orig-key')?.value;
         if (curKey) {
-            const target = state.allLicenses.find(l => l.key === curKey);
-            if (target && target.type === 'dispatch') renderModalConnectedDrivers(target.key);
-        }
-
-        if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
-            renderDispatchDriverList();
-            renderDispatchDriverDetail();
+            const target = allLicenses.find(l => l.key === curKey);
+            if (target && target.type === 'dispatch') window.renderModalConnectedDrivers(target.key);
         }
     });
 
     onSnapshot(collection(db, "memos"), (snapshot) => {
-        state.allMemos = [];
-        snapshot.forEach(docSnap => { state.allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
+        allMemos = [];
+        snapshot.forEach(docSnap => { allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
         const countMemosEl = document.getElementById('count-memos');
-        if (countMemosEl) countMemosEl.innerText = state.allMemos.length;
-        renderMemosTable(state.allMemos);
-        renderAccountHistoryView();
+        if (countMemosEl) countMemosEl.innerText = allMemos.length;
+        window.renderMemosTable(allMemos);
+        window.renderAccountHistoryView();
     });
 
     onSnapshot(collection(db, "routes"), (snapshot) => {
-        state.activeRoutes = {};
-        snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
-        renderSidebar();
-        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') drawDriverOnMap(state.selectedDeviceId);
-        populateDriverSelect();
-        renderAccountHistoryView();
+        activeRoutes = {};
+        snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
+        window.renderSidebar();
+        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
+        window.populateDriverSelect();
+        window.renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
-        state.allCompletions = [];
-        snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderSidebar();
-        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') drawDriverOnMap(state.selectedDeviceId);
-        renderAccountHistoryView();
+        allCompletions = [];
+        snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderSidebar();
+        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
+        window.renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
-        state.allDispatchMessages = [];
-        snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderMessageFeed();
-        checkDispatchInboxNotifications();
-        renderMasterNoticeHistoryList();
+        allDispatchMessages = [];
+        snapshot.forEach(docSnap => { allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderMessageFeed(); window.checkDispatchInboxNotifications(); window.renderMasterNoticeHistoryList();
     });
 
     onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
-        state.allDispatchTemplates = [];
-        snapshot.forEach(docSnap => { state.allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderCustomTemplates();
+        allDispatchTemplates = [];
+        snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderCustomTemplates();
     });
-};
+}
+
+function initRealtimeSync() {
+    onSnapshot(collection(db, "licenses"), (snapshot) => {
+        allLicenses = [];
+        snapshot.forEach(docSnap => { allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
+        if (currentUserRole === 'DISPATCH') {
+            const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+            const localToken = sessionStorage.getItem('deliveryProSessionToken');
+            if (dispatchKey && localToken) {
+                const myLic = allLicenses.find(l => l.id === dispatchKey || l.key === dispatchKey);
+                if (myLic && myLic.currentSessionToken && myLic.currentSessionToken !== localToken) {
+                    if (!localToken.startsWith('MONITOR-')) {
+                        alert("⚠️ [중복 로그인 감지]\n다른 PC 또는 브라우저에서 동일한 관제 계정으로 로그인하여 현재 연결이 종료됩니다.");
+                        sessionStorage.clear(); window.location.reload();
+                    }
+                }
+            }
+        }
+        window.renderSidebar();
+    });
+
+    onSnapshot(collection(db, "routes"), (snapshot) => {
+        activeRoutes = {};
+        snapshot.forEach(docSnap => { activeRoutes[docSnap.id] = docSnap.data(); });
+        window.renderSidebar();
+        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
+    });
+
+    onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
+        allCompletions = [];
+        snapshot.forEach(docSnap => { allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderSidebar();
+        if (selectedDeviceId && dispatchNavState === 'DELIVERY') window.drawDriverOnMap(selectedDeviceId);
+    });
+
+    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
+        allDispatchMessages = [];
+        snapshot.forEach(docSnap => { allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderMessageFeed(); window.checkDispatchInboxNotifications(); window.renderMasterNoticeHistoryList();
+    });
+
+    onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
+        allDispatchTemplates = [];
+        snapshot.forEach(docSnap => { allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
+        window.renderCustomTemplates();
+    });
+}
 
 // ==========================================
-// 4. HTML 인라인 이벤트 바인딩 (window 객체 연결)
+// 함수 바인딩 (window 객체 연결)
 // ==========================================
-// 마스터 대시보드 관련
 window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
 window.generateNewLicense = generateNewLicense;
@@ -261,9 +325,11 @@ window.unlinkDriverFromModal = unlinkDriverFromModal;
 window.saveLicenseEdit = saveLicenseEdit;
 window.deleteLicense = deleteLicense;
 window.deleteLicenseFromModal = deleteLicenseFromModal;
+window.renderMemosTable = renderMemosTable;
 window.deleteParkingMemo = deleteParkingMemo;
 window.setHistorySort = setHistorySort;
 window.setHistoryAccountTypeFilter = setHistoryAccountTypeFilter;
+window.populateDriverSelect = populateDriverSelect;
 window.filterDriverDropdown = filterDriverDropdown;
 window.onDriverSelectChange = onDriverSelectChange;
 window.selectAccountDirectly = selectAccountDirectly;
@@ -277,29 +343,44 @@ window.setHistoryMasterSubTab = setHistoryMasterSubTab;
 window.deleteAccountFromHistory = deleteAccountFromHistory;
 window.openMasterNoticeHistoryModal = openMasterNoticeHistoryModal;
 window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
+window.renderMasterTables = renderMasterTables;
+window.renderAccountHistoryView = renderAccountHistoryView;
 
-// 관제(Dispatch) 및 PRO 기능 관련
 window.setDispatchMode = setDispatchMode;
+window.renderSidebar = renderSidebar;
+window.getFilteredVisibleDrivers = getFilteredVisibleDrivers;
+window.renderDriverListView = renderDriverListView;
 window.setDispatchDetailTab = setDispatchDetailTab;
+window.renderDriverDetailView = renderDriverDetailView;
 window.selectDriver = selectDriver;
 window.clearSelectedDriver = clearSelectedDriver;
 window.removeOrUnlinkDriver = removeOrUnlinkDriver;
+window.renderMessageSidebar = renderMessageSidebar;
 window.toggleMessageDriver = toggleMessageDriver;
 window.toggleAllMessageSelection = toggleAllMessageSelection;
+window.updateMessageCharCount = updateMessageCharCount;
 window.sendDispatchMessage = sendDispatchMessage;
 window.deleteDispatchMessage = deleteDispatchMessage;
+window.renderMessageFeed = renderMessageFeed;
 window.saveCustomTemplate = saveCustomTemplate;
 window.insertCustomTemplate = insertCustomTemplate;
 window.deleteCustomTemplate = deleteCustomTemplate;
+window.renderCustomTemplates = renderCustomTemplates;
+window.showDispatchPopupAlert = showDispatchPopupAlert;
 window.closeDispatchPopupAlertModal = closeDispatchPopupAlertModal;
+window.checkDispatchInboxNotifications = checkDispatchInboxNotifications;
 window.openDispatchInboxModal = openDispatchInboxModal;
 window.closeDispatchInboxModal = closeDispatchInboxModal;
 window.deleteNoticeFromDispatchInbox = deleteNoticeFromDispatchInbox;
 window.clearAllDispatchInbox = clearAllDispatchInbox;
+window.renderLocationSidebar = renderLocationSidebar;
 window.jumpToDriverDelivery = jumpToDriverDelivery;
 window.focusDriverLocationOnMap = focusDriverLocationOnMap;
+window.showFallbackLocation = showFallbackLocation;
 window.closeCurrentLocationOverlay = closeCurrentLocationOverlay;
+window.drawAllDriversOnMap = drawAllDriversOnMap;
 window.fitMapToAllDrivers = fitMapToAllDrivers;
+window.drawDriverOnMap = drawDriverOnMap;
 window.setMapPolylineMode = setMapPolylineMode;
 window.changeDispatchDate = changeDispatchDate;
 window.onDispatchDateChange = onDispatchDateChange;
@@ -308,11 +389,8 @@ window.clearSearchInput = clearSearchInput;
 window.jumpToDeliveryTarget = jumpToDeliveryTarget;
 window.handleGlobalSearch = handleGlobalSearch;
 window.openLinkDriverModal = openLinkDriverModal;
-window.closeLinkDriverModal = closeLinkDriverModal; // 👈 닫기 바인딩 추가
-window.confirmLinkDriver = confirmLinkDriver;     // 👈 [필수] 기사 연결 확인 바인딩 추가
-window.focusMapPosition = focusMapPosition;
-
-// --- PRO 기능 바인딩 ---
+window.closeLinkDriverModal = closeLinkDriverModal;
+window.confirmLinkDriver = confirmLinkDriver;
 window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
 window.closeProInvoiceModal = closeProInvoiceModal;
@@ -350,3 +428,7 @@ window.selectFormTemplate = selectFormTemplate;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
 window.deleteSavedForm = deleteSavedForm;
+window.openExcelExportModal = openExcelExportModal;
+window.closeExcelExportModal = closeExcelExportModal;
+window.executeExcelExport = executeExcelExport;
+window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
