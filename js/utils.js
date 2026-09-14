@@ -119,61 +119,66 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 정확한 레이블(배송지명, 간판명 등) 뒤에 오는 실제 상호 데이터만 타겟팅하는 추출 로직
+// 4. 🌟 '스마트 스킵' 기반 상호명 추출 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        let tokens = fullText.split(/[\s\n]+/);
-        
-        // 상호/배송지명을 나타내는 핵심 타겟 레이블
         const targetKeywords = ['배송지명', '간판명', '상호명', '상호'];
-        // 데이터 수집을 중단해야 하는 다른 항목의 레이블들
-        const stopKeywords = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '합계', '단가', '수량'];
+        // OCR이 뒤섞어놓는 불필요한 라벨(항목명) 필터링 목록 강화 ('공급받는자' 등 추가)
+        const skipLabels = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '합계', '단가', '수량', '공급받는자', '공급자', '보관용', '제조사', '원산지', '국내산', '총액', '비고'];
+
+        // 주소, 전화번호, 단순 숫자, 우편번호인지를 판별하여 무시하도록 돕는 헬퍼 함수
+        const isJunkOrAddress = (str) => {
+            let s = str.replace(/[\(\)\[\]\,\-\.]/g, '').trim();
+            if (/^\d+$/.test(s)) return true; // 순수 숫자 (우편번호 등)
+            if (/^010|^050|^070|^02|^0[3-9]\d/.test(s) && s.length >= 8) return true; // 전화번호 형태
+            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(str)) return true; // 광역 지명
+            if (/^[가-힣]+(시|구|군|동|읍|면|로|길)\b/.test(str) && !str.includes('점')) return true; // 주소 조각 (단, '역점', '수점' 같은 지점명 제외)
+            if (/^\d+층$/.test(str) || /^\[\d{5}\]$/.test(str) || /^\(\d{5}\)$/.test(str)) return true; // 층수/우편번호
+            return false;
+        };
+
+        let tokens = fullText.split(/[\s\n]+/);
 
         for (let i = 0; i < tokens.length; i++) {
-            let token = tokens[i].trim();
-            let isTarget = targetKeywords.some(kw => token.includes(kw));
+            let isTarget = targetKeywords.some(kw => tokens[i].includes(kw));
 
             if (isTarget) {
                 let collected = [];
-                // 타겟 레이블 바로 다음 토큰부터 최대 5개 단어 수집
-                for (let j = i + 1; j < Math.min(i + 6, tokens.length); j++) {
-                    let nextTok = tokens[j].trim();
-                    if (!nextTok) continue;
-                    // 다른 항목 레이블이나 전화번호, 주소 형태를 만나면 수집 중단
-                    if (stopKeywords.some(skw => nextTok.includes(skw))) break;
-                    if (/^010-|^\d{8,}|서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주/.test(nextTok)) break;
-                    
-                    collected.push(nextTok);
+                // 키워드 발견 후 최대 20개의 다음 단어들을 스캔 (OCR이 섞어둔 단어들을 넘어가기 위함)
+                for (let j = i + 1; j < Math.min(i + 20, tokens.length); j++) {
+                    let tok = tokens[j].trim();
+                    if (!tok) continue;
+
+                    let cleanTok = tok.replace(/[\(\)\[\]]/g, '');
+                    let isSkipLabel = skipLabels.some(skw => cleanTok.includes(skw));
+                    let isJunk = isJunkOrAddress(tok);
+
+                    // 만약 쓸데없는 라벨(연락처 등)이나 숫자, 주소가 나오면
+                    if (isSkipLabel || isJunk) {
+                        if (collected.length === 0) {
+                            // 1. 아직 진짜 상호명을 못 찾았다면? -> 그냥 무시하고 다음 단어로 전진 (이게 핵심입니다!)
+                            continue;
+                        } else {
+                            // 2. 이미 상호명(예: 샤브항)을 찾고 있었는데 연락처가 나왔다? -> 수집 종료
+                            break;
+                        }
+                    }
+
+                    // 위 필터를 통과한 알짜배기 텍스트만 모음
+                    collected.push(tok);
                 }
 
+                // 텍스트 정제 후 반환
                 if (collected.length > 0) {
                     let candidate = collected.join(' ').replace(/[\(\)\:\-\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
-                    candidate = candidate.replace(/간판명|배송지명/g, '').trim();
+                    candidate = candidate.replace(/간판명|배송지명|상호명/g, '').trim();
                     if (candidate.length >= 2) {
                         return candidate;
                     }
                 }
             }
         }
-
-        // 백업 라인 단위 검색
-        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        for (let line of lines) {
-            if (line.includes('배송지명') || line.includes('간판명') || line.includes('상호')) {
-                let cleaned = line
-                    .replace(/.*(?:배송지명|간판명|상호명|상호)\s*[\(\)\:\-\s]*/, '')
-                    .replace(/연락처|전화번호|주소|구매자명.*/g, '')
-                    .replace(/[\(\)\:\-\[\]]/g, ' ')
-                    .replace(/\s+/g, ' ')
-                    .trim();
-                
-                if (cleaned.length >= 2 && !cleaned.includes('서울') && !cleaned.includes('마포구')) {
-                    return cleaned;
-                }
-            }
-        }
-
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
