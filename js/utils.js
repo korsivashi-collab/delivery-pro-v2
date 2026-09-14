@@ -1,5 +1,6 @@
 // js/utils.js
 
+// 1. 클라이언트단 사진 안전 압축 (왜곡 및 명암 필터 제거)
 export function toBase64_SafeCompress(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -31,6 +32,7 @@ export function toBase64_SafeCompress(file) {
     });
 }
 
+// 2. OCR 텍스트에서 전화번호 추출 로직 (기존 유지)
 export function extractPhoneLogic(text) {
     if (!text) return null;
     let candidates = [];
@@ -94,6 +96,7 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
+// 3. OCR 텍스트에서 주소 추출 로직 (기존 유지)
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
@@ -116,49 +119,54 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 송장 표 양식 맞춤형 상호명·배송지명 직접 추출 로직
+// 4. 🌟 사용자 지정 필터링 단어 기반 상호명·배송지명 추출 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        // 텍스트 평탄화 (줄바꿈 공백 처리)
         let flatText = fullText.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
-        // 1) "배송지명(간판명)" 또는 "상호(법인명)" 같은 레이블 바로 뒤에 오는 상호 패턴 탐색
-        // 예: "배송지명(간판명) 샤브항 홍창역점" 또는 "상호(법인명) 체이아이에치(JH) 컴퍼니"
-        const labelPatterns = [
-            /(?:배송지명|간판명|상호명|상호|법인명|거래처명|납품처)\s*(?:\([가-힣a-zA-Z\s]+\))?\s*[:\-]?\s*([가-힣a-zA-Z0-9\(\)\-\.\s]{2,25})/g
-        ];
+        // 사용자가 지정한 7가지 필터링 단어 정의
+        // (배송, 상호, 간판, 법인, 거래처, 도착, 회사)
+        const allowedFilters = ['배송', '상호', '간판', '법인', '거래처', '도착', '회사'];
 
-        for (let pat of labelPatterns) {
-            let matches = [...flatText.matchAll(pat)];
-            if (matches && matches.length > 0) {
-                // 가장 마지막에 매칭된 유효한 상호 선택
-                for (let i = matches.length - 1; i >= 0; i--) {
-                    let candidate = matches[i][1].trim();
-                    // 수령인/전화번호 등 제외 키워드 체크
-                    if (/성명|받는분|수령인|고객명|전화번호|010-/.test(candidate)) continue;
-                    if (candidate.length >= 2) {
-                        return candidate.replace(/\s+/g, ' ');
-                    }
+        // 정규식 패턴 생성: 지정된 필터 단어 뒤에 오는 텍스트 블록 타겟팅
+        const filterPattern = new RegExp(`(?:${allowedFilters.join('|')})(?:지|명|처|장)?\\s*[\\:\\-\\s]?\\s*([가-힣a-zA-Z0-9\\(\\)\\-\\.\\s]{2,25})`, 'g');
+
+        let matches = [...flatText.matchAll(filterPattern)];
+        if (matches && matches.length > 0) {
+            for (let i = matches.length - 1; i >= 0; i--) {
+                let candidate = matches[i][1].trim();
+                // 성명, 받는분 등 불필요한 단어가 포함되어 있으면 제외
+                if (/성명|받는분|수령인|고객명|전화번호|010-/.test(candidate)) continue;
+                if (candidate.length >= 2) {
+                    return candidate.replace(/\s+/g, ' ');
                 }
             }
         }
 
-        // 2) 레이블이 명확하지 않은 경우, 줄 단위로 순회하며 상호 키워드 탐색
+        // 라인 단위 백업 검사: 지정된 필터 단어가 포함된 라인이 있는지 확인
         const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        const storeKeywords = /(주)|마트|상회|상사|유통|식당|가든|카페|커피|베이커리|클리닉|센터|빌딩|타워|오피스|공사|현장|스토어|약국|병원|학원|구내식당|상가|공업|농원|축산|영농|조합|건설|기업|엔지니어링|물류|종합|점$/i;
-
         for (let line of lines) {
-            if (/성명|받는분|수령인|고객명|전화번호|010-|사업자등록번호|단가|수량|공급가액/.test(line)) continue;
-            if (line.includes('시 ') || line.includes('구 ') || line.includes('로 ') || line.includes('길 ')) continue;
-            
-            if (storeKeywords.test(line) && line.length >= 2 && line.length <= 25) {
-                return line.replace(/^[^가-힣a-zA-Z0-9]+/, '').trim();
+            let matchedKeyword = allowedFilters.find(kw => line.includes(kw));
+            if (matchedKeyword) {
+                if (/성명|받는분|수령인|고객명|전화번호|010-|사업자등록번호/.test(line)) continue;
+                
+                let cleaned = line;
+                allowedFilters.forEach(kw => {
+                    cleaned = cleaned.replace(new RegExp(`${kw}(?:지|명|처|장)?`, 'g'), '');
+                });
+                cleaned = cleaned.replace(/[\:\-\(\)]+/g, ' ').trim();
+                
+                if (cleaned.length >= 2 && !cleaned.includes('시 ') && !cleaned.includes('로 ')) {
+                    return cleaned.replace(/\s+/g, ' ');
+                }
             }
         }
 
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
+
+    // 🛑 지정된 필터링 단어에 걸리는 것이 없다면 무시하고 null 반환
     return null;
 }
