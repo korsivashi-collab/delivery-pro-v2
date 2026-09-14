@@ -83,6 +83,15 @@ export async function initApp() {
     startGpsWatcher();
     checkUnreadNotices();
     
+    // 메모 글자 수 카운터 이벤트 바인딩 (수정된 부분)
+    const memoInputEl = document.getElementById('memo-input');
+    if (memoInputEl) {
+        memoInputEl.addEventListener('input', function() {
+            const countEl = document.getElementById('memo-char-count');
+            if (countEl) countEl.innerText = `${this.value.length} / 30`;
+        });
+    }
+    
     // 카메라/스캔 및 사진 완료 전송 초기화
     initCameraScan();
     initPhotoCompletion(); 
@@ -155,6 +164,13 @@ function startLicenseRealtimeWatcher(key) {
     licenseWatcherUnsub = watchLicenseStatus(key, (status, msg) => {
         alert(`⚠️ [라이선스 알림]\n${msg}`);
         clearAuthStorage();
+        
+        // 🌟 수정된 부분: 계정 삭제 감지 시 화면을 즉시 로그인 창으로 덮어 강제 로그아웃 체감 강화
+        const mainApp = document.getElementById('main-app');
+        const authScreen = document.getElementById('auth-screen');
+        if (mainApp) { mainApp.classList.add('hidden'); mainApp.classList.remove('flex'); }
+        if (authScreen) authScreen.classList.remove('hidden');
+        
         window.location.reload();
     }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
@@ -237,7 +253,6 @@ export async function verifyLicense() {
     }
 
     try {
-        // 서버/API 통신 호출
         const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId);
         
         if (res && res.valid) {
@@ -890,7 +905,25 @@ export function openKakaoNaviDirect(lat, lng, name) {
     else alert("카카오 내비 모듈 오류입니다.");
 }
 
-// 주차 메모 모달 제어 함수들
+// 주차 메모 모달 제어 함수들 (🌟 1번 누락 수정 완료)
+export function selectHeightTag(btn, val) {
+    const isActive = btn.dataset.active === "true";
+    document.querySelectorAll('.height-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
+    if (isActive) { selectedHeightText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedHeightText = `[주차장 높이 ${val}]`; }
+}
+
+export function selectTimeTag(btn, val) {
+    const isActive = btn.dataset.active === "true";
+    document.querySelectorAll('.time-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
+    if (isActive) { selectedTimeText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedTimeText = `[무료 회차 시간 ${val}]`; }
+}
+
+export function toggleEtcTag(btn) {
+    const isActive = btn.dataset.active === "true";
+    if (isActive) { btn.dataset.active = "false"; btn.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); btn.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); } 
+    else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); }
+}
+
 export async function openMemoModal(id) {
     const item = destinations.find(d => d.id === id); if (!item) return; currentMemoAddress = item.address;
     const titleEl = document.getElementById('memo-modal-title');
@@ -982,24 +1015,6 @@ function resetMemoForm() {
     const countEl = document.getElementById('memo-char-count');
     if (memoInput) memoInput.value = ""; 
     if (countEl) countEl.innerText = "0 / 30";
-}
-
-export function selectHeightTag(btn, val) {
-    const isActive = btn.dataset.active === "true";
-    document.querySelectorAll('.height-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
-    if (isActive) { selectedHeightText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedHeightText = `[주차장 높이 ${val}]`; }
-}
-
-export function selectTimeTag(btn, val) {
-    const isActive = btn.dataset.active === "true";
-    document.querySelectorAll('.time-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
-    if (isActive) { selectedTimeText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedTimeText = `[무료 회차 시간 ${val}]`; }
-}
-
-export function toggleEtcTag(btn) {
-    const isActive = btn.dataset.active === "true";
-    if (isActive) { btn.dataset.active = "false"; btn.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); btn.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); } 
-    else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); }
 }
 
 export async function saveCurrentMemo() {
@@ -1370,9 +1385,8 @@ export function initCameraScan() {
         let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
         showLoading("사진 판독 중...");
         try {
-            const arrayBuffer = await file.arrayBuffer();
-            const cleanBlob = new Blob([arrayBuffer], { type: file.type || 'image/jpeg' });
-            const base64Image = await toBase64_SafeCompress(cleanBlob);
+            // 🌟 3번 수정: 모바일 사진 EXIF 회전 문제를 방지하는 안전 압축(toBase64_SafeCompress) 사용
+            const base64Image = await toBase64_SafeCompress(file);
             const imageContent = base64Image.split(',')[1];
             rawOCRText = await performOCR(imageContent);
             addressStr = extractAddressLogic(rawOCRText);
@@ -1423,7 +1437,6 @@ export function initCameraScan() {
     });
 }
 
-// 사진 전송 및 완료 처리 이벤트 리스너 (원본 정상 작동 방식과 일치)
 export function initPhotoCompletion() {
     const photoInput = document.getElementById('completion-photo-input');
     if (!photoInput) return;
@@ -1437,10 +1450,7 @@ export function initPhotoCompletion() {
         showLoading("사진 압축 및 서버 전송 중...");
         try {
             const deviceId = getOrCreateDeviceId();
-            
-            // 원본과 동일하게 순수 file 객체와 deviceId를 정확한 순서로 전달
             const photoUrl = await firebaseUploadDeliveryPhoto(file, deviceId);
-            
             await confirmCompletion(photoUrl);
         } catch (err) {
             hideLoading();
@@ -1451,7 +1461,7 @@ export function initPhotoCompletion() {
     });
 }
 
-// HTML과의 연결을 위한 전역 바인딩
+// 🌟 HTML과의 연결을 위한 전역 바인딩 (1번 수정: 누락된 메모 함수들 추가)
 window.logout = logout;
 window.renderList = renderList;
 window.verifyLicense = verifyLicense;
@@ -1487,6 +1497,11 @@ window.selectStartDest = selectStartDest;
 window.closeDispatchAlertModal = closeDispatchAlertModal;
 window.optimizeRoute = optimizeRouteAction;
 window.initPhotoCompletion = initPhotoCompletion;
+
+// 추가된 메모 보조 함수들
+window.selectHeightTag = selectHeightTag;
+window.selectTimeTag = selectTimeTag;
+window.toggleEtcTag = toggleEtcTag;
 
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
