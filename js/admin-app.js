@@ -23,7 +23,7 @@ import {
     closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
 } from "./admin-master.js";
 
-// [관제 기능 모듈 - 실제 사용하는 핵심 함수만 깔끔하게 정리]
+// [관제 기능 모듈]
 import {
     forceClearMap, setDispatchMode, renderSidebar, getFilteredVisibleDrivers,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView,
@@ -38,17 +38,17 @@ import {
     drawAllDriversOnMap, fitMapToAllDrivers, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch, openLinkDriverModal,
-    handleProFeature, selectFormTemplate, syncPreviewData, 
-    updateLivePreview, loadSavedForms, toggleSelectForm, previewSavedForm, 
-    saveProviderForm, openDriverTerritoryModal, 
-    setTerritoryScale, setTerritoryCenter, saveDriverTerritory, 
-    openAllTerritoriesMap, saveCompanyBaseAddress, 
-    updateCompanyBaseUI, renderDispatchDriverList, 
-    selectDispatchDriver, renderDispatchDriverDetail, loadExcelFromFirebase, 
-    processExcelData, sortExcelList, toggleRowCheckbox, renderExcelTable, 
-    initExcelDropZone, handleExcelUpload, processSingleExcelFile, previewInvoiceRow 
+    handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
+    renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
+    loadExcelFromFirebase, autoSaveExcelToFirebase, renderExcelTable, processExcelData,
+    initExcelDropZone, handleExcelUpload, processSingleExcelFile, exportToInvoiceModal,
+    toggleRowCheckbox, deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows,
+    previewInvoiceRow, syncPreviewData, loadSavedForms, saveCompanyBaseAddress,
+    clearCompanyBaseAddress, updateCompanyBaseUI, openDriverTerritoryModal,
+    closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
+    openAllTerritoriesMap, closeAllTerritoriesMap, executeBatchPrint, selectFormTemplate,
+    cancelProviderFormEdit, saveProviderForm, deleteSavedForm
 } from "./admin-dispatch.js";
-
 
 // ==========================================
 // 2. 초기화 및 인증 관리 (App Lifecycle)
@@ -60,7 +60,7 @@ window.onload = () => {
     const assignDateInput = document.getElementById('dispatch-assign-date');
     if (assignDateInput) {
         assignDateInput.value = todayStr;
-        assignDateInput.onchange = () => { loadExcelFromFirebase(); };
+        assignDateInput.onchange = () => { window.loadExcelFromFirebase(); };
     }
 
     const defaultExpire = new Date();
@@ -307,19 +307,43 @@ window.clearSearchInput = clearSearchInput;
 window.jumpToDeliveryTarget = jumpToDeliveryTarget;
 window.handleGlobalSearch = handleGlobalSearch;
 window.openLinkDriverModal = openLinkDriverModal;
+window.focusMapPosition = focusMapPosition;
+
+// --- 복구된 PRO 기능 바인딩 ---
 window.handleProFeature = handleProFeature;
-window.selectFormTemplate = selectFormTemplate;
-window.updateLivePreview = updateLivePreview;
-window.saveProviderForm = saveProviderForm;
-window.toggleSelectForm = toggleSelectForm;
-window.previewSavedForm = previewSavedForm;
-window.openDriverTerritoryModal = openDriverTerritoryModal;
-window.setTerritoryScale = setTerritoryScale;
-window.saveDriverTerritory = saveDriverTerritory;
-window.openAllTerritoriesMap = openAllTerritoriesMap;
-window.saveCompanyBaseAddress = saveCompanyBaseAddress;
+window.closeAutoDispatchModal = closeAutoDispatchModal;
+window.closeProInvoiceModal = closeProInvoiceModal;
+window.closePremiumModal = closePremiumModal;
+window.renderDispatchDriverList = renderDispatchDriverList;
 window.selectDispatchDriver = selectDispatchDriver;
+window.renderDispatchDriverDetail = renderDispatchDriverDetail;
+window.loadExcelFromFirebase = loadExcelFromFirebase;
+window.autoSaveExcelToFirebase = autoSaveExcelToFirebase;
+window.renderExcelTable = renderExcelTable;
+window.processExcelData = processExcelData;
+window.initExcelDropZone = initExcelDropZone;
+window.handleExcelUpload = handleExcelUpload;
+window.processSingleExcelFile = processSingleExcelFile;
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.toggleRowCheckbox = toggleRowCheckbox;
+window.deleteExcelRow = deleteExcelRow;
+window.deleteSelectedExcelRows = deleteSelectedExcelRows;
+window.clearAllExcelRows = clearAllExcelRows;
+window.previewInvoiceRow = previewInvoiceRow;
+window.syncPreviewData = syncPreviewData;
+window.loadSavedForms = loadSavedForms;
+window.saveCompanyBaseAddress = saveCompanyBaseAddress;
+window.clearCompanyBaseAddress = clearCompanyBaseAddress;
+window.updateCompanyBaseUI = updateCompanyBaseUI;
+window.openDriverTerritoryModal = openDriverTerritoryModal;
+window.closeDriverTerritoryModal = closeDriverTerritoryModal;
+window.setTerritoryScale = setTerritoryScale;
+window.setTerritoryCenter = setTerritoryCenter;
+window.saveDriverTerritory = saveDriverTerritory;
+window.openAllTerritoriesMap = openAllTerritoriesMap;
+window.closeAllTerritoriesMap = closeAllTerritoriesMap;
 window.executeBatchPrint = executeBatchPrint;
-window.focusMapPosition = focusMapPosition;
+window.selectFormTemplate = selectFormTemplate;
+window.cancelProviderFormEdit = cancelProviderFormEdit;
+window.saveProviderForm = saveProviderForm;
+window.deleteSavedForm = deleteSavedForm;

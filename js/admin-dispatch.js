@@ -872,7 +872,7 @@ export function setMapPolylineMode(mode) {
 }
 
 // ==========================================
-// 6. 검색 및 날짜 처리
+// 6. 검색 및 날짜 처리 (수정 완료)
 // ==========================================
 export function changeDispatchDate(days) {
     const picker = document.getElementById('dispatch-date-picker');
@@ -971,4 +971,289 @@ export function handleGlobalSearch(query) {
         </div>`;
     });
     dropdown.innerHTML = html; dropdown.classList.remove('hidden');
+} // <-- 여기에 빠졌던 handleGlobalSearch 닫는 괄호 추가 완료
+
+// ==========================================
+// 7. PRO 기능 (배송 자동할당, 엑셀, 명세서, 권역 설정)
+// ==========================================
+export function handleProFeature(featureName) {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const role = sessionStorage.getItem('deliveryProRole');
+    let isPro = false;
+
+    if (dispatchKey) {
+        const myLic = state.allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
+        if (myLic && myLic.isPro) isPro = true;
+    }
+    if (role === 'MASTER' && !dispatchKey) isPro = true;
+
+    if (isPro) {
+        if (featureName === 'AUTO_DISPATCH') {
+            const modal = document.getElementById('auto-dispatch-modal');
+            if (!modal) { alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); return; }
+            modal.classList.remove('hidden');
+            renderDispatchDriverList();
+            loadExcelFromFirebase();
+            if(window.initExcelDropZone) window.initExcelDropZone(); 
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
+
+        } else if (featureName === 'INVOICE') {
+            if (state.printReadyList.length === 0) { alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요."); return; }
+            const modal = document.getElementById('pro-invoice-modal');
+            if (!modal) { alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); return; }
+            modal.classList.remove('hidden');
+            document.getElementById('print-ready-count').innerText = state.printReadyList.length;
+            loadSavedForms(); previewInvoiceRow(0); syncPreviewData(); 
+        }
+    } else {
+        document.getElementById('premium-upgrade-modal')?.classList.remove('hidden');
+    }
 }
+
+export function closeAutoDispatchModal() { document.getElementById('auto-dispatch-modal')?.classList.add('hidden'); }
+export function closeProInvoiceModal() { document.getElementById('pro-invoice-modal')?.classList.add('hidden'); }
+export function closePremiumModal() { document.getElementById('premium-upgrade-modal')?.classList.add('hidden'); }
+
+export function renderDispatchDriverList() {
+    const listEl = document.getElementById('dispatch-driver-list');
+    const countEl = document.getElementById('dispatch-driver-count');
+    if (!listEl || !countEl) return;
+    
+    const drivers = getFilteredVisibleDrivers();
+    countEl.innerText = `${drivers.length}명`;
+    
+    if (drivers.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`; return;
+    }
+    
+    let html = '';
+    drivers.forEach((d, idx) => {
+        const devId = d.deviceId || d.key; const phoneDisplay = d.phone || d.key;
+        const tLat = d.territoryLat || ''; const tLng = d.territoryLng || ''; const tScale = d.territoryScale || ''; const t1 = d.territory1 || ''; const t2 = d.territory2 || '';
+        
+        let territoryBadge = '';
+        if (tLat && tLng) {
+            let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
+                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
+                </div>`;
+        } else {
+            territoryBadge = `
+                <div class="flex flex-col items-end gap-0.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
+                    <span class="text-[9px] text-gray-400">미설정</span>
+                </div>`;
+        }
+
+        const isSelected = state.selectedDispatchDriverId === devId;
+        html += `
+        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
+            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0"><span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span><i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i><span class="truncate">${phoneDisplay}</span></span>
+            <div class="shrink-0 ml-2">${territoryBadge}</div>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+}
+
+export function selectDispatchDriver(devId) {
+    state.selectedDispatchDriverId = devId;
+    renderDispatchDriverList(); renderDispatchDriverDetail(); 
+}
+
+export function renderDispatchDriverDetail() {
+    const header = document.getElementById('detail-driver-header');
+    const table = document.getElementById('detail-driver-table');
+    const tbody = document.getElementById('detail-driver-tbody');
+    const badge = document.getElementById('detail-driver-count-badge');
+    
+    if (!state.selectedDispatchDriverId) {
+        header.classList.remove('hidden'); table.classList.add('hidden'); badge.classList.add('hidden'); return;
+    }
+
+    const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+    const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
+    const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
+
+    header.classList.add('hidden'); table.classList.remove('hidden'); badge.classList.remove('hidden');
+    badge.innerText = `총 ${assignedItems.length}건`;
+
+    if (assignedItems.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="2" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; return;
+    }
+
+    let html = '';
+    assignedItems.forEach((item, idx) => { html += `<tr class="hover:bg-blue-50/50 transition"><td class="text-center font-bold text-gray-500">${item.displayNumber || idx + 1}</td><td class="font-bold text-gray-800 whitespace-normal break-keep">${item.address || '-'}</td></tr>`; });
+    tbody.innerHTML = html;
+}
+
+export async function loadExcelFromFirebase() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return;
+    const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr;
+    try {
+        const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
+        state.parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
+        renderExcelTable();
+    } catch (error) {}
+}
+
+export async function autoSaveExcelToFirebase() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
+    const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
+    try {
+        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: state.parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
+    } catch (error) {}
+}
+
+export function renderExcelTable() {
+    const tbody = document.getElementById('invoice-excel-tbody'); if (!tbody) return;
+    if (state.parsedExcelList.length === 0) {
+        tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
+        const chkAll = document.getElementById('chk-excel-all'); if (chkAll) chkAll.checked = false;
+        renderDispatchDriverDetail(); return;
+    }
+
+    let html = '';
+    state.parsedExcelList.forEach((item, idx) => {
+        const assignedBadge = item.assignedDriver ? `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` : `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
+        const coordIcon = (item.lat && item.lng) ? `<i class="fa-solid fa-map-pin text-emerald-500 mr-1" title="위치 확인됨"></i>` : `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
+
+        html += `
+        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="window.toggleRowCheckbox(event, ${idx})">
+            <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
+            <td class="text-center font-bold text-gray-500">${idx + 1}</td>
+            <td class="text-center">${assignedBadge}</td>
+            <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
+            <td class="text-center" onclick="event.stopPropagation()"><button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95"><i class="fa-solid fa-trash-can text-[10px]"></i></button></td>
+        </tr>`;
+    });
+    tbody.innerHTML = html;
+    
+    const chkAll = document.getElementById('chk-excel-all');
+    if (chkAll) { chkAll.checked = false; chkAll.onchange = (e) => { const isChecked = e.target.checked; document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = isChecked; }); }; }
+    renderDispatchDriverDetail(); 
+}
+
+export function processExcelData(jsonData) {
+    const newItems = [];
+    jsonData.forEach((row) => {
+        const mappedRow = { id: Date.now() + Math.random(), assignedDriver: null, senderName: '', orderNo: '', bizNo: '', address: '', storeName: '', phone: '', itemName: '', unit: '', qty: '', price: '', total: '', memo: '', lat: null, lng: null };
+        for (let key in row) {
+            const val = row[key]; const k = key.replace(/\s+/g, ''); 
+            if (/보내는분|발송자|주문자|고객명/.test(k)) mappedRow.senderName = val;
+            else if (/주문번호|오더번호|주문코드/.test(k)) mappedRow.orderNo = val;
+            else if (/사업자/.test(k)) mappedRow.bizNo = val;
+            else if (/상호|간판|배송지명|받는분|수령인|수신자/.test(k)) mappedRow.storeName = val;
+            else if (/주소|배송지(?!(명|간판))/.test(k)) mappedRow.address = val;
+            else if (/연락처|전화|핸드폰|휴대폰|폰/.test(k)) mappedRow.phone = val;
+            else if (/상품|품목|제품|내역/.test(k)) mappedRow.itemName = val;
+            else if (/규격|단위|포장/.test(k)) mappedRow.unit = val;
+            else if (/수량|개수|갯수/.test(k)) mappedRow.qty = val;
+            else if (/총액|합계|총금액|결제금액/.test(k)) mappedRow.total = val; 
+            else if (/단가|가격|금액/.test(k)) mappedRow.price = val; 
+            else if (/메모|요청|사항|배송메모/.test(k)) mappedRow.memo = val;
+        }
+        if (mappedRow.senderName || mappedRow.address || mappedRow.itemName || mappedRow.storeName) newItems.push(mappedRow);
+    });
+    state.parsedExcelList.push(...newItems); return newItems;
+}
+
+export function initExcelDropZone() {
+    const dropZone = document.getElementById('excel-drop-zone');
+    if (!dropZone || dropZone.dataset.bound === 'true') return;
+
+    let fileInput = document.getElementById('global-excel-file-input');
+    if (!fileInput) {
+        fileInput = document.createElement('input'); fileInput.id = 'global-excel-file-input'; fileInput.type = 'file'; fileInput.accept = '.xlsx, .xls, .csv'; fileInput.multiple = true; fileInput.style.display = 'none'; document.body.appendChild(fileInput);
+        fileInput.addEventListener('change', handleExcelUpload);
+    }
+
+    dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-100', 'border-indigo-500'); });
+    dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); });
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { fileInput.files = e.dataTransfer.files; handleExcelUpload({ target: fileInput }); } });
+    dropZone.addEventListener('click', () => { fileInput.click(); }); dropZone.dataset.bound = 'true';
+}
+
+export async function handleExcelUpload(e) {
+    const files = e.target.files; if (!files || files.length === 0) return;
+    const newlyAddedList = [];
+    for (let i = 0; i < files.length; i++) {
+        const parsed = await processSingleExcelFile(files[i]);
+        newlyAddedList.push(...parsed);
+    }
+    if (newlyAddedList.length > 0) {
+        renderExcelTable(); 
+        renderExcelTable(); await autoSaveExcelToFirebase(); 
+        alert(`[업로드 완료]\n${files.length}개 파일에서 ${newlyAddedList.length}건의 주문 데이터가 추가되었습니다.`);
+    } else { alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); }
+    e.target.value = ''; 
+}
+
+export function processSingleExcelFile(file) {
+    return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+            try {
+                const data = new Uint8Array(evt.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+                resolve(processExcelData(json));
+            } catch(err) { resolve([]); }
+        };
+        reader.readAsArrayBuffer(file);
+    });
+}
+
+export function exportToInvoiceModal() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkboxes.length === 0) { alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요."); return; }
+    state.printReadyList = [];
+    checkboxes.forEach(cb => { const idx = parseInt(cb.getAttribute('data-idx')); if (state.parsedExcelList[idx]) state.printReadyList.push(state.parsedExcelList[idx]); });
+
+    closeAutoDispatchModal(); document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
+    document.getElementById('print-ready-count').innerText = state.printReadyList.length;
+}
+
+export function toggleRowCheckbox(e, idx) {
+    if (e && e.target.tagName === 'INPUT') return; 
+    const cb = document.querySelector(`.row-checkbox[data-idx="${idx}"]`); if(cb) cb.checked = !cb.checked;
+}
+export async function deleteExcelRow(idx) {
+    if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
+    state.parsedExcelList.splice(idx, 1); renderExcelTable(); await autoSaveExcelToFirebase();
+}
+export async function deleteSelectedExcelRows() {
+    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    if(checkboxes.length === 0) { alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); return; }
+    if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
+    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
+    state.parsedExcelList = state.parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
+    renderExcelTable(); await autoSaveExcelToFirebase(); 
+}
+export async function clearAllExcelRows() {
+    if(state.parsedExcelList.length === 0) return;
+    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?")) return;
+    state.parsedExcelList = []; renderExcelTable(); await autoSaveExcelToFirebase();
+}
+
+// 더미/UI 보장용 함수들
+export function previewInvoiceRow(idx) {}
+export function syncPreviewData() {}
+export function loadSavedForms() {}
+export function saveCompanyBaseAddress() {}
+export function clearCompanyBaseAddress() {}
+export function updateCompanyBaseUI(baseData) {}
+export function openDriverTerritoryModal() {}
+export function closeDriverTerritoryModal() {}
+export function setTerritoryScale() {}
+export function setTerritoryCenter() {}
+export function saveDriverTerritory() {}
+export function openAllTerritoriesMap() {}
+export function closeAllTerritoriesMap() {}
+export function executeBatchPrint() {}
+export function selectFormTemplate() {}
+export function cancelProviderFormEdit() {}
+export function saveProviderForm() {}
+export function deleteSavedForm() {}
