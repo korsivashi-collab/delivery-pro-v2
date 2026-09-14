@@ -509,7 +509,16 @@ export function openHistoryModal() {
             let dailyTotal = grouped[date].length;
             grouped[date].forEach((h, idx) => { 
                 let sequentialNum = dailyTotal - idx;
-                let tagBadge = h.tag ? `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>` : "";
+                let tagBadge = "";
+if (h.tag) {
+    if (h.tag === "배송 취소") {
+        // 취소인 경우 붉은색 테마 적용
+        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
+    } else {
+        // 그 외 완료 건은 기존 에메랄드색 테마 적용
+        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
+    }
+}
                 let photoBadge = h.photoUrl 
                     ? `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0 flex items-center gap-0.5 shadow-sm active:bg-blue-100"><i class="fa-solid fa-camera"></i> 사진</a>`
                     : (h.hasPhoto ? `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0"><i class="fa-solid fa-camera"></i></span>` : "");
