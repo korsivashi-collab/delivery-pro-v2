@@ -119,59 +119,69 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 필터 단어(배송, 상호, 간판, 법인, 거래처, 도착, 회사) 자체를 제외하고 우측 데이터만 추출하는 로직
+// 4. 🌟 필터링 단어(레이블) 자체를 철저히 배제하고 우측의 진짜 상호명만 추출하는 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        let flatText = fullText.replace(/\n/g, ' ').replace(/\s+/g, ' ');
+        // 배제해야 할 필터링 단어들 (레이블 성격의 단어들)
+        const filterKeywords = ['배송지명', '간판명', '배송', '상호', '간판', '법인', '거래처', '도착', '회사', '공급받는자', '연락처', '사업자등록번호', '주소'];
 
-        // 사용자가 지정한 7가지 필터링 단어
-        const allowedFilters = ['배송', '상호', '간판', '법인', '거래처', '도착', '회사'];
+        // 공백 및 줄바꿈 단위로 토큰 분리 또는 단어 단위 분석
+        // 텍스트 전체에서 단어들을 순서대로 확인하며 필터 단어에 걸리면 건너뛰고 다음 데이터를 채택
+        let tokens = fullText.split(/[\s\n]+/);
+        let validCandidates = [];
 
-        // 필터 단어 뒤에 붙는 불필요한 접미사(지, 명, 처, 장 등)와 콜론, 괄호 등을 유연하게 건너뛰고
-        // '우측에 위치한 진짜 상호 데이터'만 캡처그룹으로 가져오는 정규식
-        const targetPattern = new RegExp(`(?:${allowedFilters.join('|')})(?:지|명|처|장)?\\s*(?:\\([가-힣a-zA-Z\\s]+\\))?\\s*[\\:\\-\\s]*\\s*([가-힣a-zA-Z0-9\\(\\)\\-\\.\\s]{2,25})`, 'g');
+        for (let i = 0; i < tokens.length; i++) {
+            let token = tokens[i].trim();
+            if (!token) continue;
 
-        let matches = [...flatText.matchAll(targetPattern)];
-        if (matches && matches.length > 0) {
-            for (let i = matches.length - 1; i >= 0; i--) {
-                let candidate = matches[i][1].trim();
-                
-                // 만약 추출된 우측 데이터가 필터 단어 자체이거나, 성명·전화번호 등 불필요한 경우 스킵
-                if (allowedFilters.some(kw => candidate === kw || candidate.startsWith(kw))) continue;
-                if (/성명|받는분|수령인|고객명|전화번호|010-/.test(candidate)) continue;
-                
-                if (candidate.length >= 2) {
-                    return candidate.replace(/\s+/g, ' ');
+            // 현재 토큰이 필터링 단어(레이블)를 포함하고 있는지 검사
+            let isFilterWord = filterKeywords.some(kw => token.includes(kw));
+
+            if (isFilterWord) {
+                // 필터 단어 자체는 상호명이 될 수 없으므로 무시하고,
+                // 바로 우측이나 다음 인덱스에 있는 실질적인 데이터 조각들을 모음
+                let collected = [];
+                let step = 1;
+                while (i + step < tokens.length && step <= 4) {
+                    let nextToken = tokens[i + step].trim();
+                    // 다음 토큰도 또 필터 단어나 번호, 전화번호, 주소 형태면 중단
+                    if (filterKeywords.some(kw => nextToken.includes(kw)) || 
+                        /^\d+$/.test(nextToken) || 
+                        /010-|050|02-|토정로|동작대로|마포구|동작구/.test(nextToken)) {
+                        break;
+                    }
+                    if (nextToken.length > 0) {
+                        collected.push(nextToken);
+                    }
+                    step++;
+                }
+
+                if (collected.length > 0) {
+                    let candidateStr = collected.join(' ');
+                    // 불필요한 기호나 단어 제거
+                    candidateStr = candidateStr.replace(/[\(\)\:\-\[\]]/g, ' ').replace(/\s+/g, ' ').trim();
+                    if (candidateStr.length >= 2) {
+                        validCandidates.push(candidateStr);
+                    }
                 }
             }
         }
 
-        // 줄 단위 백업 검사: 필터 단어가 포함된 라인에서 필터 단어 문자열을 깔끔하게 제거하고 우측 잔여 데이터만 추출
-        const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
-        for (let line of lines) {
-            let matchedKeyword = allowedFilters.find(kw => line.includes(kw));
-            if (matchedKeyword) {
-                if (/성명|받는분|수령인|고객명|전화번호|010-|사업자등록번호/.test(line)) continue;
-                
-                let cleaned = line;
-                // 발견된 필터 단어들과 괄호 레이블(예: (간판명))을 통째로 제거
-                allowedFilters.forEach(kw => {
-                    cleaned = cleaned.replace(new RegExp(`${kw}(?:지|명|처|장)?`, 'g'), '');
-                });
-                cleaned = cleaned.replace(/\([가-힣a-zA-Z\s]+\)/g, ''); // 괄호 안의 설명글 제거
-                cleaned = cleaned.replace(/[\:\-\(\)]+/g, ' ').trim(); // 남은 특수문자 정리
-                
-                if (cleaned.length >= 2 && !cleaned.includes('시 ') && !cleaned.includes('로 ')) {
-                    return cleaned.replace(/\s+/g, ' ');
+        // 유효한 후보군이 있다면 가장 적절한 상호명 반환
+        if (validCandidates.length > 0) {
+            // 중복 제거 및 너무 긴 주소 형태 제외
+            for (let cand of validCandidates) {
+                if (!cand.includes('시 ') && !cand.includes('로 ') && !cand.includes('구 ')) {
+                    return cand;
                 }
             }
+            return validCandidates[0];
         }
 
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
 
-    // 🛑 필터 단어에 걸리지 않거나 우측 데이터가 없으면 무시하고 null 반환
     return null;
 }
