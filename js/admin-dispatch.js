@@ -1377,7 +1377,6 @@ async function batchGeocodeExcelList(items) {
 }
 
 export function exportToInvoiceModal() {
-    // 이제 체크박스 선택 안해도 전체를 띄우게 연결
     state.printReadyList = [...state.parsedExcelList];
     if (state.printReadyList.length === 0) { alert("출력할 주문건이 없습니다. 엑셀을 먼저 업로드하세요."); return; }
     
@@ -1410,6 +1409,17 @@ export async function clearAllExcelRows() {
     state.parsedExcelList = []; renderExcelTable(); await autoSaveExcelToFirebase();
 }
 
+// ==========================================
+// 🌟 엑셀 데이터 자동 저장 및 AI 배차 알고리즘 🌟
+// ==========================================
+export async function autoSaveExcelToFirebase() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
+    const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
+    try {
+        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: state.parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
+    } catch (error) { console.error("자동 저장 실패:", error); }
+}
+
 export async function runAutoDispatchAlgorithm() {
     const btn = document.getElementById('btn-run-auto-dispatch');
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -1425,12 +1435,9 @@ export async function runAutoDispatchAlgorithm() {
         return;
     }
 
-    if (btn) {
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 배분 중...';
-        btn.disabled = true;
-    }
-
-    // 로딩 체감을 위한 딜레이
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 배분 중...'; btn.disabled = true; }
+    
+    // 로딩 체감을 위한 약간의 대기시간
     await new Promise(r => setTimeout(r, 800));
 
     let successCount = 0;
@@ -1460,11 +1467,8 @@ export async function runAutoDispatchAlgorithm() {
     if (state.selectedDispatchDriverId) renderDispatchDriverDetail();
     await autoSaveExcelToFirebase();
 
-    if (btn) {
-        btn.innerHTML = '<i class="fa-solid fa-robot"></i> 자동할당 실행';
-        btn.disabled = false;
-    }
-
+    if (btn) { btn.innerHTML = '<i class="fa-solid fa-satellite-dish text-base"></i> 자동할당 실행'; btn.disabled = false; }
+    
     alert(`[배송 자동할당 완료]\n총 ${state.parsedExcelList.length}건 중 주소(좌표)가 확인된 ${successCount}건이 기사별 권역 거리에 맞춰 최적 배정되었습니다.`);
 }
 
@@ -1472,29 +1476,293 @@ function getDistanceFromLatLonInKm(lat1, lon1, lat2, lon2) {
     const R = 6371; 
     const dLat = (lat2-lat1) * (Math.PI/180);
     const dLon = (lon2-lon1) * (Math.PI/180); 
-    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
-              Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * 
-              Math.sin(dLon/2) * Math.sin(dLon/2); 
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * (Math.PI/180)) * Math.cos(lat2 * (Math.PI/180)) * Math.sin(dLon/2) * Math.sin(dLon/2); 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)); 
     return R * c; 
 }
 
-// 더미/UI 보장용 함수들
-export function previewInvoiceRow(idx) {}
-export function syncPreviewData() {}
-export function loadSavedForms() {}
+// ==========================================
+// 🌟 기사 연결 팝업 제어 🌟
+// ==========================================
+export function openLinkDriverModal() {
+    const input = document.getElementById('link-driver-key-input');
+    if (input) input.value = '';
+    document.getElementById('link-driver-modal')?.classList.remove('hidden');
+    setTimeout(() => { document.getElementById('link-driver-key-input')?.focus(); }, 100);
+}
+export function closeLinkDriverModal() { document.getElementById('link-driver-modal')?.classList.add('hidden'); }
+export async function confirmLinkDriver() {
+    const rawInput = document.getElementById('link-driver-key-input')?.value.trim().toUpperCase();
+    if (!rawInput) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
+    try {
+        const cleanDigits = rawInput.replace(/[^0-9]/g, '');
+        const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        let targetLic = state.allLicenses.find(l => {
+            if (l.type === 'dispatch') return false;
+            const lKey = (l.key || '').toUpperCase();
+            const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
+            const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+            return lKey === rawInput || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
+        });
+        if (!targetLic) {
+            let directSnap = await getDoc(doc(db, "licenses", rawInput));
+            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `TRIAL-${rawInput}`));
+            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `PRO-${rawInput}`));
+            if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
+        }
+        if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
+        if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
+            alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
+        }
+        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: currentKey });
+        alert(`[등록 완료] 기사 [${targetLic.phone || targetLic.key}] 님이 연결되었습니다.`);
+        closeLinkDriverModal();
+    } catch (e) { alert("오류: " + e.message); }
+}
+
+// ==========================================
+// 🌟 엑셀 데이터 추출(다운로드) 모달 제어 🌟
+// ==========================================
+export function openExcelExportModal() {
+    const today = getLocalDateString();
+    const startInput = document.getElementById('export-start-date');
+    const endInput = document.getElementById('export-end-date');
+    if(startInput) startInput.value = today;
+    if(endInput) endInput.value = today;
+    document.getElementById('excel-export-modal')?.classList.remove('hidden');
+}
+
+export function closeExcelExportModal() {
+    document.getElementById('excel-export-modal')?.classList.add('hidden');
+}
+
+export function executeExcelExport() {
+    const startDateStr = document.getElementById('export-start-date')?.value;
+    const endDateStr = document.getElementById('export-end-date')?.value;
+    const isCompleted = document.getElementById('chk-export-completed')?.checked;
+    const isPending = document.getElementById('chk-export-pending')?.checked;
+    const isCanceled = document.getElementById('chk-export-canceled')?.checked;
+
+    if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
+
+    const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
+    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
+
+    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
+    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
+
+    const wb = XLSX.utils.book_new();
+    let hasData = false;
+
+    if (isCompleted) {
+        const targetCompletions = state.allCompletions.filter(c => {
+            if (!c.completedAt) return false;
+            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
+            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
+            return matchesDev && inRange && !isCancelTag;
+        }).sort((a, b) => a.completedAt - b.completedAt);
+
+        if (targetCompletions.length > 0) {
+            hasData = true;
+            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
+            targetCompletions.forEach((c, idx) => {
+                const dt = new Date(c.completedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음']);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송완료");
+        }
+    }
+
+    if (isPending) {
+        let pendingList = [];
+        for (const devId in state.activeRoutes) {
+            if (!visibleDeviceIds.includes(devId)) continue;
+            const driver = state.activeRoutes[devId];
+            if (!driver || !driver.updatedAt) continue;
+
+            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
+                const dests = driver.destinations || [];
+                dests.forEach(d => {
+                    const isDone = state.allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
+                    if (!isDone) pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
+                });
+            }
+        }
+
+        if (pendingList.length > 0) {
+            hasData = true;
+            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
+            pendingList.forEach((p, idx) => {
+                const dt = new Date(p.updatedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)']);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
+            XLSX.utils.book_append_sheet(wb, ws, "대기동선");
+        }
+    }
+
+    if (isCanceled) {
+        const targetCanceled = state.allCompletions.filter(c => {
+            if (!c.completedAt) return false;
+            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
+            const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
+            return matchesDev && inRange && isCancelTag;
+        }).sort((a, b) => a.completedAt - b.completedAt);
+
+        if (targetCanceled.length > 0) {
+            hasData = true;
+            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
+            targetCanceled.forEach((c, idx) => {
+                const dt = new Date(c.completedAt);
+                const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
+                excelData.push([idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음']);
+            });
+            const ws = XLSX.utils.aoa_to_sheet(excelData);
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
+            XLSX.utils.book_append_sheet(wb, ws, "배송취소");
+        }
+    }
+
+    if (!hasData) {
+        alert(`지정하신 기간 (${startDateStr} ~ ${endDateStr}) 내에 다운로드할 수 있는 데이터가 없습니다.`);
+        return;
+    }
+
+    const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
+    XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
+    closeExcelExportModal();
+}
+
+// 명세서 관련 및 지도 UI 연동용 유틸 함수 모음
+export function previewInvoiceRow(idx) {
+    if (!state.printReadyList || !state.printReadyList[idx]) return;
+    const item = state.printReadyList[idx];
+    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
+    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || '');
+    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
+    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    
+    let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
+    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
+    syncPreviewData(); 
+}
+
+function formatNumber(num) { if (!num || isNaN(num)) return num || ''; return Number(num).toLocaleString('ko-KR'); }
+
+export function syncPreviewData() {
+    const regno = document.getElementById('input-prov-regno')?.value || '';
+    const name = document.getElementById('input-prov-name')?.value || '';
+    const addr = document.getElementById('input-prov-addr')?.value || '';
+    const tel = document.getElementById('input-prov-tel')?.value || '';
+    const addTel = document.getElementById('input-prov-add-tel')?.value || '';
+    const today = new Date();
+    const dateStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    
+    if (document.getElementById('prev-date-1')) document.getElementById('prev-date-1').innerText = dateStr;
+    if (document.getElementById('prev-date-2')) document.getElementById('prev-date-2').innerText = dateStr;
+    document.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = regno);
+    document.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = name);
+    document.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = addr);
+    document.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = tel);
+    document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
+}
+
+export function loadSavedForms() {
+    const listEl = document.getElementById('saved-forms-list');
+    if (!listEl) return;
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    if (savedForms.length === 0) { listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`; return; }
+    let html = '';
+    savedForms.forEach((form, idx) => {
+        html += `
+        <div class="border border-gray-200 bg-white hover:border-indigo-300 rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
+            <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
+                <input type="checkbox" onchange="selectFormTemplate(${idx})" class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="selectFormTemplate(${idx})">
+                    <p class="text-[11px] font-black text-gray-800 truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
+                    <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
+                </div>
+            </div>
+            <button type="button" onclick="deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+        </div>`;
+    });
+    listEl.innerHTML = html;
+}
+
+export function selectFormTemplate(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const form = savedForms[idx]; if (!form) return;
+    document.getElementById('input-form-title').value = form.title || '';
+    document.getElementById('input-prov-regno').value = form.regno || '';
+    document.getElementById('input-prov-name').value = form.name || '';
+    document.getElementById('input-prov-addr').value = form.addr || '';
+    document.getElementById('input-prov-tel').value = form.tel || '';
+    document.getElementById('input-prov-add-tel').value = form.addTel || '';
+    syncPreviewData();
+}
+
+export function saveProviderForm() {
+    const title = document.getElementById('input-form-title')?.value.trim();
+    if (!title) { alert("저장할 폼의 '제목'을 입력해주세요."); return; }
+    const newForm = {
+        title, regno: document.getElementById('input-prov-regno')?.value.trim(),
+        name: document.getElementById('input-prov-name')?.value.trim(),
+        addr: document.getElementById('input-prov-addr')?.value.trim(),
+        tel: document.getElementById('input-prov-tel')?.value.trim(),
+        addTel: document.getElementById('input-prov-add-tel')?.value.trim(),
+        savedAt: Date.now()
+    };
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const existingIdx = savedForms.findIndex(f => f.title === title);
+    if(existingIdx >= 0) {
+        if(confirm(`'${title}'(으)로 이미 저장된 폼이 있습니다. 덮어쓰시겠습니까?`)) savedForms[existingIdx] = newForm;
+        else return;
+    } else { savedForms.push(newForm); }
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
+    loadSavedForms();
+}
+
+export function deleteSavedForm(idx) {
+    let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    if(!confirm(`[${savedForms[idx].title}] 폼을 삭제하시겠습니까?`)) return;
+    savedForms.splice(idx, 1);
+    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
+    loadSavedForms();
+}
+
 export function saveCompanyBaseAddress() {}
 export function clearCompanyBaseAddress() {}
 export function updateCompanyBaseUI(baseData) {}
-export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {}
+export function openDriverTerritoryModal() {}
 export function closeDriverTerritoryModal() {}
-export function setTerritoryScale(scale) {}
-export function setTerritoryCenter(pos) {}
+export function setTerritoryScale() {}
+export function setTerritoryCenter() {}
 export function saveDriverTerritory() {}
 export function openAllTerritoriesMap() {}
 export function closeAllTerritoriesMap() {}
 export function executeBatchPrint() {}
-export function selectFormTemplate() {}
 export function cancelProviderFormEdit() {}
-export function saveProviderForm() {}
-export function deleteSavedForm() {}
