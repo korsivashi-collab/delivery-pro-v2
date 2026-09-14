@@ -119,44 +119,40 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 사용자 지정 필터링 단어 기반 상호명·배송지명 추출 로직
+// 4. 🌟 사용자 지정 필터링 단어 기반 상호명·배송지명 추출 로직 (개선됨)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        let flatText = fullText.replace(/\n/g, ' ').replace(/\s+/g, ' ');
-
         // 사용자가 지정한 7가지 필터링 단어 정의
-        // (배송, 상호, 간판, 법인, 거래처, 도착, 회사)
         const allowedFilters = ['배송', '상호', '간판', '법인', '거래처', '도착', '회사'];
 
-        // 정규식 패턴 생성: 지정된 필터 단어 뒤에 오는 텍스트 블록 타겟팅
-        const filterPattern = new RegExp(`(?:${allowedFilters.join('|')})(?:지|명|처|장)?\\s*[\\:\\-\\s]?\\s*([가-힣a-zA-Z0-9\\(\\)\\-\\.\\s]{2,25})`, 'g');
-
-        let matches = [...flatText.matchAll(filterPattern)];
-        if (matches && matches.length > 0) {
-            for (let i = matches.length - 1; i >= 0; i--) {
-                let candidate = matches[i][1].trim();
-                // 성명, 받는분 등 불필요한 단어가 포함되어 있으면 제외
-                if (/성명|받는분|수령인|고객명|전화번호|010-/.test(candidate)) continue;
-                if (candidate.length >= 2) {
-                    return candidate.replace(/\s+/g, ' ');
-                }
-            }
-        }
-
-        // 라인 단위 백업 검사: 지정된 필터 단어가 포함된 라인이 있는지 확인
+        // 라인(행) 단위로 분리하여 표 구조의 칸 섞임 방지
         const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+
         for (let line of lines) {
+            // 라인 내에 필터 단어가 포함되어 있는지 확인
             let matchedKeyword = allowedFilters.find(kw => line.includes(kw));
             if (matchedKeyword) {
+                // 불필요한 개인정보나 사업자번호 행은 제외
                 if (/성명|받는분|수령인|고객명|전화번호|010-|사업자등록번호/.test(line)) continue;
-                
-                let cleaned = line;
-                allowedFilters.forEach(kw => {
-                    cleaned = cleaned.replace(new RegExp(`${kw}(?:지|명|처|장)?`, 'g'), '');
-                });
-                cleaned = cleaned.replace(/[\:\-\(\)]+/g, ' ').trim();
-                
+
+                // 필터 키워드('배송지명(간판명)' 등)를 기준으로 우측에 있는 데이터 추출 시도
+                let keywordIndex = line.indexOf(matchedKeyword);
+                let rightPart = line.substring(keywordIndex + matchedKeyword.length);
+
+                // 콜론(:), 하이픈(-), 괄호 등의 구분자 제거 후 우측 텍스트 정제
+                let cleaned = rightPart.replace(/^[\:\-\(\)\s지명처장]+/, '').trim();
+
+                // 만약 같은 라인 우측에 유효한 글자가 없다면, 라인 전체에서 키워드만 소거 후 검사
+                if (cleaned.length < 2) {
+                    cleaned = line;
+                    allowedFilters.forEach(kw => {
+                        cleaned = cleaned.replace(new RegExp(`${kw}(?:지|명|처|장)?`, 'g'), '');
+                    });
+                    cleaned = cleaned.replace(/[\:\-\(\)]+/g, ' ').trim();
+                }
+
+                // 주소 형식(시, 로 등)이 포함된 경우는 상호명이 아니므로 제외
                 if (cleaned.length >= 2 && !cleaned.includes('시 ') && !cleaned.includes('로 ')) {
                     return cleaned.replace(/\s+/g, ' ');
                 }
@@ -167,6 +163,5 @@ export function extractStoreNameLogic(fullText) {
         console.error("상호 추출 오류:", e);
     }
 
-    // 🛑 지정된 필터링 단어에 걸리는 것이 없다면 무시하고 null 반환
     return null;
 }
