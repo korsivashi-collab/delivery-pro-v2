@@ -96,13 +96,12 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. 🌟 스마트 주소 추출 로직 (행정구역 자동 감지 및 탐욕 방지 적용)
+// 3. 스마트 주소 추출 로직 (유지)
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
-        // 1. 전국 행정구역을 유연하게 감지 (서울, 서울시, 서울특별시, 경기도 등 띄어쓰기 제약 해소)
         let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
         
         let matches = [...flatText.matchAll(regionPrefixedRegex)];
@@ -110,13 +109,10 @@ export function extractAddressLogic(text) {
             return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
         }
 
-        // 2. 백업 정규식 (탐욕 방지: 상호명이 주소로 딸려오는 것 방지)
-        // 무한정 뒤로 가지 않고, '동/로/길' 앞에는 최대 4어절 정도의 한글/숫자만 허용
         let backupRegex = /((?:[가-힣a-zA-Z0-9]+\s+){1,4}[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches2 = [...flatText.matchAll(backupRegex)];
         if (matches2 && matches2.length > 0) {
             let candidate = matches2[matches2.length - 1][0].trim();
-            // 책임판매원, 제조원 같은 화장품/상품 라벨 단어가 섞여 있으면 잘라냄
             candidate = candidate.replace(/^.*?(사업장\s*주소|주소|소재지|책임판매원|판매원|제조원)\s*[\:\-]?\s*/i, '');
             if (candidate.length > 5) return candidate.replace(/\s+/g, ' ');
         }
@@ -124,7 +120,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 상호명 추출 로직 (이전에 완성한 최적화 버전 유지)
+// 4. 🌟 "규칙에 없으면 억지로 찾지 않는다" (방어막 유지 & 플랜 B 제거)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -138,16 +134,20 @@ export function extractStoreNameLogic(fullText) {
         }
 
         const targets = ['배송지명', '간판명', '상호명', '상호'];
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액'];
+        // 🛑 규격, 제조사 등 엉뚱한 정보 차단 필터는 그대로 둡니다.
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '규격', '단위', '제조사', '원산지', '비고', '품목', '품명', '별도표기'];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
             if (!s || s.length < 2) return true; 
-            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
+            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; // 숫자만 입력된 상호(예: 6223300360) 무시
             if (badWords.has(s)) return true; 
             
+            if (/[0-9]+(?:kg|g|l|ml|포|박스|box|개|ea|팩|봉)/i.test(rawStr)) return true;
+            if (/국내산|수입산|별도표기|해당없음|별도/.test(s)) return true;
+            
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
-            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
+            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(s)) return true;
             if (rawStr.includes('[') || rawStr.includes(']')) return true; 
             return false;
         };
@@ -155,7 +155,7 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                for (let j = i + 1; j < Math.min(i + 12, tokens.length); j++) {
                     let tok = tokens[j];
                     if (skips.some(skw => tok.includes(skw))) {
                         if (collected.length > 0) break; 
@@ -184,5 +184,7 @@ export function extractStoreNameLogic(fullText) {
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
+    
+    // 타겟 주변에 유효한 문자가 아예 없었다면, 무리하지 않고 깔끔하게 null 반환!
     return null;
 }
