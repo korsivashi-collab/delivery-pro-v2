@@ -45,10 +45,6 @@ export function extractPhoneLogic(text) {
     const rawMatches = [...text.matchAll(phoneRegex)];
     for (let m of rawMatches) candidates.push(m[0].replace(/[^\d]/g, ''));
     
-    const repRegex = /(1[5-9]\d{2})[\s\-\.]*(\d{4})/g;
-    const repMatches = [...text.matchAll(repRegex)];
-    for (let m of repMatches) candidates.push(m[0].replace(/[^\d]/g, ''));
-    
     candidates = [...new Set(candidates)];
     let bestPhone = null; 
     let highestScore = -1;
@@ -56,19 +52,12 @@ export function extractPhoneLogic(text) {
         let score = 0;
         let is010 = num.startsWith('010') && (num.length === 10 || num.length === 11);
         let is050 = num.startsWith('050') && (num.length === 11 || num.length === 12);
-        let is070 = num.startsWith('070') && (num.length === 10 || num.length === 11);
         let isRep = /^1[5-9]\d{6}$/.test(num); 
-        let is02 = num.startsWith('02') && (num.length === 9 || num.length === 10);
-        let isLocal = /^0[3-9]\d/.test(num) && (num.length === 10 || num.length === 11);
-        
         if (is010) score += 100; 
         else if (is050) score += 90; 
-        else if (is070) score += 80;
         else if (isRep) score += 70; 
-        else if (is02 || isLocal) score += 60; 
         else score -= 100; 
         
-        if (/(\d)\1{4,}/.test(num)) score -= 50;
         if (score > highestScore && score > 0) { 
             highestScore = score; 
             bestPhone = num; 
@@ -77,19 +66,8 @@ export function extractPhoneLogic(text) {
     
     if (bestPhone) {
         let p = bestPhone;
-        if (p.startsWith('010') || p.startsWith('070') || /^0[3-9]\d/.test(p)) {
-            if (p.length === 11) return p.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
-            if (p.length === 10) return p.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
-        }
-        if (p.startsWith('050')) {
-            if (p.length === 12) return p.replace(/(\d{4})(\d{4})(\d{4})/, '$1-$2-$3');
-            if (p.length === 11) return p.replace(/(\d{4})(\d{3})(\d{4})/, '$1-$2-$3');
-        }
-        if (/^1[5-9]\d{6}$/.test(p)) return p.replace(/(\d{4})(\d{4})/, '$1-$2');
-        if (p.startsWith('02')) {
-            if (p.length === 9) return p.replace(/(\d{2})(\d{3})(\d{4})/, '$1-$2-$3');
-            if (p.length === 10) return p.replace(/(\d{2})(\d{4})(\d{4})/, '$1-$2-$3');
-        }
+        if (p.length === 11) return p.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+        if (p.length === 10) return p.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
         return p;
     }
     return null;
@@ -106,19 +84,11 @@ export function extractAddressLogic(text) {
         if (matches && matches.length > 0) {
             return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
         }
-
-        let backupRegex = /((?:[가-힣a-zA-Z0-9]+\s+){1,4}[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
-        let matches2 = [...flatText.matchAll(backupRegex)];
-        if (matches2 && matches2.length > 0) {
-            let candidate = matches2[matches2.length - 1][0].trim();
-            candidate = candidate.replace(/^.*?(사업장\s*주소|주소|소재지|책임판매원|판매원|제조원)\s*[\:\-]?\s*/i, '');
-            if (candidate.length > 5) return candidate.replace(/\s+/g, ' ');
-        }
     } catch (e) {} 
     return null;
 }
 
-// [1단계] 기존에 안정적으로 작동하던 유연한 키워드 정밀 탐색
+// 🌟 [1단계] 기존에 안정적으로 작동하던 정밀 키워드 탐색 엔진
 function runBalancedStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
@@ -138,7 +108,6 @@ function runBalancedStage1(fullText) {
             if (!s || s.length < 2) return true; 
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
-            
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
             if (rawStr.includes('[') || rawStr.includes(']')) return true; 
@@ -154,16 +123,12 @@ function runBalancedStage1(fullText) {
                         if (collected.length > 0) break; 
                         continue; 
                     }
-                    
                     if (isJunk(tok)) continue; 
-
+                    
                     if (j + 1 < tokens.length) {
                         let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
-                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
-                            continue;
-                        }
+                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) continue;
                     }
-
                     collected.push(tok.replace(/[^\w가-힣]/g, ''));
                 }
 
@@ -178,118 +143,97 @@ function runBalancedStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 주소 앵커를 '한강/38선'으로 삼는 공간 4구역 분할 및 비교·탈락 엔진
-function runSpatialAnchorEliminationStage2(fullText) {
+// 🌟 [2단계] 주소 38선 기준 4구역 배틀로얄 (비교 및 삭제) 엔진
+function run4QuadrantBattleStage2(fullText) {
     try {
         let lines = fullText.split(/\n/);
         let addressLineIdx = -1;
         let matchedAddrStr = extractAddressLogic(fullText);
 
-        // 1. 주소 라인 (기준선) 위치 탐색
+        // 1. 주소 라인 (38선) 찾기
         for (let i = 0; i < lines.length; i++) {
             if (matchedAddrStr && lines[i].includes(matchedAddrStr.substring(0, 10))) {
                 addressLineIdx = i;
                 break;
             }
-            if (/(로|길|동|읍|면|리)\s*\d+/.test(lines[i]) && /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주|[시구군])/.test(lines[i])) {
-                addressLineIdx = i;
-                break;
-            }
         }
+        
+        if (addressLineIdx === -1) return null; // 주소가 없으면 2단계 작동 불가
 
-        let upperTokens = []; // 윗구역 (North - 생존 구역)
-        let leftTokens = [];  // 좌측구역 (West - 주소 기준 왼쪽 같은 라인)
+        // 2. 4구역 배열 초기화
+        let quadrants = {
+            TL: [], TR: [], // 윗줄 좌, 우
+            BL: [], BR: []  // 아랫줄 좌, 우
+        };
 
-        if (addressLineIdx !== -1) {
-            let addrLine = lines[addressLineIdx];
+        // [윗구역 수집] (주소 라인 제외, 위로 최대 3줄)
+        for (let k = Math.max(0, addressLineIdx - 3); k < addressLineIdx; k++) {
+            let tokens = lines[k].split(/[\s,;|]+/).map(t => t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim()).filter(t => t);
+            if (tokens.length === 0) continue;
             
-            // 🌟 [핵심] 주소 기준 좌우 분할: 주소보다 우측(오른쪽)에 있는 텍스트는 잔액/설명문이므로 원천 배제!
-            if (matchedAddrStr && addrLine.includes(matchedAddrStr)) {
-                let parts = addrLine.split(matchedAddrStr);
-                if (parts[0] && parts[0].trim().length > 0) {
-                    let leftPartTokens = parts[0].split(/[\s,;|]+/);
-                    for (let t of leftPartTokens) {
-                        let clean = t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-                        if (clean) leftTokens.push(clean);
-                    }
-                }
-            } else {
-                let addrIndex = addrLine.search(/(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주|[가-힣]+\s+(?:구|군|시))/);
-                if (addrIndex > 0) {
-                    let leftSub = addrLine.substring(0, addrIndex);
-                    let leftPartTokens = leftSub.split(/[\s,;|]+/);
-                    for (let t of leftPartTokens) {
-                        let clean = t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-                        if (clean) leftTokens.push(clean);
-                    }
-                }
-            }
-
-            // 🌟 [핵심] 윗구역 (North): 주소 라인 위쪽(최대 3줄)만 수집. (주소 라인 및 아랫구역/South는 절대 포함 안 함!)
-            for (let k = Math.max(0, addressLineIdx - 3); k < addressLineIdx; k++) {
-                let lTokens = lines[k].split(/[\s,;|]+/);
-                for (let t of lTokens) {
-                    let clean = t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-                    if (clean) upperTokens.push(clean);
-                }
-            }
-        } else {
-            for (let l of lines) {
-                let lTokens = l.split(/[\s,;|]+/);
-                for (let t of lTokens) {
-                    let clean = t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-                    if (clean) upperTokens.push(clean);
-                }
-            }
+            let mid = Math.ceil(tokens.length / 2); // 반으로 갈라 좌우 배정
+            quadrants.TL.push(...tokens.slice(0, mid));
+            quadrants.TR.push(...tokens.slice(mid));
         }
 
-        // 후보군 합치기 (윗구역 + 주소 좌측구역)
-        let candidates = [...upperTokens, ...leftTokens];
-
-        // 🌟 연쇄 탈락 및 비교 필터 (기사님 원칙: 숫자만 있으면 탈락, 글씨수 적으면 탈락)
-        let filtered = candidates;
-
-        // 1. 글씨수 적으면 탈락 (2글자 미만 조각 삭제)
-        filtered = filtered.filter(t => t.length >= 2);
-
-        // 2. 숫자만 있으면 탈락 (순수 숫자, 전화번호, 금액 패턴 차단)
-        filtered = filtered.filter(t => !/^\d+$/.test(t) && !/^[\d\-,.]+$/.test(t));
-        filtered = filtered.filter(t => !/(010|02|031|032|033|041|042|043|044|051|052|053|054|055|061|062|063|064)-?/.test(t));
-
-        // 3. 영수증 안내 문구, 잔액, 금액, 장소 등 불필요 단어 탈락
-        const junkKeywords = new Set([
-            '잔액', '금액', '장소', '아래', '영수', '청구', '합계', '입금액', '출고액',
-            '공급가액', '세액', '단가', '수량', '총액', '품목', '품명', '규격', '단위',
-            '성명', '이름', '수취인', '받으시는분', '담당자', '법인명', '공급자', '등록', 
-            '사업자', '대표', '주소', '소재지', '연락처', '전화', '전화번호', '공급자용', '보관용'
-        ]);
-        filtered = filtered.filter(t => !junkKeywords.has(t.toLowerCase()));
-
-        // 4. 행정구역 파편 단어 탈락
-        filtered = filtered.filter(t => {
-            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(t)) return false;
-            if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(t) && !t.includes('점') && !t.includes('식당')) return false;
-            return true;
-        });
-
-        let survivedTokens = [...new Set(filtered)];
-        if (survivedTokens.length > 0) {
-            return survivedTokens.slice(0, 3).join(' ');
+        // [아랫구역 수집] (주소 라인 제외, 아래로 최대 2줄)
+        for (let k = addressLineIdx + 1; k <= Math.min(lines.length - 1, addressLineIdx + 2); k++) {
+            let tokens = lines[k].split(/[\s,;|]+/).map(t => t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim()).filter(t => t);
+            if (tokens.length === 0) continue;
+            
+            let mid = Math.ceil(tokens.length / 2);
+            quadrants.BL.push(...tokens.slice(0, mid));
+            quadrants.BR.push(...tokens.slice(mid));
         }
+
+        // 3. 개별 토큰 삭제 필터 (숫자 탈락, 2글자 미만 탈락, 행정구역 탈락)
+        const filterTokens = (tokens) => {
+            return tokens.filter(t => {
+                if (t.length < 2) return false; // 글씨수 부족 탈락
+                if (/^\d+$/.test(t) || /^[\d\-,.]+$/.test(t)) return false; // 순수 숫자 탈락
+                if (/(010|02|031|032|033|041|042|043|044|051|052|053|054|055|061|062|063|064)-?/.test(t)) return false; // 전화번호 탈락
+                if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(t)) return false; // 주소 파편 탈락
+                if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(t) && !t.includes('점') && !t.includes('식당')) return false;
+                return true;
+            });
+        };
+
+        quadrants.TL = filterTokens(quadrants.TL);
+        quadrants.TR = filterTokens(quadrants.TR);
+        quadrants.BL = filterTokens(quadrants.BL);
+        quadrants.BR = filterTokens(quadrants.BR);
+
+        // 4. [핵심] 구역 폭파 (Zone Killer) 조건
+        // 구역 내에 영수증 표 관련 찌꺼기 단어가 하나라도 있다면 그 구역은 설명문/금액란이므로 통째로 삭제
+        const toxicWords = /잔액|금액|장소|아래|영수|합계|수량|단가|품목|규격|성명|수취인|공급자|보관용/;
+        
+        const isToxicZone = (tokens) => tokens.some(t => toxicWords.test(t));
+        
+        if (isToxicZone(quadrants.TL)) quadrants.TL = [];
+        if (isToxicZone(quadrants.TR)) quadrants.TR = [];
+        if (isToxicZone(quadrants.BL)) quadrants.BL = [];
+        if (isToxicZone(quadrants.BR)) quadrants.BR = [];
+
+        // 5. 최후의 1구역 선정 (남아있는 구역 중 상호명 위치 확률이 높은 순서대로 우선순위 반환)
+        if (quadrants.TL.length > 0) return [...new Set(quadrants.TL)].join(' ');
+        if (quadrants.TR.length > 0) return [...new Set(quadrants.TR)].join(' ');
+        if (quadrants.BL.length > 0) return [...new Set(quadrants.BL)].join(' ');
+        if (quadrants.BR.length > 0) return [...new Set(quadrants.BR)].join(' ');
+
     } catch (e) {}
     return null;
 }
 
-// 4. 최종 컨트롤러
+// 4. 🌟 최종 컨트롤러 (1차 엔진 실패 시 2차 4구역 배틀로얄 실행)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     
-    // [1차 시도] 기존의 안정적이고 유연한 키워드 정밀 탐색
+    // [1차 시도] 기존 키워드 정밀 탐색
     let stage1Result = runBalancedStage1(fullText);
     if (stage1Result) return stage1Result;
 
-    // [2차 시도] 주소 앵커 '한강 기준선' 기반 공간 분할 및 비교·탈락 엔진
-    let stage2Result = runSpatialAnchorEliminationStage2(fullText);
+    // [2차 시도] 주소 38선 기준 4구역 비교 및 삭제 방식
+    let stage2Result = run4QuadrantBattleStage2(fullText);
     if (stage2Result) return stage2Result;
 
     return null;
