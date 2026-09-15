@@ -120,7 +120,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 "규칙에 없으면 억지로 찾지 않는다" (방어막 유지 & 플랜 B 제거)
+// 4. 🌟 "규칙에 없으면 억지로 찾지 않는다" (우측 단어 필터링 적용)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -133,8 +133,9 @@ export function extractStoreNameLogic(fullText) {
             if (/구매자명|성명/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        const targets = ['배송지명', '간판명', '상호명', '상호'];
-        // 🛑 규격, 제조사 등 엉뚱한 정보 차단 필터는 그대로 둡니다.
+        // 🌟 필터링 타겟 단어 지정 (간판, 상호, 배송, 법인)
+        const targets = ['간판', '상호', '배송', '법인'];
+        // 🛑 규격, 제조사 등 엉뚱한 정보 차단 필터
         const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '규격', '단위', '제조사', '원산지', '비고', '품목', '품명', '별도표기'];
 
         const isJunk = (rawStr) => {
@@ -153,10 +154,18 @@ export function extractStoreNameLogic(fullText) {
         };
 
         for (let i = 0; i < tokens.length; i++) {
+            // 🌟 타겟 단어가 감지되면
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
+                // 🌟 타겟 단어 기준 '우측' 토큰들을 수집 시작
                 for (let j = i + 1; j < Math.min(i + 12, tokens.length); j++) {
                     let tok = tokens[j];
+
+                    // 🌟 핵심 로직: 수집하는 블록 자체에 타겟 단어(간판,상호,배송,법인)가 포함되어 있으면 출력 리스트에서 무시(패스)
+                    if (targets.some(kw => tok.includes(kw))) {
+                        continue;
+                    }
+
                     if (skips.some(skw => tok.includes(skw))) {
                         if (collected.length > 0) break; 
                         continue; 
@@ -176,7 +185,7 @@ export function extractStoreNameLogic(fullText) {
 
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
-                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호/g, '').trim();
+                    let result = unique.join(' ').trim();
                     if (result.length >= 2) return result;
                 }
             }

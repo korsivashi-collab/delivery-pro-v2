@@ -737,7 +737,8 @@ function renderMemoPreview(dest) {
     }
 }
 
-export async function renderList() {
+// 🌟 리스트 비동기 대기 제거 및 상호명/주소 두 줄 분리 적용
+export function renderList() {
     const listEl = document.getElementById('destination-list');
     const headerEndAddr = document.getElementById('header-end-address'); 
     const headerEndInput = document.getElementById('header-inline-end-input');
@@ -766,7 +767,6 @@ export async function renderList() {
         return;
     }
 
-    await preloadBatchMemos();
     if (listEl) {
         listEl.innerHTML = ''; 
         destinations.forEach((dest, index) => {
@@ -784,11 +784,24 @@ export async function renderList() {
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
+            // 🌟 주소와 상호명 분리 로직 (한 줄 추가 효과)
+            let displayAddressHTML = dest.address;
+            let match = dest.address.match(/^\[(.*?)\]\s*(.*)$/);
+            if (match) {
+                // 상호명이 있을 경우 위아래 2줄로 분리
+                displayAddressHTML = `
+                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${match[1]}</span>
+                    <span class="block truncate leading-tight">${match[2]}</span>
+                `;
+            } else {
+                displayAddressHTML = `<span class="block truncate">${dest.address}</span>`;
+            }
+
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
                     <div class="drag-handle cursor-grab active:cursor-grabbing p-1.5 -ml-1 text-gray-400 shrink-0"><i class="fa-solid fa-bars text-[16px]"></i></div>
                     ${numberBadge}
-                    <p class="font-bold text-gray-900 text-[13px] truncate flex-1 ml-0.5">${dest.address}</p>
+                    <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">${displayAddressHTML}</div>
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
                 </div>
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-1 mt-1"></div>
@@ -814,10 +827,18 @@ export async function renderList() {
                     </div>
                 </div>`;
             listEl.appendChild(li);
-            renderMemoPreview(dest);
         });
     }
+    
+    // UI를 먼저 다 그리고 즉시 드래그 기능을 활성화
     initSortable();
+
+    // 백그라운드에서 메모를 로드하여 나중에 덮어씌움
+    preloadBatchMemos().then(() => {
+        destinations.forEach(dest => {
+            renderMemoPreview(dest);
+        });
+    });
 }
 
 export async function setEndLocationGPS() {
@@ -948,7 +969,8 @@ export async function openMemoModal(id) {
                 });
             }
 
-            ['도로변 주차', '지하주차장', '지상주차장'].forEach(tag => {
+            // 🌟 엘리베이터가 추가된 배열
+            ['도로변 주차', '지하주차장', '지상주차장', '엘리베이터'].forEach(tag => {
                 if (rawMemo.includes(`[${tag}]`)) {
                     document.querySelectorAll('.etc-tag-btn').forEach(b => {
                         if (b.dataset.val === tag && b.dataset.active !== "true") toggleEtcTag(b);
