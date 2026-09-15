@@ -839,7 +839,6 @@ export function drawDriverOnMap(devId) {
     let pointsCount = 0;
     const plannedPath = [];
     const completedPath = [];
-    const currentMode = state.currentMapPolylineMode || 'all';
 
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
@@ -849,11 +848,7 @@ export function drawDriverOnMap(devId) {
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.customType = 'completed';
-            
-            if (currentMode === 'all' || currentMode === 'completed') {
-                overlay.setMap(map); 
-            }
+            overlay.setMap(map); 
             window.myMapOverlays.push(overlay);
         }
     });
@@ -870,11 +865,7 @@ export function drawDriverOnMap(devId) {
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
                     content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                    overlay.customType = 'planned';
-                    
-                    if (currentMode === 'all' || currentMode === 'planned') {
-                        overlay.setMap(map); 
-                    }
+                    overlay.setMap(map); 
                     window.myMapOverlays.push(overlay);
                 }
             }
@@ -885,7 +876,7 @@ export function drawDriverOnMap(devId) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
-        if (currentMode === 'all' || currentMode === 'planned') {
+        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'planned') {
             window.mapPlannedPolyline.setMap(map);
         }
     }
@@ -894,7 +885,7 @@ export function drawDriverOnMap(devId) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
         });
-        if (currentMode === 'all' || currentMode === 'completed') {
+        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'completed') {
             window.mapCompletedPolyline.setMap(map);
         }
     }
@@ -907,31 +898,11 @@ export function setMapPolylineMode(mode) {
     ['all', 'planned', 'completed'].forEach(m => {
         const btn = document.getElementById(`btn-mode-${m}`);
         if (!btn) return;
-        if (m === mode) {
-            btn.classList.remove('text-gray-700', 'hover:bg-gray-100');
-            btn.classList.add('bg-blue-600', 'text-white');
-        } else {
-            btn.classList.remove('bg-blue-600', 'text-white');
-            btn.classList.add('text-gray-700', 'hover:bg-gray-100');
-        }
+        if (m === mode) btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
+        else btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black";
     });
-
-    if (window.mapPlannedPolyline) {
-        window.mapPlannedPolyline.setMap((mode === 'all' || mode === 'planned') ? map : null);
-    }
-    if (window.mapCompletedPolyline) {
-        window.mapCompletedPolyline.setMap((mode === 'all' || mode === 'completed') ? map : null);
-    }
-    
-    if (window.myMapOverlays) {
-        window.myMapOverlays.forEach(overlay => {
-            if (overlay.customType === 'planned') {
-                overlay.setMap((mode === 'all' || mode === 'planned') ? map : null);
-            } else if (overlay.customType === 'completed') {
-                overlay.setMap((mode === 'all' || mode === 'completed') ? map : null);
-            }
-        });
-    }
+    if (window.mapPlannedPolyline) window.mapPlannedPolyline.setMap(mode === 'all' || window.mapPlannedPolyline.setMap(mode === 'planned' ? map : null));
+    if (window.mapCompletedPolyline) window.mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
 }
 
 export function changeDispatchDate(days) {
@@ -1385,9 +1356,9 @@ export function exportToInvoiceModal() {
     closeAutoDispatchModal(); 
     document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
     document.getElementById('print-ready-count').innerText = state.printReadyList.length;
-    loadSavedForms(); 
-    previewInvoiceRow(0); 
-    syncPreviewData();
+    window.loadSavedForms(); 
+    window.previewInvoiceRow(0); 
+    window.syncPreviewData();
 }
 
 export function previewInvoiceRow(idx) {
@@ -1416,7 +1387,7 @@ export function previewInvoiceRow(idx) {
     document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
     document.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
 
-    syncPreviewData(); 
+    window.syncPreviewData(); 
 }
 
 function generateInvoiceHTML(item, providerInfo) {
@@ -1497,7 +1468,7 @@ export function executeBatchPrint() {
     };
 }
 
-export function syncPreviewData() {
+export function window_syncPreviewData() {
     const regno = document.getElementById('input-prov-regno')?.value || '';
     const name = document.getElementById('input-prov-name')?.value || '';
     const addr = document.getElementById('input-prov-addr')?.value || '';
@@ -1515,12 +1486,12 @@ export function syncPreviewData() {
     document.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = addTel);
 }
 
-export function updateLivePreview() {
+export function window_updateLivePreview() {
     clearTimeout(state.previewDebounceTimer);
-    state.previewDebounceTimer = setTimeout(() => { syncPreviewData(); }, 150);
+    state.previewDebounceTimer = setTimeout(() => { window.syncPreviewData(); }, 150);
 }
 
-export function loadSavedForms() {
+export function window_loadSavedForms() {
     const listEl = document.getElementById('saved-forms-list');
     if (!listEl) return;
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
@@ -1543,17 +1514,17 @@ export function loadSavedForms() {
     listEl.innerHTML = html;
 }
 
-export function toggleSelectForm(idx) {
+export function window_toggleSelectForm(idx) {
     if (state.currentSelectedFormIndex === idx) { 
         state.currentSelectedFormIndex = null; 
-        cancelProviderFormEdit(); 
-        loadSavedForms(); 
-    } else { applySavedForm(idx); }
+        window.cancelProviderFormEdit(); 
+        window.loadSavedForms(); 
+    } else { window.applySavedForm(idx); }
 }
 
-export function previewSavedForm(idx) { applySavedForm(idx); }
+export function window_previewSavedForm(idx) { window.applySavedForm(idx); }
 
-export function applySavedForm(idx) {
+export function window_applySavedForm(idx) {
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     const form = savedForms[idx]; if (!form) return;
     state.currentSelectedFormIndex = idx;
@@ -1565,17 +1536,17 @@ export function applySavedForm(idx) {
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
-    loadSavedForms(); syncPreviewData();
+    window.loadSavedForms(); window.syncPreviewData();
 }
 
-export function selectFormTemplate(type) {
+export function window_selectFormTemplate(type) {
     document.getElementById('form-template-modal')?.classList.add('hidden');
     const accordion = document.getElementById('form-setup-accordion');
     if (accordion && accordion.classList.contains('hidden')) { accordion.classList.remove('hidden'); accordion.classList.add('flex'); }
     setTimeout(() => { document.getElementById('input-form-title')?.focus(); }, 300);
 }
 
-export function saveProviderForm() {
+export function window_saveProviderForm() {
     const title = document.getElementById('input-form-title')?.value.trim();
     if (!title) { alert("저장할 폼의 '제목'을 입력해주세요."); return; }
     const newForm = {
@@ -1594,29 +1565,29 @@ export function saveProviderForm() {
     } else { savedForms.push(newForm); }
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
-    loadSavedForms();
+    window.loadSavedForms();
 }
 
-export function deleteSavedForm(idx) {
+export function window_deleteSavedForm(idx) {
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     if(!confirm(`[${savedForms[idx].title}] 폼을 삭제하시겠습니까?`)) return;
     savedForms.splice(idx, 1);
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     if (state.currentSelectedFormIndex === idx) state.currentSelectedFormIndex = null;
-    loadSavedForms();
+    window.loadSavedForms();
 }
 
-export function cancelProviderFormEdit() {
+export function window_cancelProviderFormEdit() {
     state.currentSelectedFormIndex = null;
     ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
         if(document.getElementById(id)) document.getElementById(id).value = '';
     });
     const accordion = document.getElementById('form-setup-accordion');
     if (accordion) { accordion.classList.add('hidden'); accordion.classList.remove('flex'); }
-    loadSavedForms(); syncPreviewData();
+    window.loadSavedForms(); window.syncPreviewData();
 }
 
-export async function saveCompanyBaseAddress() {
+export async function window_saveCompanyBaseAddress() {
     const input = document.getElementById('company-base-address');
     const addr = input.value.trim();
     if (!addr) { alert("본사 거점 주소를 입력해주세요."); input.focus(); return; }
@@ -1630,19 +1601,19 @@ export async function saveCompanyBaseAddress() {
             const fullAddress = result[0].address_name;
             const baseData = { address: fullAddress, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
             localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
-            updateCompanyBaseUI(baseData);
+            window.updateCompanyBaseUI(baseData);
             input.value = fullAddress; 
         } else { alert("주소 위치를 찾을 수 없습니다."); }
     });
 }
 
-export function clearCompanyBaseAddress() {
+export function window_clearCompanyBaseAddress() {
     localStorage.removeItem('deliveryProCompanyBase');
     document.getElementById('company-base-address').value = '';
-    updateCompanyBaseUI(null);
+    window.updateCompanyBaseUI(null);
 }
 
-export function updateCompanyBaseUI(baseData) {
+export function window_updateCompanyBaseUI(baseData) {
     const textEl = document.getElementById('saved-base-address-text');
     const clearBtn = document.getElementById('btn-clear-company-base');
     if (baseData) {
@@ -1652,7 +1623,7 @@ export function updateCompanyBaseUI(baseData) {
     }
 }
 
-export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
+export function window_openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     try { if (window.event) window.event.stopPropagation(); } catch(e) {}
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
@@ -1660,13 +1631,13 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     if(!modal) return; modal.classList.remove('hidden');
     
     state.currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
-    setTerritoryScale(state.currentTerritoryScale, true); 
+    window.setTerritoryScale(state.currentTerritoryScale, true); 
 
     setTimeout(() => {
         const container = document.getElementById('territory-map-container');
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
-            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { setTerritoryCenter(mouseEvent.latLng); });
+            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { window.setTerritoryCenter(mouseEvent.latLng); });
         }
         territoryMap.relayout(); 
         
@@ -1676,7 +1647,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
 
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
             const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
-            territoryMap.setCenter(pos); setTerritoryCenter(pos);
+            territoryMap.setCenter(pos); window.setTerritoryCenter(pos);
         } else {
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
             if (savedBase) {
@@ -1687,7 +1658,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
             if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
         }
         
-        const allDrivers = getFilteredVisibleDrivers();
+        const allDrivers = window.getFilteredVisibleDrivers();
         allDrivers.forEach(d => {
             const dId = d.deviceId || d.key;
             if (dId === devId) return; 
@@ -1707,9 +1678,9 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     }, 200);
 }
 
-export function closeDriverTerritoryModal() { document.getElementById('driver-territory-modal')?.classList.add('hidden'); }
+export function window_closeDriverTerritoryModal() { document.getElementById('driver-territory-modal')?.classList.add('hidden'); }
 
-export function setTerritoryScale(scale, skipRedraw = false) {
+export function window_setTerritoryScale(scale, skipRedraw = false) {
     state.currentTerritoryScale = scale;
     const scaleInput = document.getElementById('input-territory-scale');
     if(scaleInput) scaleInput.value = scale;
@@ -1726,10 +1697,10 @@ export function setTerritoryScale(scale, skipRedraw = false) {
         else if (scale === 'gu') territoryMap.setLevel(9); 
         else if (scale === 'si') territoryMap.setLevel(11); 
     }
-    if (!skipRedraw && territoryMarker) setTerritoryCenter(territoryMarker.getPosition());
+    if (!skipRedraw && territoryMarker) window.setTerritoryCenter(territoryMarker.getPosition());
 }
 
-export function setTerritoryCenter(latLng) {
+export function window_setTerritoryCenter(latLng) {
     if (territoryMarker) territoryMarker.setMap(null);
     territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
 
@@ -1766,7 +1737,7 @@ export function setTerritoryCenter(latLng) {
     territoryCircles = [c3, c2, c1];
 }
 
-export async function saveDriverTerritory() {
+export async function window_saveDriverTerritory() {
     const devId = document.getElementById('territory-target-devid').value;
     const lat = document.getElementById('input-territory-lat').value;
     const lng = document.getElementById('input-territory-lng').value;
@@ -1785,12 +1756,12 @@ export async function saveDriverTerritory() {
             territoryScale: scale, territory1: t1, territory2: t2
         });
         alert("기사 권역이 저장되었습니다.");
-        closeDriverTerritoryModal();
-        renderDispatchDriverList();
+        window.closeDriverTerritoryModal();
+        window.renderDispatchDriverList();
     } catch(e) { alert("저장 오류: " + e.message); }
 }
 
-export function openAllTerritoriesMap() {
+export function window_openAllTerritoriesMap() {
     const modal = document.getElementById('all-territories-modal');
     if (!modal) return; modal.classList.remove('hidden');
 
@@ -1801,7 +1772,7 @@ export function openAllTerritoriesMap() {
         
         allTerritoriesOverlays.forEach(ov => ov.setMap(null)); allTerritoriesOverlays = [];
 
-        const allDrivers = getFilteredVisibleDrivers();
+        const allDrivers = window.getFilteredVisibleDrivers();
         let bounds = new kakao.maps.LatLngBounds();
         let hasValidPoint = false;
 
@@ -1837,20 +1808,20 @@ export function openAllTerritoriesMap() {
     }, 200);
 }
 
-export function closeAllTerritoriesMap() { document.getElementById('all-territories-modal')?.classList.add('hidden'); }
+export function window_closeAllTerritoriesMap() { document.getElementById('all-territories-modal')?.classList.add('hidden'); }
 
-export function openExcelExportModal() {
+export function window_openExcelExportModal() {
     const today = getLocalDateString();
     document.getElementById('export-start-date').value = today;
     document.getElementById('export-end-date').value = today;
     document.getElementById('excel-export-modal').classList.remove('hidden');
 }
 
-export function closeExcelExportModal() {
+export function window_closeExcelExportModal() {
     document.getElementById('excel-export-modal').classList.add('hidden');
 }
 
-export function executeExcelExport() {
+export function window_executeExcelExport() {
     const startDateStr = document.getElementById('export-start-date').value;
     const endDateStr = document.getElementById('export-end-date').value;
     const isCompleted = document.getElementById('chk-export-completed').checked;
@@ -1858,13 +1829,13 @@ export function executeExcelExport() {
     const isCanceled = document.getElementById('chk-export-canceled').checked;
 
     if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 정 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
     const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
 
-    const visibleLicenses = getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers();
     const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
     const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
 
@@ -1964,7 +1935,7 @@ export function executeExcelExport() {
 
     const fileNameDate = startDateStr === endDateStr ? startDateStr : `${startDateStr}_to_${endDateStr}`;
     XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
-    closeExcelExportModal();
+    window.closeExcelExportModal();
 }
 
 export function runAutoDispatchAlgorithm() { 
