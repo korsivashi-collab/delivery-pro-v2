@@ -3,7 +3,7 @@ import { db } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { map, focusMapPosition } from "./admin-map.js";
 import { playBeepSound, getAddressFromCoords } from "./admin-utils.js";
-import { collection, doc, setDoc, updateDoc, deleteDoc, addDoc, getDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { collection, doc, setDoc, updateDoc, deleteDoc, addDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 export function formatNumber(num) {
     if (!num || isNaN(num)) return num || ''; 
@@ -11,23 +11,12 @@ export function formatNumber(num) {
 }
 
 window.myMapOverlays = [];
-window.mapPlannedPolyline = null;
-window.mapCompletedPolyline = null;
-window.currentLocationOverlay = null;
-
 let territoryMap = null;
 let territoryMarker = null;
 let territoryCircles = [];
 let otherTerritoryOverlays = [];
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
-
-// [PRO 전용 데이터 배열 선언 - 모듈 초기화시 즉시 할당하여 참조 오류 방지]
-let parsedExcelList = [];
-let printReadyList = [];
-let selectedDispatchDriverId = null;
-let currentSelectedFormIndex = null;
-let previewDebounceTimer = null;
 
 export function forceClearMap() {
     if (window.myMapOverlays) window.myMapOverlays.forEach(ov => ov.setMap(null));
@@ -105,7 +94,7 @@ export function renderDriverListView() {
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-600"></i> 운행 기사 (<span id="driver-count">${visibleLicenses.length}</span>명)</h2>
-        <button onclick="window.openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
+        <button onclick="openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
     `;
 
     if (visibleLicenses.length === 0) {
@@ -145,10 +134,10 @@ export function renderDriverListView() {
         const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
 
         html += `
-        <div onclick="window.selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
+        <div onclick="selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
             <div class="flex justify-between items-center mb-1.5">
                 <span class="font-black text-sm text-gray-900 tracking-tight flex items-center gap-1.5"><i class="fa-solid fa-phone text-blue-500 text-xs"></i>${phone}<span class="text-[10px] text-gray-400 font-mono font-normal">[${lic.key}]</span></span>
-                <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); window.removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
+                <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
             </div>
             <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden"><div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
             <div class="flex justify-between text-[11px] font-bold text-gray-600"><span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span><span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span></div>
@@ -171,7 +160,7 @@ export function renderDriverDetailView(devId) {
 
     headerEl.innerHTML = `
         <div class="flex items-center justify-between w-full">
-            <button onclick="window.clearSelectedDriver()" class="text-xs font-black text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 border border-blue-200"><i class="fa-solid fa-arrow-left"></i> 기사 목록</button>
+            <button onclick="clearSelectedDriver()" class="text-xs font-black text-blue-600 hover:bg-blue-50 px-2.5 py-1.5 rounded-xl transition flex items-center gap-1 border border-blue-200"><i class="fa-solid fa-arrow-left"></i> 기사 목록</button>
             <span class="text-xs font-black text-gray-900 bg-white border border-gray-200 shadow-sm px-3 py-1.5 rounded-xl truncate"><i class="fa-solid fa-phone text-blue-500 mr-1 text-[11px]"></i>${phone}</span>
         </div>
     `;
@@ -218,13 +207,13 @@ export function renderDriverDetailView(devId) {
     </div>
 
     <div class="flex gap-1 mb-3 bg-gray-100 p-1 rounded-xl text-xs font-black">
-        <button onclick="window.setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+        <button onclick="setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-route mr-1"></i> 동선 (${totalCount})
         </button>
-        <button onclick="window.setDispatchDetailTab('PENDING')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'PENDING' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+        <button onclick="setDispatchDetailTab('PENDING')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'PENDING' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-clock mr-1"></i> 미처리 (${pendingCount})
         </button>
-        <button onclick="window.setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+        <button onclick="setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-circle-check mr-1"></i> 완료 (${doneCount})
         </button>
     </div>`;
@@ -244,7 +233,7 @@ export function renderDriverDetailView(devId) {
                 let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
                 let photoBtn = comp && comp.photoUrl ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
-                <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">${numberBadge}${addressHtml}</div><div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}${statusBadge}</div>
                 </div>`;
             });
@@ -257,7 +246,7 @@ export function renderDriverDetailView(devId) {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
                 html += `
-                <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                <div onclick="focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                         <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${d.displayNumber || idx + 1}</span>
                         <span class="font-bold text-gray-900 truncate">${d.address}</span>
@@ -278,7 +267,7 @@ export function renderDriverDetailView(devId) {
                 let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
                 let photoBtn = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
-                <div onclick="window.focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                <div onclick="focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '완료'}]</span></div>
                 </div>`;
@@ -313,7 +302,7 @@ export function renderMessageSidebar() {
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-comments text-blue-600"></i> 수신 기사 선택</h2>
-        <button onclick="window.toggleAllMessageSelection()" class="text-[11px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 hover:bg-blue-100 transition">
+        <button onclick="toggleAllMessageSelection()" class="text-[11px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 hover:bg-blue-100 transition">
             ${state.selectedMessageDrivers.size === visibleLicenses.length && visibleLicenses.length > 0 ? '선택 해제' : '전체 선택'}
         </button>`;
 
@@ -328,7 +317,7 @@ export function renderMessageSidebar() {
         html += `
         <label class="flex items-center justify-between p-3.5 bg-white border ${isChecked ? 'border-blue-500 bg-blue-50/40 ring-1 ring-blue-300' : 'border-gray-200 hover:bg-gray-50'} rounded-2xl cursor-pointer transition shadow-xs">
             <div class="flex items-center gap-3">
-                <input type="checkbox" onchange="window.toggleMessageDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                <input type="checkbox" onchange="toggleMessageDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
                 <div><span class="font-black text-sm text-gray-900 block leading-tight">${phone}</span><span class="text-[10px] text-gray-400 font-mono">ID: ${lic.key}</span></div>
             </div>
             <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${isChecked ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}">${isChecked ? '선택됨' : '대기'}</span>
@@ -423,7 +412,7 @@ export function renderMessageFeed() {
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-[11px] font-mono text-gray-400">${msg.dateStr || ''} ${msg.timeStr || ''}</span>
-                    <button type="button" onclick="window.deleteDispatchMessage('${msg.id}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                    <button type="button" onclick="deleteDispatchMessage('${msg.id}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
                 </div>
             </div>
             <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${msg.content}</div>
@@ -467,10 +456,10 @@ export function renderCustomTemplates() {
         html += `
         <div class="group p-3 bg-white border border-gray-200 rounded-2xl hover:border-blue-400 hover:shadow-xs transition flex flex-col gap-1.5 relative">
             <div class="flex justify-between items-start gap-2">
-                <span onclick="window.insertCustomTemplate('${escapedContent}')" class="font-black text-xs text-gray-900 cursor-pointer hover:text-blue-600 flex items-center gap-1.5 truncate flex-1"><i class="fa-solid fa-file-lines text-blue-500 text-[11px] shrink-0"></i><span class="truncate">${tpl.title || '제목 없음'}</span></span>
-                <button onclick="window.deleteCustomTemplate('${tpl.id}')" class="text-gray-300 hover:text-red-500 p-1 text-xs transition" title="틀 삭제"><i class="fa-solid fa-trash-can text-[11px]"></i></button>
+                <span onclick="insertCustomTemplate('${escapedContent}')" class="font-black text-xs text-gray-900 cursor-pointer hover:text-blue-600 flex items-center gap-1.5 truncate flex-1"><i class="fa-solid fa-file-lines text-blue-500 text-[11px] shrink-0"></i><span class="truncate">${tpl.title || '제목 없음'}</span></span>
+                <button onclick="deleteCustomTemplate('${tpl.id}')" class="text-gray-300 hover:text-red-500 p-1 text-xs transition" title="틀 삭제"><i class="fa-solid fa-trash-can text-[11px]"></i></button>
             </div>
-            <p onclick="window.insertCustomTemplate('${escapedContent}')" class="text-[11px] text-gray-600 font-medium line-clamp-2 leading-relaxed cursor-pointer hover:text-gray-800">${tpl.content || ''}</p>
+            <p onclick="insertCustomTemplate('${escapedContent}')" class="text-[11px] text-gray-600 font-medium line-clamp-2 leading-relaxed cursor-pointer hover:text-gray-800">${tpl.content || ''}</p>
         </div>`;
     });
     listEl.innerHTML = html;
@@ -577,7 +566,7 @@ export function openDispatchInboxModal() {
             <div class="bg-amber-50/40 border border-amber-200 rounded-2xl p-4 shadow-2xs flex flex-col gap-1.5 hover:border-amber-300 transition">
                 <div class="flex justify-between items-center text-xs">
                     <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">${m.senderTitle || '운영사 알림'}</span>
-                    <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="window.deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
+                    <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
                 </div>
                 <p class="text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed mt-1">${m.content}</p>
             </div>`;
@@ -667,8 +656,8 @@ export function renderLocationSidebar() {
                 </div>
             </div>
             <div class="grid grid-cols-2 gap-2 pt-1 border-t border-gray-100">
-                <button onclick="window.focusDriverLocationOnMap('${devId}')" class="py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-blue-200 shadow-xs"><i class="fa-solid fa-crosshairs text-[11px]"></i> 위치 확인</button>
-                <button onclick="window.jumpToDriverDelivery('${devId}')" class="py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"><i class="fa-solid fa-route text-[10px]"></i> 배송 관리</button>
+                <button onclick="focusDriverLocationOnMap('${devId}')" class="py-2 px-3 bg-blue-50 hover:bg-blue-100 text-blue-700 font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 border border-blue-200 shadow-xs"><i class="fa-solid fa-crosshairs text-[11px]"></i> 위치 확인</button>
+                <button onclick="jumpToDriverDelivery('${devId}')" class="py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white font-black rounded-xl text-xs flex items-center justify-center gap-1.5 transition active:scale-95 shadow-xs"><i class="fa-solid fa-route text-[10px]"></i> 배송 관리</button>
             </div>
         </div>`;
     });
@@ -723,7 +712,7 @@ export async function focusDriverLocationOnMap(devId) {
                             <span class="text-[10px] text-gray-400 font-mono">${timeStr}</span>
                         </div>
                         <div id="loc-overlay-addr" class="font-black text-gray-100 text-[13px] leading-snug py-0.5 break-keep"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-emerald-400"></i>주소 확인 중...</div>
-                        <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-emerald-400 mr-1"></i>${phoneName}</span><button onclick="window.closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
+                        <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-emerald-400 mr-1"></i>${phoneName}</span><button onclick="closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
                         <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
                     </div>`;
                 window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
@@ -770,7 +759,7 @@ export async function showFallbackLocation(devId) {
         <div style="transform: translate(-50%, -100%); margin-top: -15px;" class="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-sky-400 text-xs flex flex-col gap-1.5 min-w-[240px] max-w-[320px] relative z-50">
             <div class="flex justify-between items-center pb-1.5 border-b border-slate-700"><span class="font-black text-sky-400 flex items-center gap-1.5 text-xs"><i class="fa-solid fa-location-dot text-sky-400"></i> 기사 최근 위치</span><span class="text-[10px] text-gray-400 font-mono">${timeStr}</span></div>
             <div id="loc-overlay-addr" class="font-black text-gray-100 text-[13px] leading-snug py-0.5 break-keep"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-sky-400"></i>주소 확인 중...</div>
-            <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-sky-400 mr-1"></i>${phone}</span><button onclick="window.closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
+            <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-sky-400 mr-1"></i>${phone}</span><button onclick="closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
             <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-sky-400"></div>
         </div>`;
     window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
@@ -803,7 +792,7 @@ export function drawAllDriversOnMap() {
             bounds.extend(pos); hasPoints = true;
             const content = document.createElement('div'); content.className = 'driver-pin';
             content.innerHTML = `<i class="fa-solid fa-truck text-sky-400 text-xs"></i><span>${lic.phone || '기사'}</span>`;
-            content.onclick = () => { window.jumpToDriverDelivery(devId); };
+            content.onclick = () => { jumpToDriverDelivery(devId); };
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.3, zIndex: 30 });
             overlay.setMap(map); 
             window.myMapOverlays.push(overlay);
@@ -850,7 +839,6 @@ export function drawDriverOnMap(devId) {
     let pointsCount = 0;
     const plannedPath = [];
     const completedPath = [];
-    const currentMode = state.currentMapPolylineMode || 'all';
 
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
@@ -860,11 +848,7 @@ export function drawDriverOnMap(devId) {
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.customType = 'completed';
-            
-            if (currentMode === 'all' || currentMode === 'completed') {
-                overlay.setMap(map); 
-            }
+            overlay.setMap(map); 
             window.myMapOverlays.push(overlay);
         }
     });
@@ -881,11 +865,7 @@ export function drawDriverOnMap(devId) {
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
                     content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                    overlay.customType = 'planned';
-                    
-                    if (currentMode === 'all' || currentMode === 'planned') {
-                        overlay.setMap(map); 
-                    }
+                    overlay.setMap(map); 
                     window.myMapOverlays.push(overlay);
                 }
             }
@@ -896,7 +876,7 @@ export function drawDriverOnMap(devId) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
-        if (currentMode === 'all' || currentMode === 'planned') {
+        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'planned') {
             window.mapPlannedPolyline.setMap(map);
         }
     }
@@ -905,7 +885,7 @@ export function drawDriverOnMap(devId) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
         });
-        if (currentMode === 'all' || currentMode === 'completed') {
+        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'completed') {
             window.mapCompletedPolyline.setMap(map);
         }
     }
@@ -918,31 +898,11 @@ export function setMapPolylineMode(mode) {
     ['all', 'planned', 'completed'].forEach(m => {
         const btn = document.getElementById(`btn-mode-${m}`);
         if (!btn) return;
-        if (m === mode) {
-            btn.classList.remove('text-gray-700', 'hover:bg-gray-100');
-            btn.classList.add('bg-blue-600', 'text-white');
-        } else {
-            btn.classList.remove('bg-blue-600', 'text-white');
-            btn.classList.add('text-gray-700', 'hover:bg-gray-100');
-        }
+        if (m === mode) btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
+        else btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black";
     });
-
-    if (window.mapPlannedPolyline) {
-        window.mapPlannedPolyline.setMap((mode === 'all' || mode === 'planned') ? map : null);
-    }
-    if (window.mapCompletedPolyline) {
-        window.mapCompletedPolyline.setMap((mode === 'all' || mode === 'completed') ? map : null);
-    }
-    
-    if (window.myMapOverlays) {
-        window.myMapOverlays.forEach(overlay => {
-            if (overlay.customType === 'planned') {
-                overlay.setMap((mode === 'all' || mode === 'planned') ? map : null);
-            } else if (overlay.customType === 'completed') {
-                overlay.setMap((mode === 'all' || mode === 'completed') ? map : null);
-            }
-        });
-    }
+    if (window.mapPlannedPolyline) window.mapPlannedPolyline.setMap(mode === 'all' || window.mapPlannedPolyline.setMap(mode === 'planned' ? map : null));
+    if (window.mapCompletedPolyline) window.mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
 }
 
 export function changeDispatchDate(days) {
@@ -1033,7 +993,7 @@ export function handleGlobalSearch(query) {
         html += `
         <div class="border border-gray-200 rounded-2xl p-3 bg-white hover:border-blue-300 transition shadow-xs">
             <div class="flex justify-between items-center mb-1.5"><span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${latest.address}</span><span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span></div>
-            <div onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
+            <div onclick="jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
                 <div class="flex justify-between items-center text-xs">
                     <div class="flex items-center gap-1.5"><span class="text-[10px] font-black px-1.5 py-0.5 rounded ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span><span class="font-bold text-gray-800">${latest.phone}</span></div>
                     <span class="font-black text-[11px] ${latest.type === 'DONE' ? 'text-emerald-700' : 'text-blue-700'}">${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}] ${latest.timeStr}` : `➔ ${latest.displayNumber || 1}번 이동 대기`}</span>
@@ -1067,14 +1027,15 @@ export function handleProFeature(featureName) {
             if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
 
         } else if (featureName === 'INVOICE') {
-            if (parsedExcelList && parsedExcelList.length === 0) { alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요."); return; }
+            if (state.parsedExcelList && state.parsedExcelList.length === 0) { alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요."); return; }
             const modal = document.getElementById('pro-invoice-modal');
             if (!modal) { alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); return; }
             modal.classList.remove('hidden');
             
-            printReadyList = [...parsedExcelList];
+            // 모든 엑셀 리스트를 출력 대기 리스트로 일괄 세팅 (사용자가 체크박스 안눌러도 되게)
+            state.printReadyList = [...state.parsedExcelList];
             
-            document.getElementById('print-ready-count').innerText = printReadyList.length;
+            document.getElementById('print-ready-count').innerText = state.printReadyList.length;
             loadSavedForms(); 
             previewInvoiceRow(0); 
             syncPreviewData(); 
@@ -1153,20 +1114,20 @@ export function renderDispatchDriverList() {
             let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
             territoryBadge = `
                 <div class="flex flex-col items-end gap-0.5">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
+                    <button type="button" onclick="openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
                     <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
                 </div>`;
         } else {
             territoryBadge = `
                 <div class="flex flex-col items-end gap-0.5">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
+                    <button type="button" onclick="openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
                     <span class="text-[9px] text-gray-400">미설정</span>
                 </div>`;
         }
 
-        const isSelected = selectedDispatchDriverId === devId;
+        const isSelected = state.selectedDispatchDriverId === devId;
         html += `
-        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
+        <div onclick="selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
             <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0"><span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span><i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i><span class="truncate">${phoneDisplay}</span></span>
             <div class="shrink-0 ml-2">${territoryBadge}</div>
         </div>`;
@@ -1175,7 +1136,7 @@ export function renderDispatchDriverList() {
 }
 
 export function selectDispatchDriver(devId) {
-    selectedDispatchDriverId = devId;
+    state.selectedDispatchDriverId = devId;
     renderDispatchDriverList(); renderDispatchDriverDetail(); 
 }
 
@@ -1185,13 +1146,13 @@ export function renderDispatchDriverDetail() {
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
     
-    if (!selectedDispatchDriverId) {
+    if (!state.selectedDispatchDriverId) {
         header.classList.remove('hidden'); table.classList.add('hidden'); badge.classList.add('hidden'); return;
     }
 
-    const targetLic = state.allLicenses.find(l => l.deviceId === selectedDispatchDriverId || l.key === selectedDispatchDriverId);
-    const driverName = targetLic ? (targetLic.phone || targetLic.key) : selectedDispatchDriverId;
-    const assignedItems = parsedExcelList.filter(item => item.assignedDriver === driverName);
+    const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+    const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
+    const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
 
     header.classList.add('hidden'); table.classList.remove('hidden'); badge.classList.remove('hidden');
     badge.innerText = `총 ${assignedItems.length}건`;
@@ -1210,7 +1171,7 @@ export async function loadExcelFromFirebase() {
     const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr;
     try {
         const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
-        parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
+        state.parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
         renderExcelTable();
     } catch (error) {}
 }
@@ -1219,30 +1180,30 @@ export async function autoSaveExcelToFirebase() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); if (!dispatchKey) return; 
     const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
     try {
-        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
+        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { date: dateVal, dispatchKey: dispatchKey, orders: state.parsedExcelList || [], updatedAt: Date.now() }, { merge: true });
     } catch (error) {}
 }
 
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); if (!tbody) return;
-    if (parsedExcelList.length === 0) {
+    if (state.parsedExcelList.length === 0) {
         tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
         const chkAll = document.getElementById('chk-excel-all'); if (chkAll) chkAll.checked = false;
         renderDispatchDriverDetail(); return;
     }
 
     let html = '';
-    parsedExcelList.forEach((item, idx) => {
+    state.parsedExcelList.forEach((item, idx) => {
         const assignedBadge = item.assignedDriver ? `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` : `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
         const coordIcon = (item.lat && item.lng) ? `<i class="fa-solid fa-map-pin text-emerald-500 mr-1" title="위치 확인됨"></i>` : `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
 
         html += `
-        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="window.toggleRowCheckbox(event, ${idx})">
+        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="toggleRowCheckbox(event, ${idx})">
             <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
             <td class="text-center font-bold text-gray-500">${idx + 1}</td>
             <td class="text-center">${assignedBadge}</td>
             <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">${coordIcon}${item.address || '-'}</td>
-            <td class="text-center" onclick="event.stopPropagation()"><button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95"><i class="fa-solid fa-trash-can text-[10px]"></i></button></td>
+            <td class="text-center" onclick="event.stopPropagation()"><button onclick="deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95"><i class="fa-solid fa-trash-can text-[10px]"></i></button></td>
         </tr>`;
     });
     tbody.innerHTML = html;
@@ -1273,7 +1234,7 @@ export function processExcelData(jsonData) {
         }
         if (mappedRow.senderName || mappedRow.address || mappedRow.itemName || mappedRow.storeName) newItems.push(mappedRow);
     });
-    parsedExcelList.push(...newItems); return newItems;
+    state.parsedExcelList.push(...newItems); return newItems;
 }
 
 export function initExcelDropZone() {
@@ -1360,7 +1321,7 @@ export function toggleRowCheckbox(e, idx) {
 
 export async function deleteExcelRow(idx) {
     if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
-    parsedExcelList.splice(idx, 1); 
+    state.parsedExcelList.splice(idx, 1); 
     renderExcelTable(); 
     await autoSaveExcelToFirebase();
 }
@@ -1370,15 +1331,15 @@ export async function deleteSelectedExcelRows() {
     if(checkboxes.length === 0) { alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); return; }
     if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
     const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
-    parsedExcelList = parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
+    state.parsedExcelList = state.parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
     renderExcelTable(); 
     await autoSaveExcelToFirebase(); 
 }
 
 export async function clearAllExcelRows() {
-    if(parsedExcelList.length === 0) return;
+    if(state.parsedExcelList.length === 0) return;
     if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?")) return;
-    parsedExcelList = []; 
+    state.parsedExcelList = []; 
     renderExcelTable(); 
     await autoSaveExcelToFirebase();
 }
@@ -1386,23 +1347,23 @@ export async function clearAllExcelRows() {
 export function exportToInvoiceModal() {
     const checkboxes = document.querySelectorAll('.row-checkbox:checked');
     if (checkboxes.length === 0) { alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요."); return; }
-    printReadyList = [];
+    state.printReadyList = [];
     checkboxes.forEach(cb => { 
         const idx = parseInt(cb.getAttribute('data-idx')); 
-        if (parsedExcelList[idx]) printReadyList.push(parsedExcelList[idx]); 
+        if (state.parsedExcelList[idx]) state.printReadyList.push(state.parsedExcelList[idx]); 
     });
 
     closeAutoDispatchModal(); 
     document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
-    document.getElementById('print-ready-count').innerText = printReadyList.length;
+    document.getElementById('print-ready-count').innerText = state.printReadyList.length;
     loadSavedForms(); 
     previewInvoiceRow(0); 
     syncPreviewData();
 }
 
 export function previewInvoiceRow(idx) {
-    if (!printReadyList || !printReadyList[idx]) return;
-    const item = printReadyList[idx];
+    if (!state.printReadyList || !state.printReadyList[idx]) return;
+    const item = state.printReadyList[idx];
 
     document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || ''); 
@@ -1469,7 +1430,7 @@ function generateInvoiceHTML(item, providerInfo) {
         });
     });
 
-    const dateStr = getLocalDateString(new Date());
+    const dateStr = getLocalDateString();
     const dateSpan1 = template.querySelector('#prev-date-1'); if (dateSpan1) { dateSpan1.id = ''; dateSpan1.innerText = dateStr; }
     const dateSpan2 = template.querySelector('#prev-date-2'); if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
     template.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
@@ -1478,7 +1439,7 @@ function generateInvoiceHTML(item, providerInfo) {
 }
 
 export function executeBatchPrint() {
-    if (printReadyList.length === 0) { alert("출력할 주문건이 없습니다."); return; }
+    if (state.printReadyList.length === 0) { alert("출력할 주문건이 없습니다."); return; }
     const btn = document.getElementById('btn-batch-print');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 문서 생성 중...'; }
 
@@ -1488,7 +1449,7 @@ export function executeBatchPrint() {
         tel: document.getElementById('input-prov-tel')?.value || '', addTel: document.getElementById('input-prov-add-tel')?.value || ''
     };
 
-    let printContents = ''; printReadyList.forEach(item => { printContents += generateInvoiceHTML(item, providerInfo); });
+    let printContents = ''; state.printReadyList.forEach(item => { printContents += generateInvoiceHTML(item, providerInfo); });
 
     const iframe = document.createElement('iframe');
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; document.body.appendChild(iframe);
@@ -1526,8 +1487,8 @@ export function syncPreviewData() {
 }
 
 export function updateLivePreview() {
-    clearTimeout(previewDebounceTimer);
-    previewDebounceTimer = setTimeout(() => { syncPreviewData(); }, 150);
+    clearTimeout(state.previewDebounceTimer);
+    state.previewDebounceTimer = setTimeout(() => { syncPreviewData(); }, 150);
 }
 
 export function loadSavedForms() {
@@ -1537,25 +1498,25 @@ export function loadSavedForms() {
     if (savedForms.length === 0) { listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">저장된 폼이 없습니다.<br>아래에서 새 폼을 작성하고 저장하세요.</div>`; return; }
     let html = '';
     savedForms.forEach((form, idx) => {
-        const isSelected = (currentSelectedFormIndex === idx);
+        const isSelected = (state.currentSelectedFormIndex === idx);
         html += `
         <div class="border ${isSelected ? 'border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-400' : 'border-gray-200 bg-white hover:border-indigo-300'} rounded-xl p-2.5 shadow-xs transition flex items-center justify-between group">
             <div class="flex items-center gap-3 overflow-hidden flex-1 pl-1">
-                <input type="checkbox" onchange="window.toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
-                <div class="min-w-0 cursor-pointer flex-1" onclick="window.previewSavedForm(${idx})">
+                <input type="checkbox" onchange="toggleSelectForm(${idx})" ${isSelected ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer shrink-0">
+                <div class="min-w-0 cursor-pointer flex-1" onclick="previewSavedForm(${idx})">
                     <p class="text-[11px] font-black ${isSelected ? 'text-indigo-800' : 'text-gray-800'} truncate leading-tight hover:text-indigo-600 transition">${form.title}</p>
                     <p class="text-[9px] text-gray-400 truncate mt-0.5">${form.name}</p>
                 </div>
             </div>
-            <button type="button" onclick="window.deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+            <button type="button" onclick="deleteSavedForm(${idx})" class="text-gray-300 hover:text-red-500 px-1.5 py-1 transition shrink-0"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
         </div>`;
     });
     listEl.innerHTML = html;
 }
 
 export function toggleSelectForm(idx) {
-    if (currentSelectedFormIndex === idx) { 
-        currentSelectedFormIndex = null; 
+    if (state.currentSelectedFormIndex === idx) { 
+        state.currentSelectedFormIndex = null; 
         cancelProviderFormEdit(); 
         loadSavedForms(); 
     } else { applySavedForm(idx); }
@@ -1566,7 +1527,7 @@ export function previewSavedForm(idx) { applySavedForm(idx); }
 export function applySavedForm(idx) {
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     const form = savedForms[idx]; if (!form) return;
-    currentSelectedFormIndex = idx;
+    state.currentSelectedFormIndex = idx;
 
     document.getElementById('input-form-title').value = form.title || '';
     document.getElementById('input-prov-regno').value = form.regno || '';
@@ -1612,12 +1573,12 @@ export function deleteSavedForm(idx) {
     if(!confirm(`[${savedForms[idx].title}] 폼을 삭제하시겠습니까?`)) return;
     savedForms.splice(idx, 1);
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    if (currentSelectedFormIndex === idx) currentSelectedFormIndex = null;
+    if (state.currentSelectedFormIndex === idx) state.currentSelectedFormIndex = null;
     loadSavedForms();
 }
 
 export function cancelProviderFormEdit() {
-    currentSelectedFormIndex = null;
+    state.currentSelectedFormIndex = null;
     ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
         if(document.getElementById(id)) document.getElementById(id).value = '';
     });
