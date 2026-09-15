@@ -95,7 +95,7 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. 스마트 주소 추출 로직 (기준점 앵커 용도)
+// 3. 스마트 주소 추출 로직
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
@@ -118,7 +118,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 [1단계] 기존의 유연함과 안정성을 되살린 정밀 키워드 탐색 엔진
+// [1단계] 기존에 잘 작동하던 유연한 키워드 탐색 엔진
 function runBalancedStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
@@ -178,8 +178,8 @@ function runBalancedStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 주소 앵커 기준 [상단 복수 라인 스캔] + [정제 필터] 구역 엔진
-function runAnchorZoneStage2(fullText) {
+// [2단계] 주소 앵커 기준 상단 구역 스캔 + [숫자만 있으면 탈락, 글씨수 적으면 탈락] 핵심 필터
+function runSimpleFilterStage2(fullText) {
     try {
         let lines = fullText.split(/\n/);
         let addressLineIdx = -1;
@@ -194,7 +194,7 @@ function runAnchorZoneStage2(fullText) {
 
         let scanLines = [];
         if (addressLineIdx !== -1) {
-            // 상호명과 법인명이 위쪽에 여러 줄로 나뉘어 있을 수 있으므로 윗쪽으로 3줄까지 넉넉하게 포함
+            // 주소 라인 자체는 제외하고, 윗쪽으로 3줄 범위만 탐색 구역으로 설정
             for (let k = Math.max(0, addressLineIdx - 3); k < addressLineIdx; k++) {
                 scanLines.push(lines[k]);
             }
@@ -211,33 +211,15 @@ function runAnchorZoneStage2(fullText) {
             }
         }
 
-        let funnel = targetTokens;
+        let filtered = targetTokens;
 
-        // 글자 수 필터
-        funnel = funnel.filter(t => t.length >= 2);
+        // 1. 글씨수 적으면 탈락 (2글자 미만 조각 삭제)
+        filtered = filtered.filter(t => t.length >= 2);
 
-        // 숫자 및 전화번호 제거
-        funnel = funnel.filter(t => !/^[\d\-,.]+$/.test(t) && !/^\d+$/.test(t));
-        funnel = funnel.filter(t => !/(010|02|031|032|033|041|042|043|044|051|052|053|054|055|061|062|063|064)-?/.test(t));
+        // 2. 숫자만 있으면 탈락 (순수 숫자 및 숫자+기호 조합 차단)
+        filtered = filtered.filter(t => !/^\d+$/.test(t) && !/^[\d\-,.]+$/.test(t));
 
-        // 서식어 및 인명 라벨 제거
-        const forbidden = new Set([
-            '성명', '이름', '수취인', '받으시는분', '담당자', '법인명', '공급자', 
-            '등록', '사업자', '대표', '주소', '소재지', '연락처', '전화', '전화번호',
-            'tel', 'fax', 'el', '공급가액', '세액', '단가', '수량', '총액', '출고액', 
-            '입금액', '잔액', '합계', '영수', '청구', '품목', '품명', '규격', '단위',
-            '업장명', '상호', '상호명', '간판명', '배송지명', '상인명', '공급자용', '보관용'
-        ]);
-        funnel = funnel.filter(t => !forbidden.has(t.toLowerCase()));
-
-        // 행정구역 파편 제거
-        funnel = funnel.filter(t => {
-            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(t)) return false;
-            if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(t) && !t.includes('점') && !t.includes('식당')) return false;
-            return true;
-        });
-
-        let survivedTokens = [...new Set(funnel)];
+        let survivedTokens = [...new Set(filtered)];
         if (survivedTokens.length > 0) {
             return survivedTokens.slice(0, 3).join(' ');
         }
@@ -245,7 +227,7 @@ function runAnchorZoneStage2(fullText) {
     return null;
 }
 
-// 4. 🌟 최종 컨트롤러
+// 4. 최종 컨트롤러
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     
@@ -253,8 +235,8 @@ export function extractStoreNameLogic(fullText) {
     let stage1Result = runBalancedStage1(fullText);
     if (stage1Result) return stage1Result;
 
-    // [2차 시도] 주소 앵커 기준 상단 복수 라인 구역 스캔 엔진
-    let stage2Result = runAnchorZoneStage2(fullText);
+    // [2차 시도] 주소 앵커 구역 + [숫자 탈락, 글씨수 탈락] 필터 엔진
+    let stage2Result = runSimpleFilterStage2(fullText);
     if (stage2Result) return stage2Result;
 
     return null;
