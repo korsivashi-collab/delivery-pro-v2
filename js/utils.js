@@ -120,64 +120,78 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 표 형태 완벽 대응 정규식 기반 상호 추출 (기사님의 좌표 제한 아이디어 모방)
+// 4. 🌟 기사님 아이디어 완벽 적용: "필터 단어 차단 + 우측 긁어오기 + 멈춤 단어에서 강제 정지"
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
 
     try {
-        // 1. 모든 줄바꿈을 공백으로 펴서 좌표가 깨져도 같은 줄처럼 인식하게 만듦
-        let text = fullText.replace(/\n/g, ' ');
+        // 1. 모든 줄바꿈과 탭을 공백 하나로 통일하여 한 줄로 만듦 (좌표 엉킴 방지)
+        let text = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
 
-        // 2. 표 형태를 정규식으로 직접 캡처 (가장 우선순위 높음)
-        // 형식: "상호(법인명) [추출할 타겟] 성명" 형태에서 [추출할 타겟]만 뽑아냄
-        const tablePatterns = [
-            // 뒤에 성명, 주소, 연락처, 공급받는자 등의 표 헤더가 오는 경우 (여기서 강제 차단됨)
-            /(?:상호명?|법인명|간판명?|배송지명?)\s*(?:\([^)]*\))?\s*[:;|\-]?\s*([가-힣a-zA-Z0-9\s()]+?)\s+(?:성명|이름|대표|주소|소재지|연락처|전화|TEL|종목|업태|등록번호|공급받는자|공급자)/i,
-            
-            // 뒤에 표 헤더 없이 바로 전화번호나 금액 숫자가 오는 경우
-            /(?:상호명?|법인명|간판명?|배송지명?)\s*(?:\([^)]*\))?\s*[:;|\-]?\s*([가-힣a-zA-Z0-9\s()]+?)\s+(?:010|02|031|050|\d{3}-\d{4}|\d{1,3},\d{3})/i
-        ];
+        // 2. 필터 단어와 멈춤(Stop) 단어 강력하게 정의
+        const targets = ['상호', '법인', '간판', '배송'];
+        const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', 'tel', 'fax', 'el', '공급', '잔액', '금액', '수량', '단가', '종목', '업태', '합계', '영수', '청구', '품목', '품명', '규격'];
 
-        for (let pattern of tablePatterns) {
-            let match = text.match(pattern);
-            if (match && match[1]) {
-                let result = match[1].trim();
-                
-                // 혹시라도 묻어들어온 찌꺼기 강제 삭제
-                result = result.replace(/귀하$|\(인\)$|연락처$|공급받는자$/g, '').trim();
-                
-                if (result.length >= 2 && result !== '주식회사' && result !== '(주)') {
-                    return result;
-                }
-            }
-        }
-
-        // 3. 만약 위 패턴에 안 걸리면, 기존처럼 단어 단위로 검사하되 브레이크(Stop) 기준을 대폭 강화
-        let tokens = text.split(/\s+/);
-        const keywords = ['상호', '법인명', '간판', '배송지'];
-        // 기사님이 우려하신 '뒷부분'에 해당하는 단어들 (여기서 멈춤)
-        const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', 'TEL', '공급받는자', '공급자', '수량', '단가', '금액', '합계', '종목', '업태'];
+        let tokens = text.split(' ');
 
         for (let i = 0; i < tokens.length; i++) {
-            if (keywords.some(kw => tokens[i].includes(kw))) {
+            let token = tokens[i];
+            
+            // 3. 필터 단어가 현재 토큰에 포함되어 있는지 확인
+            if (targets.some(t => token.includes(t))) {
                 let collected = [];
-                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
-                    let token = tokens[j];
-                    
-                    if (keywords.some(kw => token.includes(kw))) continue;
-
-                    // 🛑 스톱워드가 포함된 단어(연락처, 공급받는자 등)를 만나면 즉시 수집 중단!
-                    if (stopWords.some(sw => token.includes(sw))) break;
-
-                    // 숫자만 있거나, 전화번호 형태면 중단
-                    if (/^[\d\-,.]+$/.test(token) || token.includes('010')) break;
-
-                    collected.push(token);
+                
+                let cleanToken = token;
+                // 🌟 핵심 1: 필터 단어(간판명, 상호명 등) 자체는 출력되지 않도록 텍스트에서 강제 삭제!
+                cleanToken = cleanToken.replace(/상호명?|법인명?|간판명?|배송지명?/g, '');
+                // 앞뒤에 붙은 불필요한 기호 껍데기 제거
+                cleanToken = cleanToken.replace(/^[():;|\[\]]+|[():;|\[\]]+$/g, '');
+                
+                if (cleanToken.length >= 1) {
+                    collected.push(cleanToken);
                 }
-
+                
+                // 4. 필터 단어의 우측(다음 순서) 토큰들을 하나씩 수집
+                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                    let nextToken = tokens[j];
+                    
+                    // 또 다른 필터 단어가 연달아 나오면 수집하지 않고 스킵 (예: 배송지명 옆에 또 간판명이 있는 경우)
+                    if (targets.some(t => nextToken.includes(t))) continue;
+                    
+                    let nextTokenLower = nextToken.toLowerCase();
+                    
+                    // 🌟 핵심 2: 멈춤 단어(연락처, 잔액 등)가 포함되어 있으면 즉시 수집 중단!
+                    if (stopWords.some(sw => nextTokenLower.includes(sw)) || nextTokenLower === 'el:') {
+                        break;
+                    }
+                    
+                    // 숫자, 전화번호, 단가 형태면 즉시 중단
+                    if (/^[\d\-,.]+$/.test(nextToken)) break;
+                    if (/[0-9]+(?:원|개|박스|ea|kg|g|l|ml)$/i.test(nextToken)) break;
+                    if (nextToken.includes('010') || nextToken.includes('02-') || nextToken.includes('031-')) break;
+                    
+                    collected.push(nextToken);
+                }
+                
+                // 5. 수집된 단어들 조합 및 찌꺼기 최종 정리
                 if (collected.length > 0) {
-                    let result = collected.join(' ').replace(/귀하$|\(인\)$|연락처$|공급받는자$/g, '').trim();
-                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') return result;
+                    let result = collected.join(' ').trim();
+                    
+                    // 혹시라도 '잔액', '연락처' 같은 멈춤 단어가 결과물 중간에 섞였다면 그 앞부분까지만 싹둑 자르기
+                    for (let sw of stopWords) {
+                        let swIndex = result.toLowerCase().indexOf(sw);
+                        if (swIndex !== -1) {
+                            result = result.substring(0, swIndex).trim();
+                        }
+                    }
+                    
+                    // 최종 찌꺼기 기호 정리
+                    result = result.replace(/^[\]) :;|]+|[\[( :;|]+$/g, '').trim();
+                    
+                    // 유효성 검사 (너무 짧거나 껍데기 단어만 남은 경우는 무시)
+                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') {
+                        return result; // 깔끔하게 찾았으면 반환!
+                    }
                 }
             }
         }
@@ -185,5 +199,5 @@ export function extractStoreNameLogic(fullText) {
         console.error("상호 추출 오류:", e);
     }
     
-    return null;
+    return null; // 못 찾았으면 차라리 안 띄우는 게 안전함
 }
