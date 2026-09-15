@@ -849,7 +849,7 @@ export function drawDriverOnMap(devId) {
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.customType = 'completed'; 
+            overlay.customType = 'completed';
             
             if (currentMode === 'all' || currentMode === 'completed') {
                 overlay.setMap(map); 
@@ -870,7 +870,7 @@ export function drawDriverOnMap(devId) {
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
                     content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                    overlay.customType = 'planned'; 
+                    overlay.customType = 'planned';
                     
                     if (currentMode === 'all' || currentMode === 'planned') {
                         overlay.setMap(map); 
@@ -966,8 +966,8 @@ export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
     clearSearchInput();
     if (dateStr) document.getElementById('dispatch-date-picker').value = dateStr;
     setDispatchMode('DELIVERY', true);
-    if (devId) window.selectDriver(devId);
-    if (lat && lng) window.focusMapPosition(lat, lng);
+    if (devId) selectDriver(devId);
+    if (lat && lng) focusMapPosition(lat, lng);
 }
 
 export function handleGlobalSearch(query) {
@@ -1034,37 +1034,43 @@ export function handleGlobalSearch(query) {
 }
 
 export function handleProFeature(featureName) {
-    if (featureName === 'AUTO_DISPATCH') {
-        const modal = document.getElementById('auto-dispatch-modal');
-        if (!modal) { 
-            alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); 
-            return; 
-        }
-        modal.classList.remove('hidden');
-        window.renderDispatchDriverList();
-        window.loadExcelFromFirebase();
-        if (window.initExcelDropZone) window.initExcelDropZone(); 
-        const savedBase = localStorage.getItem('deliveryProCompanyBase');
-        if (savedBase && window.updateCompanyBaseUI) window.updateCompanyBaseUI(JSON.parse(savedBase));
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const role = sessionStorage.getItem('deliveryProRole');
+    let isPro = false;
 
-    } else if (featureName === 'INVOICE') {
-        const modal = document.getElementById('pro-invoice-modal');
-        if (!modal) { 
-            alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); 
-            return; 
-        }
-        modal.classList.remove('hidden');
-        
-        state.printReadyList = (state.parsedExcelList && state.parsedExcelList.length > 0) ? [...state.parsedExcelList] : [];
-        
-        const countEl = document.getElementById('print-ready-count');
-        if (countEl) countEl.innerText = state.printReadyList.length;
-        
-        if(window.loadSavedForms) window.loadSavedForms(); 
-        if (state.printReadyList.length > 0) {
+    if (dispatchKey) {
+        const myLic = state.allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
+        if (myLic && myLic.isPro) isPro = true;
+    }
+    if (role === 'MASTER' && !dispatchKey) isPro = true;
+
+    if (isPro) {
+        if (featureName === 'AUTO_DISPATCH') {
+            const modal = document.getElementById('auto-dispatch-modal');
+            if (!modal) { alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); return; }
+            modal.classList.remove('hidden');
+            renderDispatchDriverList();
+            loadExcelFromFirebase();
+            if(window.initExcelDropZone) window.initExcelDropZone(); 
+            const savedBase = localStorage.getItem('deliveryProCompanyBase');
+            if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
+
+        } else if (featureName === 'INVOICE') {
+            if (state.parsedExcelList && state.parsedExcelList.length === 0) { alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요."); return; }
+            const modal = document.getElementById('pro-invoice-modal');
+            if (!modal) { alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); return; }
+            modal.classList.remove('hidden');
+            
+            // 모든 엑셀 리스트를 출력 대기 리스트로 일괄 세팅 (사용자가 체크박스 안눌러도 되게)
+            state.printReadyList = [...state.parsedExcelList];
+            
+            document.getElementById('print-ready-count').innerText = state.printReadyList.length;
+            if(window.loadSavedForms) window.loadSavedForms(); 
             if(window.previewInvoiceRow) window.previewInvoiceRow(0); 
             if(window.syncPreviewData) window.syncPreviewData(); 
         }
+    } else {
+        document.getElementById('premium-upgrade-modal')?.classList.remove('hidden');
     }
 }
 
@@ -1267,12 +1273,12 @@ export function initExcelDropZone() {
     let fileInput = document.getElementById('global-excel-file-input');
     if (!fileInput) {
         fileInput = document.createElement('input'); fileInput.id = 'global-excel-file-input'; fileInput.type = 'file'; fileInput.accept = '.xlsx, .xls, .csv'; fileInput.multiple = true; fileInput.style.display = 'none'; document.body.appendChild(fileInput);
-        fileInput.addEventListener('change', window.handleExcelUpload);
+        fileInput.addEventListener('change', handleExcelUpload);
     }
 
     dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('bg-indigo-100', 'border-indigo-500'); });
     dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); });
-    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { fileInput.files = e.dataTransfer.files; window.handleExcelUpload({ target: fileInput }); } });
+    dropZone.addEventListener('drop', (e) => { e.preventDefault(); dropZone.classList.remove('bg-indigo-100', 'border-indigo-500'); if (e.dataTransfer.files && e.dataTransfer.files.length > 0) { fileInput.files = e.dataTransfer.files; handleExcelUpload({ target: fileInput }); } });
     dropZone.addEventListener('click', () => { fileInput.click(); }); dropZone.dataset.bound = 'true';
 }
 
@@ -1379,9 +1385,9 @@ export function exportToInvoiceModal() {
     closeAutoDispatchModal(); 
     document.getElementById('pro-invoice-modal')?.classList.remove('hidden');
     document.getElementById('print-ready-count').innerText = state.printReadyList.length;
-    window.loadSavedForms(); 
-    window.previewInvoiceRow(0); 
-    window.syncPreviewData();
+    loadSavedForms(); 
+    previewInvoiceRow(0); 
+    syncPreviewData();
 }
 
 export function previewInvoiceRow(idx) {
@@ -1396,21 +1402,21 @@ export function previewInvoiceRow(idx) {
 
     document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
     document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
-    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
-    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
     
     let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
     
     document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
     document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
-    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
     document.querySelectorAll('span.font-normal.inline-block').forEach(span => { if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; });
 
-    window.syncPreviewData(); 
+    syncPreviewData(); 
 }
 
 function generateInvoiceHTML(item, providerInfo) {
@@ -1431,17 +1437,17 @@ function generateInvoiceHTML(item, providerInfo) {
 
     template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = item.itemName || '');
     template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = item.unit || '');
-    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = window.formatNumber(item.qty) || '');
-    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = window.formatNumber(item.price) || '');
-    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = window.formatNumber(item.total) || '');
+    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(item.qty) || '');
+    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
 
     let payMethod = ''; if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
     template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? window.formatNumber(item.qty) + '개' : ''));
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? formatNumber(item.qty) + '개' : ''));
     template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
-    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? window.formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
+    template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? formatNumber(item.total) + '원' : ''));
 
     template.querySelectorAll('.invoice-table').forEach(table => {
         table.querySelectorAll('tr').forEach(tr => {
@@ -1511,7 +1517,7 @@ export function syncPreviewData() {
 
 export function updateLivePreview() {
     clearTimeout(state.previewDebounceTimer);
-    state.previewDebounceTimer = setTimeout(() => { window.syncPreviewData(); }, 150);
+    state.previewDebounceTimer = setTimeout(() => { syncPreviewData(); }, 150);
 }
 
 export function loadSavedForms() {
@@ -1540,12 +1546,12 @@ export function loadSavedForms() {
 export function toggleSelectForm(idx) {
     if (state.currentSelectedFormIndex === idx) { 
         state.currentSelectedFormIndex = null; 
-        window.cancelProviderFormEdit(); 
-        window.loadSavedForms(); 
-    } else { window.applySavedForm(idx); }
+        cancelProviderFormEdit(); 
+        loadSavedForms(); 
+    } else { applySavedForm(idx); }
 }
 
-export function previewSavedForm(idx) { window.applySavedForm(idx); }
+export function previewSavedForm(idx) { applySavedForm(idx); }
 
 export function applySavedForm(idx) {
     let savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
@@ -1559,7 +1565,7 @@ export function applySavedForm(idx) {
     document.getElementById('input-prov-tel').value = form.tel || '';
     document.getElementById('input-prov-add-tel').value = form.addTel || '';
 
-    window.loadSavedForms(); window.syncPreviewData();
+    loadSavedForms(); syncPreviewData();
 }
 
 export function selectFormTemplate(type) {
@@ -1588,7 +1594,7 @@ export function saveProviderForm() {
     } else { savedForms.push(newForm); }
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     alert(`[${title}] 폼이 성공적으로 저장되었습니다.`);
-    window.loadSavedForms();
+    loadSavedForms();
 }
 
 export function deleteSavedForm(idx) {
@@ -1597,7 +1603,7 @@ export function deleteSavedForm(idx) {
     savedForms.splice(idx, 1);
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     if (state.currentSelectedFormIndex === idx) state.currentSelectedFormIndex = null;
-    window.loadSavedForms();
+    loadSavedForms();
 }
 
 export function cancelProviderFormEdit() {
@@ -1607,7 +1613,7 @@ export function cancelProviderFormEdit() {
     });
     const accordion = document.getElementById('form-setup-accordion');
     if (accordion) { accordion.classList.add('hidden'); accordion.classList.remove('flex'); }
-    window.loadSavedForms(); window.syncPreviewData();
+    loadSavedForms(); syncPreviewData();
 }
 
 export async function saveCompanyBaseAddress() {
@@ -1624,7 +1630,7 @@ export async function saveCompanyBaseAddress() {
             const fullAddress = result[0].address_name;
             const baseData = { address: fullAddress, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
             localStorage.setItem('deliveryProCompanyBase', JSON.stringify(baseData));
-            window.updateCompanyBaseUI(baseData);
+            updateCompanyBaseUI(baseData);
             input.value = fullAddress; 
         } else { alert("주소 위치를 찾을 수 없습니다."); }
     });
@@ -1633,7 +1639,7 @@ export async function saveCompanyBaseAddress() {
 export function clearCompanyBaseAddress() {
     localStorage.removeItem('deliveryProCompanyBase');
     document.getElementById('company-base-address').value = '';
-    window.updateCompanyBaseUI(null);
+    updateCompanyBaseUI(null);
 }
 
 export function updateCompanyBaseUI(baseData) {
@@ -1654,13 +1660,13 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     if(!modal) return; modal.classList.remove('hidden');
     
     state.currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
-    window.setTerritoryScale(state.currentTerritoryScale, true); 
+    setTerritoryScale(state.currentTerritoryScale, true); 
 
     setTimeout(() => {
         const container = document.getElementById('territory-map-container');
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
-            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { window.setTerritoryCenter(mouseEvent.latLng); });
+            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { setTerritoryCenter(mouseEvent.latLng); });
         }
         territoryMap.relayout(); 
         
@@ -1670,7 +1676,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
 
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
             const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
-            territoryMap.setCenter(pos); window.setTerritoryCenter(pos);
+            territoryMap.setCenter(pos); setTerritoryCenter(pos);
         } else {
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
             if (savedBase) {
@@ -1720,7 +1726,7 @@ export function setTerritoryScale(scale, skipRedraw = false) {
         else if (scale === 'gu') territoryMap.setLevel(9); 
         else if (scale === 'si') territoryMap.setLevel(11); 
     }
-    if (!skipRedraw && territoryMarker) window.setTerritoryCenter(territoryMarker.getPosition());
+    if (!skipRedraw && territoryMarker) setTerritoryCenter(territoryMarker.getPosition());
 }
 
 export function setTerritoryCenter(latLng) {
@@ -1779,8 +1785,8 @@ export async function saveDriverTerritory() {
             territoryScale: scale, territory1: t1, territory2: t2
         });
         alert("기사 권역이 저장되었습니다.");
-        window.closeDriverTerritoryModal();
-        window.renderDispatchDriverList();
+        closeDriverTerritoryModal();
+        renderDispatchDriverList();
     } catch(e) { alert("저장 오류: " + e.message); }
 }
 
@@ -1852,7 +1858,7 @@ export function executeExcelExport() {
     const isCanceled = document.getElementById('chk-export-canceled').checked;
 
     if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 정 없습니다. 날짜를 다시 확인해주세요."); return; }
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
