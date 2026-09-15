@@ -120,16 +120,24 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 기사님 아이디어 완벽 적용: "필터 단어 차단 + 우측 긁어오기 + 멈춤 단어에서 강제 정지"
+// 4. 🌟 기사님 제안 반영: "주소 영역 철저히 배제 + 노이즈/순수 숫자 필터링 후 남은 상호명 출력"
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
 
     try {
-        // 1. 모든 줄바꿈과 탭을 공백 하나로 통일하여 한 줄로 만듦 (좌표 엉킴 방지)
-        let text = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
+        // 1. 주소 영역을 먼저 정확히 찾아내서 텍스트 전체에서 도려냄 (주소 좌우 정보가 상호명으로 오인되는 것 원천 차단)
+        let cleanText = fullText;
+        let detectedAddress = extractAddressLogic(fullText);
+        if (detectedAddress) {
+            // 주소 문자열을 기준으로 앞뒤를 분리하거나 주소 자체를 빈 문자로 치환
+            cleanText = cleanText.replace(detectedAddress, ' [주소제외됨] ');
+        }
 
-        // 2. 필터 단어와 멈춤(Stop) 단어 강력하게 정의
-        const targets = ['상호', '법인', '간판', '배송'];
+        // 2. 줄바꿈을 공백으로 펴서 한 줄로 만듦
+        let text = cleanText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
+
+        // 3. 탐색할 타겟 키워드와 확실하게 걸러낼 필터링(Stop) 단어 정의
+        const targets = ['상호', '법인', '간판', '배송지'];
         const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', 'tel', 'fax', 'el', '공급', '잔액', '금액', '수량', '단가', '종목', '업태', '합계', '영수', '청구', '품목', '품명', '규격'];
 
         let tokens = text.split(' ');
@@ -137,47 +145,38 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let token = tokens[i];
             
-            // 3. 필터 단어가 현재 토큰에 포함되어 있는지 확인
+            // 타겟 키워드가 포함된 블록 발견 시
             if (targets.some(t => token.includes(t))) {
                 let collected = [];
                 
-                let cleanToken = token;
-                // 🌟 핵심 1: 필터 단어(간판명, 상호명 등) 자체는 출력되지 않도록 텍스트에서 강제 삭제!
-                cleanToken = cleanToken.replace(/상호명?|법인명?|간판명?|배송지명?/g, '');
-                // 앞뒤에 붙은 불필요한 기호 껍데기 제거
-                cleanToken = cleanToken.replace(/^[():;|\[\]]+|[():;|\[\]]+$/g, '');
-                
-                if (cleanToken.length >= 1) {
-                    collected.push(cleanToken);
-                }
-                
-                // 4. 필터 단어의 우측(다음 순서) 토큰들을 하나씩 수집
+                // 타겟 단어 자체는 필터링(출력 불가)하므로 버리고 우측 토큰들 수집 시작
                 for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
                     let nextToken = tokens[j];
                     
-                    // 또 다른 필터 단어가 연달아 나오면 수집하지 않고 스킵 (예: 배송지명 옆에 또 간판명이 있는 경우)
                     if (targets.some(t => nextToken.includes(t))) continue;
-                    
                     let nextTokenLower = nextToken.toLowerCase();
                     
-                    // 🌟 핵심 2: 멈춤 단어(연락처, 잔액 등)가 포함되어 있으면 즉시 수집 중단!
+                    // 성명, 연락처, 잔액 등 필터링 단어를 만나면 즉시 중단
                     if (stopWords.some(sw => nextTokenLower.includes(sw)) || nextTokenLower === 'el:') {
                         break;
                     }
                     
-                    // 숫자, 전화번호, 단가 형태면 즉시 중단
-                    if (/^[\d\-,.]+$/.test(nextToken)) break;
-                    if (/[0-9]+(?:원|개|박스|ea|kg|g|l|ml)$/i.test(nextToken)) break;
+                    // 🌟 기사님 제안: "순수 숫자만 있는 단어 출력 불가" (단, 글자 내부에 숫자가 섞인 상호는 허용)
+                    // 예: "528,000", "0", "12" 처럼 숫자와 기호로만 이루어진 경우 버림
+                    if (/^[\d\-,.]+$/.test(nextToken)) {
+                        break; // 숫자가 나오면 상호명 끝으로 간주하고 중단
+                    }
+                    
+                    // 전화번호 형태면 중단
                     if (nextToken.includes('010') || nextToken.includes('02-') || nextToken.includes('031-')) break;
                     
                     collected.push(nextToken);
                 }
                 
-                // 5. 수집된 단어들 조합 및 찌꺼기 최종 정리
                 if (collected.length > 0) {
                     let result = collected.join(' ').trim();
                     
-                    // 혹시라도 '잔액', '연락처' 같은 멈춤 단어가 결과물 중간에 섞였다면 그 앞부분까지만 싹둑 자르기
+                    // 찌꺼기 텍스트 한 번 더 필터링
                     for (let sw of stopWords) {
                         let swIndex = result.toLowerCase().indexOf(sw);
                         if (swIndex !== -1) {
@@ -185,12 +184,11 @@ export function extractStoreNameLogic(fullText) {
                         }
                     }
                     
-                    // 최종 찌꺼기 기호 정리
                     result = result.replace(/^[\]) :;|]+|[\[( :;|]+$/g, '').trim();
                     
-                    // 유효성 검사 (너무 짧거나 껍데기 단어만 남은 경우는 무시)
-                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') {
-                        return result; // 깔끔하게 찾았으면 반환!
+                    // 최종 유효성 검사 (너무 짧거나 껍데기만 남았으면 무시)
+                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사' && !/^[\d\-,.]+$/.test(result)) {
+                        return result; // 깔끔하게 정제된 상호명 출력!
                     }
                 }
             }
@@ -199,5 +197,5 @@ export function extractStoreNameLogic(fullText) {
         console.error("상호 추출 오류:", e);
     }
     
-    return null; // 못 찾았으면 차라리 안 띄우는 게 안전함
+    return null; // 걸리는 게 없으면 무시하고 null 반환
 }
