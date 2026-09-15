@@ -120,7 +120,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 [1단계] 기존에 가장 성능이 좋았던 정밀 키워드 탐색 엔진
+// 🌟 [1단계] 정밀 키워드 탐색 엔진
 function runStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
@@ -187,7 +187,7 @@ function runStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 1단계에서 못 잡았을 때 발동하는 네거티브(제거) 필터링 백업 시스템
+// 🌟 [2단계] 네거티브(제거) 필터링 백업 시스템 (명세서 서식 금지어 대폭 강화)
 function runStage2(fullText) {
     try {
         let text = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
@@ -195,13 +195,16 @@ function runStage2(fullText) {
         let addr = extractAddressLogic(fullText);
         if (addr) text = text.replace(addr, ' ');
 
+        // 🛑 2단계 네거티브 금지어 리스트 대폭 강화 (공급자용, 김태환, 등록 등 서식/인명 차단)
         const negativeWords = new Set([
             '공급가액', '세액', '단가', '수량', '총액', '출고액', '입금액', '전잔액', '잔액', 
             '합계', '영수', '청구', '품목', '품명', '규격', '단위', '사업자등록번호', '구매자명', 
             '성명', '이름', '대표', '대표자', '주소', '소재지', '연락처', '전화', '전화번호', 
             'tel', 'fax', 'el', '공급받는자', '공급자', '제조사', '원산지', '비고', '업태', '종목', 
             '사업장', '조사', '구수', '구수동', '간판명', '배송지명', '상호명', '상호', '업체명', '상인명',
-            '한식', '음식', '식품', '국내산', '수입산'
+            '한식', '음식', '식품', '국내산', '수입산',
+            // 🌟 추가된 명세서 고정 서식/인명 노이즈어
+            '공급자용', '김태환', '등록', '보관용', '인수자', '확인', '일자', '번호', '거래명세표'
         ]);
 
         let tokens = text.split(' ');
