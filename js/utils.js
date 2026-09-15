@@ -120,80 +120,58 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 "규칙에 없으면 억지로 찾지 않는다" (우측 단어 필터링 적용)
+// 4. 🌟 거래명세서/영수증 표(테이블) 구조 맞춤형 스마트 추출 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
+
     try {
-        let tokens = fullText.split(/[\s\n]+/);
-        let badWords = new Set();
+        // 1. OCR 인식 시 발생할 수 있는 띄어쓰기 오차 보정
+        let normalizedText = fullText.replace(/상\s+호/g, '상호')
+                                     .replace(/법\s+인\s+명/g, '법인명')
+                                     .replace(/배\s+송\s+지/g, '배송지')
+                                     .replace(/간\s+판/g, '간판');
 
-        for (let i = 0; i < tokens.length; i++) {
-            let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
-            if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
-            if (/구매자명|성명/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
-        }
+        // 2. 거래명세표 핵심 패턴 검색 (사진에 있는 "상호(법인명)" 패턴 정확히 타겟팅)
+        // 설명: "상호(법인명)" 텍스트 뒤에 오는 문자열을 일단 길게 캡처합니다.
+        let match = normalizedText.match(/(?:상호명?|법인명|간판명?|배송지명?)\s*(?:\([^)]*\))?\s*[:;|\-]?\s*([가-힣a-zA-Z0-9\s()]+)/);
 
-        // 🌟 필터링 타겟 단어 지정 (간판, 상호, 배송, 법인)
-        const targets = ['간판', '상호', '배송', '법인'];
-        // 🛑 규격, 제조사 등 엉뚱한 정보 차단 필터
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '규격', '단위', '제조사', '원산지', '비고', '품목', '품명', '별도표기'];
+        if (match && match[1]) {
+            let candidate = match[1].trim();
 
-        const isJunk = (rawStr) => {
-            let s = rawStr.replace(/[^\w가-힣]/g, ''); 
-            if (!s || s.length < 2) return true; 
-            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; // 숫자만 입력된 상호(예: 6223300360) 무시
-            if (badWords.has(s)) return true; 
-            
-            if (/[0-9]+(?:kg|g|l|ml|포|박스|box|개|ea|팩|봉)/i.test(rawStr)) return true;
-            if (/국내산|수입산|별도표기|해당없음|별도/.test(s)) return true;
-            
-            if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
-            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(s)) return true;
-            if (rawStr.includes('[') || rawStr.includes(']')) return true; 
-            return false;
-        };
+            // 3. 추출된 블록에서 '표의 다음 칸' 데이터(성명, 잔액, TEL 등)가 섞여 있다면 그 직전까지만 스마트하게 잘라내기
+            let tokens = candidate.split(/[\s\n]+/);
+            let finalName = [];
 
-        for (let i = 0; i < tokens.length; i++) {
-            // 🌟 타겟 단어가 감지되면
-            if (targets.some(kw => tokens[i].includes(kw))) {
-                let collected = [];
-                // 🌟 타겟 단어 기준 '우측' 토큰들을 수집 시작
-                for (let j = i + 1; j < Math.min(i + 12, tokens.length); j++) {
-                    let tok = tokens[j];
-
-                    // 🌟 핵심 로직: 수집하는 블록 자체에 타겟 단어(간판,상호,배송,법인)가 포함되어 있으면 출력 리스트에서 무시(패스)
-                    if (targets.some(kw => tok.includes(kw))) {
-                        continue;
-                    }
-
-                    if (skips.some(skw => tok.includes(skw))) {
-                        if (collected.length > 0) break; 
-                        continue; 
-                    }
-                    
-                    if (isJunk(tok)) continue; 
-
-                    if (j + 1 < tokens.length) {
-                        let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
-                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
-                            continue;
-                        }
-                    }
-
-                    collected.push(tok.replace(/[^\w가-힣]/g, ''));
+            for (let token of tokens) {
+                // 🌟 핵심 방어막: 표의 다음 컬럼이나 불필요한 정보가 시작되는 키워드가 나오면 멈춤!
+                if (/성명|이름|대표|귀하|사업장|주소|종목|업태|등록번호|전화|TEL|잔액|금액/.test(token)) {
+                    break; 
                 }
+                // 숫자만 있거나 단가/수량/전화번호 형태가 나오면 멈춤
+                if (/^[0-9,]+$/.test(token)) break;
+                if (/원$|개$|박스$|ea$|kg$|g$/i.test(token)) break;
+                if (/^\d{2,3}-\d{3,4}-\d{4}$/.test(token)) break;
 
-                if (collected.length > 0) {
-                    let unique = [...new Set(collected)];
-                    let result = unique.join(' ').trim();
-                    if (result.length >= 2) return result;
-                }
+                finalName.push(token);
+
+                // 상호명이 너무 비정상적으로 길어지는 것 방지 (보통 4어절 이내)
+                if (finalName.length >= 4) break;
+            }
+
+            let result = finalName.join(' ').trim();
+            
+            // "(인)", "귀하" 등 영수증 찌꺼기 텍스트 한 번 더 청소
+            result = result.replace(/\(인\)$|귀하$|대표자.*/g, '').trim();
+
+            // 유효성 검사 (너무 짧거나 '주식회사' 같은 단어만 달랑 있으면 상호명이 아니라고 판단)
+            if (result.length >= 2 && result !== '주식회사' && result !== '(주)') {
+                return result;
             }
         }
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
     
-    // 타겟 주변에 유효한 문자가 아예 없었다면, 무리하지 않고 깔끔하게 null 반환!
+    // 🌟 확실하지 않으면 억지로 이상한 단어(EL 등)를 넣느니, 깔끔하게 null을 반환하여 주소만 표기되게 함
     return null;
 }
