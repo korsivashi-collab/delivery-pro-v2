@@ -95,7 +95,7 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. 스마트 주소 추출 로직 (기준점 앵커 용도)
+// 3. 스마트 주소 추출 로직
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
@@ -118,7 +118,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 [1단계] 더 빡빡하고 엄격하게 강화된 정밀 키워드 탐색 엔진
+// [1단계] 엄격 정밀 키워드 탐색 엔진
 function runStrictStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
@@ -140,7 +140,6 @@ function runStrictStage1(fullText) {
             if (badWords.has(s)) return true; 
             if (/^(tel|fax|el)$/i.test(s)) return true;
             
-            // 엄격한 서식 및 인명 키워드 차단
             if (/^(법인명|상호|업체명|간판명|배송지명|상인명|공급자|공급자용|보관용|사업자|등록|대표자|대표|성명|이름|수취인|받으시는분|담당자)$/i.test(s)) return true;
 
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
@@ -181,13 +180,12 @@ function runStrictStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 주소 앵커 기준 [상·하단 라인 스캔] + [연쇄 비교 삭제(펀넬)] 백업 엔진
+// [2단계] 주소 앵커 기준 상하단 구역 + 연쇄 비교 삭제 엔진
 function runAnchorFunnelStage2(fullText) {
     try {
         let lines = fullText.split(/\n/);
         let addressLineIdx = -1;
 
-        // 주소 라인 앵커 탐색
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
             if (/(로|길|동|읍|면|리)\s*\d+/.test(line) && /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주|[시구군])/.test(line)) {
@@ -196,13 +194,12 @@ function runAnchorFunnelStage2(fullText) {
             }
         }
 
-        // 주소 라인은 제외하고 [바로 윗줄]과 [바로 아랫줄]만 타겟 구역 설정[cite: 3]
         let scanLines = [];
         if (addressLineIdx !== -1) {
             if (addressLineIdx - 1 >= 0) scanLines.push(lines[addressLineIdx - 1]);
             if (addressLineIdx + 1 < lines.length) scanLines.push(lines[addressLineIdx + 1]);
         } else {
-            scanLines = lines; // 비상시 전체 대상
+            scanLines = lines;
         }
 
         let targetTokens = [];
@@ -214,17 +211,12 @@ function runAnchorFunnelStage2(fullText) {
             }
         }
 
-        // 연쇄 비교 삭제 (펀넬) 파이프라인 가동
         let funnel = targetTokens;
 
-        // [삭제 1] 2글자 미만 조각 삭제
         funnel = funnel.filter(t => t.length >= 2);
-
-        // [삭제 2] 숫자, 전화번호, 금액 패턴 삭제
         funnel = funnel.filter(t => !/^[\d\-,.]+$/.test(t) && !/^\d+$/.test(t));
         funnel = funnel.filter(t => !/(010|02|031|032|033|041|042|043|044|051|052|053|054|055|061|062|063|064)-?/.test(t));
 
-        // [삭제 3] 성명, 수취인, 받으시는분, 서식 라벨 및 타이틀 삭제
         const strictForbidden = new Set([
             '성명', '이름', '수취인', '받으시는분', '담당자', '법인명', '공급자', 
             '등록', '사업자', '대표', '주소', '소재지', '연락처', '전화', '전화번호',
@@ -234,7 +226,6 @@ function runAnchorFunnelStage2(fullText) {
         ]);
         funnel = funnel.filter(t => !strictForbidden.has(t.toLowerCase()));
 
-        // [삭제 4] 행정구역 파편 단어 삭제
         funnel = funnel.filter(t => {
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(t)) return false;
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(t) && !t.includes('점') && !t.includes('식당')) return false;
@@ -249,18 +240,15 @@ function runAnchorFunnelStage2(fullText) {
     return null;
 }
 
-// 4. 🌟 최종 컨트롤러: 1차 엄격 정밀 탐색 실패 시 2차 앵커 구역 펀넬 엔진 가동
+// 4. 최종 컨트롤러
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     
-    // [1차 시도] 더 빡빡하게 강화된 정밀 키워드 엔진
     let stage1Result = runStrictStage1(fullText);
     if (stage1Result) return stage1Result;
 
-    // [2차 시도] 1차 미검출 시 주소 앵커 기준 상하단 구역 펀넬(비교 삭제) 엔진 가동
     let stage2Result = runAnchorFunnelStage2(fullText);
     if (stage2Result) return stage2Result;
 
     return null;
 }
-```[cite: 3]
