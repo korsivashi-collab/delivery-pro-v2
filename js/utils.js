@@ -120,92 +120,79 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 성능 최적화 utils_3 버전 + "세로 읽기 방어 및 동적 이름 차단기" 탑재
+// 4. 상호명 추출 로직 (가장 안정적이었던 utils_3 버전을 기반으로 미세 조정)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        let tokens = fullText.split(/[\s\n,;|]+/);
-        let badWords = new Set(); // 여기에 잡동사니와 사람 이름이 들어갑니다.
+        let tokens = fullText.split(/[\s\n]+/);
+        let badWords = new Set();
 
-        // [방어막 1] 표 헤더 단어들 (발견해도 멈추지 않고 폴짝 뛰어넘음)
-        const skips = [
-            '연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', 
-            '공급받는자', '총액', '성명', '이름', '대표', '대표자', '종목', '업태', '제조사', '원산지',
-            '청구', '영수', '품목', '품명', '규격', '사업장', '소재지', '합계', '금액', '잔액',
-            'tel', 'fax', 'el', '명', '태', '동'
-        ];
+        // 이름, 전화번호 등을 블랙리스트(badWords)에 등록
+        for (let i = 0; i < tokens.length; i++) {
+            let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
+            if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+            // 🌟 성명, 구매자명 뒤에 오는 사람 이름(예: 정돌섭) 강력 차단
+            if (/구매자명|성명|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+        }
 
-        // [방어막 2] 완벽한 쓰레기값 판별기
+        // 🌟 타겟 단어 추가: 엄마손 맛집 등을 잡기 위해 업체명, 상인명 추가
+        const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명'];
+        
+        // 🌟 스킵(정지) 단어 대폭 추가: 잔액, 출고액, 합계 등 표 헤더 추가
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '전잔액', '잔액', '합계', '영수', '청구', '품목', '성명', '이름', '대표'];
+
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
-            if (!s || s.length < 2) return true; // 1글자짜리 찌꺼기 무시
-            if (/^[\d\-,.]+$/.test(rawStr)) return true; // 528,000 같은 순수 숫자 무시
-            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; // 전화번호 무시
-            if (s.toLowerCase() === 'el' || s.toLowerCase() === 'tel' || s.toLowerCase() === 'fax') return true;
+            if (!s || s.length < 2) return true; 
+            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
+            if (badWords.has(s)) return true; 
             
-            // 주소 파편 무시 (단, 식당 이름이나 지점명은 살려줌!)
+            // 🌟 추가된 쓰레기값 필터 (EL, TEL, 구수동 파편 강제 차단)
+            if (/^(tel|fax|el|구수|구수동)$/i.test(s)) return true;
+
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
+            if (rawStr.includes('[') || rawStr.includes(']')) return true; 
             return false;
         };
 
-        // 🌟 [핵심 고도화] 동적 이름 차단기 (전규복, 정돌섭 등을 찾아내서 블랙리스트에 추가)
-        const nameHeaders = ['구매자명', '성명', '이름', '대표자', '대표'];
-        for (let i = 0; i < tokens.length; i++) {
-            if (nameHeaders.some(nh => tokens[i].includes(nh))) {
-                // 이름 헤더 밑으로 최대 20칸을 뒤져서 진짜 사람 이름을 찾아냄
-                for (let j = i + 1; j < Math.min(i + 25, tokens.length); j++) {
-                    let tok = tokens[j];
-                    if (skips.some(sk => tok.toLowerCase().includes(sk.toLowerCase()))) continue;
-                    if (isJunk(tok)) continue;
-                    
-                    // 찾아낸 사람 이름을 블랙리스트(badWords)에 영구 등록!
-                    let cleanName = tok.replace(/[^\w가-힣]/g, '');
-                    badWords.add(cleanName);
-                    break; 
-                }
-            }
-        }
-
-        // 🌟 상호명 본격 탐색 시작
-        const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명'];
-        
         for (let i = 0; i < tokens.length; i++) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                // 세로로 꼬인 표를 다 건너뛰기 위해 탐색 거리를 35칸으로 대폭 늘림
-                for (let j = i + 1; j < Math.min(i + 35, tokens.length); j++) {
+                
+                // 🌟 탐색 범위를 15 -> 20으로 늘려 두 줄로 쪼개진 론에프앤비 등 방어
+                for (let j = i + 1; j < Math.min(i + 20, tokens.length); j++) {
                     let tok = tokens[j];
-                    let cleanTok = tok.replace(/[^\w가-힣]/g, '');
                     
-                    // 표 헤더(연락처, 공급가액 등)를 만나면 가볍게 무시하고 다음 칸으로 전진
-                    if (skips.some(skw => tok.toLowerCase().includes(skw.toLowerCase()))) continue; 
-                    if (isJunk(tok)) continue; 
-                    
-                    // 🌟 블랙리스트에 등록된 사람 이름(전규복 등)이면 상호명에 절대 끼워주지 않음!
-                    if (badWords.has(cleanTok)) continue; 
-
-                    // 특수기호 껍데기만 살짝 벗겨서 수집 ((주) 같은 괄호는 보존)
-                    let finalTok = tok.replace(/^[|:;\[\]{}]+|[|:;\[\]{}]+$/g, '');
-                    if (finalTok) {
-                        collected.push(finalTok);
+                    // 스킵 단어 처리 (이전 버전의 안정적인 로직 유지)
+                    if (skips.some(skw => tok.includes(skw))) {
+                        // 이미 상호명을 모았는데 스킵 단어(잔액, 출고액 등)를 만나면 즉시 완료
+                        if (collected.length > 0) break; 
+                        continue; 
                     }
                     
-                    // 상호명은 보통 4어절을 넘지 않으므로 4개 모으면 퇴근
-                    if (collected.length >= 4) break; 
+                    if (isJunk(tok)) continue; 
+
+                    if (j + 1 < tokens.length) {
+                        let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
+                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
+                            continue;
+                        }
+                    }
+
+                    // 🌟 괄호 보존 처리: (주) 같은 특수기호가 뭉개지지 않도록 양끝 껍데기만 살짝 벗김
+                    let finalTok = tok.replace(/^[|:;\[\]{}]+|[|:;\[\]{}]+$/g, '').trim();
+                    if (finalTok) collected.push(finalTok);
                 }
 
                 if (collected.length > 0) {
-                    // 혹시라도 타겟 단어가 섞여 들어왔다면 청소
-                    let result = collected.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명/g, '').trim();
-                    result = result.replace(/^[\]) :;|]+|[\[( :;|]+$/g, '').trim();
+                    let unique = [...new Set(collected)];
+                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명/g, '').trim();
                     
-                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') {
-                        // '사브향 사브향' 처럼 중복 인식된 단어가 있으면 하나로 합쳐주는 센스
-                        let resTokens = result.split(' ');
-                        let uniqueRes = [...new Set(resTokens)];
-                        return uniqueRes.join(' ');
-                    }
+                    // 🌟 후처리: 문자열 끝에 남아있는 닫는 괄호나 이상한 기호 청소
+                    result = result.replace(/^[)\]}]+|[)\]}]+$/g, '').trim();
+                    
+                    if (result.length >= 2) return result;
                 }
             }
         }
