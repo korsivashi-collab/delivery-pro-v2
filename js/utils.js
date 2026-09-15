@@ -120,69 +120,64 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 표(테이블) 양식 최적화 스마트 상호 추출 로직 (강력한 정지 단어 필터 적용)
+// 4. 🌟 표 형태 완벽 대응 정규식 기반 상호 추출 (기사님의 좌표 제한 아이디어 모방)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
 
     try {
-        // 1. 방해되는 괄호 키워드 사전 제거 (상호명 추출을 쉽게 만들기 위함)
-        let normalized = fullText.replace(/\(간판명?\)/g, '')
-                                 .replace(/\(법인명?\)/g, '')
-                                 .replace(/상\s+호/g, '상호')
-                                 .replace(/배\s+송\s+지/g, '배송지')
-                                 .replace(/간\s+판/g, '간판');
+        // 1. 모든 줄바꿈을 공백으로 펴서 좌표가 깨져도 같은 줄처럼 인식하게 만듦
+        let text = fullText.replace(/\n/g, ' ');
 
-        let tokens = normalized.split(/[\s\n,;|]+/);
+        // 2. 표 형태를 정규식으로 직접 캡처 (가장 우선순위 높음)
+        // 형식: "상호(법인명) [추출할 타겟] 성명" 형태에서 [추출할 타겟]만 뽑아냄
+        const tablePatterns = [
+            // 뒤에 성명, 주소, 연락처, 공급받는자 등의 표 헤더가 오는 경우 (여기서 강제 차단됨)
+            /(?:상호명?|법인명|간판명?|배송지명?)\s*(?:\([^)]*\))?\s*[:;|\-]?\s*([가-힣a-zA-Z0-9\s()]+?)\s+(?:성명|이름|대표|주소|소재지|연락처|전화|TEL|종목|업태|등록번호|공급받는자|공급자)/i,
+            
+            // 뒤에 표 헤더 없이 바로 전화번호나 금액 숫자가 오는 경우
+            /(?:상호명?|법인명|간판명?|배송지명?)\s*(?:\([^)]*\))?\s*[:;|\-]?\s*([가-힣a-zA-Z0-9\s()]+?)\s+(?:010|02|031|050|\d{3}-\d{4}|\d{1,3},\d{3})/i
+        ];
 
-        const keywords = ['상호', '법인명', '간판명', '간판', '배송지명', '배송지'];
-        
-        // 🌟 정밀한 정지(Stop) 키워드 목록 ('연락처', '공급받는자' 등 표의 다음 칸을 의미하는 단어들 추가)
-        const stopWords = ['성명', '이름', '대표', '귀하', '사업장', '주소', '소재지', '종목', '업태', '등록번호', '전화', '연락처', 'tel', '잔액', '금액', '공급받는자', '공급자', '공급가액', '단가', '수량', '세액', '비고', '합계', '영수', '청구', '품목', '품명', '규격'];
+        for (let pattern of tablePatterns) {
+            let match = text.match(pattern);
+            if (match && match[1]) {
+                let result = match[1].trim();
+                
+                // 혹시라도 묻어들어온 찌꺼기 강제 삭제
+                result = result.replace(/귀하$|\(인\)$|연락처$|공급받는자$/g, '').trim();
+                
+                if (result.length >= 2 && result !== '주식회사' && result !== '(주)') {
+                    return result;
+                }
+            }
+        }
+
+        // 3. 만약 위 패턴에 안 걸리면, 기존처럼 단어 단위로 검사하되 브레이크(Stop) 기준을 대폭 강화
+        let tokens = text.split(/\s+/);
+        const keywords = ['상호', '법인명', '간판', '배송지'];
+        // 기사님이 우려하신 '뒷부분'에 해당하는 단어들 (여기서 멈춤)
+        const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', 'TEL', '공급받는자', '공급자', '수량', '단가', '금액', '합계', '종목', '업태'];
 
         for (let i = 0; i < tokens.length; i++) {
-            let token = tokens[i];
-            // 타겟 키워드(예: 배송지명, 상호)를 발견하면
-            if (keywords.some(kw => token.includes(kw))) {
+            if (keywords.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                // 타겟 단어 우측으로 글자들을 하나씩 검사하며 수집
-                for (let j = i + 1; j < Math.min(i + 12, tokens.length); j++) {
-                    let nextToken = tokens[j];
+                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                    let token = tokens[j];
+                    
+                    if (keywords.some(kw => token.includes(kw))) continue;
 
-                    // 콜론(:)이나 파이프(|) 같은 시작 특수문자만 부드럽게 제거 ((주) 같은 괄호는 살려둠)
-                    let cleanToken = nextToken.replace(/^[|:;]+|[|:;]+$/g, '').trim();
-                    if (!cleanToken) continue;
+                    // 🛑 스톱워드가 포함된 단어(연락처, 공급받는자 등)를 만나면 즉시 수집 중단!
+                    if (stopWords.some(sw => token.includes(sw))) break;
 
-                    // 자기 자신이 키워드이거나 의미없는 '명' 이면 건너뜀
-                    if (keywords.some(kw => cleanToken.includes(kw)) || cleanToken === '명') continue;
+                    // 숫자만 있거나, 전화번호 형태면 중단
+                    if (/^[\d\-,.]+$/.test(token) || token.includes('010')) break;
 
-                    // 🛑 핵심 로직: 스톱 워드(예: 연락처, 성명)를 만나면 그 즉시 수집 중단!
-                    if (stopWords.some(sw => cleanToken.toLowerCase().includes(sw))) {
-                        break;
-                    }
-
-                    // 숫자만 있거나, 전화번호, 금액 형식이면 중단
-                    if (/^[\d\-,.]+$/.test(cleanToken)) break;
-                    if (/[0-9]+(?:원|개|박스|ea|kg|g|l|ml)$/i.test(cleanToken)) break;
-
-                    // 주소 형태가 튀어나오면 중단 (단, '점'으로 끝나는 건 지점명이므로 정상 수집)
-                    let textForAddrCheck = cleanToken.replace(/[^\w가-힣]/g, '');
-                    if (/(시|구|군|동|읍|면|로|길|층)$/.test(textForAddrCheck) && !textForAddrCheck.endsWith('점')) {
-                        if (collected.length > 0) break; // 이미 수집된 게 있으면 주소 앞에서 멈춤
-                        else continue;
-                    }
-
-                    collected.push(cleanToken);
+                    collected.push(token);
                 }
 
                 if (collected.length > 0) {
-                    let finalName = collected.join(' ');
-                    // 찌꺼기 문자(닫는 괄호 등) 한 번 더 정리
-                    finalName = finalName.replace(/^[-)\]}]+|[-)\]}]+$/g, '').trim();
-
-                    // 유효성 검사 (너무 짧거나 '주식회사' 같은 단어만 달랑 있으면 상호명이 아니라고 판단)
-                    if (finalName.length >= 2 && finalName !== '주식회사' && finalName !== '(주)') {
-                        return finalName;
-                    }
+                    let result = collected.join(' ').replace(/귀하$|\(인\)$|연락처$|공급받는자$/g, '').trim();
+                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') return result;
                 }
             }
         }
