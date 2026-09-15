@@ -102,7 +102,6 @@ export function extractAddressLogic(text) {
     try {
         let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
-        // 1. 전국 행정구역을 유연하게 감지 (서울, 서울시, 서울특별시, 경기도 등 띄어쓰기 제약 해소)
         let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
         
         let matches = [...flatText.matchAll(regionPrefixedRegex)];
@@ -110,13 +109,10 @@ export function extractAddressLogic(text) {
             return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
         }
 
-        // 2. 백업 정규식 (탐욕 방지: 상호명이 주소로 딸려오는 것 방지)
-        // 무한정 뒤로 가지 않고, '동/로/길' 앞에는 최대 4어절 정도의 한글/숫자만 허용
         let backupRegex = /((?:[가-힣a-zA-Z0-9]+\s+){1,4}[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches2 = [...flatText.matchAll(backupRegex)];
         if (matches2 && matches2.length > 0) {
             let candidate = matches2[matches2.length - 1][0].trim();
-            // 책임판매원, 제조원 같은 화장품/상품 라벨 단어가 섞여 있으면 잘라냄
             candidate = candidate.replace(/^.*?(사업장\s*주소|주소|소재지|책임판매원|판매원|제조원)\s*[\:\-]?\s*/i, '');
             if (candidate.length > 5) return candidate.replace(/\s+/g, ' ');
         }
@@ -124,7 +120,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 상호명 추출 로직 (이전에 완성한 최적화 버전 유지)
+// 4. 🌟 기존 고성능 구조 유지 + EL, TEL 등 영수증 파편 및 노이즈 완벽 차단 업그레이드 버전
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -138,13 +134,23 @@ export function extractStoreNameLogic(fullText) {
         }
 
         const targets = ['배송지명', '간판명', '상호명', '상호'];
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액'];
+        // 🛑 스톱워드 및 필터링할 노이즈 단어 대폭 강화 (EL, TEL, FAX 및 표 항목들 차단)
+        const skips = [
+            '연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액',
+            'tel', 'fax', 'el', '전화', '성명', '대표', '소재지', '금액', '합계', '잔액', '종목', '업태'
+        ];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
             if (!s || s.length < 2) return true; 
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
+
+            // 🛑 'EL', 'TEL', 'FAX' 같은 영수증 파편 단어 철저히 거름
+            if (/^(tel|fax|el)$/i.test(s)) return true;
+            
+            // 표 항목 단어가 포함되어 있으면 정크로 판단
+            if (skips.some(sk => s.toLowerCase().includes(sk))) return true;
             
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
@@ -157,7 +163,7 @@ export function extractStoreNameLogic(fullText) {
                 let collected = [];
                 for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
                     let tok = tokens[j];
-                    if (skips.some(skw => tok.includes(skw))) {
+                    if (skips.some(skw => tok.toLowerCase().includes(skw))) {
                         if (collected.length > 0) break; 
                         continue; 
                     }
@@ -177,7 +183,7 @@ export function extractStoreNameLogic(fullText) {
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
                     let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호/g, '').trim();
-                    if (result.length >= 2) return result;
+                    if (result.length >= 2 && !/^(tel|fax|el)$/i.test(result)) return result;
                 }
             }
         }
