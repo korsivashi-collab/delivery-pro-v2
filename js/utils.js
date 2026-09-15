@@ -96,12 +96,13 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. 스마트 주소 추출 로직 (유지)
+// 3. 🌟 스마트 주소 추출 로직 (행정구역 자동 감지 및 탐욕 방지 적용)
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
+        // 1. 전국 행정구역을 유연하게 감지 (서울, 서울시, 서울특별시, 경기도 등 띄어쓰기 제약 해소)
         let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
         
         let matches = [...flatText.matchAll(regionPrefixedRegex)];
@@ -109,10 +110,13 @@ export function extractAddressLogic(text) {
             return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
         }
 
+        // 2. 백업 정규식 (탐욕 방지: 상호명이 주소로 딸려오는 것 방지)
+        // 무한정 뒤로 가지 않고, '동/로/길' 앞에는 최대 4어절 정도의 한글/숫자만 허용
         let backupRegex = /((?:[가-힣a-zA-Z0-9]+\s+){1,4}[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
         let matches2 = [...flatText.matchAll(backupRegex)];
         if (matches2 && matches2.length > 0) {
             let candidate = matches2[matches2.length - 1][0].trim();
+            // 책임판매원, 제조원 같은 화장품/상품 라벨 단어가 섞여 있으면 잘라냄
             candidate = candidate.replace(/^.*?(사업장\s*주소|주소|소재지|책임판매원|판매원|제조원)\s*[\:\-]?\s*/i, '');
             if (candidate.length > 5) return candidate.replace(/\s+/g, ' ');
         }
@@ -120,77 +124,65 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 고도화된 상호 추출 로직 (표 노이즈 및 제조사/공급가액 완벽 차단)
+// 4. 상호명 추출 로직 (이전에 완성한 최적화 버전 유지)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
-
     try {
-        let flatText = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
+        let tokens = fullText.split(/[\s\n]+/);
+        let badWords = new Set();
 
-        // 1. 주소 영역 먼저 도려내기
-        let detectedAddress = extractAddressLogic(fullText);
-        if (detectedAddress) {
-            flatText = flatText.replace(detectedAddress, ' ');
+        for (let i = 0; i < tokens.length; i++) {
+            let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
+            if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+            if (/구매자명|성명/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        // 2. 표 내부의 다른 칸 항목명들(제조사, 공급가액 등)을 노이즈로 처리해 일괄 제거
-        flatText = flatText.replace(/(?:성명|이름|대표|연락처|전화번호|TEL|FAX|사업자등록번호|공급받는자|공급자|제조사|원산지|공급가액|단가|수량|금액|합계|잔액|세액|종목|업태|구수동)[\s\:\-\|]*[가-힣a-zA-Z0-9]*/gi, ' ');
+        const targets = ['배송지명', '간판명', '상호명', '상호'];
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액'];
 
-        let tokens = flatText.split(' ');
-        let cleanedTokens = [];
-        
-        for (let token of tokens) {
-            let cleanToken = token.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-            if (!cleanToken) continue;
+        const isJunk = (rawStr) => {
+            let s = rawStr.replace(/[^\w가-힣]/g, ''); 
+            if (!s || s.length < 2) return true; 
+            if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
+            if (badWords.has(s)) return true; 
+            
+            if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
+            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
+            if (rawStr.includes('[') || rawStr.includes(']')) return true; 
+            return false;
+        };
 
-            if (/^[\d\-,.]+$/.test(cleanToken)) continue;
-            if (cleanToken.includes('010') || cleanToken.includes('02-') || cleanToken.includes('031-')) continue;
-            if (cleanToken.toLowerCase() === 'el' || cleanToken.toLowerCase() === 'el:') continue;
-
-            cleanedTokens.push(cleanToken);
-        }
-
-        let processedText = cleanedTokens.join(' ');
-
-        // 3. 상호/간판/배송지 키워드 탐색 후 뒷내용 추출
-        const filterKeywords = ['상호', '법인', '간판', '배송지', '업체명'];
-        // 🛑 스톱워드 대폭 강화 (제조사, 원산지, 공급가액 등 표 항목이 뒤에 붙어오면 즉시 차단)
-        const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', '금액', '합계', '잔액', '구매자명', '제조사', '원산지', '공급가액', '단가', '수량'];
-
-        for (let kw of filterKeywords) {
-            let kwIndex = processedText.indexOf(kw);
-            if (kwIndex !== -1) {
-                let subStr = processedText.substring(kwIndex + kw.length).trim();
-                subStr = subStr.replace(/^[:;|\-\s]+/, '').trim();
-
-                let subTokens = subStr.split(' ');
-                let finalCollected = [];
-
-                for (let st of subTokens) {
-                    if (filterKeywords.some(fk => st.includes(fk)) || stopWords.some(sw => st.includes(sw))) {
-                        break;
+        for (let i = 0; i < tokens.length; i++) {
+            if (targets.some(kw => tokens[i].includes(kw))) {
+                let collected = [];
+                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                    let tok = tokens[j];
+                    if (skips.some(skw => tok.includes(skw))) {
+                        if (collected.length > 0) break; 
+                        continue; 
                     }
-                    if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(st)) {
-                        break;
+                    
+                    if (isJunk(tok)) continue; 
+
+                    if (j + 1 < tokens.length) {
+                        let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
+                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
+                            continue;
+                        }
                     }
 
-                    finalCollected.push(st);
-                    if (finalCollected.length >= 4) break; 
+                    collected.push(tok.replace(/[^\w가-힣]/g, ''));
                 }
 
-                if (finalCollected.length > 0) {
-                    let result = finalCollected.join(' ').trim();
-                    result = result.replace(/^[\]) :;|]+|[\[( :;|]+$/g, '').trim();
-
-                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사' && !/^[\d\-,.]+$/.test(result)) {
-                        return result;
-                    }
+                if (collected.length > 0) {
+                    let unique = [...new Set(collected)];
+                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호/g, '').trim();
+                    if (result.length >= 2) return result;
                 }
             }
         }
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
-    
     return null;
 }
