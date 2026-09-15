@@ -120,75 +120,82 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 기사님 제안 반영: "주소 영역 철저히 배제 + 노이즈/순수 숫자 필터링 후 남은 상호명 출력"
+// 4. 🌟 2가지 고정 양식 맞춤형: "키워드 찾기 -> 우측/아랫방향 탐색 -> 2줄 상호명 보존 및 스톱워드 차단"
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
 
     try {
-        // 1. 주소 영역을 먼저 정확히 찾아내서 텍스트 전체에서 도려냄 (주소 좌우 정보가 상호명으로 오인되는 것 원천 차단)
-        let cleanText = fullText;
-        let detectedAddress = extractAddressLogic(fullText);
-        if (detectedAddress) {
-            // 주소 문자열을 기준으로 앞뒤를 분리하거나 주소 자체를 빈 문자로 치환
-            cleanText = cleanText.replace(detectedAddress, ' [주소제외됨] ');
-        }
+        let text = fullText;
 
-        // 2. 줄바꿈을 공백으로 펴서 한 줄로 만듦
-        let text = cleanText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
-
-        // 3. 탐색할 타겟 키워드와 확실하게 걸러낼 필터링(Stop) 단어 정의
-        const targets = ['상호', '법인', '간판', '배송지'];
+        // 1. 2가지 양식의 핵심 안내 키워드들을 탐색 목록으로 설정
+        // 양식 A: "배송지명(간판명)" 또는 "간판명" 또는 "간판"
+        // 양식 B: "업체명" 또는 "상호" 또는 "상인명"
+        const anchorKeywords = ['배송지명', '간판명', '간판', '업체명', '상호', '상인명'];
+        
+        // 탐색을 멈추게 하는 강력한 스톱 워드 (다음 칸 정보들)
         const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', 'tel', 'fax', 'el', '공급', '잔액', '금액', '수량', '단가', '종목', '업태', '합계', '영수', '청구', '품목', '품명', '규격'];
 
-        let tokens = text.split(' ');
+        // 토큰 단위로 쪼개서 분석
+        let tokens = text.split(/[\s\n,;|]+/);
 
         for (let i = 0; i < tokens.length; i++) {
             let token = tokens[i];
             
-            // 타겟 키워드가 포함된 블록 발견 시
-            if (targets.some(t => token.includes(t))) {
+            // 2. 키워드 발견 시점 포착
+            if (anchorKeywords.some(ak => token.includes(ak))) {
                 let collected = [];
                 
-                // 타겟 단어 자체는 필터링(출력 불가)하므로 버리고 우측 토큰들 수집 시작
-                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                // 3. 키워드 우측 또는 바로 아랫줄에 있는 실제 상호명 데이터 수집 시작 (최대 12개 토큰)
+                for (let j = i + 1; j < Math.min(i + 14, tokens.length); j++) {
                     let nextToken = tokens[j];
+                    if (!nextToken) continue;
                     
-                    if (targets.some(t => nextToken.includes(t))) continue;
-                    let nextTokenLower = nextToken.toLowerCase();
+                    let cleanNext = nextToken.replace(/^[|:;()]+|[|:;()]+$/g, '').trim();
+                    if (!cleanNext) continue;
+
+                    // 또 다른 ânchor 키워드가 나오면 무시
+                    if (anchorKeywords.some(ak => cleanNext.includes(ak))) continue;
                     
-                    // 성명, 연락처, 잔액 등 필터링 단어를 만나면 즉시 중단
-                    if (stopWords.some(sw => nextTokenLower.includes(sw)) || nextTokenLower === 'el:') {
+                    let lowerNext = cleanNext.toLowerCase();
+                    
+                    // 4. 스톱워드(성명, 주소, 연락처 등)를 만나면 즉시 수집 중단
+                    if (stopWords.some(sw => lowerNext.includes(sw))) {
                         break;
                     }
                     
-                    // 🌟 기사님 제안: "순수 숫자만 있는 단어 출력 불가" (단, 글자 내부에 숫자가 섞인 상호는 허용)
-                    // 예: "528,000", "0", "12" 처럼 숫자와 기호로만 이루어진 경우 버림
-                    if (/^[\d\-,.]+$/.test(nextToken)) {
-                        break; // 숫자가 나오면 상호명 끝으로 간주하고 중단
+                    // 순수 숫자만 있는 단어(금액, 번호 등)는 상호명이 아니므로 중단
+                    if (/^[\d\-,.]+$/.test(cleanNext)) {
+                        break;
                     }
                     
                     // 전화번호 형태면 중단
-                    if (nextToken.includes('010') || nextToken.includes('02-') || nextToken.includes('031-')) break;
-                    
-                    collected.push(nextToken);
+                    if (cleanNext.includes('010') || cleanNext.includes('02-') || cleanNext.includes('031-')) break;
+
+                    // 주소 형태(예: 서울시, 종로구 등)가 나오면 상호명 영역을 벗어난 것이므로 중단
+                    if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(cleanNext)) {
+                        break;
+                    }
+
+                    collected.push(cleanNext);
                 }
                 
                 if (collected.length > 0) {
                     let result = collected.join(' ').trim();
                     
-                    // 찌꺼기 텍스트 한 번 더 필터링
+                    // 중간에 묻어 들어온 스톱워드 뒷부분 잘라내기
                     for (let sw of stopWords) {
-                        let swIndex = result.toLowerCase().indexOf(sw);
-                        if (swIndex !== -1) {
-                            result = result.substring(0, swIndex).trim();
+                        let swIdx = result.toLowerCase().indexOf(sw);
+                        if (swIdx !== -1) {
+                            result = result.substring(0, swIdx).trim();
                         }
                     }
                     
-                    result = result.replace(/^[\]) :;|]+|[\[( :;|]+$/g, '').trim();
+                    // 최종 기호 정리 ((주) 같은 괄호는 살리고 불필요한 특수문자만 제거)
+                    result = result.replace(/^[-)\]}]+|[-)\]}]+$/g, '').trim();
                     
-                    // 최종 유효성 검사 (너무 짧거나 껍데기만 남았으면 무시)
+                    // 2글자 이상이고 단순 껍데기가 아니면 최종 채택!
                     if (result.length >= 2 && result !== '(주)' && result !== '주식회사' && !/^[\d\-,.]+$/.test(result)) {
-                        return result; // 깔끔하게 정제된 상호명 출력!
+                        return result;
                     }
                 }
             }
@@ -197,5 +204,5 @@ export function extractStoreNameLogic(fullText) {
         console.error("상호 추출 오류:", e);
     }
     
-    return null; // 걸리는 게 없으면 무시하고 null 반환
+    return null;
 }
