@@ -28,9 +28,8 @@ export function toBase64_SafeCompress(file) {
     });
 }
 
-// 2. 전화번호 추출 로직 (기존 유지)
+// 2. OCR 텍스트에서 전화번호 추출 로직 (기존 유지)
 export function extractPhoneLogic(text) {
-    // ... (기존 코드와 동일하므로 생략 없이 원본 그대로 사용하시면 됩니다) ...
     if (!text) return null;
     let candidates = [];
     const tokens = text.split(/[\s\n,;|]+/);
@@ -41,12 +40,15 @@ export function extractPhoneLogic(text) {
     const phoneRegex = /(010|050\d|070|0[2-9][0-9]?|1[5-9]\d{2})[\s\-\.]*(\d{3,4})[\s\-\.]*(\d{4})/g;
     const rawMatches = [...text.matchAll(phoneRegex)];
     for (let m of rawMatches) candidates.push(m[0].replace(/[^\d]/g, ''));
+    
     const repRegex = /(1[5-9]\d{2})[\s\-\.]*(\d{4})/g;
     const repMatches = [...text.matchAll(repRegex)];
     for (let m of repMatches) candidates.push(m[0].replace(/[^\d]/g, ''));
+    
     candidates = [...new Set(candidates)];
     
-    let bestPhone = null; let highestScore = -1;
+    let bestPhone = null; 
+    let highestScore = -1;
     for (let num of candidates) {
         let score = 0;
         let is010 = num.startsWith('010') && (num.length === 10 || num.length === 11);
@@ -58,10 +60,11 @@ export function extractPhoneLogic(text) {
         
         if (is010) score += 100; else if (is050) score += 90; else if (is070) score += 80;
         else if (isRep) score += 70; else if (is02 || isLocal) score += 60; else score -= 100; 
-        if (/(\d)\1{4,}/.test(num)) score -= 50;
         
+        if (/(\d)\1{4,}/.test(num)) score -= 50;
         if (score > highestScore && score > 0) { highestScore = score; bestPhone = num; }
     }
+    
     if (bestPhone) {
         let p = bestPhone;
         if (p.startsWith('010') || p.startsWith('070') || /^0[3-9]\d/.test(p)) {
@@ -154,44 +157,79 @@ function runStage1_KeywordMatch(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 명시적 라벨이 없을 때의 폴백 (접미사 및 주소 역추적)
-function runStage2_HeuristicMatch(fullText) {
+// 🌟 [2단계] 거래명세표(표 양식) 특화 어드밴스드 폴백 (새로운 설계)
+function runStage2_AdvancedHeuristics(fullText, addressStr) {
     try {
+        let lines = fullText.split('\n').map(l => l.trim()).filter(l => l);
         let tokens = fullText.split(/[\s\n]+/);
-        let flatText = fullText.replace(/\n/g, ' ').replace(/\s+/g, ' ');
 
-        // [전략 A] 기업/상점 식별용 접미사 스캐닝 (토박이농산주식회사 등을 즉시 포획)
-        const businessSuffixes = /(주식회사|\(주\)|유통|물류|상사|상회|농산|농업회사법인|영농조합|농원|농장|마트|상단|팩토리)$/;
-        
-        for (let t of tokens) {
-            let cleanT = t.replace(/[^\w가-힣()]/g, '');
-            if (cleanT.length >= 3 && businessSuffixes.test(cleanT)) {
-                // 주소 파편이 섞여 들어오지 않도록 방어
-                if (!/시$|구$|군$|동$|읍$|면$|로$|길$/.test(cleanT)) {
-                    // '(주)'나 '주식회사' 같은 텍스트는 깔끔하게 제거할 수도 있지만, 원본 유지가 안전할 때가 많습니다.
-                    return cleanT; 
+        // [전략 1] 표 양식에서 '배송지명'이나 '간판명' 라벨 직접 공략
+        for (let i = 0; i < lines.length; i++) {
+            if (/(배송지명|간판명)/.test(lines[i])) {
+                let inlineVal = lines[i].replace(/.*(배송지명|간판명)[^\w가-힣]*/, '').trim();
+                inlineVal = inlineVal.replace(/[^\w가-힣\s]/g, '').trim();
+                if (inlineVal.length >= 2 && !/^\d+$/.test(inlineVal)) return inlineVal;
+
+                if (i + 1 < lines.length) {
+                    let nextLineVal = lines[i+1].replace(/[^\w가-힣\s]/g, '').trim();
+                    if (nextLineVal.length >= 2 && !/^\d+$/.test(nextLineVal) && !/주소|업태|종목|성명/.test(nextLineVal)) {
+                        return nextLineVal.split(/\s+/)[0]; 
+                    }
                 }
             }
         }
 
-        // [전략 B] 추출된 주소를 기반으로 바로 앞 단어(어절) 역추적
-        let extractedAddress = extractAddressLogic(fullText);
-        if (extractedAddress) {
-            // 주소의 첫 번째 덩어리(예: '강북구', '덕릉로')를 찾음
-            let addrFirstWord = extractedAddress.split(/\s+/)[0]; 
-            let addrIndex = flatText.indexOf(addrFirstWord);
-            
-            if (addrIndex > 0) {
-                let precedingText = flatText.substring(0, addrIndex).trim();
-                let precedingTokens = precedingText.split(/\s+/);
-                
-                // 주소 앞쪽에 있는 단어들을 뒤에서부터 확인하여 상호명 발굴
-                for (let i = precedingTokens.length - 1; i >= 0; i--) {
-                    let candidate = precedingTokens[i].replace(/[^\w가-힣]/g, '');
-                    // OCR 오타(예: '울')나 불필요한 예약어 패스
-                    if (candidate.length >= 2 && !/^(보내는분|발송인|수신인|받는분|주소|전화|연락처|서울|경기|인천)$/.test(candidate)) {
-                         return candidate;
+        // [전략 2] 사업자등록번호 앵커 (이미지 2번 한촌설렁탕, 3번 엄마손 맛집 대응)
+        // OCR이 표를 어떻게 읽었든 '000-00-00000' 형태 뒤에는 무조건 상호나 대표자명이 옴
+        for (let i = 0; i < tokens.length; i++) {
+            if (/^\d{3}-?\d{2}-?\d{5}$/.test(tokens[i])) {
+                for (let j = i + 1; j <= i + 3 && j < tokens.length; j++) {
+                    let nextTok = tokens[j].replace(/[^\w가-힣]/g, '');
+                    if (nextTok.length >= 2 && !/^\d+$/.test(nextTok)) {
+                        // 명백한 식당/기업 키워드가 있으면 확정
+                        if (/(식당|맛집|점|가|집|향|주식회사|유통|물류|상사|상회|농산|농원|농장|마트|에프앤비)$/.test(nextTok) || tokens.slice(j, j+2).join('').includes('맛집')) {
+                            let combined = tokens[j];
+                            if (j + 1 < tokens.length && !/^\d/.test(tokens[j+1]) && !/^(성명|대표자|주소)/.test(tokens[j+1])) {
+                                combined += ' ' + tokens[j+1]; // "엄마손" + "맛집" 등 띄어쓰기 결합
+                            }
+                            return combined.replace(/[^\w가-힣\s]/g, '').trim();
+                        }
+                        // 이름보다는 상호명에 가까운 길이 (4글자 이상)
+                        if (nextTok.length >= 4 && !/^(서울특별시|경기도|인천광역시)/.test(nextTok)) {
+                            return nextTok;
+                        }
                     }
+                }
+            }
+        }
+
+        // [전략 3] 주소 라인 꼬리표 절단 (이미지 4, 5, 6, 7번 완벽 대응)
+        // "[07008] 서울 동작구 동작대로27다길 11 (사당동) 1층 쭈꾸미도사" -> 주소, 층수 날리고 "쭈꾸미도사"만 발라냄
+        if (addressStr) {
+            // 구, 도로명 위주로 해당 라인 찾기
+            let addrCore = addressStr.split(/\s+/).slice(1, 4).join(' '); 
+            if (addrCore.length < 3) addrCore = addressStr.substring(0, 10);
+
+            let targetLine = lines.find(l => l.replace(/\s+/g, '').includes(addrCore.replace(/\s+/g, '')));
+
+            if (targetLine) {
+                let tail = targetLine;
+                
+                // 1. 도로명/지번 주소 몸통 날리기 (숫자 번지수까지)
+                tail = tail.replace(/(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\d]+(?:로|길|대로|동|읍|면|리)\s*\d+(?:-\d+)?/g, '');
+                // 2. 우편번호, 괄호 안의 동/빌딩명 날리기 ([04087], (사당동) 등)
+                tail = tail.replace(/\[\d{5}\]|\(\d{5}\)/g, ''); 
+                tail = tail.replace(/^\s*\d{5}\s*/g, ''); 
+                tail = tail.replace(/\([가-힣\s\d,]+\)/g, ''); 
+                tail = tail.replace(/\b[가-힣]{2,3}동\b/g, ''); // 괄호 없이 적힌 '사당동' 같은 행정동 처리
+                // 3. 층수 표시 날리기 (1층, 지하1층, B1층 등)
+                tail = tail.replace(/(?:지하|B|F)?\s*\d+\s*층/g, ''); 
+                // 4. 남은 특수문자 정리
+                tail = tail.replace(/[^\w가-힣\s]/g, '').trim();
+                
+                // 찌꺼기를 다 날리고 2글자 이상 남았다면 99% 꼬리표 상호명
+                if (tail.length >= 2 && !/^(주소|사업장|소재지|빌딩|상가)$/.test(tail)) {
+                    return tail;
                 }
             }
         }
@@ -209,8 +247,9 @@ export function extractStoreNameLogic(fullText) {
     let stage1Result = runStage1_KeywordMatch(fullText);
     if (stage1Result) return stage1Result;
 
-    // [2차 시도] 라벨 없이 [상호명 + 주소] 형태로 붙어있는 불규칙 포맷
-    let stage2Result = runStage2_HeuristicMatch(fullText);
+    // [2차 시도] 거래명세표 전용 어드밴스드 폴백 (사업자번호 앵커 + 주소 꼬리표 절단)
+    let matchedAddrStr = extractAddressLogic(fullText); // 2차 방식에서 주소 꼬리표를 찾기 위해 주소 결과 전달
+    let stage2Result = runStage2_AdvancedHeuristics(fullText, matchedAddrStr);
     if (stage2Result) return stage2Result;
 
     return null;
