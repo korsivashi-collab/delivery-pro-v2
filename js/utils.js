@@ -120,81 +120,83 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 2가지 고정 양식 맞춤형: "키워드 찾기 -> 우측/아랫방향 탐색 -> 2줄 상호명 보존 및 스톱워드 차단"
+// 4. 🌟 기사님 제안 반영 "일렬 배치 후 노이즈/주소 도려내기 및 필터링 출력 방식"
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
 
     try {
-        let text = fullText;
+        // 1. 인식된 모든 단어를 순서대로 한 줄에 공백으로 배치 (일렬 정렬)
+        let flatText = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
 
-        // 1. 2가지 양식의 핵심 안내 키워드들을 탐색 목록으로 설정
-        // 양식 A: "배송지명(간판명)" 또는 "간판명" 또는 "간판"
-        // 양식 B: "업체명" 또는 "상호" 또는 "상인명"
-        const anchorKeywords = ['배송지명', '간판명', '간판', '업체명', '상호', '상인명'];
+        // 2. 주소 영역을 먼저 파악해서 텍스트에서 완전히 도려냄 (주소 간섭 원천 차단)
+        let detectedAddress = extractAddressLogic(fullText);
+        if (detectedAddress) {
+            flatText = flatText.replace(detectedAddress, ' [주소제외] ');
+        }
+
+        // 3. 성명, 전화번호, 공급받는자 등 출력되면 안 되는 필터/노이즈 정보들 철저히 제거
+        // 정규식을 이용해 불필요한 패턴들을 공백으로 치환
+        flatText = flatText.replace(/(?:성명|이름|대표|연락처|전화번호|TEL|FAX|사업자등록번호|구매자명|공급받는자|공급자|단가|수량|금액|합계|잔액|세액|종목|업태)[\s\:\-\|]*/gi, ' [노이즈제외] ');
+
+        // 4. 순수 숫자만 있는 단어 제거 (단, 글자 내부에 숫자가 섞인 상호는 허용하기 위해 단어별로 검사)
+        let tokens = flatText.split(' ');
+        let cleanedTokens = [];
         
-        // 탐색을 멈추게 하는 강력한 스톱 워드 (다음 칸 정보들)
-        const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', 'tel', 'fax', 'el', '공급', '잔액', '금액', '수량', '단가', '종목', '업태', '합계', '영수', '청구', '품목', '품명', '규격'];
+        for (let token of tokens) {
+            let cleanToken = token.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
+            if (!cleanToken) continue;
 
-        // 토큰 단위로 쪼개서 분석
-        let tokens = text.split(/[\s\n,;|]+/);
+            // 순수 숫자 및 콤마/하이픈 조합인 경우 (예: 528,000, 0, 101-12) 노이즈로 간주하고 제외
+            if (/^[\d\-,.]+$/.test(cleanToken)) {
+                continue;
+            }
+            // 전화번호 형태 제외
+            if (cleanToken.includes('010') || cleanToken.includes('02-') || cleanToken.includes('031-')) {
+                continue;
+            }
 
-        for (let i = 0; i < tokens.length; i++) {
-            let token = tokens[i];
-            
-            // 2. 키워드 발견 시점 포착
-            if (anchorKeywords.some(ak => token.includes(ak))) {
-                let collected = [];
+            cleanedTokens.push(cleanToken);
+        }
+
+        // 5. 정제된 단어들을 다시 한 줄 문장으로 결합
+        let processedText = cleanedTokens.join(' ');
+
+        // 6. 필터링 대상 단어(상호, 간판, 배송지 등) 탐색 후 뒤에 남은 내용 추출
+        const filterKeywords = ['상호', '법인', '간판', '배송지', '업체명'];
+        const stopWords = ['성명', '대표', '주소', '연락처', '전화', '금액', '합계', '잔액'];
+
+        for (let kw of filterKeywords) {
+            let kwIndex = processedText.indexOf(kw);
+            if (kwIndex !== -1) {
+                // 키워드 발견 시, 그 키워드 이후의 텍스트를 잘라냄
+                let subStr = processedText.substring(kwIndex + kw.length).trim();
                 
-                // 3. 키워드 우측 또는 바로 아랫줄에 있는 실제 상호명 데이터 수집 시작 (최대 12개 토큰)
-                for (let j = i + 1; j < Math.min(i + 14, tokens.length); j++) {
-                    let nextToken = tokens[j];
-                    if (!nextToken) continue;
-                    
-                    let cleanNext = nextToken.replace(/^[|:;()]+|[|:;()]+$/g, '').trim();
-                    if (!cleanNext) continue;
+                // 불필요한 기호나 콜론 제거
+                subStr = subStr.replace(/^[:;|\-\s]+/, '').trim();
 
-                    // 또 다른 ânchor 키워드가 나오면 무시
-                    if (anchorKeywords.some(ak => cleanNext.includes(ak))) continue;
-                    
-                    let lowerNext = cleanNext.toLowerCase();
-                    
-                    // 4. 스톱워드(성명, 주소, 연락처 등)를 만나면 즉시 수집 중단
-                    if (stopWords.some(sw => lowerNext.includes(sw))) {
+                let subTokens = subStr.split(' ');
+                let finalCollected = [];
+
+                for (let st of subTokens) {
+                    // 또 다른 필터 단어나 스톱워드를 만나면 중단
+                    if (filterKeywords.some(fk => st.includes(fk)) || stopWords.some(sw => st.includes(sw))) {
                         break;
                     }
-                    
-                    // 순수 숫자만 있는 단어(금액, 번호 등)는 상호명이 아니므로 중단
-                    if (/^[\d\-,.]+$/.test(cleanNext)) {
-                        break;
-                    }
-                    
-                    // 전화번호 형태면 중단
-                    if (cleanNext.includes('010') || cleanNext.includes('02-') || cleanNext.includes('031-')) break;
-
-                    // 주소 형태(예: 서울시, 종로구 등)가 나오면 상호명 영역을 벗어난 것이므로 중단
-                    if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(cleanNext)) {
+                    // 주소 파편이 섞여 들어오면 중단
+                    if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(st)) {
                         break;
                     }
 
-                    collected.push(cleanNext);
+                    finalCollected.push(st);
+                    if (finalCollected.length >= 4) break; // 상호명은 보통 4단어 이내
                 }
-                
-                if (collected.length > 0) {
-                    let result = collected.join(' ').trim();
-                    
-                    // 중간에 묻어 들어온 스톱워드 뒷부분 잘라내기
-                    for (let sw of stopWords) {
-                        let swIdx = result.toLowerCase().indexOf(sw);
-                        if (swIdx !== -1) {
-                            result = result.substring(0, swIdx).trim();
-                        }
-                    }
-                    
-                    // 최종 기호 정리 ((주) 같은 괄호는 살리고 불필요한 특수문자만 제거)
-                    result = result.replace(/^[-)\]}]+|[-)\]}]+$/g, '').trim();
-                    
-                    // 2글자 이상이고 단순 껍데기가 아니면 최종 채택!
-                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사' && !/^[\d\-,.]+$/.test(result)) {
+
+                if (finalCollected.length > 0) {
+                    let result = finalCollected.join(' ').trim();
+                    result = result.replace(/^[\]) :;|]+|[\[( :;|]+$/g, '').trim();
+
+                    // 최종 유효성 검사 (2글자 이상이고 의미 있는 단어인 경우)
+                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') {
                         return result;
                     }
                 }
@@ -204,5 +206,5 @@ export function extractStoreNameLogic(fullText) {
         console.error("상호 추출 오류:", e);
     }
     
-    return null;
+    return null; // 검출된 게 없으면 무시
 }
