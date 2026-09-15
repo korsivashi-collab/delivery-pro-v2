@@ -32,7 +32,7 @@ export function toBase64_SafeCompress(file) {
     });
 }
 
-// 2. OCR 텍스트에서 전화번호 추출 로직 (기존 유지)
+// 2. OCR 텍스트에서 전화번호 추출 로직
 export function extractPhoneLogic(text) {
     if (!text) return null;
     let candidates = [];
@@ -50,7 +50,6 @@ export function extractPhoneLogic(text) {
     for (let m of repMatches) candidates.push(m[0].replace(/[^\d]/g, ''));
     
     candidates = [...new Set(candidates)];
-    
     let bestPhone = null; 
     let highestScore = -1;
     for (let num of candidates) {
@@ -96,12 +95,11 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. 🌟 스마트 주소 추출 로직
+// 3. 스마트 주소 추출 로직 (기준점 앵커 용도)
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
-
         let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
         
         let matches = [...flatText.matchAll(regionPrefixedRegex)];
@@ -120,19 +118,8 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 [핵심] 상위 5대 성씨(김, 이, 박, 최, 정) 기반 인명 판별기
-function isKoreanName(str) {
-    if (!str) return false;
-    let clean = str.replace(/[^\w가-힣]/g, '');
-    if (clean.length < 2 || clean.length > 3) return false;
-    
-    // 대한민국 상위 5대 성씨로 축소 (엄마손 등의 오인식 방지)
-    const majorSurnames = ['김', '이', '박', '최', '정'];
-    return majorSurnames.includes(clean[0]);
-}
-
-// 🌟 [1단계] 정밀 키워드 탐색 엔진
-function runStage1(fullText) {
+// 🌟 [1단계] 더 빡빡하고 엄격하게 강화된 정밀 키워드 탐색 엔진
+function runStrictStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
         let badWords = new Set();
@@ -140,11 +127,11 @@ function runStage1(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
             if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
-            if (/구매자명|성명|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+            if (/구매자명|성명|수취인|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명', '(간판명)', '법인명'];
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '잔액'];
+        const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '법인명'];
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '잔액', '성명', '수취인'];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
@@ -153,10 +140,9 @@ function runStage1(fullText) {
             if (badWords.has(s)) return true; 
             if (/^(tel|fax|el)$/i.test(s)) return true;
             
-            if (isKoreanName(s)) return true;
+            // 엄격한 서식 및 인명 키워드 차단
+            if (/^(법인명|상호|업체명|간판명|배송지명|상인명|공급자|공급자용|보관용|사업자|등록|대표자|대표|성명|이름|수취인|받으시는분|담당자)$/i.test(s)) return true;
 
-            if (/^(법인명|상호|업체명|간판명|배송지명|상인명|공급자|공급자용|보관용|사업자|등록|대표자|대표|성명|이름)$/i.test(s)) return true;
-            
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
             if (rawStr.includes('[') || rawStr.includes(']')) return true; 
@@ -166,7 +152,7 @@ function runStage1(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                for (let j = i + 1; j < Math.min(i + 12, tokens.length); j++) {
                     let tok = tokens[j];
                     if (skips.some(skw => tok.includes(skw))) {
                         if (collected.length > 0) break; 
@@ -174,25 +160,14 @@ function runStage1(fullText) {
                     }
                     if (isJunk(tok)) continue; 
 
-                    let cleanTokCheck = tok.replace(/[^\w가-힣]/g, '');
-                    if (isKoreanName(cleanTokCheck)) break;
-
-                    if (j + 1 < tokens.length) {
-                        let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
-                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
-                            continue;
-                        }
-                    }
-
                     collected.push(tok.replace(/^[|:;\[\]{}]+|[|:;\[\]{}]+$/g, '').trim());
                 }
 
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
-                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명|\(간판명\)|법인명/g, '').trim();
+                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|법인명/g, '').trim();
                     
-                    // 🌟 음식 이름(한식 등)은 꼬리표에서 제외하여 한촌설렁탕 등이 보호되도록 함
-                    const trailingNoise = /(조사|원산지|제조사|정돌섭|전규복|권진우|이영석|출고액|잔액|법인명).*$/;
+                    const trailingNoise = /(조사|원산지|제조사|출고액|잔액|법인명|성명|수취인).*$/;
                     result = result.replace(trailingNoise, '').trim();
                     result = result.replace(/^[)\]}]+|[)\]}]+$/g, '').trim();
 
@@ -206,57 +181,86 @@ function runStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 네거티브 필터링 백업 시스템
-function runStage2(fullText) {
+// 🌟 [2단계] 주소 앵커 기준 [상·하단 라인 스캔] + [연쇄 비교 삭제(펀넬)] 백업 엔진
+function runAnchorFunnelStage2(fullText) {
     try {
-        let text = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
-        
-        let addr = extractAddressLogic(fullText);
-        if (addr) text = text.replace(addr, ' ');
+        let lines = fullText.split(/\n/);
+        let addressLineIdx = -1;
 
-        const negativeWords = new Set([
-            '공급가액', '세액', '단가', '수량', '총액', '출고액', '입금액', '전잔액', '잔액', 
-            '합계', '영수', '청구', '품목', '품명', '규격', '단위', '사업자등록번호', '구매자명', 
-            '성명', '이름', '대표', '대표자', '주소', '소재지', '연락처', '전화', '전화번호', 
-            'tel', 'fax', 'el', '공급받는자', '공급자', '제조사', '원산지', '비고', '업태', '종목', 
-            '사업장', '조사', '구수', '구수동', '간판명', '배송지명', '상호명', '상호', '업체명', '상인명',
-            '국내산', '수입산', '공급자용', '보관용', '인수자', '확인', '일자', '번호', '거래명세표', '법인명', '등록'
-        ]);
-
-        let tokens = text.split(' ');
-        let validTokens = [];
-
-        for (let tok of tokens) {
-            let clean = tok.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-            if (!clean || clean.length < 2) continue;
-            if (/^[\d\-,.]+$/.test(clean)) continue;
-            if (clean.includes('010') || clean.includes('02-') || clean.includes('031-')) continue;
-            if (negativeWords.has(clean.toLowerCase())) continue;
-            if (isKoreanName(clean)) continue;
-            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(clean)) continue;
-
-            validTokens.push(clean);
+        // 주소 라인 앵커 탐색
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
+            if (/(로|길|동|읍|면|리)\s*\d+/.test(line) && /(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주|[시구군])/.test(line)) {
+                addressLineIdx = i;
+                break;
+            }
         }
 
-        if (validTokens.length > 0) {
-            let candidate = validTokens.slice(0, 3).join(' ');
-            if (candidate.length >= 2) {
-                return candidate;
+        // 주소 라인은 제외하고 [바로 윗줄]과 [바로 아랫줄]만 타겟 구역 설정[cite: 3]
+        let scanLines = [];
+        if (addressLineIdx !== -1) {
+            if (addressLineIdx - 1 >= 0) scanLines.push(lines[addressLineIdx - 1]);
+            if (addressLineIdx + 1 < lines.length) scanLines.push(lines[addressLineIdx + 1]);
+        } else {
+            scanLines = lines; // 비상시 전체 대상
+        }
+
+        let targetTokens = [];
+        for (let l of scanLines) {
+            let tokens = l.split(/[\s,;|]+/);
+            for (let t of tokens) {
+                let clean = t.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
+                if (clean) targetTokens.push(clean);
             }
+        }
+
+        // 연쇄 비교 삭제 (펀넬) 파이프라인 가동
+        let funnel = targetTokens;
+
+        // [삭제 1] 2글자 미만 조각 삭제
+        funnel = funnel.filter(t => t.length >= 2);
+
+        // [삭제 2] 숫자, 전화번호, 금액 패턴 삭제
+        funnel = funnel.filter(t => !/^[\d\-,.]+$/.test(t) && !/^\d+$/.test(t));
+        funnel = funnel.filter(t => !/(010|02|031|032|033|041|042|043|044|051|052|053|054|055|061|062|063|064)-?/.test(t));
+
+        // [삭제 3] 성명, 수취인, 받으시는분, 서식 라벨 및 타이틀 삭제
+        const strictForbidden = new Set([
+            '성명', '이름', '수취인', '받으시는분', '담당자', '법인명', '공급자', 
+            '등록', '사업자', '대표', '주소', '소재지', '연락처', '전화', '전화번호',
+            'tel', 'fax', 'el', '공급가액', '세액', '단가', '수량', '총액', '출고액', 
+            '입금액', '잔액', '합계', '영수', '청구', '품목', '품명', '규격', '단위',
+            '업장명', '상호', '상호명', '간판명', '배송지명', '상인명', '공급자용', '보관용'
+        ]);
+        funnel = funnel.filter(t => !strictForbidden.has(t.toLowerCase()));
+
+        // [삭제 4] 행정구역 파편 단어 삭제
+        funnel = funnel.filter(t => {
+            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(t)) return false;
+            if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(t) && !t.includes('점') && !t.includes('식당')) return false;
+            return true;
+        });
+
+        let survivedTokens = [...new Set(funnel)];
+        if (survivedTokens.length > 0) {
+            return survivedTokens.slice(0, 2).join(' ');
         }
     } catch (e) {}
     return null;
 }
 
-// 4. 🌟 다단 필터링 컨트롤러
+// 4. 🌟 최종 컨트롤러: 1차 엄격 정밀 탐색 실패 시 2차 앵커 구역 펀넬 엔진 가동
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     
-    let stage1Result = runStage1(fullText);
+    // [1차 시도] 더 빡빡하게 강화된 정밀 키워드 엔진
+    let stage1Result = runStrictStage1(fullText);
     if (stage1Result) return stage1Result;
 
-    let stage2Result = runStage2(fullTest);
+    // [2차 시도] 1차 미검출 시 주소 앵커 기준 상하단 구역 펀넬(비교 삭제) 엔진 가동
+    let stage2Result = runAnchorFunnelStage2(fullText);
     if (stage2Result) return stage2Result;
 
     return null;
 }
+```[cite: 3]
