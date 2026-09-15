@@ -120,9 +120,8 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 가장 안정적인 utils_3 뼈대 + 확장된 키워드 탐색 및 스마트 후처리 탑재
-export function extractStoreNameLogic(fullText) {
-    if (!fullText || typeof fullText !== 'string') return null;
+// 🌟 [1단계] 기존에 가장 성능이 좋았던 정밀 키워드 탐색 엔진
+function runStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
         let badWords = new Set();
@@ -130,19 +129,18 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
             if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
-            if (/구매자명|성명|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+            if (/구매자명|성명/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        // 🌟 탐색 키워드 대폭 확장 (현장의 모든 양식 포용)
         const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명', '(간판명)'];
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '전잔액', '잔액', '합계'];
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '잔액'];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
             if (!s || s.length < 2) return true; 
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
-            if (/^(tel|fax|el)$/i.test(s)) return true; // 영어 파편 차단
+            if (/^(tel|fax|el)$/i.test(s)) return true;
             
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
@@ -153,13 +151,12 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                for (let j = i + 1; j < Math.min(i + 18, tokens.length); j++) {
+                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
                     let tok = tokens[j];
                     if (skips.some(skw => tok.includes(skw))) {
                         if (collected.length > 0) break; 
                         continue; 
                     }
-                    
                     if (isJunk(tok)) continue; 
 
                     if (j + 1 < tokens.length) {
@@ -176,10 +173,8 @@ export function extractStoreNameLogic(fullText) {
                     let unique = [...new Set(collected)];
                     let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명|\(간판명\)/g, '').trim();
                     
-                    // 🌟 꼬리표 후처리: 수집된 결과물 뒤에 조사(원산지), 사람 이름 등이 붙어오면 스마트하게 잘라냄
-                    const trailingNoise = /(조사|원산지|제조사|정돌섭|전규복|이영석|한식|음식|구이|탕|요리).*$/;
+                    const trailingNoise = /(조사|원산지|제조사|정돌섭|전규복|이영석|한식|음식|구이|탕|요리|출고액|잔액).*$/;
                     result = result.replace(trailingNoise, '').trim();
-
                     result = result.replace(/^[)\]}]+|[)\]}]+$/g, '').trim();
 
                     if (result.length >= 2 && !/^(tel|fax|el)$/i.test(result)) {
@@ -188,8 +183,62 @@ export function extractStoreNameLogic(fullText) {
                 }
             }
         }
-    } catch (e) {
-        console.error("상호 추출 오류:", e);
-    }
+    } catch (e) {}
+    return null;
+}
+
+// 🌟 [2단계] 1단계에서 못 잡았을 때 발동하는 네거티브(제거) 필터링 백업 시스템
+function runStage2(fullText) {
+    try {
+        let text = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
+        
+        let addr = extractAddressLogic(fullText);
+        if (addr) text = text.replace(addr, ' ');
+
+        const negativeWords = new Set([
+            '공급가액', '세액', '단가', '수량', '총액', '출고액', '입금액', '전잔액', '잔액', 
+            '합계', '영수', '청구', '품목', '품명', '규격', '단위', '사업자등록번호', '구매자명', 
+            '성명', '이름', '대표', '대표자', '주소', '소재지', '연락처', '전화', '전화번호', 
+            'tel', 'fax', 'el', '공급받는자', '공급자', '제조사', '원산지', '비고', '업태', '종목', 
+            '사업장', '조사', '구수', '구수동', '간판명', '배송지명', '상호명', '상호', '업체명', '상인명',
+            '한식', '음식', '식품', '국내산', '수입산'
+        ]);
+
+        let tokens = text.split(' ');
+        let validTokens = [];
+
+        for (let tok of tokens) {
+            let clean = tok.replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
+            if (!clean || clean.length < 2) continue;
+            if (/^[\d\-,.]+$/.test(clean)) continue;
+            if (clean.includes('010') || clean.includes('02-') || clean.includes('031-')) continue;
+            if (negativeWords.has(clean.toLowerCase())) continue;
+            if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(clean)) continue;
+
+            validTokens.push(clean);
+        }
+
+        if (validTokens.length > 0) {
+            let candidate = validTokens.slice(0, 3).join(' ');
+            if (candidate.length >= 2) {
+                return candidate;
+            }
+        }
+    } catch (e) {}
+    return null;
+}
+
+// 4. 🌟 다단 필터링(Cascade) 최종 상호 추출 컨트롤러
+export function extractStoreNameLogic(fullText) {
+    if (!fullText || typeof fullText !== 'string') return null;
+    
+    // [1차 시도] 정밀 키워드 엔진 (utils_3 기반)
+    let stage1Result = runStage1(fullText);
+    if (stage1Result) return stage1Result;
+
+    // [2차 시도] 1차 실패 시 네거티브 필터링 백업 엔진 가동
+    let stage2Result = runStage2(fullText);
+    if (stage2Result) return stage2Result;
+
     return null;
 }
