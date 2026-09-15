@@ -839,6 +839,7 @@ export function drawDriverOnMap(devId) {
     let pointsCount = 0;
     const plannedPath = [];
     const completedPath = [];
+    const currentMode = state.currentMapPolylineMode || 'all';
 
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
@@ -848,7 +849,11 @@ export function drawDriverOnMap(devId) {
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.setMap(map); 
+            overlay.customType = 'completed'; // 복구된 부분
+            
+            if (currentMode === 'all' || currentMode === 'completed') {
+                overlay.setMap(map); 
+            }
             window.myMapOverlays.push(overlay);
         }
     });
@@ -865,7 +870,11 @@ export function drawDriverOnMap(devId) {
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
                     content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                    overlay.setMap(map); 
+                    overlay.customType = 'planned'; // 복구된 부분
+                    
+                    if (currentMode === 'all' || currentMode === 'planned') {
+                        overlay.setMap(map); 
+                    }
                     window.myMapOverlays.push(overlay);
                 }
             }
@@ -876,7 +885,7 @@ export function drawDriverOnMap(devId) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
-        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'planned') {
+        if (currentMode === 'all' || currentMode === 'planned') {
             window.mapPlannedPolyline.setMap(map);
         }
     }
@@ -885,7 +894,7 @@ export function drawDriverOnMap(devId) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
         });
-        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'completed') {
+        if (currentMode === 'all' || currentMode === 'completed') {
             window.mapCompletedPolyline.setMap(map);
         }
     }
@@ -898,72 +907,34 @@ export function setMapPolylineMode(mode) {
     ['all', 'planned', 'completed'].forEach(m => {
         const btn = document.getElementById(`btn-mode-${m}`);
         if (!btn) return;
-        if (m === mode) btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
-        else btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black";
+        if (m === mode) {
+            btn.classList.remove('text-gray-700', 'hover:bg-gray-100');
+            btn.classList.add('bg-blue-600', 'text-white');
+        } else {
+            btn.classList.remove('bg-blue-600', 'text-white');
+            btn.classList.add('text-gray-700', 'hover:bg-gray-100');
+        }
     });
-    if (window.mapPlannedPolyline) window.mapPlannedPolyline.setMap(mode === 'all' || window.mapPlannedPolyline.setMap(mode === 'planned' ? map : null));
-    if (window.mapCompletedPolyline) window.mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
-}
 
-export function changeDispatchDate(days) {
-    const picker = document.getElementById('dispatch-date-picker');
-    if (!picker) return;
-    let parts = (picker.value || todayStr).split('-');
-    const curDate = new Date(parts[0], parts[1] - 1, parts[2]);
-    curDate.setDate(curDate.getDate() + days);
-    picker.value = getLocalDateString(curDate);
-    onDispatchDateChange();
-}
-
-export function onDispatchDateChange() {
-    renderSidebar();
-    if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') drawDriverOnMap(state.selectedDeviceId);
-}
-
-export function resetDispatchDateToToday() {
-    const picker = document.getElementById('dispatch-date-picker');
-    if (picker) picker.value = todayStr;
-    onDispatchDateChange();
-}
-
-export function clearSearchInput() {
-    document.getElementById('global-search-input').value = '';
-    document.getElementById('search-dropdown').classList.add('hidden');
-    document.getElementById('search-clear-btn').classList.add('hidden');
-}
-
-export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
-    document.getElementById('search-dropdown').classList.add('hidden');
-    clearSearchInput();
-    if (dateStr) document.getElementById('dispatch-date-picker').value = dateStr;
-    setDispatchMode('DELIVERY', true);
-    if (devId) selectDriver(devId);
-    if (lat && lng) focusMapPosition(lat, lng);
-}
-
-export function handleGlobalSearch(query) {
-    const dropdown = document.getElementById('search-dropdown');
-    const clearBtn = document.getElementById('search-clear-btn');
-    const q = query.trim().toLowerCase();
-    if (!q) { dropdown.classList.add('hidden'); clearBtn.classList.add('hidden'); return; }
-    clearBtn.classList.remove('hidden');
-
-    const addressGroups = {};
-    for (let devId in state.activeRoutes) {
-        const r = state.activeRoutes[devId];
-        const dests = r.destinations || [];
-        const p = r.phone || '기사';
-        dests.forEach(d => {
-            if (d.address && (d.address.toLowerCase().includes(q) || p.includes(q))) {
-                const addrKey = d.address.trim();
-                if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
-                addressGroups[addrKey].push({
-                    type: 'PENDING', address: d.address, dateStr: todayStr, timeStr: '이동/대기 중',
-                    phone: p, devId: devId, lat: d.lat, lng: d.lng, displayNumber: d.displayNumber, timestamp: Date.now()
-                });
+    if (window.mapPlannedPolyline) {
+        window.mapPlannedPolyline.setMap((mode === 'all' || mode === 'planned') ? map : null);
+    }
+    if (window.mapCompletedPolyline) {
+        window.mapCompletedPolyline.setMap((mode === 'all' || mode === 'completed') ? map : null);
+    }
+    
+    // 오버레이(마커) 필터링 복구된 부분
+    if (window.myMapOverlays) {
+        window.myMapOverlays.forEach(overlay => {
+            if (overlay.customType === 'planned') {
+                overlay.setMap((mode === 'all' || mode === 'planned') ? map : null);
+            } else if (overlay.customType === 'completed') {
+                overlay.setMap((mode === 'all' || mode === 'completed') ? map : null);
             }
         });
     }
+}
+
     state.allCompletions.forEach(c => {
         if (c.address && (c.address.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)))) {
             const addrKey = c.address.trim();
