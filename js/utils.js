@@ -74,7 +74,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 [1단계] 기존에 안정적으로 작동하던 정밀 키워드 탐색 엔진
+// 🌟 [1단계] 수정된 정밀 키워드 탐색 엔진 (잡동사니 수집 범위 대폭 축소 및 필터 강화)
 function runBalancedStage1(fullText) {
     try {
         let tokens = fullText.split(/[\s\n]+/);
@@ -86,11 +86,13 @@ function runBalancedStage1(fullText) {
         }
 
         const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '법인명'];
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액'];
+        // 영수증 서식에 나오는 안내 문구 및 TEL(EL 조각) 등을 차단 목록에 대거 추가
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '잔액', '영수', '금액', '아래', '장소', 'TEL', 'FAX', '통보호', '전잔액', '출고액', '입금액'];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
             if (!s || s.length < 2) return true; 
+            if (/^[a-zA-Z]{1,2}$/.test(s)) return true; // EL 같은 짧은 영단어 조각 차단
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점')) return true; 
@@ -102,19 +104,22 @@ function runBalancedStage1(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
-                for (let j = i + 1; j < Math.min(i + 15, tokens.length); j++) {
+                // [핵심] 기존 15개에서 최대 3개 단어로 바짝 좁혀서 수집하도록 제한
+                for (let j = i + 1; j < Math.min(i + 4, tokens.length); j++) {
                     let tok = tokens[j];
                     if (skips.some(skw => tok.includes(skw))) {
                         if (collected.length > 0) break; 
                         continue; 
                     }
                     if (isJunk(tok)) continue; 
+                    
                     if (j + 1 < tokens.length) {
                         let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
                         if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) continue;
                     }
                     collected.push(tok.replace(/[^\w가-힣]/g, ''));
                 }
+
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
                     let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|법인명/g, '').trim();
@@ -130,10 +135,8 @@ function runBalancedStage1(fullText) {
 function runStrictAdjacentRightStage2(fullText) {
     try {
         let lines = fullText.split(/\n/);
-        
-        // 선생님이 지정하신 5대 기준 키워드 (상호, 법인, 간판, 가게, 배송) 및 유의어
         const primaryAnchors = ['상호', '법인', '간판', '가게', '배송', '상호명', '간판명', '배송지명', '업체명'];
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '총액', '성명', '대표자'];
+        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '총액', '성명', '대표자', '잔액', '영수', '금액', '장소', '아래'];
 
         for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
             let lineTokens = lines[lineIdx].split(/[\s,;|]+/).map(t => t.trim()).filter(t => t);
@@ -141,35 +144,25 @@ function runStrictAdjacentRightStage2(fullText) {
             for (let tokIdx = 0; tokIdx < lineTokens.length; tokIdx++) {
                 let cleanTok = lineTokens[tokIdx].replace(/[^\w가-힣]/g, '');
 
-                // 1. 5대 키워드 중 하나가 인식된 경우
                 if (primaryAnchors.some(anchor => cleanTok.includes(anchor))) {
-                    
-                    // [요청 반영] 세로(라인) 영역은 완전히 배제하고, 인식된 단어의 '우측' 토큰들만 정밀 탐색 시작
                     let adjacentWords = [];
                     
-                    // 바로 우측에 붙어 있는 최대 2개의 토큰만 엄격하게 검사
                     for (let r = tokIdx + 1; r <= Math.min(tokIdx + 2, lineTokens.length - 1); r++) {
                         let rightCandidate = lineTokens[r].replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
                         if (!rightCandidate) continue;
 
                         let cleanCandidate = rightCandidate.replace(/[^\w가-힣]/g, '');
 
-                        // 2. [엄격한 네거티브 필터링 규칙]
-                        // - 숫자만 있는 경우 (출력 불가 판정 및 즉시 중단)
                         if (/^\d+$/.test(cleanCandidate)) break;
-                        // - 주소 관련 행정구역 파편(시, 구, 동, 읍, 면, 로, 길, 층, 호 등)이 인식되면 즉시 차단
+                        if (/^[a-zA-Z]{1,2}$/.test(cleanCandidate)) break;
                         if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$|호$/.test(cleanCandidate) && !cleanCandidate.includes('점') && !cleanCandidate.includes('식당')) break;
-                        // - 지역명 포함 시 차단
                         if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(cleanCandidate)) break;
-                        // - 스킵 키워드 포함 시 차단
                         if (skips.some(skw => cleanCandidate.includes(skw))) break;
-                        // - 1글자 미만 무시
                         if (cleanCandidate.length < 2) continue;
 
                         adjacentWords.push(cleanCandidate);
                     }
 
-                    // 만약 바로 우측에서 조건을 통과한 순수 밀착 정보가 있다면 최종 확정
                     if (adjacentWords.length > 0) {
                         let finalResult = adjacentWords.join(' ').trim();
                         if (finalResult.length >= 2) return finalResult;
@@ -187,11 +180,11 @@ function runStrictAdjacentRightStage2(fullText) {
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     
-    // [1차 시도] 기존 키워드 정밀 탐색
+    // [1차 시도] 강화된 1단계 정밀 키워드 탐색
     let stage1Result = runBalancedStage1(fullText);
     if (stage1Result) return stage1Result;
 
-    // [2차 시도] 연쇄 우측 탐색 및 엄격한 인접 밀착 네거티브 필터링
+    // [2단계 시도] 연쇄 우측 탐색 및 엄격한 인접 밀착 네거티브 필터링
     let stage2Result = runStrictAdjacentRightStage2(fullText);
     if (stage2Result) return stage2Result;
 
