@@ -347,8 +347,8 @@
                     </div>
 
                     <div class="flex gap-1.5">
-                        <input type="text" id="modal-add-driver-input" placeholder="기사 8자리 키 또는 전화번호 입력" class="flex-1 bg-white border border-purple-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-purple-600 uppercase" onkeyup="if(window.event.keyCode==13){linkDriverFromModal()}">
-                        <button type="button" onclick="linkDriverFromModal()" class="bg-purple-600 hover:bg-purple-700 text-white font-black text-xs px-3.5 py-2 rounded-xl transition shadow-xs whitespace-nowrap active:scale-95 flex items-center gap-1">
+                        <input type="text" id="modal-add-driver-input" placeholder="기사 8자리 키 또는 전화번호 입력" class="flex-1 bg-white border border-purple-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-purple-600 uppercase" onkeyup="if(window.event.keyCode==13){window.linkDriverFromModal()}">
+                        <button type="button" onclick="window.linkDriverFromModal()" class="bg-purple-600 hover:bg-purple-700 text-white font-black text-xs px-3.5 py-2 rounded-xl transition shadow-xs whitespace-nowrap active:scale-95 flex items-center gap-1">
                             <i class="fa-solid fa-plus"></i> 연결 추가
                         </button>
                     </div>
@@ -397,6 +397,7 @@
                     </button>
                 </div>
                 
+
                 <div class="flex items-center gap-1.5 flex-none ml-2">
                     <button type="button" id="btn-pro-auto-dispatch" onclick="handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
                         <span class="absolute -top-2 -right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white">PRO</span>
@@ -408,7 +409,7 @@
                     </button>
                 </div>
             </div>
-            
+
             <div class="flex-1 max-w-xl relative">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
@@ -585,7 +586,7 @@
                         <span class="text-[11px] font-black text-gray-700"><i class="fa-solid fa-users text-blue-500 mr-1"></i> 운행 기사 권역 설정</span>
                         <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-black shadow-sm" id="dispatch-driver-count">0명</span>
                     </div>
-                    <button type="button" onclick="openAllTerritoriesMap()" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-[11px] font-black transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"><i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기</button>
+                    <button type="button" onclick="window.openAllTerritoriesMap()" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-2 text-[11px] font-black transition shadow-sm active:scale-95 flex items-center justify-center gap-1.5"><i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기</button>
                 </div>
                 <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-2.5">
                     <div class="text-center text-gray-400 py-10 text-[10px] font-bold">데이터 로딩중...</div>
@@ -663,9 +664,9 @@
                         <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역 중심을 지정하세요. <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.</p>
                     </div>
                     <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
-                        <button type="button" onclick="setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
-                        <button type="button" onclick="setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
-                        <button type="button" onclick="setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
                     </div>
                 </div>
                 <div class="bg-white px-4 py-3 rounded-xl border border-blue-200 flex items-center gap-3 shadow-sm">
@@ -693,7 +694,7 @@
                     <h3 class="text-lg font-black text-gray-900"><i class="fa-solid fa-map text-blue-600 mr-1.5"></i> 전체 기사 권역 설정 현황</h3>
                     <p class="text-xs font-bold text-gray-500 mt-1">현재 설정된 모든 기사님의 배송 커버리지를 한눈에 확인합니다.</p>
                 </div>
-                <button onclick="closeAllTerritoriesMap()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
+                <button onclick="window.closeAllTerritoriesMap()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
             </div>
             <div id="all-territories-map-container" class="flex-1 w-full bg-gray-200 rounded-2xl overflow-hidden relative shadow-inner border border-gray-300"></div>
         </div>
@@ -816,19 +817,19 @@
                     </div>
                     <div id="form-setup-accordion" class="hidden flex-col p-3 space-y-3 custom-scrollbar overflow-y-auto max-h-[300px]">
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">폼 제목</label><input type="text" id="input-form-title" class="w-full bg-indigo-50/50 border rounded-lg p-2 text-xs font-black"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label><input type="text" id="input-prov-regno" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label><input type="text" id="input-prov-name" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">사업자등록번호</label><input type="text" id="input-prov-regno" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">상호(법인명)</label><input type="text" id="input-prov-name" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">주소</label><input type="text" id="input-prov-addr" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">연락처/FAX</label><input type="text" id="input-prov-tel" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">추가연락처</label><input type="text" id="input-prov-add-tel" oninput="window.updateLivePreview()" class="w-full bg-white border rounded-lg p-2 text-xs font-bold"></div>
                         <div class="flex gap-1.5 pt-1">
-                            <button type="button" onclick="cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
-                            <button type="button" onclick="saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 저장</button>
+                            <button type="button" onclick="window.cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-[11px] font-black py-2 rounded-lg transition active:scale-95">취소</button>
+                            <button type="button" onclick="window.saveProviderForm()" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 저장</button>
                         </div>
                     </div>
                 </div>
                 <div class="bg-white border border-gray-200 p-3 rounded-2xl shadow-sm flex flex-col gap-2 flex-none mt-auto border-t">
-                    <button id="btn-batch-print" onclick="executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
+                    <button id="btn-batch-print" onclick="window.executeBatchPrint()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black py-3.5 rounded-xl transition shadow-md active:scale-95 flex items-center justify-center gap-2">
                         <i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력
                     </button>
                 </div>
@@ -891,7 +892,7 @@
             <input type="text" id="link-driver-key-input" placeholder="예: 7K9A-4M2X 또는 010-1234-5678" class="w-full bg-gray-50 border border-gray-300 rounded-xl p-3 text-xs font-mono font-black uppercase outline-none focus:border-blue-500 text-center mb-4">
             <div class="flex gap-2">
                 <button onclick="closeLinkDriverModal()" class="flex-1 bg-gray-100 text-gray-600 font-bold py-3 rounded-xl text-xs">취소</button>
-                <button onclick="confirmLinkDriver()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow">기사 연결하기</button>
+                <button onclick="window.confirmLinkDriver()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow">기사 연결하기</button>
             </div>
         </div>
     </div>
