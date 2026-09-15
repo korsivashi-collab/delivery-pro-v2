@@ -839,6 +839,7 @@ export function drawDriverOnMap(devId) {
     let pointsCount = 0;
     const plannedPath = [];
     const completedPath = [];
+    const currentMode = state.currentMapPolylineMode || 'all';
 
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
@@ -848,7 +849,11 @@ export function drawDriverOnMap(devId) {
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-            overlay.setMap(map); 
+            overlay.customType = 'completed';
+            
+            if (currentMode === 'all' || currentMode === 'completed') {
+                overlay.setMap(map); 
+            }
             window.myMapOverlays.push(overlay);
         }
     });
@@ -865,7 +870,11 @@ export function drawDriverOnMap(devId) {
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
                     content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
-                    overlay.setMap(map); 
+                    overlay.customType = 'planned';
+                    
+                    if (currentMode === 'all' || currentMode === 'planned') {
+                        overlay.setMap(map); 
+                    }
                     window.myMapOverlays.push(overlay);
                 }
             }
@@ -876,7 +885,7 @@ export function drawDriverOnMap(devId) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
             path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
         });
-        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'planned') {
+        if (currentMode === 'all' || currentMode === 'planned') {
             window.mapPlannedPolyline.setMap(map);
         }
     }
@@ -885,7 +894,7 @@ export function drawDriverOnMap(devId) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
             path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
         });
-        if (state.currentMapPolylineMode === 'all' || state.currentMapPolylineMode === 'completed') {
+        if (currentMode === 'all' || currentMode === 'completed') {
             window.mapCompletedPolyline.setMap(map);
         }
     }
@@ -897,11 +906,32 @@ export function setMapPolylineMode(mode) {
     state.currentMapPolylineMode = mode;
     ['all', 'planned', 'completed'].forEach(m => {
         const btn = document.getElementById(`btn-mode-${m}`);
-        if (m === mode) btn.className = "px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black";
-        else btn.className = "px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition font-black flex items-center gap-1";
+        if (!btn) return;
+        if (m === mode) {
+            btn.classList.remove('text-gray-700', 'hover:bg-gray-100');
+            btn.classList.add('bg-blue-600', 'text-white');
+        } else {
+            btn.classList.remove('bg-blue-600', 'text-white');
+            btn.classList.add('text-gray-700', 'hover:bg-gray-100');
+        }
     });
-    if (window.mapPlannedPolyline) window.mapPlannedPolyline.setMap(mode === 'all' || window.mapPlannedPolyline.setMap(mode === 'planned' ? map : null));
-    if (window.mapCompletedPolyline) window.mapCompletedPolyline.setMap(mode === 'all' || mode === 'completed' ? map : null);
+
+    if (window.mapPlannedPolyline) {
+        window.mapPlannedPolyline.setMap((mode === 'all' || mode === 'planned') ? map : null);
+    }
+    if (window.mapCompletedPolyline) {
+        window.mapCompletedPolyline.setMap((mode === 'all' || mode === 'completed') ? map : null);
+    }
+    
+    if (window.myMapOverlays) {
+        window.myMapOverlays.forEach(overlay => {
+            if (overlay.customType === 'planned') {
+                overlay.setMap((mode === 'all' || mode === 'planned') ? map : null);
+            } else if (overlay.customType === 'completed') {
+                overlay.setMap((mode === 'all' || mode === 'completed') ? map : null);
+            }
+        });
+    }
 }
 
 export function changeDispatchDate(days) {
@@ -1828,7 +1858,7 @@ export function executeExcelExport() {
     const isCanceled = document.getElementById('chk-export-canceled').checked;
 
     if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 정 없습니다. 날짜를 다시 확인해주세요."); return; }
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
