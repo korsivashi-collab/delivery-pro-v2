@@ -120,24 +120,22 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 🌟 고도화된 상호 추출 로직 (구매자명/성명 차단 및 찌꺼기 제거 완성본)
+// 4. 🌟 고도화된 상호 추출 로직 (표 노이즈 및 제조사/공급가액 완벽 차단)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
 
     try {
         let flatText = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
 
-        // 1. 주소 영역 도려내기
+        // 1. 주소 영역 먼저 도려내기
         let detectedAddress = extractAddressLogic(fullText);
         if (detectedAddress) {
             flatText = flatText.replace(detectedAddress, ' ');
         }
 
-        // 2. 출력되면 안 되는 노이즈 필터 단어 및 구매자명/성명 계열 강력 차단
-        // 구매자명 뒤에 오는 이름까지 통째로 날려버리도록 패턴 적용
-        flatText = flatText.replace(/(?:구매자명|성명|이름|대표|연락처|전화번호|TEL|FAX|사업자등록번호|공급받는자|공급자|단가|수량|금액|합계|잔액|세액|종목|업태)[\s\:\-\|]*[가-힣a-zA-Z0-9]*/gi, ' ');
+        // 2. 표 내부의 다른 칸 항목명들(제조사, 공급가액 등)을 노이즈로 처리해 일괄 제거
+        flatText = flatText.replace(/(?:성명|이름|대표|연락처|전화번호|TEL|FAX|사업자등록번호|공급받는자|공급자|제조사|원산지|공급가액|단가|수량|금액|합계|잔액|세액|종목|업태|구수동)[\s\:\-\|]*[가-힣a-zA-Z0-9]*/gi, ' ');
 
-        // 3. 순수 숫자 및 전화번호 형태 토큰 제거
         let tokens = flatText.split(' ');
         let cleanedTokens = [];
         
@@ -154,9 +152,10 @@ export function extractStoreNameLogic(fullText) {
 
         let processedText = cleanedTokens.join(' ');
 
-        // 4. 상호/간판/배송지 키워드 탐색 후 뒷내용 추출
+        // 3. 상호/간판/배송지 키워드 탐색 후 뒷내용 추출
         const filterKeywords = ['상호', '법인', '간판', '배송지', '업체명'];
-        const stopWords = ['성명', '이름', '대표', '주소', '연락처', '전화', '금액', '합계', '잔액', '구매자명'];
+        // 🛑 스톱워드 대폭 강화 (제조사, 원산지, 공급가액 등 표 항목이 뒤에 붙어오면 즉시 차단)
+        const stopWords = ['성명', '이름', '대표', '주소', '소재지', '연락처', '전화', '금액', '합계', '잔액', '구매자명', '제조사', '원산지', '공급가액', '단가', '수량'];
 
         for (let kw of filterKeywords) {
             let kwIndex = processedText.indexOf(kw);
