@@ -120,7 +120,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 상호명 추출 로직 (가장 안정적이었던 utils_3 버전을 기반으로 미세 조정)
+// 4. 상호명 추출 로직 (뒷줄 노이즈 유입 원천 차단 브레이크 장치 탑재)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -131,15 +131,17 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
             if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
-            // 🌟 성명, 구매자명 뒤에 오는 사람 이름(예: 정돌섭) 강력 차단
             if (/구매자명|성명|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        // 🌟 타겟 단어 추가: 엄마손 맛집 등을 잡기 위해 업체명, 상인명 추가
         const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명'];
         
-        // 🌟 스킵(정지) 단어 대폭 추가: 잔액, 출고액, 합계 등 표 헤더 추가
-        const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '전잔액', '잔액', '합계', '영수', '청구', '품목', '성명', '이름', '대표'];
+        // 🛑 스킵(정지) 단어 대폭 강화: 조사, 원산지, 성명 등을 만나면 뒤도 안 돌아보고 멈춤
+        const skips = [
+            '연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', 
+            '공급받는자', '총액', '출고액', '입금액', '전잔액', '잔액', '합계', '영수', '청구', '품목', 
+            '성명', '이름', '대표', '조사', '원산지', '제조사', '규격', '단위', '비고'
+        ];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
@@ -147,7 +149,6 @@ export function extractStoreNameLogic(fullText) {
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
             
-            // 🌟 추가된 쓰레기값 필터 (EL, TEL, 구수동 파편 강제 차단)
             if (/^(tel|fax|el|구수|구수동)$/i.test(s)) return true;
 
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
@@ -160,15 +161,13 @@ export function extractStoreNameLogic(fullText) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
                 
-                // 🌟 탐색 범위를 15 -> 20으로 늘려 두 줄로 쪼개진 론에프앤비 등 방어
                 for (let j = i + 1; j < Math.min(i + 20, tokens.length); j++) {
                     let tok = tokens[j];
                     
-                    // 스킵 단어 처리 (이전 버전의 안정적인 로직 유지)
-                    if (skips.some(skw => tok.includes(skw))) {
-                        // 이미 상호명을 모았는데 스킵 단어(잔액, 출고액 등)를 만나면 즉시 완료
-                        if (collected.length > 0) break; 
-                        continue; 
+                    // 🌟 [강력한 브레이크 장치] 스킵 단어나 사람 이름(정돌섭 등)을 만나면 즉시 수집 중단!
+                    let cleanTokCheck = tok.replace(/[^\w가-힣]/g, '');
+                    if (skips.some(skw => tok.includes(skw)) || badWords.has(cleanTokCheck)) {
+                        break; // 무조건 멈춤
                     }
                     
                     if (isJunk(tok)) continue; 
@@ -180,7 +179,6 @@ export function extractStoreNameLogic(fullText) {
                         }
                     }
 
-                    // 🌟 괄호 보존 처리: (주) 같은 특수기호가 뭉개지지 않도록 양끝 껍데기만 살짝 벗김
                     let finalTok = tok.replace(/^[|:;\[\]{}]+|[|:;\[\]{}]+$/g, '').trim();
                     if (finalTok) collected.push(finalTok);
                 }
@@ -188,11 +186,13 @@ export function extractStoreNameLogic(fullText) {
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
                     let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명/g, '').trim();
-                    
-                    // 🌟 후처리: 문자열 끝에 남아있는 닫는 괄호나 이상한 기호 청소
                     result = result.replace(/^[)\]}]+|[)\]}]+$/g, '').trim();
                     
-                    if (result.length >= 2) return result;
+                    if (result.length >= 2 && result !== '(주)' && result !== '주식회사') {
+                        let resTokens = result.split(' ');
+                        let uniqueRes = [...new Set(resTokens)];
+                        return uniqueRes.join(' ');
+                    }
                 }
             }
         }
