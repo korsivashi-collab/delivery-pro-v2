@@ -126,50 +126,59 @@ function runBalancedStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 사용자 지정 5대 앵커 기반 인접 데이터 필터링 엔진
-function runAdjacentAnchorStage2(fullText) {
+// 🌟 [2단계] 연쇄 우측 탐색 및 엄격한 인접 밀착 네거티브 필터링 엔진
+function runStrictAdjacentRightStage2(fullText) {
     try {
-        let tokens = fullText.split(/[\s\n]+/);
+        let lines = fullText.split(/\n/);
         
-        // 선생님이 지정하신 핵심 필터링 5대 단어 및 확장 키워드 앵커
-        const targetAnchors = ['상호', '법인', '간판', '가게', '배송', '상호명', '간판명', '배송지명', '업체명'];
+        // 선생님이 지정하신 5대 기준 키워드 (상호, 법인, 간판, 가게, 배송) 및 유의어
+        const primaryAnchors = ['상호', '법인', '간판', '가게', '배송', '상호명', '간판명', '배송지명', '업체명'];
         const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '총액', '성명', '대표자'];
 
-        for (let i = 0; i < tokens.length; i++) {
-            let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
+        for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+            let lineTokens = lines[lineIdx].split(/[\s,;|]+/).map(t => t.trim()).filter(t => t);
             
-            // 1. 5대 핵심 앵커 단어가 인식되면 수직/해당 라인은 차단하고 우측(바로 다음 토큰) 정보 공략
-            if (targetAnchors.some(anchor => cleanTok.includes(anchor))) {
-                
-                // 바로 붙어 있는 인접 데이터(오른쪽) 수집 시도 (최대 2개 토큰까지 연속 확인)
-                let extractedWords = [];
-                for (let j = i + 1; j <= Math.min(i + 2, tokens.length - 1); j++) {
-                    let candidate = tokens[j].replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-                    if (!candidate) continue;
+            for (let tokIdx = 0; tokIdx < lineTokens.length; tokIdx++) {
+                let cleanTok = lineTokens[tokIdx].replace(/[^\w가-힣]/g, '');
 
-                    // 2. [네거티브 필터 규칙 적용]
-                    // - 숫자만 있는 경우 출력 불가 판정 (제외)
-                    if (/^\d+$/.test(candidate)) break; 
-                    // - 주소 관련 행정구역 파편(시, 구, 동, 로, 길 등)이 인식되면 해당 부분 출력 불가 판정 (제외)
-                    if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$|호$/.test(candidate) && !candidate.includes('점') && !candidate.includes('식당')) break;
-                    // - 지역명 포함 시 제외
-                    if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(candidate)) break;
-                    // - 금지(스킵) 단어 포함 시 제외
-                    if (skips.some(skw => candidate.includes(skw))) break;
-                    // - 글자수가 너무 짧으면(1글자) 무시
-                    if (candidate.length < 2) continue;
+                // 1. 5대 키워드 중 하나가 인식된 경우
+                if (primaryAnchors.some(anchor => cleanTok.includes(anchor))) {
+                    
+                    // [요청 반영] 세로(라인) 영역은 완전히 배제하고, 인식된 단어의 '우측' 토큰들만 정밀 탐색 시작
+                    let adjacentWords = [];
+                    
+                    // 바로 우측에 붙어 있는 최대 2개의 토큰만 엄격하게 검사
+                    for (let r = tokIdx + 1; r <= Math.min(tokIdx + 2, lineTokens.length - 1); r++) {
+                        let rightCandidate = lineTokens[r].replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
+                        if (!rightCandidate) continue;
 
-                    extractedWords.push(candidate);
-                }
+                        let cleanCandidate = rightCandidate.replace(/[^\w가-힣]/g, '');
 
-                if (extractedWords.length > 0) {
-                    let finalResult = extractedWords.join(' ').replace(/[^\w가-힣\s]/g, '').trim();
-                    if (finalResult.length >= 2) return finalResult;
+                        // 2. [엄격한 네거티브 필터링 규칙]
+                        // - 숫자만 있는 경우 (출력 불가 판정 및 즉시 중단)
+                        if (/^\d+$/.test(cleanCandidate)) break;
+                        // - 주소 관련 행정구역 파편(시, 구, 동, 읍, 면, 로, 길, 층, 호 등)이 인식되면 즉시 차단
+                        if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$|호$/.test(cleanCandidate) && !cleanCandidate.includes('점') && !cleanCandidate.includes('식당')) break;
+                        // - 지역명 포함 시 차단
+                        if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(cleanCandidate)) break;
+                        // - 스킵 키워드 포함 시 차단
+                        if (skips.some(skw => cleanCandidate.includes(skw))) break;
+                        // - 1글자 미만 무시
+                        if (cleanCandidate.length < 2) continue;
+
+                        adjacentWords.push(cleanCandidate);
+                    }
+
+                    // 만약 바로 우측에서 조건을 통과한 순수 밀착 정보가 있다면 최종 확정
+                    if (adjacentWords.length > 0) {
+                        let finalResult = adjacentWords.join(' ').trim();
+                        if (finalResult.length >= 2) return finalResult;
+                    }
                 }
             }
         }
     } catch (e) {
-        console.error("2단계 인접 앵커 추출 오류:", e);
+        console.error("2단계 우측 밀착 탐색 오류:", e);
     }
     return null;
 }
@@ -182,8 +191,8 @@ export function extractStoreNameLogic(fullText) {
     let stage1Result = runBalancedStage1(fullText);
     if (stage1Result) return stage1Result;
 
-    // [2차 시도] 5대 핵심 앵커(상호, 법인, 간판, 가게, 배송) 기반 인접 데이터 추출 및 필터링
-    let stage2Result = runAdjacentAnchorStage2(fullText);
+    // [2차 시도] 연쇄 우측 탐색 및 엄격한 인접 밀착 네거티브 필터링
+    let stage2Result = runStrictAdjacentRightStage2(fullText);
     if (stage2Result) return stage2Result;
 
     return null;
