@@ -120,6 +120,21 @@ export function extractAddressLogic(text) {
     return null;
 }
 
+// 🌟 [핵심 공통] 대한민국 주요 성씨 기반 인명 판별기 (2~3글자 + 성씨 매칭)
+function isKoreanName(str) {
+    if (!str) return false;
+    let clean = str.replace(/[^\w가-힣]/g, '');
+    if (clean.length < 2 || clean.length > 3) return false;
+    
+    // 대한민국 대표 성씨 목록
+    const majorSurnames = [
+        '김','이','박','최','정','강','조','윤','장','임','신','한','오','서','권',
+        '황','안','송','전','홍','고','문','양','손','배','백','허','유','남','심',
+        '노','하','곽','성','차','주','우','구','민','진','엄','채','원','천','방'
+    ];
+    return majorSurnames.includes(clean[0]);
+}
+
 // 🌟 [1단계] 정밀 키워드 탐색 엔진
 function runStage1(fullText) {
     try {
@@ -129,10 +144,10 @@ function runStage1(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
             if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
-            if (/구매자명|성명/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
+            if (/구매자명|성명|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
-        const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명', '(간판명)'];
+        const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명', '(간판명)', '법인명'];
         const skips = ['연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '잔액'];
 
         const isJunk = (rawStr) => {
@@ -141,6 +156,12 @@ function runStage1(fullText) {
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
             if (/^(tel|fax|el)$/i.test(s)) return true;
+            
+            // 🛑 성씨 기반 인명 자동 차단 적용
+            if (isKoreanName(s)) return true;
+
+            // 명세서 서식어 차단
+            if (/^(법인명|상호|업체명|간판명|배송지명|상인명|공급자|공급자용|보관용|사업자|등록|대표자|대표|성명|이름)$/i.test(s)) return true;
             
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
@@ -159,6 +180,9 @@ function runStage1(fullText) {
                     }
                     if (isJunk(tok)) continue; 
 
+                    let cleanTokCheck = tok.replace(/[^\w가-힣]/g, '');
+                    if (isKoreanName(cleanTokCheck)) break; // 이름 만나면 즉시 중단
+
                     if (j + 1 < tokens.length) {
                         let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
                         if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
@@ -171,9 +195,9 @@ function runStage1(fullText) {
 
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
-                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명|\(간판명\)/g, '').trim();
+                    let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명|\(간판명\)|법인명/g, '').trim();
                     
-                    const trailingNoise = /(조사|원산지|제조사|정돌섭|전규복|이영석|한식|음식|구이|탕|요리|출고액|잔액).*$/;
+                    const trailingNoise = /(조사|원산지|제조사|정돌섭|전규복|권진우|이영석|한식|음식|구이|탕|요리|출고액|잔액|법인명).*$/;
                     result = result.replace(trailingNoise, '').trim();
                     result = result.replace(/^[)\]}]+|[)\]}]+$/g, '').trim();
 
@@ -187,7 +211,7 @@ function runStage1(fullText) {
     return null;
 }
 
-// 🌟 [2단계] 네거티브(제거) 필터링 백업 시스템 (명세서 서식 금지어 대폭 강화)
+// 🌟 [2단계] 네거티브(제거) 필터링 백업 시스템 (성씨 인명 및 서식어 전면 차단)
 function runStage2(fullText) {
     try {
         let text = fullText.replace(/[\n\t\r]+/g, ' ').replace(/\s{2,}/g, ' ');
@@ -195,7 +219,7 @@ function runStage2(fullText) {
         let addr = extractAddressLogic(fullText);
         if (addr) text = text.replace(addr, ' ');
 
-        // 🛑 2단계 네거티브 금지어 리스트 대폭 강화 (공급자용, 김태환, 등록 등 서식/인명 차단)
+        // 🛑 명세서 고정 서식어 및 타이틀 전면 금지어 리스트
         const negativeWords = new Set([
             '공급가액', '세액', '단가', '수량', '총액', '출고액', '입금액', '전잔액', '잔액', 
             '합계', '영수', '청구', '품목', '품명', '규격', '단위', '사업자등록번호', '구매자명', 
@@ -203,8 +227,7 @@ function runStage2(fullText) {
             'tel', 'fax', 'el', '공급받는자', '공급자', '제조사', '원산지', '비고', '업태', '종목', 
             '사업장', '조사', '구수', '구수동', '간판명', '배송지명', '상호명', '상호', '업체명', '상인명',
             '한식', '음식', '식품', '국내산', '수입산',
-            // 🌟 추가된 명세서 고정 서식/인명 노이즈어
-            '공급자용', '김태환', '등록', '보관용', '인수자', '확인', '일자', '번호', '거래명세표'
+            '공급자용', '보관용', '인수자', '확인', '일자', '번호', '거래명세표', '법인명', '등록'
         ]);
 
         let tokens = text.split(' ');
@@ -216,6 +239,10 @@ function runStage2(fullText) {
             if (/^[\d\-,.]+$/.test(clean)) continue;
             if (clean.includes('010') || clean.includes('02-') || clean.includes('031-')) continue;
             if (negativeWords.has(clean.toLowerCase())) continue;
+            
+            // 🛑 성씨 기반 인명 자동 필터링
+            if (isKoreanName(clean)) continue;
+
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(clean)) continue;
 
             validTokens.push(clean);
@@ -235,7 +262,7 @@ function runStage2(fullText) {
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     
-    // [1차 시도] 정밀 키워드 엔진 (utils_3 기반)
+    // [1차 시도] 정밀 키워드 엔진
     let stage1Result = runStage1(fullText);
     if (stage1Result) return stage1Result;
 
