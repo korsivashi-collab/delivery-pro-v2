@@ -120,37 +120,33 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 4. 상호명 추출 로직 (뒷줄 노이즈 유입 원천 차단 브레이크 장치 탑재)
+// 4. 🌟 안정성과 유연성을 극대화한 최종 상호 추출 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         let tokens = fullText.split(/[\s\n]+/);
         let badWords = new Set();
 
-        // 이름, 전화번호 등을 블랙리스트(badWords)에 등록
         for (let i = 0; i < tokens.length; i++) {
             let cleanT = tokens[i].replace(/[^\w가-힣]/g, '');
             if (/^\d{10}$/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
             if (/구매자명|성명|대표/.test(cleanT) && tokens[i+1]) badWords.add(tokens[i+1].replace(/[^\w가-힣]/g, ''));
         }
 
+        // 탐색할 키워드 대폭 확장 (양식별 모든 케이스 포용)
         const targets = ['배송지명', '간판명', '상호명', '상호', '업체명', '상인명'];
         
-        // 🛑 스킵(정지) 단어 대폭 강화: 조사, 원산지, 성명 등을 만나면 뒤도 안 돌아보고 멈춤
-        const skips = [
-            '연락처', '전화번호', '주소', '구매자명', '사업자등록번호', '공급가액', '세액', '단가', '수량', 
-            '공급받는자', '총액', '출고액', '입금액', '전잔액', '잔액', '합계', '영수', '청구', '품목', 
-            '성명', '이름', '대표', '조사', '원산지', '제조사', '규격', '단위', '비고'
-        ];
+        // 최소한의 필수 스킵 단어만 유지하여 인식 실패(null) 원천 방지
+        const skips = ['연락처', '전화번호', '주소', '사업자등록번호', '공급가액', '세액', '단가', '수량', '공급받는자', '총액', '출고액', '입금액', '전잔액', '잔액'];
 
         const isJunk = (rawStr) => {
             let s = rawStr.replace(/[^\w가-힣]/g, ''); 
             if (!s || s.length < 2) return true; 
             if (/^\d+$/.test(s) || /^0[1-9]\d{6,}/.test(s)) return true; 
             if (badWords.has(s)) return true; 
-            
             if (/^(tel|fax|el|구수|구수동)$/i.test(s)) return true;
-
+            
+            // 주소 파편 무시 (단, 상호명에 들어가는 '점', '식당'은 허용)
             if (/시$|구$|군$|동$|읍$|면$|로$|길$|층$/.test(s) && !s.includes('점') && !s.includes('식당')) return true; 
             if (/^(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충청|전라|경상|제주)/.test(s)) return true;
             if (rawStr.includes('[') || rawStr.includes(']')) return true; 
@@ -161,23 +157,11 @@ export function extractStoreNameLogic(fullText) {
             if (targets.some(kw => tokens[i].includes(kw))) {
                 let collected = [];
                 
+                // 넉넉하게 20개의 토큰을 수집하여 누락 방지
                 for (let j = i + 1; j < Math.min(i + 20, tokens.length); j++) {
                     let tok = tokens[j];
-                    
-                    // 🌟 [강력한 브레이크 장치] 스킵 단어나 사람 이름(정돌섭 등)을 만나면 즉시 수집 중단!
-                    let cleanTokCheck = tok.replace(/[^\w가-힣]/g, '');
-                    if (skips.some(skw => tok.includes(skw)) || badWords.has(cleanTokCheck)) {
-                        break; // 무조건 멈춤
-                    }
-                    
+                    if (skips.some(skw => tok.includes(skw))) break; // 표 하단 영역 진입 시 중단
                     if (isJunk(tok)) continue; 
-
-                    if (j + 1 < tokens.length) {
-                        let nextClean = tokens[j+1].replace(/[^\w가-힣]/g, '');
-                        if (/시$|구$|군$|동$|읍$|면$|로$|길$/.test(nextClean) && !nextClean.includes('점')) {
-                            continue;
-                        }
-                    }
 
                     let finalTok = tok.replace(/^[|:;\[\]{}]+|[|:;\[\]{}]+$/g, '').trim();
                     if (finalTok) collected.push(finalTok);
@@ -186,6 +170,12 @@ export function extractStoreNameLogic(fullText) {
                 if (collected.length > 0) {
                     let unique = [...new Set(collected)];
                     let result = unique.join(' ').replace(/간판명|배송지명|상호명|상호|업체명|상인명/g, '').trim();
+                    
+                    // 🌟 후처리(Cut-off): 상호명 뒤에 묻어 들어오는 노이즈 단어들(조사, 원산지, 사람 이름 등)이 있으면 그 뒷부분은 과감히 잘라냄!
+                    const trailingNoiseRegex = /(조사|원산지|제조사|정돌섭|전규복|이영석|전규복|한식|음식|구이|탕|요리|포장|판매|식품).*$/;
+                    result = result.replace(trailingNoiseRegex, '').trim();
+
+                    // 마지막 기호 정리
                     result = result.replace(/^[)\]}]+|[)\]}]+$/g, '').trim();
                     
                     if (result.length >= 2 && result !== '(주)' && result !== '주식회사') {
