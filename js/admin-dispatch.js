@@ -1004,44 +1004,40 @@ export function handleGlobalSearch(query) {
     dropdown.innerHTML = html; dropdown.classList.remove('hidden');
 }
 
+// js/admin-dispatch.js 파일 내 handleProFeature 함수 교체
 export function handleProFeature(featureName) {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const role = sessionStorage.getItem('deliveryProRole');
-    let isPro = false;
+    if (featureName === 'AUTO_DISPATCH') {
+        const modal = document.getElementById('auto-dispatch-modal');
+        if (!modal) { 
+            alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); 
+            return; 
+        }
+        modal.classList.remove('hidden');
+        renderDispatchDriverList();
+        loadExcelFromFirebase();
+        initExcelDropZone(); 
+        const savedBase = localStorage.getItem('deliveryProCompanyBase');
+        if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
 
-    if (dispatchKey) {
-        const myLic = state.allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
-        if (myLic && myLic.isPro) isPro = true;
-    }
-    if (role === 'MASTER' && !dispatchKey) isPro = true;
-
-    if (isPro) {
-        if (featureName === 'AUTO_DISPATCH') {
-            const modal = document.getElementById('auto-dispatch-modal');
-            if (!modal) { alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); return; }
-            modal.classList.remove('hidden');
-            renderDispatchDriverList();
-            loadExcelFromFirebase();
-            initExcelDropZone(); 
-            const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
-
-        } else if (featureName === 'INVOICE') {
-            if (state.parsedExcelList && state.parsedExcelList.length === 0) { alert("출력 대기 중인 데이터가 없습니다.\n\n[배송 자동할당] 화면에서 엑셀을 업로드 한 후\n'명세서 출력으로 내보내기'를 실행해 주세요."); return; }
-            const modal = document.getElementById('pro-invoice-modal');
-            if (!modal) { alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); return; }
-            modal.classList.remove('hidden');
-            
-            // 모든 엑셀 리스트를 출력 대기 리스트로 일괄 세팅 (사용자가 체크박스 안눌러도 되게)
-            state.printReadyList = [...state.parsedExcelList];
-            
-            document.getElementById('print-ready-count').innerText = state.printReadyList.length;
-            loadSavedForms(); 
+    } else if (featureName === 'INVOICE') {
+        const modal = document.getElementById('pro-invoice-modal');
+        if (!modal) { 
+            alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); 
+            return; 
+        }
+        modal.classList.remove('hidden');
+        
+        // 데이터가 없어도 모달이 열리도록 안전하게 처리
+        state.printReadyList = (state.parsedExcelList && state.parsedExcelList.length > 0) ? [...state.parsedExcelList] : [];
+        
+        const countEl = document.getElementById('print-ready-count');
+        if (countEl) countEl.innerText = state.printReadyList.length;
+        
+        loadSavedForms(); 
+        if (state.printReadyList.length > 0) {
             previewInvoiceRow(0); 
             syncPreviewData(); 
         }
-    } else {
-        document.getElementById('premium-upgrade-modal')?.classList.remove('hidden');
     }
 }
 
