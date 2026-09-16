@@ -169,15 +169,13 @@ function startLicenseRealtimeWatcher(key) {
         if (authScreen) authScreen.classList.remove('hidden');
         window.location.reload();
     }, async (docData) => {
-        // 🌟 [강력 자동 방어 로직 추가됨]
-        // 기사님이 스위치를 꺼두었는데(allowTms: false), 
-        // 관제가 오래된 캐시나 강제 우회로 연결을 시도하여 DB에 dispatchKey가 들어온 경우
+        // 🌟 기사님이 스위치를 꺼두었는데, 관제가 억지로 연결을 시도해 DB에 dispatchKey가 들어온 경우 
+        // 0.1초만에 기사 앱이 즉시 서버의 연결 상태를 빈칸으로 덮어써서 관제를 쫓아냅니다.
         if (docData.allowTms === false && docData.dispatchKey) {
             try {
-                // 기사 앱이 즉시 서버의 연결 상태를 빈칸으로 덮어써서 관제를 쫓아냅니다.
                 await firebaseSetTmsPermission(key, false);
             } catch(e) {}
-            return; // 이후 UI 연결 처리 완전 중단
+            return; 
         }
 
         const linkedKey = docData.dispatchKey || '';
@@ -1489,8 +1487,8 @@ export function initPhotoCompletion() {
 }
 
 export function openSettingsModal() {
-    const isTmsAllowed = localStorage.getItem('deliveryProAllowTms') !== 'false'; // 기본값 허용
-    const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false'; // 기본값 허용
+    const isTmsAllowed = localStorage.getItem('deliveryProAllowTms') !== 'false';
+    const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false';
     
     const tmsToggle = document.getElementById('tms-toggle');
     const gpsToggle = document.getElementById('gps-toggle');
@@ -1505,30 +1503,72 @@ export function closeSettingsModal() {
     document.getElementById('settings-modal')?.classList.add('hidden');
 }
 
-export async function toggleTMS(isChecked) {
+// 🌟 [추가/변경됨] 비동기 커스텀 모달 제어를 통한 토글 로직
+export function toggleTMS(isChecked) {
+    const myKey = localStorage.getItem('deliveryProKey');
+    if (!myKey || typeof firebaseSetTmsPermission !== 'function') return;
+
+    if (!isChecked) {
+        // 스위치를 끌 때: 앱을 멈추지 않는 커스텀 확인 모달 띄우기
+        document.getElementById('tms-confirm-modal')?.classList.remove('hidden');
+    } else {
+        // 스위치를 켤 때: 바로 허용 로직 실행
+        proceedTMSToggle(true);
+    }
+}
+
+// 모달에서 '취소'를 눌렀을 때
+export function cancelTMSToggle() {
+    document.getElementById('tms-confirm-modal')?.classList.add('hidden');
+    const tmsToggle = document.getElementById('tms-toggle');
+    if (tmsToggle) tmsToggle.checked = true; // 스위치를 다시 켠 상태(원상복구)로 되돌림
+}
+
+// 모달에서 '차단하기'를 눌렀을 때
+export async function confirmTMSToggle() {
+    document.getElementById('tms-confirm-modal')?.classList.add('hidden');
+    await proceedTMSToggle(false);
+}
+
+// 실제 서버와 통신하는 핵심 비동기 함수
+async function proceedTMSToggle(isAllowed) {
     const tmsToggle = document.getElementById('tms-toggle');
     const myKey = localStorage.getItem('deliveryProKey');
     
-    if (!myKey || typeof firebaseSetTmsPermission !== 'function') return;
-
     showLoading("설정 변경 중...");
     try {
-        await firebaseSetTmsPermission(myKey, isChecked);
-        localStorage.setItem('deliveryProAllowTms', isChecked ? 'true' : 'false');
+        await firebaseSetTmsPermission(myKey, isAllowed);
+        localStorage.setItem('deliveryProAllowTms', isAllowed ? 'true' : 'false');
         
-        if (!isChecked) {
+        hideLoading();
+
+        // 성공 안내를 위한 커스텀 모달 세팅
+        const titleEl = document.getElementById('tms-success-title');
+        const descEl = document.getElementById('tms-success-desc');
+        const iconEl = document.getElementById('tms-success-icon');
+
+        if (!isAllowed) {
+            // 차단 시의 로컬 스토리지 및 UI 정리
             localStorage.removeItem('deliveryProDispatchKey');
             updatePhotoCompButtonState(false);
-            hideLoading();
-            alert("TMS 연결이 차단되었습니다.\n기존 소속 정보가 초기화되었으며, 더 이상 관제 센터에서 기사님을 강제로 연결할 수 없습니다.");
+            
+            if(titleEl) titleEl.innerText = "연결 차단 완료";
+            if(descEl) descEl.innerHTML = "TMS 연결이 차단되었습니다.<br>기존 소속 정보가 초기화되었으며, 더 이상 관제 센터에서 기사님을 강제로 연결할 수 없습니다.";
+            if(iconEl) iconEl.className = "w-14 h-14 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner";
+            if(iconEl) iconEl.innerHTML = '<i class="fa-solid fa-link-slash"></i>';
         } else {
-            hideLoading();
-            alert("TMS 연결이 허용되었습니다.\n본사 또는 관제 센터 관리자에게 기사님의 '라이선스 키'를 전달하여 시스템에 등록을 요청해 주세요.");
+            if(titleEl) titleEl.innerText = "연결 허용 완료";
+            if(descEl) descEl.innerHTML = "TMS 연결이 허용되었습니다.<br>본사 또는 관제 센터 관리자에게 기사님의 '라이선스 키'를 전달하여 시스템에 등록을 요청해 주세요.";
+            if(iconEl) iconEl.className = "w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner";
+            if(iconEl) iconEl.innerHTML = '<i class="fa-solid fa-check"></i>';
         }
+        
+        document.getElementById('tms-success-modal')?.classList.remove('hidden');
+
     } catch(e) {
         hideLoading();
         alert("설정 변경 중 오류가 발생했습니다: " + e.message);
-        if (tmsToggle) tmsToggle.checked = !isChecked; // 실패 시 스위치 원상복구
+        if (tmsToggle) tmsToggle.checked = !isAllowed; // 실패 시 스위치 원상복구
     }
 }
 
@@ -1589,6 +1629,9 @@ window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.toggleTMS = toggleTMS;
 window.toggleGPS = toggleGPS;
+// 🌟 [추가됨] window 객체에 모달 제어 함수 연결
+window.cancelTMSToggle = cancelTMSToggle;
+window.confirmTMSToggle = confirmTMSToggle;
 
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
