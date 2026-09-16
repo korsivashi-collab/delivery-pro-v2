@@ -13,6 +13,7 @@ let territoryCircles = [];
 let otherTerritoryOverlays = [];
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
+let isTerritoryPinMode = true; // 🌟 핀 이동 모드 활성화 여부
 
 // ==========================================
 // 1. 실시간 위치 관제 사이드바
@@ -217,12 +218,49 @@ export function drawAllDriversOnMap() {
 export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
 
 // ==========================================
-// 3. 기사 권역(Territory) 설정 모달 (지도)
+// 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
 // ==========================================
+export function toggleTerritoryPinMode(isEnabled) {
+    isTerritoryPinMode = isEnabled;
+}
+
+export function searchTerritoryAddress() {
+    const inputEl = document.getElementById('territory-address-search');
+    const query = inputEl ? inputEl.value.trim() : '';
+    
+    if (!query) { 
+        alert("검색할 주소를 입력해 주세요."); 
+        inputEl?.focus();
+        return; 
+    }
+
+    if (window.kakao && kakao.maps && kakao.maps.services) {
+        const geocoder = new kakao.maps.services.Geocoder();
+        geocoder.addressSearch(query, (result, status) => {
+            if (status === kakao.maps.services.Status.OK && result[0]) {
+                const pos = new kakao.maps.LatLng(parseFloat(result[0].y), parseFloat(result[0].x));
+                territoryMap.setCenter(pos);
+                setTerritoryCenter(pos); // 검색 결과 위치에 강제로 핀 꽂기
+            } else {
+                alert("주소를 찾을 수 없습니다. 정확한 도로명이나 지번 주소를 다시 입력해 주세요.");
+            }
+        });
+    } else {
+        alert("지도 API가 로드되지 않았습니다.");
+    }
+}
+
 export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     try { if (window.event) window.event.stopPropagation(); } catch(e) {}
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
+    
+    // 🌟 모달창 열 때 UI 상태 초기화 (검색어 초기화, 핀 이동 스위치 ON)
+    const searchInput = document.getElementById('territory-address-search');
+    if (searchInput) searchInput.value = '';
+    const pinToggle = document.getElementById('territory-pin-toggle');
+    if (pinToggle) { pinToggle.checked = true; isTerritoryPinMode = true; }
+
     const modal = document.getElementById('driver-territory-modal');
     if(!modal) return; modal.classList.remove('hidden');
     
@@ -233,7 +271,12 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         const container = document.getElementById('territory-map-container');
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
-            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { setTerritoryCenter(mouseEvent.latLng); });
+            // 🌟 핀 스위치 상태를 확인하여 이동 여부 결정
+            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
+                if (isTerritoryPinMode) {
+                    setTerritoryCenter(mouseEvent.latLng); 
+                }
+            });
         }
         territoryMap.relayout(); 
         
@@ -411,3 +454,7 @@ export function openAllTerritoriesMap() {
 }
 
 export function closeAllTerritoriesMap() { document.getElementById('all-territories-modal')?.classList.add('hidden'); }
+
+// 🌟 추가된 함수들을 window 객체에 맵핑
+window.toggleTerritoryPinMode = toggleTerritoryPinMode;
+window.searchTerritoryAddress = searchTerritoryAddress;
