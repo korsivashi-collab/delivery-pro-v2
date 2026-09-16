@@ -1,10 +1,13 @@
 // js/admin-app.js
+
 import { db } from "./admin-api.js";
 import { doc, getDoc, onSnapshot, collection, query, orderBy, updateDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 
+// ==========================================
 // [마스터 기능 모듈 가져오기]
+// ==========================================
 import {
     switchMasterTab, changeMasterTabPagination, renderMasterTables,
     generateNewLicense, openEditLicenseModal, closeEditModal,
@@ -19,40 +22,68 @@ import {
     closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
 } from "./admin-master.js";
 
-// [관제/PRO 기능 모듈 가져오기]
+// ==========================================
+// [관제/PRO 기능 - 6개로 분할된 모듈 가져오기]
+// ==========================================
+
+// 1. 관제 코어 (UI, 검색, 배송 상태, 마커 렌더링)
 import {
-    formatNumber, forceClearMap, setDispatchMode, renderSidebar, getFilteredVisibleDrivers,
-    renderDriverListView, setDispatchDetailTab, renderDriverDetailView,
-    selectDriver, clearSelectedDriver, removeOrUnlinkDriver, renderMessageSidebar,
-    toggleMessageDriver, toggleAllMessageSelection, updateMessageCharCount,
-    sendDispatchMessage, deleteDispatchMessage, renderMessageFeed, saveCustomTemplate,
-    insertCustomTemplate, deleteCustomTemplate, renderCustomTemplates,
-    showDispatchPopupAlert, closeDispatchPopupAlertModal, checkDispatchInboxNotifications,
-    openDispatchInboxModal, closeDispatchInboxModal, deleteNoticeFromDispatchInbox,
-    clearAllDispatchInbox, renderLocationSidebar, jumpToDriverDelivery,
-    focusDriverLocationOnMap, showFallbackLocation, closeCurrentLocationOverlay,
-    drawAllDriversOnMap, fitMapToAllDrivers, drawDriverOnMap, setMapPolylineMode,
+    formatNumber, forceClearMap, getFilteredVisibleDrivers, setDispatchMode, renderSidebar,
+    renderDriverListView, setDispatchDetailTab, renderDriverDetailView, selectDriver,
+    clearSelectedDriver, removeOrUnlinkDriver, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch,
-    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver,
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
+    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver,
     renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
+    runAutoDispatchAlgorithm
+} from "./admin-dispatch-core.js";
+
+// 2. 회사 알림 및 메시지 수발신
+import {
+    renderMessageSidebar, toggleMessageDriver, toggleAllMessageSelection,
+    updateMessageCharCount, sendDispatchMessage, deleteDispatchMessage,
+    renderMessageFeed, saveCustomTemplate, insertCustomTemplate, deleteCustomTemplate,
+    renderCustomTemplates, showDispatchPopupAlert, closeDispatchPopupAlertModal,
+    checkDispatchInboxNotifications, openDispatchInboxModal, closeDispatchInboxModal,
+    deleteNoticeFromDispatchInbox, clearAllDispatchInbox
+} from "./admin-dispatch-msg.js";
+
+// 3. 엑셀 업로드 및 처리 (PRO)
+import {
     loadExcelFromFirebase, autoSaveExcelToFirebase, renderExcelTable, processExcelData,
-    initExcelDropZone, handleExcelUpload, processSingleExcelFile, exportToInvoiceModal,
-    toggleRowCheckbox, deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows,
-    previewInvoiceRow, syncPreviewData, loadSavedForms, saveCompanyBaseAddress,
-    clearCompanyBaseAddress, updateCompanyBaseUI, openDriverTerritoryModal,
-    closeDriverTerritoryModal, setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
-    openAllTerritoriesMap, closeAllTerritoriesMap, executeBatchPrint, selectFormTemplate,
-    cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
-    openExcelExportModal, closeExcelExportModal, executeExcelExport, runAutoDispatchAlgorithm,
-    switchInvoiceTab, updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm
-} from "./admin-dispatch.js";
+    initExcelDropZone, handleExcelUpload, processSingleExcelFile,
+    toggleRowCheckbox, deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows
+} from "./admin-dispatch-excel.js";
+
+// 4. 명세서 출력 및 폼 관리 (PRO)
+import {
+    exportToInvoiceModal, previewInvoiceRow, syncPreviewData, loadSavedForms,
+    executeBatchPrint, selectFormTemplate, cancelProviderFormEdit, saveProviderForm,
+    deleteSavedForm, updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
+    switchInvoiceTab
+} from "./admin-dispatch-print.js";
+
+// 5. 기사 권역(지도) 및 실시간 위치 관제
+import {
+    renderLocationSidebar, jumpToDriverDelivery, focusDriverLocationOnMap,
+    showFallbackLocation, closeCurrentLocationOverlay, drawAllDriversOnMap,
+    fitMapToAllDrivers, openDriverTerritoryModal, closeDriverTerritoryModal,
+    setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
+    openAllTerritoriesMap, closeAllTerritoriesMap
+} from "./admin-dispatch-territory.js";
+
+// 6. 배송 리포트(엑셀) 추출
+import {
+    openExcelExportModal, closeExcelExportModal, executeExcelExport
+} from "./admin-dispatch-export.js";
+
 
 // ==========================================
 // 1. 초기화 및 인증 관리 (App Lifecycle)
 // ==========================================
 window.onload = () => {
+    // [날짜 기본값 세팅]
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
     
@@ -62,14 +93,17 @@ window.onload = () => {
         assignDateInput.onchange = () => { window.loadExcelFromFirebase(); };
     }
 
+    // [마스터 계정 생성용 - 만료일 기본 세팅 (30일 뒤)]
     const defaultExpire = new Date();
     defaultExpire.setDate(defaultExpire.getDate() + 30);
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
+    // [로컬 데이터(명세서 폼 등) 초기 로드]
     if (typeof loadSavedForms === 'function') loadSavedForms();
     if (typeof initExcelDropZone === 'function') initExcelDropZone(); 
 
+    // [모니터링 모드 URL 파라미터 체크]
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
     if (monitorKey) {
@@ -81,6 +115,7 @@ window.onload = () => {
         return;
     }
 
+    // [세션 검사 후 자동 로그인 처리]
     const savedRole = sessionStorage.getItem('deliveryProRole');
     const savedName = sessionStorage.getItem('deliveryProAdminName');
     if (savedRole === 'MASTER') showMasterPanel(savedName);
@@ -180,24 +215,27 @@ window.showDispatchPanel = function() {
 };
 
 // ==========================================
-// 2. 실시간 데이터 동기화
+// 2. 실시간 데이터 동기화 (Firestore Snapshots)
 // ==========================================
 window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderMasterTables();
-        populateDriverSelect();
-        renderAccountHistoryView();
-        renderSidebar();
+        if (typeof renderMasterTables === 'function') renderMasterTables();
+        if (typeof populateDriverSelect === 'function') populateDriverSelect();
+        if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
+        if (typeof renderSidebar === 'function') renderSidebar();
+        
         const curKey = document.getElementById('edit-orig-key')?.value;
         if (curKey) {
             const target = state.allLicenses.find(l => l.key === curKey);
-            if (target && target.type === 'dispatch') renderModalConnectedDrivers(target.key);
+            if (target && target.type === 'dispatch' && typeof renderModalConnectedDrivers === 'function') {
+                renderModalConnectedDrivers(target.key);
+            }
         }
         if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
-            renderDispatchDriverList();
-            renderDispatchDriverDetail();
+            if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
+            if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
     });
 
@@ -206,37 +244,43 @@ window.initMasterDataSync = function() {
         snapshot.forEach(docSnap => { state.allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
         const countMemosEl = document.getElementById('count-memos');
         if (countMemosEl) countMemosEl.innerText = state.allMemos.length;
-        renderMemosTable(state.allMemos);
-        renderAccountHistoryView();
+        if (typeof renderMemosTable === 'function') renderMemosTable(state.allMemos);
+        if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
     onSnapshot(collection(db, "routes"), (snapshot) => {
         state.activeRoutes = {};
         snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
-        renderSidebar();
-        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') drawDriverOnMap(state.selectedDeviceId);
-        populateDriverSelect();
-        renderAccountHistoryView();
+        if (typeof renderSidebar === 'function') renderSidebar();
+        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
+            drawDriverOnMap(state.selectedDeviceId);
+        }
+        if (typeof populateDriverSelect === 'function') populateDriverSelect();
+        if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         state.allCompletions = [];
         snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderSidebar();
-        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') drawDriverOnMap(state.selectedDeviceId);
-        renderAccountHistoryView();
+        if (typeof renderSidebar === 'function') renderSidebar();
+        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
+            drawDriverOnMap(state.selectedDeviceId);
+        }
+        if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderMessageFeed(); checkDispatchInboxNotifications(); renderMasterNoticeHistoryList();
+        if (typeof renderMessageFeed === 'function') renderMessageFeed(); 
+        if (typeof checkDispatchInboxNotifications === 'function') checkDispatchInboxNotifications(); 
+        if (typeof renderMasterNoticeHistoryList === 'function') renderMasterNoticeHistoryList();
     });
 
     onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
         state.allDispatchTemplates = [];
         snapshot.forEach(docSnap => { state.allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
-        renderCustomTemplates();
+        if (typeof renderCustomTemplates === 'function') renderCustomTemplates();
     });
 };
 
@@ -244,6 +288,8 @@ window.initMasterDataSync = function() {
 // 3. HTML 인라인 이벤트를 위한 window 전역 객체 맵핑
 // ==========================================
 window.formatNumber = formatNumber;
+
+// [마스터]
 window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
 window.generateNewLicense = generateNewLicense;
@@ -275,6 +321,7 @@ window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
 window.renderMasterTables = renderMasterTables;
 window.renderAccountHistoryView = renderAccountHistoryView;
 
+// [관제 코어]
 window.setDispatchMode = setDispatchMode;
 window.renderSidebar = renderSidebar;
 window.getFilteredVisibleDrivers = getFilteredVisibleDrivers;
@@ -284,6 +331,28 @@ window.renderDriverDetailView = renderDriverDetailView;
 window.selectDriver = selectDriver;
 window.clearSelectedDriver = clearSelectedDriver;
 window.removeOrUnlinkDriver = removeOrUnlinkDriver;
+window.drawDriverOnMap = drawDriverOnMap;
+window.setMapPolylineMode = setMapPolylineMode;
+window.changeDispatchDate = changeDispatchDate;
+window.onDispatchDateChange = onDispatchDateChange;
+window.resetDispatchDateToToday = resetDispatchDateToToday;
+window.clearSearchInput = clearSearchInput;
+window.jumpToDeliveryTarget = jumpToDeliveryTarget;
+window.handleGlobalSearch = handleGlobalSearch;
+window.openLinkDriverModal = openLinkDriverModal;
+window.closeLinkDriverModal = closeLinkDriverModal;
+window.confirmLinkDriver = confirmLinkDriver;
+window.handleProFeature = handleProFeature;
+window.closeAutoDispatchModal = closeAutoDispatchModal;
+window.closeProInvoiceModal = closeProInvoiceModal;
+window.closePremiumModal = closePremiumModal;
+window.renderDispatchDriverList = renderDispatchDriverList;
+window.selectDispatchDriver = selectDispatchDriver;
+window.renderDispatchDriverDetail = renderDispatchDriverDetail;
+window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
+window.focusMapPosition = focusMapPosition;
+
+// [관제 메시지]
 window.renderMessageSidebar = renderMessageSidebar;
 window.toggleMessageDriver = toggleMessageDriver;
 window.toggleAllMessageSelection = toggleAllMessageSelection;
@@ -302,6 +371,8 @@ window.openDispatchInboxModal = openDispatchInboxModal;
 window.closeDispatchInboxModal = closeDispatchInboxModal;
 window.deleteNoticeFromDispatchInbox = deleteNoticeFromDispatchInbox;
 window.clearAllDispatchInbox = clearAllDispatchInbox;
+
+// [관제 권역/지도(Territory)]
 window.renderLocationSidebar = renderLocationSidebar;
 window.jumpToDriverDelivery = jumpToDriverDelivery;
 window.focusDriverLocationOnMap = focusDriverLocationOnMap;
@@ -309,44 +380,6 @@ window.showFallbackLocation = showFallbackLocation;
 window.closeCurrentLocationOverlay = closeCurrentLocationOverlay;
 window.drawAllDriversOnMap = drawAllDriversOnMap;
 window.fitMapToAllDrivers = fitMapToAllDrivers;
-window.drawDriverOnMap = drawDriverOnMap;
-window.setMapPolylineMode = setMapPolylineMode;
-window.changeDispatchDate = changeDispatchDate;
-window.onDispatchDateChange = onDispatchDateChange;
-window.resetDispatchDateToToday = resetDispatchDateToToday;
-window.clearSearchInput = clearSearchInput;
-window.jumpToDeliveryTarget = jumpToDeliveryTarget;
-window.handleGlobalSearch = handleGlobalSearch;
-window.openLinkDriverModal = openLinkDriverModal;
-window.closeLinkDriverModal = closeLinkDriverModal;
-window.confirmLinkDriver = confirmLinkDriver;
-window.focusMapPosition = focusMapPosition;
-
-window.handleProFeature = handleProFeature;
-window.closeAutoDispatchModal = closeAutoDispatchModal;
-window.closeProInvoiceModal = closeProInvoiceModal;
-window.closePremiumModal = closePremiumModal;
-window.renderDispatchDriverList = renderDispatchDriverList;
-window.selectDispatchDriver = selectDispatchDriver;
-window.renderDispatchDriverDetail = renderDispatchDriverDetail;
-window.loadExcelFromFirebase = loadExcelFromFirebase;
-window.autoSaveExcelToFirebase = autoSaveExcelToFirebase;
-window.renderExcelTable = renderExcelTable;
-window.processExcelData = processExcelData;
-window.initExcelDropZone = initExcelDropZone;
-window.handleExcelUpload = handleExcelUpload;
-window.processSingleExcelFile = processSingleExcelFile;
-window.exportToInvoiceModal = exportToInvoiceModal;
-window.toggleRowCheckbox = toggleRowCheckbox;
-window.deleteExcelRow = deleteExcelRow;
-window.deleteSelectedExcelRows = deleteSelectedExcelRows;
-window.clearAllExcelRows = clearAllExcelRows;
-window.previewInvoiceRow = previewInvoiceRow;
-window.syncPreviewData = syncPreviewData;
-window.loadSavedForms = loadSavedForms;
-window.saveCompanyBaseAddress = saveCompanyBaseAddress;
-window.clearCompanyBaseAddress = clearCompanyBaseAddress;
-window.updateCompanyBaseUI = updateCompanyBaseUI;
 window.openDriverTerritoryModal = openDriverTerritoryModal;
 window.closeDriverTerritoryModal = closeDriverTerritoryModal;
 window.setTerritoryScale = setTerritoryScale;
@@ -354,17 +387,37 @@ window.setTerritoryCenter = setTerritoryCenter;
 window.saveDriverTerritory = saveDriverTerritory;
 window.openAllTerritoriesMap = openAllTerritoriesMap;
 window.closeAllTerritoriesMap = closeAllTerritoriesMap;
+
+// [관제 엑셀(Excel)]
+window.loadExcelFromFirebase = loadExcelFromFirebase;
+window.autoSaveExcelToFirebase = autoSaveExcelToFirebase;
+window.renderExcelTable = renderExcelTable;
+window.processExcelData = processExcelData;
+window.initExcelDropZone = initExcelDropZone;
+window.handleExcelUpload = handleExcelUpload;
+window.processSingleExcelFile = processSingleExcelFile;
+window.toggleRowCheckbox = toggleRowCheckbox;
+window.deleteExcelRow = deleteExcelRow;
+window.deleteSelectedExcelRows = deleteSelectedExcelRows;
+window.clearAllExcelRows = clearAllExcelRows;
+
+// [관제 인쇄(Print)]
+window.exportToInvoiceModal = exportToInvoiceModal;
+window.previewInvoiceRow = previewInvoiceRow;
+window.syncPreviewData = syncPreviewData;
+window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
 window.selectFormTemplate = selectFormTemplate;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
 window.deleteSavedForm = deleteSavedForm;
-window.openExcelExportModal = openExcelExportModal;
-window.closeExcelExportModal = closeExcelExportModal;
-window.executeExcelExport = executeExcelExport;
-window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
-window.switchInvoiceTab = switchInvoiceTab;
 window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
+window.switchInvoiceTab = switchInvoiceTab;
+
+// [관제 데이터 추출(Export)]
+window.openExcelExportModal = openExcelExportModal;
+window.closeExcelExportModal = closeExcelExportModal;
+window.executeExcelExport = executeExcelExport;
