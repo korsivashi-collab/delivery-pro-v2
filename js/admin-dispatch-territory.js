@@ -13,7 +13,7 @@ let territoryCircles = [];
 let otherTerritoryOverlays = [];
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
-let isTerritoryPinMode = true; // 🌟 핀 이동 모드 활성화 여부
+let isTerritoryPinMode = false; // 🌟 핀 이동 모드 기본값: OFF (지도 드래그 위주로 안전하게 시작)
 
 // ==========================================
 // 1. 실시간 위치 관제 사이드바
@@ -220,10 +220,24 @@ export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
 // ==========================================
 // 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
 // ==========================================
-export function toggleTerritoryPinMode(isEnabled) {
-    isTerritoryPinMode = isEnabled;
+
+// 🌟 핀 이동 모드 토글 (아이콘 클릭 시 UI 및 상태 변경)
+export function toggleTerritoryPinMode() {
+    isTerritoryPinMode = !isTerritoryPinMode;
+    const btn = document.getElementById('btn-territory-pin');
+    
+    if (btn) {
+        if (isTerritoryPinMode) {
+            // ON: 핀 이동 가능 (파란색)
+            btn.className = "w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md transition active:scale-95";
+        } else {
+            // OFF: 지도만 이동 가능 (회색)
+            btn.className = "w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95";
+        }
+    }
 }
 
+// 🌟 주소 검색 및 해당 위치로 지도/핀 강제 이동
 export function searchTerritoryAddress() {
     const inputEl = document.getElementById('territory-address-search');
     const query = inputEl ? inputEl.value.trim() : '';
@@ -240,13 +254,13 @@ export function searchTerritoryAddress() {
             if (status === kakao.maps.services.Status.OK && result[0]) {
                 const pos = new kakao.maps.LatLng(parseFloat(result[0].y), parseFloat(result[0].x));
                 territoryMap.setCenter(pos);
-                setTerritoryCenter(pos); // 검색 결과 위치에 강제로 핀 꽂기
+                setTerritoryCenter(pos); // 검색한 주소 위치로 핀 강제 이동
             } else {
                 alert("주소를 찾을 수 없습니다. 정확한 도로명이나 지번 주소를 다시 입력해 주세요.");
             }
         });
     } else {
-        alert("지도 API가 로드되지 않았습니다.");
+        alert("지도 API가 아직 로드되지 않았습니다.");
     }
 }
 
@@ -255,11 +269,15 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
     
-    // 🌟 모달창 열 때 UI 상태 초기화 (검색어 초기화, 핀 이동 스위치 ON)
+    // 🌟 모달창 열 때 UI 상태 초기화 (검색어 비우기, 핀 이동 모드 무조건 OFF 상태로 시작)
     const searchInput = document.getElementById('territory-address-search');
     if (searchInput) searchInput.value = '';
-    const pinToggle = document.getElementById('territory-pin-toggle');
-    if (pinToggle) { pinToggle.checked = true; isTerritoryPinMode = true; }
+    
+    isTerritoryPinMode = false;
+    const pinBtn = document.getElementById('btn-territory-pin');
+    if (pinBtn) {
+        pinBtn.className = "w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95";
+    }
 
     const modal = document.getElementById('driver-territory-modal');
     if(!modal) return; modal.classList.remove('hidden');
@@ -271,7 +289,8 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         const container = document.getElementById('territory-map-container');
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
-            // 🌟 핀 스위치 상태를 확인하여 이동 여부 결정
+            
+            // 🌟 지도를 클릭했을 때, '핀 이동 모드'가 켜져 있을 때만 핀을 이동시킴
             kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
                 if (isTerritoryPinMode) {
                     setTerritoryCenter(mouseEvent.latLng); 
