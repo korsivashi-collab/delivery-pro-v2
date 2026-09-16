@@ -466,61 +466,66 @@
 
     <!-- 4. 실시간 관제 화면 (통합) -->
     <div id="dispatch-panel" class="hidden flex-col h-full w-full bg-gray-100">
-        <!-- 🌟 1단 구조로 원복/개선된 깔끔한 관제 헤더 -->
-        <header class="bg-white border-b border-gray-200 z-20 shadow-sm flex-none px-5 py-2.5 flex items-center justify-between gap-4 overflow-x-auto hide-scrollbar">
+        <!-- 🌟 요청하신 1단 일렬 배치 헤더 레이아웃 (좌: 탭 / 중: 주소 검색 / 우: PRO 기능) -->
+        <header class="bg-white border-b border-gray-200 z-20 shadow-sm flex-none px-5 py-2.5 flex items-center justify-between gap-3 overflow-x-auto hide-scrollbar">
             
-            <!-- 로고 영역 -->
-            <div onclick="window.location.reload()" class="flex items-center gap-2 cursor-pointer group shrink-0">
-                <i class="fa-solid fa-route text-blue-600 text-2xl group-hover:text-blue-700 transition"></i>
-                <div>
-                    <h1 class="text-sm font-black text-gray-900 tracking-tight leading-none group-hover:text-blue-600 transition">배송 동선 PRO 관제</h1>
-                    <span id="dispatch-sub-title" class="text-[9px] text-gray-400 font-bold mt-0.5 block">실시간 라스트마일</span>
+            <!-- 1. 좌측 영역: 로고 및 탭 메뉴 -->
+            <div class="flex items-center gap-4 shrink-0">
+                <div onclick="window.location.reload()" class="flex items-center gap-2 cursor-pointer group">
+                    <i class="fa-solid fa-route text-blue-600 text-2xl group-hover:text-blue-700 transition"></i>
+                    <div>
+                        <h1 class="text-sm font-black text-gray-900 tracking-tight leading-none group-hover:text-blue-600 transition">배송 동선 PRO 관제</h1>
+                        <span id="dispatch-sub-title" class="text-[9px] text-gray-400 font-bold mt-0.5 block">실시간 라스트마일</span>
+                    </div>
+                </div>
+
+                <div class="w-px h-6 bg-gray-200"></div>
+
+                <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+                    <button onclick="window.setDispatchMode('DELIVERY')" id="nav-btn-DELIVERY" class="px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-route text-[11px]"></i> 배송 관리
+                    </button>
+                    <button onclick="window.setDispatchMode('MESSAGE')" id="nav-btn-MESSAGE" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-comment-dots text-[11px]"></i> 메시지
+                    </button>
+                    <button onclick="window.setDispatchMode('LOCATION')" id="nav-btn-LOCATION" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
+                        <i class="fa-solid fa-map-location-dot text-[11px]"></i> 위치 확인
+                    </button>
+                    <div class="w-px h-5 bg-gray-300 mx-0.5"></div>
+                    <button onclick="window.openExcelExportModal()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5 shadow-sm active:scale-95" title="데이터 추출">
+                        <i class="fa-solid fa-file-excel text-[11px]"></i> 데이터 추출
+                    </button>
                 </div>
             </div>
 
-            <!-- 통합 검색 바 -->
-            <div class="flex-1 max-w-sm relative min-w-[200px]">
+            <!-- 2. 중앙 영역: 주소 / 통합 검색 바 -->
+            <div class="flex-1 max-w-md relative min-w-[220px]">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
-                    <input type="text" id="global-search-input" oninput="window.handleGlobalSearch(this.value)" placeholder="주소, 동·호수, 연락처 검색..." class="w-full pl-9 pr-8 py-1.5 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
+                    <input type="text" id="global-search-input" oninput="window.handleGlobalSearch(this.value)" placeholder="주소, 동·호수, 연락처 검색..." class="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
                     <button onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden absolute right-3 text-gray-400 hover:text-gray-600 text-xs"><i class="fa-solid fa-circle-xmark"></i></button>
                 </div>
-                <div id="search-dropdown" class="hidden absolute left-0 right-0 top-10 bg-white border border-gray-200 rounded-2xl shadow-2xl z-[600] max-h-[460px] overflow-y-auto hide-scrollbar p-2.5 space-y-2"></div>
+                <div id="search-dropdown" class="hidden absolute left-0 right-0 top-11 bg-white border border-gray-200 rounded-2xl shadow-2xl z-[600] max-h-[460px] overflow-y-auto hide-scrollbar p-2.5 space-y-2"></div>
             </div>
 
-            <!-- 네비게이션 탭 -->
-            <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner shrink-0">
-                <button onclick="window.setDispatchMode('DELIVERY')" id="nav-btn-DELIVERY" class="px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5">
-                    <i class="fa-solid fa-route text-[11px]"></i> 배송 관리
-                </button>
-                <button onclick="window.setDispatchMode('MESSAGE')" id="nav-btn-MESSAGE" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
-                    <i class="fa-solid fa-comment-dots text-[11px]"></i> 메시지
-                </button>
-                <button onclick="window.setDispatchMode('LOCATION')" id="nav-btn-LOCATION" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
-                    <i class="fa-solid fa-map-location-dot text-[11px]"></i> 위치 확인
-                </button>
-                <div class="w-px h-5 bg-gray-300 mx-0.5"></div>
-                <button onclick="window.openExcelExportModal()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5 shadow-sm active:scale-95" title="데이터 추출">
-                    <i class="fa-solid fa-file-excel text-[11px]"></i> 데이터 추출
-                </button>
-            </div>
-
-            <!-- PRO 기능 및 로그아웃 영역 -->
+            <!-- 3. 우측 영역: 프리미엄 기능(자동할당, 명세서) 및 유틸 버튼 -->
             <div class="flex items-center gap-2 shrink-0">
-                <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3 py-1.5 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
+                <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3.5 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
                     <span class="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm">PRO</span>
                     <i class="fa-solid fa-robot text-amber-200"></i><span>자동할당</span>
                 </button>
-                <button type="button" id="btn-pro-invoice" onclick="window.handleProFeature('INVOICE')" class="relative bg-slate-800 text-white text-xs font-black px-3 py-1.5 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:bg-slate-900 active:scale-95">
+                <button type="button" id="btn-pro-invoice" onclick="window.handleProFeature('INVOICE')" class="relative bg-slate-800 text-white text-xs font-black px-3.5 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:bg-slate-900 active:scale-95">
                     <span class="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm">PRO</span>
                     <i class="fa-solid fa-print text-amber-200"></i><span>명세서</span>
                 </button>
+                
                 <div class="w-px h-5 bg-gray-200 mx-1"></div>
-                <button type="button" onclick="window.openDispatchInboxModal()" id="btn-dispatch-inbox" class="relative bg-amber-50 text-amber-800 border border-amber-300 text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-2xs active:scale-95">
+
+                <button type="button" onclick="window.openDispatchInboxModal()" id="btn-dispatch-inbox" class="relative bg-amber-50 text-amber-800 border border-amber-300 text-xs font-black px-3 py-2 rounded-xl transition flex items-center gap-1.5 shadow-2xs active:scale-95" title="알림함">
                     <i class="fa-solid fa-bell text-xs text-amber-600"></i>
                     <span id="dispatch-inbox-badge" class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-black rounded-full border border-white flex items-center justify-center px-1">0</span>
                 </button>
-                <button onclick="window.systemLogout()" class="bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold px-3 py-1.5 rounded-lg transition">
+                <button onclick="window.systemLogout()" class="bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold px-3 py-2 rounded-xl transition">
                     로그아웃
                 </button>
             </div>
