@@ -541,7 +541,8 @@ export function handleProFeature(featureName) {
         if (window.loadExcelFromFirebase) window.loadExcelFromFirebase();
         if (window.initExcelDropZone) window.initExcelDropZone(); 
         const savedBase = localStorage.getItem('deliveryProCompanyBase');
-        if (savedBase && window.updateCompanyBaseUI) window.updateCompanyBaseUI(JSON.parse(savedBase));
+        if (savedBase) updateCompanyBaseUI(JSON.parse(savedBase));
+        else updateCompanyBaseUI(null);
 
     } else if (featureName === 'INVOICE') {
         const modal = document.getElementById('pro-invoice-modal');
@@ -638,15 +639,75 @@ export async function confirmLinkDriver() {
 }
 
 // ==========================================
-// 6. PRO 자동할당 패널 내 기사 리스트
+// 🌟 6. 본사 거점 및 PRO 자동할당 패널 제어
 // ==========================================
+export function saveCompanyBaseAddress() {
+    const input = document.getElementById('company-base-address').value.trim();
+    if (!input) { alert("본사 거점 주소를 입력해주세요."); return; }
+    
+    if (window.kakao && kakao.maps && kakao.maps.services) {
+        const geocoder = new kakao.maps.services.Geocoder();
+        geocoder.addressSearch(input, (result, status) => {
+            if (status === kakao.maps.services.Status.OK && result[0]) {
+                const data = { address: input, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
+                localStorage.setItem('deliveryProCompanyBase', JSON.stringify(data));
+                updateCompanyBaseUI(data);
+                alert("본사 거점이 성공적으로 저장되었습니다.");
+            } else {
+                alert("주소를 좌표로 변환할 수 없습니다. 정확한 도로명이나 지번 주소를 입력해주세요.");
+            }
+        });
+    } else {
+        alert("카카오맵 지도 API가 완전히 로드되지 않았습니다. 잠시 후 다시 시도해주세요.");
+    }
+}
+
+export function clearCompanyBaseAddress() {
+    localStorage.removeItem('deliveryProCompanyBase');
+    updateCompanyBaseUI(null);
+}
+
+export function updateCompanyBaseUI(data) {
+    const textEl = document.getElementById('saved-base-address-text');
+    const clearBtn = document.getElementById('btn-clear-company-base');
+    const inputEl = document.getElementById('company-base-address');
+    if (textEl && clearBtn && inputEl) {
+        if (data) {
+            textEl.innerText = data.address;
+            textEl.classList.add('text-blue-600');
+            textEl.classList.remove('text-gray-500');
+            clearBtn.classList.remove('hidden');
+            inputEl.value = '';
+        } else {
+            textEl.innerText = '저장된 거점이 없습니다.';
+            textEl.classList.remove('text-blue-600');
+            textEl.classList.add('text-gray-500');
+            clearBtn.classList.add('hidden');
+        }
+    }
+}
+
+// 🌟 자동 할당 내부 상태 관리
+export const autoDispatchState = {
+    selectedDrivers: new Set(),
+    weights: {},
+    territoryAdjustments: {},
+    isInit: false
+};
+
 export function renderDispatchDriverList() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
     if (!listEl || !countEl) return;
     
     const drivers = getFilteredVisibleDrivers();
-    countEl.innerText = `${drivers.length}명`;
+    
+    if (!autoDispatchState.isInit && drivers.length > 0) {
+        drivers.forEach(d => autoDispatchState.selectedDrivers.add(d.deviceId || d.key));
+        autoDispatchState.isInit = true;
+    }
+
+    countEl.innerText = `${autoDispatchState.selectedDrivers.size} / ${drivers.length}명`;
     
     if (drivers.length === 0) {
         listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`; return;
@@ -661,26 +722,80 @@ export function renderDispatchDriverList() {
         if (tLat && tLng) {
             let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
             territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5">
+                <div class="flex flex-col items-end gap-0.5" onclick="event.stopPropagation()">
                     <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
                     <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
                 </div>`;
         } else {
             territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5">
+                <div class="flex flex-col items-end gap-0.5" onclick="event.stopPropagation()">
                     <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
                     <span class="text-[9px] text-gray-400">미설정</span>
                 </div>`;
         }
 
-        const isSelected = state.selectedDispatchDriverId === devId;
+        const isFocus = state.selectedDispatchDriverId === devId;
+        const isChecked = autoDispatchState.selectedDrivers.has(devId);
+        const weight = autoDispatchState.weights[devId] || 0;
+        const weightText = weight > 0 ? `+${weight}` : weight;
+        const scopeMod = autoDispatchState.territoryAdjustments[devId] || 1.0;
+        const scopeText = Math.round(scopeMod * 100) + '%';
+
         html += `
-        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isSelected ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex items-center justify-between shadow-xs transition">
-            <span class="font-black text-xs ${isSelected ? 'text-blue-700' : 'text-gray-800'} flex items-center gap-2 min-w-0"><span class="w-5 h-5 bg-slate-100 rounded-full flex items-center justify-center text-[10px] font-bold text-gray-500 shrink-0">${idx + 1}</span><i class="fa-solid fa-truck ${isSelected ? 'text-blue-600' : 'text-gray-400'} shrink-0"></i><span class="truncate">${phoneDisplay}</span></span>
-            <div class="shrink-0 ml-2">${territoryBadge}</div>
+        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex flex-col gap-2 shadow-xs transition mb-2">
+            <div class="flex items-start justify-between">
+                <label class="flex items-center gap-2 cursor-pointer mt-0.5" onclick="event.stopPropagation()">
+                    <input type="checkbox" onchange="window.toggleDispatchDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
+                    <span class="font-black text-xs ${isFocus ? 'text-blue-700' : 'text-gray-800'} min-w-0"><i class="fa-solid fa-truck ${isFocus ? 'text-blue-600' : 'text-gray-400'} mr-1 shrink-0"></i><span class="truncate">${phoneDisplay}</span></span>
+                </label>
+                <div class="shrink-0 ml-2">${territoryBadge}</div>
+            </div>
+            
+            <div class="flex items-center justify-between bg-gray-50/80 p-1.5 rounded-lg border border-gray-100" onclick="event.stopPropagation()">
+                <div class="flex items-center gap-1">
+                    <span class="text-[9px] font-bold text-gray-500 w-10">할당배점</span>
+                    <div class="flex items-center bg-white border border-gray-200 rounded shadow-sm">
+                        <button onclick="window.adjustDriverWeight('${devId}', -0.5)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-r border-gray-200">-</button>
+                        <span class="w-7 text-center text-[10px] font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
+                        <button onclick="window.adjustDriverWeight('${devId}', 0.5)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-l border-gray-200">+</button>
+                    </div>
+                </div>
+                
+                <div class="flex items-center gap-1">
+                    <span class="text-[9px] font-bold text-gray-500 w-10 text-right">권역크기</span>
+                    <div class="flex items-center bg-white border border-gray-200 rounded shadow-sm">
+                        <button onclick="window.adjustDriverScope('${devId}', -0.2)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-r border-gray-200">-</button>
+                        <span class="w-9 text-center text-[10px] font-black text-emerald-700">${scopeText}</span>
+                        <button onclick="window.adjustDriverScope('${devId}', 0.2)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-l border-gray-200">+</button>
+                    </div>
+                </div>
+            </div>
         </div>`;
     });
     listEl.innerHTML = html;
+}
+
+export function toggleDispatchDriver(devId) {
+    if(autoDispatchState.selectedDrivers.has(devId)) autoDispatchState.selectedDrivers.delete(devId);
+    else autoDispatchState.selectedDrivers.add(devId);
+    renderDispatchDriverList();
+}
+
+export function adjustDriverWeight(devId, delta) {
+    let w = autoDispatchState.weights[devId] || 0;
+    w += delta;
+    autoDispatchState.weights[devId] = w;
+    renderDispatchDriverList();
+}
+
+export function adjustDriverScope(devId, delta) {
+    let modifier = autoDispatchState.territoryAdjustments[devId] || 1.0;
+    modifier += delta; 
+    // 범위 배수는 최소 20% ~ 최대 300% 까지만 조절 가능하도록 제한
+    if(modifier < 0.2) modifier = 0.2;
+    if(modifier > 3.0) modifier = 3.0;
+    autoDispatchState.territoryAdjustments[devId] = modifier;
+    renderDispatchDriverList();
 }
 
 export function selectDispatchDriver(devId) {
@@ -717,6 +832,121 @@ export function renderDispatchDriverDetail() {
     tbody.innerHTML = html;
 }
 
+// 🌟 7. PRO 자동할당 배분 알고리즘 실행 로직
 export function runAutoDispatchAlgorithm() { 
-    alert("AI 자동 배차 로직은 다음 단계에서 적용될 예정입니다."); 
+    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
+        alert("할당할 엑셀 데이터가 없습니다."); return;
+    }
+    
+    // 체크박스로 선택된 대상 기사들만 필터링
+    const activeDrivers = getFilteredVisibleDrivers().filter(d => 
+        autoDispatchState.selectedDrivers.has(d.deviceId || d.key)
+    );
+    
+    if (activeDrivers.length === 0) {
+        alert("자동 할당 대상 기사가 없습니다. 목록에서 배정할 기사를 체크해주세요."); return;
+    }
+
+    const unassignedOrders = state.parsedExcelList.filter(o => !o.assignedDriver);
+    if (unassignedOrders.length === 0) {
+        alert("모든 주문이 이미 기사들에게 할당되었습니다."); return;
+    }
+
+    const totalOrders = unassignedOrders.length;
+    const numDrivers = activeDrivers.length;
+    
+    // 사용자가 조절한 전체 할당 배점 합산
+    let totalWeights = 0;
+    activeDrivers.forEach(d => { totalWeights += (autoDispatchState.weights[d.deviceId || d.key] || 0); });
+
+    // 1단계: 기사별로 목표 할당량(Capacity) 수학적 계산 (배점 1 = 1건 추가 배정)
+    let driverStats = activeDrivers.map(d => {
+        const devId = d.deviceId || d.key;
+        let w = autoDispatchState.weights[devId] || 0;
+        
+        // (전체물량 / 전체기사수) 로 얻은 기본 할당치에서 본인 배점(w)을 더하고, 총 배점 평균을 빼서 전체 파이를 완벽히 일치시킴
+        let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
+        if (exactCap < 0) exactCap = 0;
+        
+        return {
+            devId, phone: d.phone || devId,
+            exactCap, targetCap: Math.floor(exactCap), remainder: exactCap - Math.floor(exactCap),
+            assignedCount: 0, tLat: d.territoryLat || null, tLng: d.territoryLng || null,
+            radiusMultiplier: autoDispatchState.territoryAdjustments[devId] || 1.0
+        };
+    });
+
+    // 소수점(0.5단위 등)으로 인해 남는 잉여 물량 분배 로직
+    let currentSum = driverStats.reduce((sum, d) => sum + d.targetCap, 0);
+    let diff = totalOrders - currentSum;
+    
+    // 소수점 잔여치가 높은 기사부터 우선적으로 1건씩 추가 배정하여 완벽하게 전체 물량 갯수를 맞춤
+    driverStats.sort((a, b) => b.remainder - a.remainder);
+    for(let i=0; i<diff; i++) {
+        driverStats[i % driverStats.length].targetCap++;
+    }
+
+    // 위경도 거리 계산 함수 (하버사인 공식)
+    const getDist = (lat1, lon1, lat2, lon2) => {
+        if(!lat1 || !lon1 || !lat2 || !lon2) return 999999;
+        const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    };
+
+    const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
+    const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
+
+    // 2단계: 최적 거리 및 권역 크기를 고려한 실제 물량 배정
+    unassignedOrders.forEach(order => {
+        let bestDriver = null; let bestScore = Infinity;
+
+        driverStats.forEach(ds => {
+            // 해당 기사가 본인의 목표 할당량을 다 채웠으면 건너뜀
+            if (ds.assignedCount >= ds.targetCap) return;
+
+            let dist = 999999;
+            if (order.lat && order.lng) {
+                if (ds.tLat && ds.tLng) {
+                    // 기사의 권역이 설정되어 있을 경우 거리 측정
+                    // 권역 크기를 키웠다면(radiusMultiplier > 1.0), 실제 거리를 축소시켜 더 먼곳의 배송건도 쉽게 가져오도록 패널티 완화
+                    dist = getDist(order.lat, order.lng, ds.tLat, ds.tLng) / ds.radiusMultiplier;
+                } else if (companyBase && companyBase.lat && companyBase.lng) {
+                    // 권역 설정이 없는 기사는 본사 거점을 기준으로 측정
+                    dist = getDist(order.lat, order.lng, companyBase.lat, companyBase.lng);
+                } else {
+                    dist = 100; // 기준이 아무것도 없을 때 기본 패널티
+                }
+            }
+            
+            if (dist < bestScore) {
+                bestScore = dist;
+                bestDriver = ds;
+            }
+        });
+
+        // 만약 모든 조건에 안맞아 배정되지 못했다면 현재 가장 덜 받은 기사에게 강제 배정 (오류 방지)
+        if (!bestDriver) {
+            bestDriver = driverStats.reduce((prev, curr) => (prev.assignedCount < curr.assignedCount) ? prev : curr);
+        }
+
+        bestDriver.assignedCount++;
+        order.assignedDriver = bestDriver.phone;
+    });
+
+    if(window.renderExcelTable) window.renderExcelTable();
+    if(window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
+    alert(`자동 할당 배분이 성공적으로 완료되었습니다.\n(총 ${totalOrders}건의 목적지가 ${activeDrivers.length}명의 선택된 기사에게 분배됨)`);
+    
+    if(window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
 }
+
+// ==========================================
+// 8. 전역 Window 객체 바인딩
+// ==========================================
+window.toggleDispatchDriver = toggleDispatchDriver;
+window.adjustDriverWeight = adjustDriverWeight;
+window.adjustDriverScope = adjustDriverScope;
+window.saveCompanyBaseAddress = saveCompanyBaseAddress;
+window.clearCompanyBaseAddress = clearCompanyBaseAddress;
+window.updateCompanyBaseUI = updateCompanyBaseUI;
