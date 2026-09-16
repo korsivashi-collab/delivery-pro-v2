@@ -104,37 +104,6 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
     const pagEl = document.getElementById(paginationId);
     if (!tbody) return;
 
-    // 🌟 [UI 개선] 누락되었던 테이블 헤더(thead)를 동적으로 주입하여 레이아웃 교정
-    const table = tbody.parentElement;
-    if (!table.querySelector('thead')) {
-        const thead = document.createElement('thead');
-        if (tabKey === 'regular' || tabKey === 'trial') {
-            thead.innerHTML = `
-                <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
-                    <th class="py-3 px-3 w-12 text-center">순번</th>
-                    <th class="py-3 px-3">라이선스 키</th>
-                    <th class="py-3 px-3">전화번호</th>
-                    <th class="py-3 px-3">기기 고유번호</th>
-                    <th class="py-3 px-3">만료일</th>
-                    <th class="py-3 px-3">상태</th>
-                    <th class="py-3 px-3 text-center">관리</th>
-                </tr>`;
-        } else if (tabKey === 'dispatch') {
-            thead.innerHTML = `
-                <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
-                    <th class="py-3 px-3 w-12 text-center">순번</th>
-                    <th class="py-3 px-3">관제 라이선스 키</th>
-                    <th class="py-3 px-3">사무실 전화번호</th>
-                    <th class="py-3 px-3">기기 고유번호</th>
-                    <th class="py-3 px-3">연결된 기사</th>
-                    <th class="py-3 px-3">만료일</th>
-                    <th class="py-3 px-3">상태</th>
-                    <th class="py-3 px-3 text-center">관리</th>
-                </tr>`;
-        }
-        table.insertBefore(thead, tbody);
-    }
-
     if (list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="py-12 text-center text-gray-400 font-bold">등록된 내역이 없습니다.</td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
@@ -369,16 +338,22 @@ export async function deleteLicenseFromModal() {
 }
 
 // ==========================================
-// 3. 메모 테이블 관리 및 정렬
+// 3. 메모 테이블 관리 및 정렬 로직 (클릭 연동)
 // ==========================================
 
-// 🌟 현재 메모 정렬 상태 관리 변수
-let currentMemoSort = 'latest'; 
+// 🌟 메모 테이블 정렬 상태 변수
+let memoSortField = 'time'; // 'time' (작성 일시) 또는 'likes' (추천수)
+let memoSortAsc = false;    // 기본적으로 최신순/추천많은순(내림차순) 표시
 
-// 🌟 정렬 기준 변경 함수
-export function sortMemos(sortType) {
-    currentMemoSort = sortType;
-    state.masterPages['memos'] = 1; // 정렬 변경 시 첫 페이지로 이동
+// 🌟 헤더 클릭 시 호출되는 정렬 실행 함수
+export function sortMemos(field) {
+    if (memoSortField === field) {
+        memoSortAsc = !memoSortAsc; // 동일 항목 클릭 시 오름/내림차순 변경
+    } else {
+        memoSortField = field;
+        memoSortAsc = false; // 다른 항목 클릭 시 무조건 내림차순(최신/인기)부터 시작
+    }
+    state.masterPages['memos'] = 1; // 정렬 시 페이지를 1페이지로 리셋
     renderMemosTable(state.allMemos);
 }
 
@@ -387,20 +362,22 @@ export function renderMemosTable(memos) {
     const pagEl = document.getElementById('pagination-memos');
     if (!tbody) return;
 
-    // 🌟 [UI 개선] 누락되었던 테이블 헤더(thead)를 동적으로 주입
-    const table = tbody.parentElement;
-    if (!table.querySelector('thead')) {
-        const thead = document.createElement('thead');
-        thead.innerHTML = `
-            <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
-                <th class="py-3 px-3 w-12 text-center">순번</th>
-                <th class="py-3 px-3">배송지 주소</th>
-                <th class="py-3 px-3">등록된 주차/건물 메모</th>
-                <th class="py-3 px-3 text-center">작성 일시</th>
-                <th class="py-3 px-3 text-center">추천수(좋아요)</th>
-                <th class="py-3 px-3 text-center">관리</th>
-            </tr>`;
-        table.insertBefore(thead, tbody);
+    // 🌟 1. 테이블 헤더 화살표 UI 및 색상 업데이트
+    const arrowTime = document.getElementById('sort-arrow-time');
+    const arrowLikes = document.getElementById('sort-arrow-likes');
+    
+    if (arrowTime && arrowLikes) {
+        // 작성 일시 헤더 상태 갱신
+        arrowTime.innerText = (memoSortField === 'time') ? (memoSortAsc ? '▲' : '▼') : '↕';
+        arrowTime.parentElement.className = (memoSortField === 'time') 
+            ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
+            : "sortable-th py-3 px-3 text-center text-gray-500 hover:bg-gray-100 transition";
+        
+        // 추천수 헤더 상태 갱신
+        arrowLikes.innerText = (memoSortField === 'likes') ? (memoSortAsc ? '▲' : '▼') : '↕';
+        arrowLikes.parentElement.className = (memoSortField === 'likes') 
+            ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
+            : "sortable-th py-3 px-3 text-center text-gray-500 hover:bg-gray-100 transition";
     }
 
     if (!memos || memos.length === 0) {
@@ -409,19 +386,20 @@ export function renderMemosTable(memos) {
         return;
     }
 
-    // 🌟 렌더링 전 정렬 로직 적용
+    // 🌟 2. 선택된 기준(시간 or 좋아요)에 맞게 데이터 배열 실제 정렬 적용
     let sortedMemos = [...memos];
-    if (currentMemoSort === 'likes') {
-        // 추천수(좋아요) 내림차순 정렬
-        sortedMemos.sort((a, b) => (b.likes || 0) - (a.likes || 0));
-    } else {
-        // 최신 등록순 (createdAt 기준, 없으면 updatedAt 기준 역순)
-        sortedMemos.sort((a, b) => {
+    sortedMemos.sort((a, b) => {
+        if (memoSortField === 'likes') {
+            const valA = a.likes || 0;
+            const valB = b.likes || 0;
+            return memoSortAsc ? (valA - valB) : (valB - valA);
+        } else {
+            // 시간 기준 (데이터가 없으면 0 처리)
             const timeA = a.createdAt || a.updatedAt || 0;
             const timeB = b.createdAt || b.updatedAt || 0;
-            return timeB - timeA;
-        });
-    }
+            return memoSortAsc ? (timeA - timeB) : (timeB - timeA);
+        }
+    });
 
     const total = sortedMemos.length;
     const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
@@ -443,6 +421,7 @@ export function renderMemosTable(memos) {
             <td class="py-3 px-3 text-center whitespace-nowrap"><button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95">삭제</button></td>
         </tr>
     `).join('');
+    
     if (pagEl) pagEl.innerHTML = renderPaginationControls('memos', curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');
 }
 
@@ -715,7 +694,7 @@ export function renderAccountHistoryView() {
                     <thead>
                         <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
                             ${checkHeaderTh}
-                            <th onclick="window.setHistorySort('originalIndex')" class="sortable-th py-3.5 px-3">순번${getArrow('originalIndex')}</th>
+                            <th onclick="window.setHistorySort('originalIndex')" class="sortable-th py-3.5 px-3 text-center">순번${getArrow('originalIndex')}</th>
                             <th onclick="window.setHistorySort('type')" class="sortable-th py-3.5 px-3 min-w-[120px]">계정 유형${getArrow('type')}</th>
                             <th onclick="window.setHistorySort('key')" class="sortable-th py-3.5 px-3">라이선스 키${getArrow('key')}</th>
                             <th onclick="window.setHistorySort('phone')" class="sortable-th py-3.5 px-3">전화번호${getArrow('phone')}</th>
@@ -745,7 +724,7 @@ export function renderAccountHistoryView() {
             tableHtml += `
             <tr onclick="window.selectAccountDirectly('${item.key}')" class="hover:bg-blue-50/60 cursor-pointer transition ${isChecked ? 'bg-amber-50/50' : ''}">
                 ${checkRowTd}
-                <td class="py-3.5 px-3 font-bold text-gray-400">${item.originalIndex}</td>
+                <td class="py-3.5 px-3 font-bold text-gray-400 text-center">${item.originalIndex}</td>
                 <td class="py-3.5 px-3">${typeBadge}</td>
                 <td class="py-3.5 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
                 <td class="py-3.5 px-3 font-black text-gray-900">${item.phone ? `<i class="fa-solid fa-phone text-blue-500 mr-1 text-[10px]"></i>${item.phone}` : '<span class="text-gray-400 text-[11px] font-normal">미등록</span>'}</td>
