@@ -1082,6 +1082,7 @@ export function closeLinkDriverModal() {
     document.getElementById('link-driver-modal').classList.add('hidden');
 }
 
+// 🌟 [강력 방어 패치] 기사가 차단했는데도 관제가 강제로 연결하는 문제 완벽 해결
 export async function confirmLinkDriver() {
     const rawInput = document.getElementById('link-driver-key-input').value.trim().toUpperCase();
     if (!rawInput) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
@@ -1090,6 +1091,9 @@ export async function confirmLinkDriver() {
     try {
         const cleanDigits = rawInput.replace(/[^0-9]/g, '');
         const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        
+        // 1차: 브라우저 메모리에 있는 데이터에서 검색
+        let targetLicKey = null;
         let targetLic = state.allLicenses.find(l => {
             if (l.type === 'dispatch') return false;
             const lKey = (l.key || '').toUpperCase();
@@ -1098,28 +1102,54 @@ export async function confirmLinkDriver() {
             return lKey === rawInput || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
         });
 
-        if (!targetLic) {
-            let directSnap = await getDoc(doc(db, "licenses", rawInput));
-            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `TRIAL-${rawInput}`));
-            if (!directSnap.exists()) directSnap = await getDoc(doc(db, "licenses", `PRO-${rawInput}`));
-            if (directSnap.exists()) targetLic = { id: directSnap.id, ...directSnap.data() };
+        if (targetLic) {
+            targetLicKey = targetLic.key || targetLic.id;
+        } else {
+            targetLicKey = rawInput; // 못 찾았으면 입력값 그대로 DB 강제 조회
         }
 
-        if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
+        // 🌟 [핵심 방어] 관리자 웹브라우저의 캐시나 과거 데이터를 절대 믿지 않고,
+        // 현재 DB에 기록된 최신 상태(허용/차단 여부)를 실시간으로 즉시 다시 읽어옵니다.
+        let docRef = doc(db, "licenses", targetLicKey);
+        let directSnap = await getDoc(docRef);
+        
+        if (!directSnap.exists()) {
+            docRef = doc(db, "licenses", `TRIAL-${targetLicKey}`);
+            directSnap = await getDoc(docRef);
+        }
+        if (!directSnap.exists()) {
+            docRef = doc(db, "licenses", `PRO-${targetLicKey}`);
+            directSnap = await getDoc(docRef);
+        }
 
-        // 🌟 [추가됨] 기사가 TMS 연결 스위치를 껐는지 확인 (연결 원천 차단)
-        if (targetLic.allowTms === false) {
-            alert(`해당 기사님([${targetLic.phone || targetLic.key}])이 앱에서 'TMS 연결'을 차단(OFF) 상태로 설정했습니다.\n기사님에게 앱의 [연결설정]에서 스위치를 켜달라고 요청해 주셔야 연결이 가능합니다.`);
+        if (!directSnap.exists()) { 
+            alert("기사 계정을 찾을 수 없습니다. 키 또는 번호를 다시 확인해 주세요."); 
+            return; 
+        }
+
+        const freshLicData = directSnap.data();
+        const finalKey = directSnap.id;
+
+        // 🌟 방금 읽어온 "최신" 서버 데이터 기준으로 차단 여부(allowTms: false) 검사
+        if (freshLicData.allowTms === false || freshLicData.allowTms === "false") {
+            alert(`해당 기사님([${freshLicData.phone || finalKey}])이 앱에서 'TMS 연결'을 차단(OFF) 상태로 설정했습니다.\n기사님에게 앱의 [연결설정]에서 스위치를 켜달라고 요청해 주셔야 연결이 가능합니다.`);
             return;
         }
 
-        if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
-            alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
+        // 타 관제 연결 여부 검사
+        if (freshLicData.dispatchKey && freshLicData.dispatchKey !== currentKey && currentKey !== 'MASTER') {
+            alert(`이미 다른 관제소([${freshLicData.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); 
+            return;
         }
-        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: currentKey });
-        alert(`[등록 완료] 기사 [${targetLic.phone || targetLic.key}] 님이 연결되었습니다.`);
+
+        // 🌟 모든 안전 검사를 통과했을 때만 최종적으로 DB에 소속 업데이트
+        await updateDoc(doc(db, "licenses", finalKey), { dispatchKey: currentKey });
+        
+        alert(`[등록 완료] 기사 [${freshLicData.phone || finalKey}] 님이 연결되었습니다.`);
         closeLinkDriverModal();
-    } catch (e) { alert("오류: " + e.message); }
+    } catch (e) { 
+        alert("연결 처리 중 오류가 발생했습니다: " + e.message); 
+    }
 }
 
 export function renderDispatchDriverList() {

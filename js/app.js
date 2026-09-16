@@ -6,7 +6,7 @@ import {
     getBatchMemosFromFirestore, saveMemoToFirestore, likeMemoInFirestore, 
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
     deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto,
-    firebaseSetTmsPermission // 🌟 [변경됨] 차단/허용 상태를 기록하는 API 함수
+    firebaseSetTmsPermission 
 } from './api.js';
 import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 
@@ -114,7 +114,6 @@ export async function initApp() {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
             if (res.valid) {
                 localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-                // 🌟 [추가됨] 앱 시작 시 서버의 차단/허용 상태를 기기 로컬 저장소에 동기화
                 localStorage.setItem('deliveryProAllowTms', res.allowTms !== false ? 'true' : 'false');
                 
                 unlockApp();
@@ -169,10 +168,20 @@ function startLicenseRealtimeWatcher(key) {
         if (mainApp) { mainApp.classList.add('hidden'); mainApp.classList.remove('flex'); }
         if (authScreen) authScreen.classList.remove('hidden');
         window.location.reload();
-    }, (docData) => {
+    }, async (docData) => {
+        // 🌟 [강력 자동 방어 로직 추가됨]
+        // 기사님이 스위치를 꺼두었는데(allowTms: false), 
+        // 관제가 오래된 캐시나 강제 우회로 연결을 시도하여 DB에 dispatchKey가 들어온 경우
+        if (docData.allowTms === false && docData.dispatchKey) {
+            try {
+                // 기사 앱이 즉시 서버의 연결 상태를 빈칸으로 덮어써서 관제를 쫓아냅니다.
+                await firebaseSetTmsPermission(key, false);
+            } catch(e) {}
+            return; // 이후 UI 연결 처리 완전 중단
+        }
+
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
-        // 🌟 [추가됨] 실시간으로 관제 쪽에서 상태가 변하면 동기화
         localStorage.setItem('deliveryProAllowTms', docData.allowTms !== false ? 'true' : 'false');
         updatePhotoCompButtonState(!!linkedKey);
     });
@@ -259,7 +268,6 @@ export async function verifyLicense() {
             localStorage.setItem('deliveryProKey', actualKey);
             localStorage.setItem('deliveryProUserPhone', formattedPhone); 
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            // 🌟 [추가됨] 로그인 시 차단 상태 동기화
             localStorage.setItem('deliveryProAllowTms', res.allowTms !== false ? 'true' : 'false');
 
             if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
@@ -333,7 +341,7 @@ export async function startFreeTrial() {
             localStorage.setItem('deliveryProUserPhone', phoneInput);
             localStorage.setItem('deliveryProExpireDate', res.expireDate);
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            localStorage.setItem('deliveryProAllowTms', 'true'); // 🌟 체험판은 시작 시 무조건 허용
+            localStorage.setItem('deliveryProAllowTms', 'true');
 
             alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
             closeTrialModal();
@@ -1480,7 +1488,6 @@ export function initPhotoCompletion() {
     });
 }
 
-// 🌟 [추가됨] 설정창 호출 및 동기화 처리
 export function openSettingsModal() {
     const isTmsAllowed = localStorage.getItem('deliveryProAllowTms') !== 'false'; // 기본값 허용
     const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false'; // 기본값 허용
@@ -1498,7 +1505,6 @@ export function closeSettingsModal() {
     document.getElementById('settings-modal')?.classList.add('hidden');
 }
 
-// 🌟 [수정됨] 스위치를 끄면 서버에 차단 상태 기록 및 연결 초기화, 켜면 허용 기록
 export async function toggleTMS(isChecked) {
     const tmsToggle = document.getElementById('tms-toggle');
     const myKey = localStorage.getItem('deliveryProKey');
