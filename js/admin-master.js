@@ -336,8 +336,19 @@ export async function deleteLicenseFromModal() {
 }
 
 // ==========================================
-// 3. 메모 테이블 관리
+// 3. 메모 테이블 관리 및 정렬
 // ==========================================
+
+// 🌟 현재 메모 정렬 상태 관리 변수
+let currentMemoSort = 'latest'; 
+
+// 🌟 정렬 기준 변경 함수
+export function sortMemos(sortType) {
+    currentMemoSort = sortType;
+    state.masterPages['memos'] = 1; // 정렬 변경 시 첫 페이지로 이동
+    renderMemosTable(state.allMemos);
+}
+
 export function renderMemosTable(memos) {
     const tbody = document.getElementById('table-body-memos');
     const pagEl = document.getElementById('pagination-memos');
@@ -347,7 +358,22 @@ export function renderMemosTable(memos) {
         if (pagEl) pagEl.innerHTML = '';
         return;
     }
-    const total = memos.length;
+
+    // 🌟 렌더링 전 정렬 로직 적용
+    let sortedMemos = [...memos];
+    if (currentMemoSort === 'likes') {
+        // 추천수(좋아요) 내림차순 정렬
+        sortedMemos.sort((a, b) => (b.likes || 0) - (a.likes || 0));
+    } else {
+        // 최신 등록순 (createdAt 기준, 없으면 updatedAt 기준 역순)
+        sortedMemos.sort((a, b) => {
+            const timeA = a.createdAt || a.updatedAt || 0;
+            const timeB = b.createdAt || b.updatedAt || 0;
+            return timeB - timeA;
+        });
+    }
+
+    const total = sortedMemos.length;
     const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
     let curPage = state.masterPages['memos'] || 1;
     if (curPage > totalPages) curPage = totalPages;
@@ -355,7 +381,7 @@ export function renderMemosTable(memos) {
     state.masterPages['memos'] = curPage;
 
     const start = (curPage - 1) * PAGE_SIZE_MASTER;
-    const pagedMemos = memos.slice(start, start + PAGE_SIZE_MASTER);
+    const pagedMemos = sortedMemos.slice(start, start + PAGE_SIZE_MASTER);
 
     tbody.innerHTML = pagedMemos.map((m, idx) => `
         <tr class="hover:bg-gray-50 transition">
@@ -374,7 +400,6 @@ export async function deleteParkingMemo(id) {
     if (!confirm("이 주차 메모를 삭제하시겠습니까?")) return;
     try { await deleteDoc(doc(db, "memos", id)); } catch (e) { alert("삭제 오류: " + e.message); }
 }
-
 
 // ==========================================
 // 4. 히스토리 / 내역 조회
@@ -716,7 +741,7 @@ export function renderAccountHistoryView() {
     }
 
     const targetLic = state.allLicenses.find(l => l.key === selectedKey);
-    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 없습니다.</div>`; return; }
+    if (!targetLic) { listEl.innerHTML = `<div class="text-center text-gray-400 py-28 text-xs font-bold">계정 정보를 찾을 수 정를 수 없습니다.</div>`; return; }
 
     state.currentSelectedAccountKey = targetLic.key;
     if (topFilterBarEl) topFilterBarEl.classList.add('hidden');
@@ -931,3 +956,6 @@ export function renderMasterNoticeHistoryList() {
     });
     container.innerHTML = html;
 }
+
+// 모듈 함수들을 전역 window 객체에 맵핑 (다른 파일 수정 없이 즉시 작동)
+window.sortMemos = sortMemos;
