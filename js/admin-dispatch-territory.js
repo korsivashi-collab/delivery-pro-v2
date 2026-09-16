@@ -13,7 +13,7 @@ let territoryCircles = [];
 let otherTerritoryOverlays = [];
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
-let isTerritoryPinMode = false; // 🌟 핀 이동 모드 기본값: OFF (지도 드래그 위주로 안전하게 시작)
+let isTerritoryPinMode = false; // 🌟 핀 이동 모드 기본값: OFF
 
 // ==========================================
 // 1. 실시간 위치 관제 사이드바
@@ -221,30 +221,25 @@ export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
 // 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
 // ==========================================
 
-// 🌟 핀 이동 모드 토글 (아이콘 클릭 시 UI 및 드래그 권한 교차 적용)
+// 🌟 핀 이동 모드 토글 (지도 드래그 잠금 및 클릭 활성화)
 export function toggleTerritoryPinMode() {
     isTerritoryPinMode = !isTerritoryPinMode;
     const btn = document.getElementById('btn-territory-pin');
     
     if (btn) {
         if (isTerritoryPinMode) {
-            // ON: 핀 드래그 가능, 지도 이동 불가, 텍스트와 UI 넓히기
+            // ON: 지도 드래그 불가능, 지도를 클릭하면 핀이 이동함
             btn.className = "px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-black text-sm";
             btn.innerHTML = '<i class="fa-solid fa-map-pin"></i> 핀 이동 ON';
         } else {
-            // OFF: 지도 드래그 가능, 핀 고정
+            // OFF: 지도 드래그 가능, 지도를 클릭해도 핀 안 움직임
             btn.className = "px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm";
             btn.innerHTML = '<i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF';
         }
     }
 
-    // 지도 드래그 제어 (ON 이면 지도 이동 불가)
     if (territoryMap) {
         territoryMap.setDraggable(!isTerritoryPinMode);
-    }
-    // 마커 드래그 제어 (ON 이면 핀 이동 가능)
-    if (territoryMarker) {
-        territoryMarker.setDraggable(isTerritoryPinMode);
     }
 }
 
@@ -280,7 +275,6 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
     
-    // 🌟 모달창 열 때 UI 상태 초기화 (검색어 비우기, 핀 이동 모드 무조건 OFF 상태로 시작)
     const searchInput = document.getElementById('territory-address-search');
     if (searchInput) searchInput.value = '';
     
@@ -302,16 +296,16 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
             
-            // 🌟 지도를 클릭했을 때, '핀 이동 모드'가 켜져 있을 때만 핀을 새로운 곳으로 이동시킴
+            // 🌟 핀 이동 모드가 ON일 때, 지도의 아무 곳이나 클릭하면 핀이 거기로 즉시 이동함
             kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
                 if (isTerritoryPinMode) {
-                    setTerritoryCenter(mouseEvent.latLng); 
+                    territoryMap.panTo(mouseEvent.latLng); // 클릭한 곳으로 지도 중심도 부드럽게 이동
+                    setTerritoryCenter(mouseEvent.latLng); // 핀과 반경 원을 클릭한 곳으로 이동
                 }
             });
         }
         
-        // 처음 모달을 열 때는 지도는 움직일 수 있게 (OFF 상태)
-        territoryMap.setDraggable(true); 
+        territoryMap.setDraggable(true); // 처음 열 때는 지도 이동 가능 상태
         territoryMap.relayout(); 
         
         if (territoryMarker) territoryMarker.setMap(null);
@@ -355,11 +349,9 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
             }
         });
 
-        // 🌟 모달 렌더링 애니메이션 딜레이로 인해 핀이 우측으로 밀리는 카카오맵 버그 해결
         setTimeout(() => { 
             if (territoryMap) {
                 territoryMap.relayout(); 
-                // relayout 직후에 저장해둔 중앙 좌표(또는 핀 위치)로 지도를 강제 재정렬
                 territoryMap.setCenter(territoryMarker ? territoryMarker.getPosition() : centerPos);
             }
         }, 300);
@@ -409,17 +401,11 @@ export function setTerritoryCenter(latLng) {
         if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
     });
 
-    // 🌟 마커 생성 시 현재 isTerritoryPinMode 에 맞춰 마커 드래그 속성 주입
+    // 🌟 핀 마커 생성 (마커 드래그 기능 제거, 오직 맵 클릭으로만 이동)
     territoryMarker = new kakao.maps.Marker({ 
-        position: latLng,
-        draggable: isTerritoryPinMode 
+        position: latLng
     });
     territoryMarker.setMap(territoryMap);
-
-    // 🌟 마커를 마우스로 직접 잡고 드래그(움직임) 완료 시, 원(반경) 범위도 함께 이동하도록 연결
-    kakao.maps.event.addListener(territoryMarker, 'dragend', function() {
-        setTerritoryCenter(territoryMarker.getPosition());
-    });
 
     let r1, r2, r3;
     if (state.currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
