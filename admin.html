@@ -138,9 +138,7 @@
                 <!-- 탭 5: 계정/내역 조회 통합 뷰 -->
                 <div id="tab-content-history" class="hidden p-5 flex flex-col gap-3.5">
                     <div id="account-back-bar" class="hidden justify-between items-center bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-xs">
-                        <button onclick="window.backToAllAccountsView()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow transition active:scale-95">
-                            <i class="fa-solid fa-arrow-left"></i> 전체 계정 목록으로 돌아가기
-                        </button>
+                        <button onclick="window.backToAllAccountsView()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow transition active:scale-95"><i class="fa-solid fa-arrow-left"></i> 전체 계정 목록으로 돌아가기</button>
                         <span class="text-xs text-blue-950 font-bold">현재 상세 확인 중: <b id="top-selected-account-label" class="font-black text-blue-700 text-sm"></b></span>
                     </div>
 
@@ -461,7 +459,7 @@
         </div>
     </div>
 
-    <!-- 🌟 기사 권역 설정 팝업 모달창 (주소 검색창 및 핀 이동 스위치) -->
+    <!-- 🌟 기사 권역 설정 팝업 모달창 (주소 검색창 및 핀 아이콘 토글) -->
     <div id="driver-territory-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white w-full max-w-[95vw] rounded-3xl p-6 shadow-2xl relative flex flex-col h-[95vh]">
             <div class="flex justify-between items-center mb-4 flex-none">
@@ -487,20 +485,19 @@
                 </div>
             </div>
 
-            <!-- 새로 추가된 주소 검색창 & 핀 이동 스위치 컨트롤 영역 -->
+            <!-- 🌟 새로 추가된 주소 검색창 & 핀 이동 모드 토글 버튼 (아이콘) -->
             <div class="mb-3 flex justify-between items-center flex-none gap-3">
                 <div class="flex-1 relative flex items-center max-w-md">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-sm"></i>
-                    <input type="text" id="territory-address-search" placeholder="권역 중심으로 지정할 주소 검색..." class="w-full bg-white border border-gray-300 rounded-xl pl-10 pr-16 py-2.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" onkeyup="if(window.event.keyCode==13){window.searchTerritoryAddress()}">
+                    <input type="text" id="territory-address-search" placeholder="권역 중심으로 지정할 주소 검색..." class="w-full bg-white border border-gray-300 rounded-xl pl-10 pr-16 py-2 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" onkeyup="if(window.event.keyCode==13){window.searchTerritoryAddress()}">
                     <button type="button" onclick="window.searchTerritoryAddress()" class="absolute right-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black px-3.5 py-1.5 rounded-lg transition active:scale-95 shadow-sm">검색</button>
                 </div>
                 
-                <div class="shrink-0 flex items-center gap-2.5 bg-white border border-gray-300 px-3.5 py-2 rounded-xl shadow-sm cursor-pointer hover:bg-gray-50 transition" onclick="document.getElementById('territory-pin-toggle').click()">
-                    <span class="text-xs font-black text-gray-700 select-none">지도 클릭 시 핀 이동</span>
-                    <label class="relative inline-flex items-center cursor-pointer pointer-events-none">
-                        <input type="checkbox" id="territory-pin-toggle" class="sr-only peer" checked onchange="window.toggleTerritoryPinMode(this.checked)">
-                        <div class="w-10 h-5 bg-gray-200 rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
-                    </label>
+                <div class="shrink-0 flex items-center">
+                    <button type="button" id="btn-territory-pin" onclick="if(window.toggleTerritoryPinMode) window.toggleTerritoryPinMode()" class="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95" title="핀 이동 모드 켜기/끄기">
+                        <i class="fa-solid fa-map-pin text-lg"></i>
+                    </button>
+                    <input type="hidden" id="territory-pin-toggle-state" value="false">
                 </div>
             </div>
 
