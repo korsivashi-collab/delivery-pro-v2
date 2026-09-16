@@ -221,18 +221,18 @@ export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
 // 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
 // ==========================================
 
-// 🌟 핀 이동 모드 토글 (지도 드래그 잠금 및 클릭 활성화)
+// 🌟 핀 이동 모드 토글 (지도 드래그 잠금 및 마커 드래그/클릭 활성화)
 export function toggleTerritoryPinMode() {
     isTerritoryPinMode = !isTerritoryPinMode;
     const btn = document.getElementById('btn-territory-pin');
     
     if (btn) {
         if (isTerritoryPinMode) {
-            // ON: 지도 드래그 불가능, 지도를 클릭하면 핀이 이동함
+            // ON: 지도 이동 불가능, 지도를 클릭하거나 핀을 직접 드래그하여 이동
             btn.className = "px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-black text-sm";
             btn.innerHTML = '<i class="fa-solid fa-map-pin"></i> 핀 이동 ON';
         } else {
-            // OFF: 지도 드래그 가능, 지도를 클릭해도 핀 안 움직임
+            // OFF: 지도 드래그 가능, 핀 위치 고정
             btn.className = "px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm";
             btn.innerHTML = '<i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF';
         }
@@ -240,6 +240,10 @@ export function toggleTerritoryPinMode() {
 
     if (territoryMap) {
         territoryMap.setDraggable(!isTerritoryPinMode);
+    }
+    // 🌟 마커 객체가 이미 존재한다면 현재 핀 이동 모드에 맞춰 드래그 가능 여부 즉시 동기화
+    if (territoryMarker) {
+        territoryMarker.setDraggable(isTerritoryPinMode);
     }
 }
 
@@ -401,11 +405,17 @@ export function setTerritoryCenter(latLng) {
         if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
     });
 
-    // 🌟 핀 마커 생성 (마커 드래그 기능 제거, 오직 맵 클릭으로만 이동)
+    // 🌟 핀 마커 생성 (핀 이동 모드에 따라 드래그 기능 활성화)
     territoryMarker = new kakao.maps.Marker({ 
-        position: latLng
+        position: latLng,
+        draggable: isTerritoryPinMode // 🌟 상태 실시간 동기화
     });
     territoryMarker.setMap(territoryMap);
+
+    // 🌟 핀을 사용자가 직접 드래그한 후 놓았을 때 권역 중심을 업데이트하는 이벤트
+    kakao.maps.event.addListener(territoryMarker, 'dragend', function() {
+        setTerritoryCenter(territoryMarker.getPosition());
+    });
 
     let r1, r2, r3;
     if (state.currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
