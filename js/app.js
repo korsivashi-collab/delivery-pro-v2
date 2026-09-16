@@ -30,10 +30,11 @@ let lastKnownGps = null;
 let gpsWatchId = null;
 
 // ==========================================
-// 🌟 [추가됨] 상호명을 제외한 '순수 주소' 추출 헬퍼 함수
+// 🌟 [원칙 적용] 상호명을 완벽히 제외한 '순수 주소' 추출 함수
 // ==========================================
 function getPureAddress(address) {
     if (!address) return "";
+    // [상호명] 패턴이 존재하면 그 뒷부분의 주소만 추출, 없으면 그대로 사용
     let match = address.match(/^\[(.*?)\]\s*(.*)$/);
     return match ? match[2].trim() : address.trim();
 }
@@ -705,10 +706,11 @@ function initSortable() {
 }
 
 // ==========================================
-// 🌟 [수정됨] 메모를 불러오기 전 주소 배열에서 상호명 제거
+// 🌟 [원칙 적용] 메모를 서버에서 가져올 때 '순수 주소' 배열을 만들어 요청
 // ==========================================
 async function preloadBatchMemos() {
     if (destinations.length === 0) return;
+    // 모든 배송지 주소에서 상호명을 제거한 순수 주소 추출
     const addresses = destinations.map(d => getPureAddress(d.address));
     const uniqueAddrs = [...new Set(addresses)];
     try { 
@@ -719,7 +721,7 @@ async function preloadBatchMemos() {
 }
 
 // ==========================================
-// 🌟 [수정됨] 미리보기 렌더링 시 상호명을 제외한 순수 주소로 캐시 검색
+// 🌟 [원칙 적용] 미리보기를 렌더링 할 때 '순수 주소'로 메모 캐시 검색
 // ==========================================
 function renderMemoPreview(dest) {
     const previewEl = document.getElementById(`memo-preview-${dest.id}`); 
@@ -950,12 +952,12 @@ export function toggleEtcTag(btn) {
 }
 
 // ==========================================
-// 🌟 [수정됨] 메모 모달을 열 때 상호명이 제거된 주소 기준으로 검색
+// 🌟 [원칙 적용] 메모 모달을 열 때 상호명이 제거된 주소 기준으로 검색
 // ==========================================
 export async function openMemoModal(id) {
     const item = destinations.find(d => d.id === id); if (!item) return; 
     
-    currentMemoAddress = getPureAddress(item.address); // <-- [변경점] 순수 주소 추출 적용
+    currentMemoAddress = getPureAddress(item.address); // <-- [적용됨] 순수 주소 기반 동작
     
     const titleEl = document.getElementById('memo-modal-title');
     if (titleEl) titleEl.innerText = currentMemoAddress; 
@@ -1049,7 +1051,7 @@ function resetMemoForm() {
 }
 
 // ==========================================
-// 🌟 [수정됨] 메모 등록 시 '순수 주소' 기준으로 저장하고 화면 갱신
+// 🌟 [원칙 적용] 메모 등록 시 '순수 주소' 기준으로만 저장하고 화면 갱신
 // ==========================================
 export async function saveCurrentMemo() {
     const rawText = (document.getElementById('memo-input')?.value || '').trim();
@@ -1065,35 +1067,33 @@ export async function saveCurrentMemo() {
 
     showLoading("주차정보 등록/수정 중...");
     try {
+        // currentMemoAddress는 이미 괄호 [상호명]이 제거된 순수 주소입니다.
         await saveMemoToFirestore(currentMemoAddress, getOrCreateDeviceId(), finalMemo);
         hideLoading(); alert("주차 정보가 등록(수정)되었습니다.");
         
-        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); // <-- [변경점]
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); 
         if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
 
 // ==========================================
-// 🌟 [수정됨] 좋아요 후 '순수 주소' 기준으로 화면 갱신
+// 🌟 [원칙 적용] 좋아요 및 갱신 처리 시 '순수 주소' 유지
 // ==========================================
 export async function likeMemo(docId) {
     try {
         await likeMemoInFirestore(docId);
-        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); // <-- [변경점]
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
         if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
     } catch (e) { alert("통신 오류가 발생했습니다."); }
 }
 
-// ==========================================
-// 🌟 [수정됨] 신고 후 '순수 주소' 기준으로 화면 갱신
-// ==========================================
 export async function reportMemo(docId) {
     if (!confirm("이 메모에 부적절한 내용이 있습니까?\n신고하시면 즉시 블라인드 처리됩니다.")) return;
     showLoading("신고 처리 중...");
     try {
         await reportMemoInFirestore(docId);
         hideLoading(); alert("신고가 접수되어 블라인드 처리되었습니다."); 
-        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); // <-- [변경점]
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
         if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
