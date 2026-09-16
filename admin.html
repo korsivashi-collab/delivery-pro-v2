@@ -384,12 +384,12 @@
                 <div><h2 class="text-xl font-black text-gray-900 flex items-center gap-1.5 tracking-tight">배송 자동할당 <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-300 transform -translate-y-1">PRO</span></h2><p class="text-[11px] text-gray-500 font-bold">기사별 권역별 물량 균등배분</p></div>
             </div>
 
-            <!-- 👇 2번 문제 해결: 본사 거점 텍스트가 유연하게 넓어지도록 flex-1 할당 및 줄바꿈 허용 적용 -->
+            <!-- 🌟 1번 문제 UI 해결: 본사 거점 텍스트 영역 확장, 긴 주소 전체 표시를 위한 flex-1 및 break-all 적용 -->
             <div class="flex-1 bg-slate-50 px-4 py-2.5 rounded-2xl border border-gray-200 flex items-center gap-2.5 shadow-inner min-w-0">
                 <span class="text-[13px] font-black text-gray-700 whitespace-nowrap shrink-0"><i class="fa-solid fa-building text-blue-600 mr-1.5"></i>본사 거점</span>
-                <input type="text" id="company-base-address" placeholder="주소를 입력하세요" class="w-48 bg-white border border-gray-300 rounded-lg text-xs p-2.5 font-bold outline-none focus:border-blue-500 transition shadow-sm shrink-0">
+                <input type="text" id="company-base-address" placeholder="전체 주소를 입력하세요" class="w-56 bg-white border border-gray-300 rounded-lg text-xs p-2.5 font-bold outline-none focus:border-blue-500 transition shadow-sm shrink-0">
                 <button type="button" id="btn-save-company-base" onclick="window.saveCompanyBaseAddress()" class="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-lg text-xs font-black shadow-sm active:scale-95 whitespace-nowrap transition shrink-0">저장</button>
-                <div class="flex-1 text-[12px] font-bold text-blue-700 whitespace-normal break-keep leading-tight px-1 min-w-[200px]" id="saved-base-address-text" title="저장된 거점 주소">저장된 거점이 없습니다.</div>
+                <div class="flex-1 text-[13px] font-bold text-blue-700 break-all leading-tight px-2 min-w-[200px]" id="saved-base-address-text" title="저장된 거점 주소">저장된 거점이 없습니다.</div>
                 <button id="btn-clear-company-base" onclick="window.clearCompanyBaseAddress()" class="hidden text-red-500 hover:text-red-700 text-[11px] font-bold pr-2 whitespace-nowrap transition shrink-0"><i class="fa-solid fa-rotate-left"></i> 초기화</button>
             </div>
 
@@ -469,15 +469,27 @@
             </div>
             
             <div class="mb-4 bg-blue-50 p-4 rounded-2xl border border-blue-100 flex-none flex flex-col gap-3 shadow-inner">
-                <div class="flex justify-between items-center">
+                <div class="flex justify-between items-center flex-wrap gap-2">
                     <div>
                         <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-base ml-1">010-0000-0000</span></p>
                         <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역 중심을 지정하세요. <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.</p>
                     </div>
-                    <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
-                        <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
-                        <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
-                        <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                    <div class="flex flex-wrap items-center gap-3">
+                        <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
+                            <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
+                            <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
+                            <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                        </div>
+                        
+                        <!-- 🌟 2번 문제 UI 해결: 사이드바에 있던 권역크기(반경) 조절 기능을 이곳 모달창 내부로 이동 -->
+                        <div class="bg-white p-1.5 rounded-xl border border-emerald-300 shadow-sm flex items-center gap-2">
+                            <span class="text-xs font-black text-emerald-700 pl-2"><i class="fa-solid fa-expand"></i> 반경 크기 조절</span>
+                            <div class="flex items-center gap-1 bg-gray-50 rounded-lg p-0.5 border border-gray-200">
+                                <button type="button" onclick="if(window.adjustModalTerritorySize) window.adjustModalTerritorySize(-10)" class="w-7 h-7 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100 font-black text-sm transition active:scale-95">-</button>
+                                <span id="modal-territory-size-display" class="text-xs font-black text-emerald-600 w-12 text-center">100%</span>
+                                <button type="button" onclick="if(window.adjustModalTerritorySize) window.adjustModalTerritorySize(10)" class="w-7 h-7 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100 font-black text-sm transition active:scale-95">+</button>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="bg-white px-4 py-3 rounded-xl border border-blue-200 flex items-center gap-3 shadow-sm">
@@ -486,7 +498,7 @@
                 </div>
             </div>
 
-            <!-- 🌟 새로 추가된 주소 검색창 & 핀 이동 모드 토글 버튼 (아이콘) -->
+            <!-- 새로 추가된 주소 검색창 & 핀 이동 모드 토글 버튼 (아이콘) -->
             <div class="mb-3 flex justify-between items-center flex-none gap-3">
                 <div class="flex-1 relative flex items-center max-w-md">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-sm"></i>
