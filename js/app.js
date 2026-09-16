@@ -5,7 +5,8 @@ import {
     startDispatchMessageListener, firebaseStartTrial, getMemosFromFirestore, 
     getBatchMemosFromFirestore, saveMemoToFirestore, likeMemoInFirestore, 
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
-    deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto 
+    deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto,
+    firebaseDisconnectTMS // 🌟 [추가됨] TMS 연결 해제를 위한 API 함수
 } from './api.js';
 import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 
@@ -39,6 +40,9 @@ export function getOrCreateDeviceId() {
 }
 
 export function startGpsWatcher() {
+    // 🌟 [추가됨] GPS 설정 스위치가 꺼져있으면 작동하지 않음
+    if (localStorage.getItem('deliveryProGpsEnabled') === 'false') return; 
+
     if (!navigator.geolocation || gpsWatchId !== null) return;
     gpsWatchId = navigator.geolocation.watchPosition(
         (pos) => {
@@ -192,19 +196,21 @@ function updateExpireBadge(serverDate) {
     badge.classList.remove('hidden');
 }
 
+// 🌟 [수정됨] 사진 완료 버튼 상태 제어 (제한 해제)
 function updatePhotoCompButtonState(isLinked) {
     const btn = document.getElementById('btn-photo-comp');
     const subtext = document.getElementById('photo-comp-subtext');
     if (!btn || !subtext) return;
 
+    // 관제 연결 여부와 관계없이 버튼은 항상 활성화
+    btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
+    
     if (isLinked) {
-        btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
         subtext.className = "text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter flex items-center gap-1";
         subtext.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 관제 연결됨';
     } else {
-        btn.className = "bg-gray-100 border border-gray-200 text-gray-400 font-bold py-2.5 px-2 rounded-xl text-xs transition flex flex-col items-center justify-center cursor-not-allowed opacity-75";
-        subtext.className = "text-[9px] font-normal text-gray-400 mt-0.5 tracking-tighter";
-        subtext.innerText = "(계정 연결 시 사용)";
+        subtext.className = "text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter";
+        subtext.innerText = "일반 모드 (사진전송 가능)";
     }
 }
 
@@ -737,7 +743,6 @@ function renderMemoPreview(dest) {
     }
 }
 
-// 🌟 리스트 비동기 대기 제거 및 상호명/주소 두 줄 분리 적용
 export function renderList() {
     const listEl = document.getElementById('destination-list');
     const headerEndAddr = document.getElementById('header-end-address'); 
@@ -784,11 +789,9 @@ export function renderList() {
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
-            // 🌟 주소와 상호명 분리 로직 (한 줄 추가 효과)
             let displayAddressHTML = dest.address;
             let match = dest.address.match(/^\[(.*?)\]\s*(.*)$/);
             if (match) {
-                // 상호명이 있을 경우 위아래 2줄로 분리
                 displayAddressHTML = `
                     <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${match[1]}</span>
                     <span class="block truncate leading-tight">${match[2]}</span>
@@ -830,10 +833,7 @@ export function renderList() {
         });
     }
     
-    // UI를 먼저 다 그리고 즉시 드래그 기능을 활성화
     initSortable();
-
-    // 백그라운드에서 메모를 로드하여 나중에 덮어씌움
     preloadBatchMemos().then(() => {
         destinations.forEach(dest => {
             renderMemoPreview(dest);
@@ -969,7 +969,6 @@ export async function openMemoModal(id) {
                 });
             }
 
-            // 🌟 엘리베이터가 추가된 배열
             ['도로변 주차', '지하주차장', '지상주차장', '엘리베이터'].forEach(tag => {
                 if (rawMemo.includes(`[${tag}]`)) {
                     document.querySelectorAll('.etc-tag-btn').forEach(b => {
@@ -1143,12 +1142,8 @@ export function closeCompletionModal() {
     pendingCompletionId = null;
 }
 
+// 🌟 [수정됨] 제한 없이 사진 선택 창 호출
 export function triggerPhotoCompletion() {
-    const dispatchKey = localStorage.getItem('deliveryProDispatchKey');
-    if (!dispatchKey) {
-        alert("⚠️ [관제 연결 필요]\n사진 전송은 관제 센터(사무실)와 연결된 기사 계정만 사용하실 수 있습니다.\n관리자에게 기사 등록 연결을 요청해 주세요.");
-        return;
-    }
     document.getElementById('completion-photo-input')?.click();
 }
 
@@ -1383,7 +1378,6 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
     });
 }
 
-// 🌟 카메라 스캔 이벤트: 주소와 상호명을 동시에 추출하여 결합하도록 수정
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
     if (!cameraInput) return;
@@ -1402,7 +1396,6 @@ export function initCameraScan() {
             addressStr = extractAddressLogic(rawOCRText);
             extractedPhone = extractPhoneLogic(rawOCRText);
             
-            // 🌟 상호명/배송지명 추출 로직 결합
             if (addressStr) {
                 storeName = extractStoreNameLogic(rawOCRText, addressStr);
             }
@@ -1436,7 +1429,6 @@ export function initCameraScan() {
         }
 
         if (coords) {
-            // 🌟 상호명이 감지된 경우 "[상호명] 주소" 형태로 최종 표시명 구성
             let resolvedAddress = coords.address_name || addressStr;
             if (storeName && !resolvedAddress.includes(storeName)) {
                 resolvedAddress = `[${storeName}] ${resolvedAddress}`;
@@ -1482,6 +1474,70 @@ export function initPhotoCompletion() {
     });
 }
 
+// 🌟 [추가됨] 모달 제어 및 스위치 로직
+export function openSettingsModal() {
+    const dispatchKey = localStorage.getItem('deliveryProDispatchKey');
+    const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false'; // 기본값 true
+    
+    const tmsToggle = document.getElementById('tms-toggle');
+    const gpsToggle = document.getElementById('gps-toggle');
+    
+    if (tmsToggle) tmsToggle.checked = !!dispatchKey;
+    if (gpsToggle) gpsToggle.checked = isGpsEnabled;
+    
+    document.getElementById('settings-modal')?.classList.remove('hidden');
+}
+
+export function closeSettingsModal() {
+    document.getElementById('settings-modal')?.classList.add('hidden');
+}
+
+export async function toggleTMS(isChecked) {
+    const tmsToggle = document.getElementById('tms-toggle');
+    const myKey = localStorage.getItem('deliveryProKey');
+    
+    if (!isChecked) {
+        if (confirm("TMS(관제) 연결을 해제하시겠습니까?\n해제 시 소속 정보가 초기화되며 배송 자동할당 및 관제 메시지를 받을 수 없습니다.")) {
+            if (myKey && typeof firebaseDisconnectTMS === 'function') {
+                showLoading("TMS 연결 해제 중...");
+                try {
+                    await firebaseDisconnectTMS(myKey);
+                    localStorage.removeItem('deliveryProDispatchKey');
+                    updatePhotoCompButtonState(false);
+                    hideLoading();
+                    alert("TMS 연결이 안전하게 해제되었습니다.\n이제 다른 관제 계정에 새롭게 연결될 수 있습니다.");
+                } catch(e) {
+                    hideLoading();
+                    alert("해제 중 오류가 발생했습니다: " + e.message);
+                    if (tmsToggle) tmsToggle.checked = true; // 실패 시 원상복구
+                }
+            } else {
+                localStorage.removeItem('deliveryProDispatchKey');
+                updatePhotoCompButtonState(false);
+            }
+        } else {
+            // 취소 시 스위치를 다시 원래대로(true)
+            if (tmsToggle) tmsToggle.checked = true;
+        }
+    } else {
+        alert("TMS(관제) 연결은 스스로 활성화할 수 없습니다.\n본사 또는 관제 센터(사무실) 관리자에게 기사님의 '라이선스 키'를 전달하여 시스템에 등록을 요청해 주세요.");
+        if (tmsToggle) tmsToggle.checked = false; // 스스로 활성화 불가
+    }
+}
+
+export function toggleGPS(isChecked) {
+    localStorage.setItem('deliveryProGpsEnabled', isChecked ? 'true' : 'false');
+    
+    if (isChecked) {
+        startGpsWatcher();
+    } else {
+        if (gpsWatchId !== null && navigator.geolocation) {
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+        }
+    }
+}
+
 window.logout = logout;
 window.renderList = renderList;
 window.verifyLicense = verifyLicense;
@@ -1521,6 +1577,12 @@ window.initPhotoCompletion = initPhotoCompletion;
 window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
+
+// 🌟 [추가됨] window 객체에 연결
+window.openSettingsModal = openSettingsModal;
+window.closeSettingsModal = closeSettingsModal;
+window.toggleTMS = toggleTMS;
+window.toggleGPS = toggleGPS;
 
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList

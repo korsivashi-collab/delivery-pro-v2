@@ -397,3 +397,32 @@ export async function firebaseClearDeviceData(key) {
         console.error("서버 기기 정보 초기화 오류:", e);
     }
 }
+
+// 🌟 9. [추가됨] TMS(관제) 연결 해제 함수
+export async function firebaseDisconnectTMS(key) {
+    try {
+        if (!key) throw new Error("유효한 라이선스 키 값이 없습니다.");
+        
+        let docRef = doc(db, "licenses", key);
+        let docSnap = await getDoc(docRef);
+
+        if (!docSnap.exists()) {
+            docRef = doc(db, "licenses", `PRO-${key}`);
+            docSnap = await getDoc(docRef);
+        }
+        if (!docSnap.exists()) {
+            docRef = doc(db, "licenses", `TRIAL-${key}`);
+            docSnap = await getDoc(docRef);
+        }
+        
+        if (docSnap.exists()) {
+            // 관제 연결 정보를 비워버림
+            await updateDoc(docRef, { dispatchKey: "" });
+        } else {
+            throw new Error("서버에서 계정 정보를 찾을 수 없습니다.");
+        }
+    } catch(e) {
+        console.error("TMS 연결 해제 오류:", e);
+        throw e;
+    }
+}
