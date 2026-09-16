@@ -13,7 +13,8 @@ let territoryCircles = [];
 let otherTerritoryOverlays = [];
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
-let isTerritoryPinMode = false; // 🌟 핀 이동 모드 기본값: OFF (지도 드래그 위주로 안전하게 시작)
+let isTerritoryPinMode = false; // 🌟 핀 이동 모드 기본값: OFF
+let currentTerritorySize = 100; // 🌟 현재 모달에서 조작 중인 권역 크기(%)
 
 // ==========================================
 // 1. 실시간 위치 관제 사이드바
@@ -221,19 +222,28 @@ export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
 // 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
 // ==========================================
 
-// 🌟 핀 이동 모드 토글 (아이콘 클릭 시 UI 및 상태 변경)
+// 🌟 핀 이동 모드 토글 (지도 드래그 잠금 및 마커 드래그/클릭 활성화)
 export function toggleTerritoryPinMode() {
     isTerritoryPinMode = !isTerritoryPinMode;
     const btn = document.getElementById('btn-territory-pin');
     
     if (btn) {
         if (isTerritoryPinMode) {
-            // ON: 핀 이동 가능 (파란색)
-            btn.className = "w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md transition active:scale-95";
+            // ON: 지도 이동 불가능, 지도를 클릭하거나 핀을 직접 드래그하여 이동
+            btn.className = "px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-black text-sm";
+            btn.innerHTML = '<i class="fa-solid fa-map-pin"></i> 핀 이동 ON';
         } else {
-            // OFF: 지도만 이동 가능 (회색)
-            btn.className = "w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95";
+            // OFF: 지도 드래그 가능, 핀 위치 고정
+            btn.className = "px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm";
+            btn.innerHTML = '<i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF';
         }
+    }
+
+    if (territoryMap) {
+        territoryMap.setDraggable(!isTerritoryPinMode);
+    }
+    if (territoryMarker) {
+        territoryMarker.setDraggable(isTerritoryPinMode);
     }
 }
 
@@ -264,19 +274,37 @@ export function searchTerritoryAddress() {
     }
 }
 
+// 🌟 모달창 내 권역 크기(반경 %) 조절 함수 추가
+export function adjustModalTerritorySize(delta) {
+    currentTerritorySize += delta;
+    if (currentTerritorySize < 50) currentTerritorySize = 50;   // 최소 50%
+    if (currentTerritorySize > 300) currentTerritorySize = 300; // 최대 300%
+    
+    const displayEl = document.getElementById('modal-territory-size-display');
+    if (displayEl) displayEl.innerText = currentTerritorySize + '%';
+    
+    if (territoryMarker) setTerritoryCenter(territoryMarker.getPosition()); // 변경된 비율로 원 다시 그리기
+}
+
 export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     try { if (window.event) window.event.stopPropagation(); } catch(e) {}
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
     
-    // 🌟 모달창 열 때 UI 상태 초기화 (검색어 비우기, 핀 이동 모드 무조건 OFF 상태로 시작)
     const searchInput = document.getElementById('territory-address-search');
     if (searchInput) searchInput.value = '';
     
+    // 🌟 해당 기사의 저장된 사이즈(%) 불러오기
+    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    currentTerritorySize = targetLic?.territorySize || 100;
+    const sizeDisp = document.getElementById('modal-territory-size-display');
+    if (sizeDisp) sizeDisp.innerText = currentTerritorySize + '%';
+
     isTerritoryPinMode = false;
     const pinBtn = document.getElementById('btn-territory-pin');
     if (pinBtn) {
-        pinBtn.className = "w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95";
+        pinBtn.className = "px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm";
+        pinBtn.innerHTML = '<i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF';
     }
 
     const modal = document.getElementById('driver-territory-modal');
@@ -290,28 +318,39 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
             
-            // 🌟 지도를 클릭했을 때, '핀 이동 모드'가 켜져 있을 때만 핀을 이동시킴
+            // 🌟 핀 이동 모드가 ON일 때, 지도의 아무 곳이나 클릭하면 핀이 거기로 즉시 이동함
             kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
                 if (isTerritoryPinMode) {
-                    setTerritoryCenter(mouseEvent.latLng); 
+                    territoryMap.panTo(mouseEvent.latLng);
+                    setTerritoryCenter(mouseEvent.latLng);
                 }
             });
         }
+        
+        territoryMap.setDraggable(true);
         territoryMap.relayout(); 
         
         if (territoryMarker) territoryMarker.setMap(null);
         territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
         otherTerritoryOverlays.forEach(ov => ov.setMap(null)); otherTerritoryOverlays = [];
 
+        let centerPos = new kakao.maps.LatLng(37.566826, 126.978656);
+
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
-            const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
-            territoryMap.setCenter(pos); setTerritoryCenter(pos);
+            centerPos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
+            territoryMap.setCenter(centerPos); 
+            setTerritoryCenter(centerPos);
         } else {
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
             if (savedBase) {
                 const baseData = JSON.parse(savedBase);
-                if (baseData.lat && baseData.lng) territoryMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
-            } else territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
+                if (baseData.lat && baseData.lng) {
+                    centerPos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
+                    territoryMap.setCenter(centerPos);
+                }
+            } else {
+                territoryMap.setCenter(centerPos);
+            }
             const addrDisplayEl = document.getElementById('territory-selected-address');
             if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
         }
@@ -326,13 +365,21 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
                 marker.setMap(territoryMap); otherTerritoryOverlays.push(marker);
                 const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
                 label.setMap(territoryMap); otherTerritoryOverlays.push(label);
+                
                 let r3 = 5000; if (d.territoryScale === 'gu') r3 = 15000; else if (d.territoryScale === 'si') r3 = 45000;
-                const circle = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6, fillColor: '#d1d5db', fillOpacity: 0.2 });
+                // 🌟 다른 기사의 원형 반경에도 해당 기사의 저장된 사이즈(%) 적용
+                const otherSizeRatio = (d.territorySize || 100) / 100;
+                const circle = new kakao.maps.Circle({ center: pos, radius: r3 * otherSizeRatio, strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6, fillColor: '#d1d5db', fillOpacity: 0.2 });
                 circle.setMap(territoryMap); otherTerritoryOverlays.push(circle);
             }
         });
 
-        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
+        setTimeout(() => { 
+            if (territoryMap) {
+                territoryMap.relayout(); 
+                territoryMap.setCenter(territoryMarker ? territoryMarker.getPosition() : centerPos);
+            }
+        }, 300);
     }, 200);
 }
 
@@ -379,17 +426,38 @@ export function setTerritoryCenter(latLng) {
         if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
     });
 
-    territoryMarker = new kakao.maps.Marker({ position: latLng });
+    territoryMarker = new kakao.maps.Marker({ 
+        position: latLng,
+        draggable: isTerritoryPinMode 
+    });
     territoryMarker.setMap(territoryMap);
+
+    kakao.maps.event.addListener(territoryMarker, 'dragend', function() {
+        setTerritoryCenter(territoryMarker.getPosition());
+    });
 
     let r1, r2, r3;
     if (state.currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
     else if (state.currentTerritoryScale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
     else if (state.currentTerritoryScale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
 
+    // 🌟 조절된 % 비율에 맞춰 실제 원의 반경 크기 곱셈 적용
+    const sizeRatio = currentTerritorySize / 100;
+    r1 *= sizeRatio; r2 *= sizeRatio; r3 *= sizeRatio;
+
     const c1 = new kakao.maps.Circle({ center: latLng, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.5 });
     const c2 = new kakao.maps.Circle({ center: latLng, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.25 });
     const c3 = new kakao.maps.Circle({ center: latLng, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.1 });
+
+    // 🌟 원형 객체가 지도 클릭을 막는 문제 해결 (원 영역을 클릭해도 지도를 클릭한 것과 동일한 효과를 발생시키도록 프록시 이벤트 처리)
+    [c1, c2, c3].forEach(c => {
+        kakao.maps.event.addListener(c, 'click', function(mouseEvent) {
+            if (isTerritoryPinMode) {
+                territoryMap.panTo(mouseEvent.latLng);
+                setTerritoryCenter(mouseEvent.latLng);
+            }
+        });
+    });
 
     c3.setMap(territoryMap); c2.setMap(territoryMap); c1.setMap(territoryMap);
     territoryCircles = [c3, c2, c1];
@@ -411,7 +479,8 @@ export async function saveDriverTerritory() {
     try {
         await updateDoc(doc(db, "licenses", targetLic.key), {
             territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
-            territoryScale: scale, territory1: t1, territory2: t2
+            territoryScale: scale, territory1: t1, territory2: t2,
+            territorySize: currentTerritorySize // 🌟 권역 크기(%) DB 저장
         });
         alert("기사 권역이 저장되었습니다.");
         closeDriverTerritoryModal();
@@ -452,6 +521,10 @@ export function openAllTerritoriesMap() {
                 else if (scale === 'gu') { r1 = 5000; r2 = 10000; r3 = 15000; } 
                 else if (scale === 'si') { r1 = 15000; r2 = 30000; r3 = 45000; }
 
+                // 🌟 전체 현황 지도에서도 각 기사별 커스텀 사이즈(%) 반영
+                const sizeRatio = (d.territorySize || 100) / 100;
+                r1 *= sizeRatio; r2 *= sizeRatio; r3 *= sizeRatio;
+
                 const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
                 const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
                 const c3 = new kakao.maps.Circle({ center: pos, radius: r3, strokeWeight: 1, strokeColor: '#93c5fd', strokeOpacity: 0.4, fillColor: '#bfdbfe', fillOpacity: 0.05 });
@@ -477,3 +550,4 @@ export function closeAllTerritoriesMap() { document.getElementById('all-territor
 // 🌟 추가된 함수들을 window 객체에 맵핑
 window.toggleTerritoryPinMode = toggleTerritoryPinMode;
 window.searchTerritoryAddress = searchTerritoryAddress;
+window.adjustModalTerritorySize = adjustModalTerritorySize;
