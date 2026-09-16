@@ -221,19 +221,30 @@ export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
 // 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
 // ==========================================
 
-// 🌟 핀 이동 모드 토글 (아이콘 클릭 시 UI 및 상태 변경)
+// 🌟 핀 이동 모드 토글 (아이콘 클릭 시 UI 및 드래그 권한 교차 적용)
 export function toggleTerritoryPinMode() {
     isTerritoryPinMode = !isTerritoryPinMode;
     const btn = document.getElementById('btn-territory-pin');
     
     if (btn) {
         if (isTerritoryPinMode) {
-            // ON: 핀 이동 가능 (파란색)
-            btn.className = "w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shadow-md transition active:scale-95";
+            // ON: 핀 드래그 가능, 지도 이동 불가, 텍스트와 UI 넓히기
+            btn.className = "px-4 py-2 rounded-xl bg-blue-600 text-white flex items-center justify-center gap-2 shadow-md transition active:scale-95 font-black text-sm";
+            btn.innerHTML = '<i class="fa-solid fa-map-pin"></i> 핀 이동 ON';
         } else {
-            // OFF: 지도만 이동 가능 (회색)
-            btn.className = "w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95";
+            // OFF: 지도 드래그 가능, 핀 고정
+            btn.className = "px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm";
+            btn.innerHTML = '<i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF';
         }
+    }
+
+    // 지도 드래그 제어 (ON 이면 지도 이동 불가)
+    if (territoryMap) {
+        territoryMap.setDraggable(!isTerritoryPinMode);
+    }
+    // 마커 드래그 제어 (ON 이면 핀 이동 가능)
+    if (territoryMarker) {
+        territoryMarker.setDraggable(isTerritoryPinMode);
     }
 }
 
@@ -276,7 +287,8 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     isTerritoryPinMode = false;
     const pinBtn = document.getElementById('btn-territory-pin');
     if (pinBtn) {
-        pinBtn.className = "w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 text-gray-500 border border-gray-200 flex items-center justify-center shadow-sm transition active:scale-95";
+        pinBtn.className = "px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm";
+        pinBtn.innerHTML = '<i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF';
     }
 
     const modal = document.getElementById('driver-territory-modal');
@@ -290,28 +302,39 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
             
-            // 🌟 지도를 클릭했을 때, '핀 이동 모드'가 켜져 있을 때만 핀을 이동시킴
+            // 🌟 지도를 클릭했을 때, '핀 이동 모드'가 켜져 있을 때만 핀을 새로운 곳으로 이동시킴
             kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
                 if (isTerritoryPinMode) {
                     setTerritoryCenter(mouseEvent.latLng); 
                 }
             });
         }
+        
+        // 처음 모달을 열 때는 지도는 움직일 수 있게 (OFF 상태)
+        territoryMap.setDraggable(true); 
         territoryMap.relayout(); 
         
         if (territoryMarker) territoryMarker.setMap(null);
         territoryCircles.forEach(c => c.setMap(null)); territoryCircles = [];
         otherTerritoryOverlays.forEach(ov => ov.setMap(null)); otherTerritoryOverlays = [];
 
+        let centerPos = new kakao.maps.LatLng(37.566826, 126.978656);
+
         if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
-            const pos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
-            territoryMap.setCenter(pos); setTerritoryCenter(pos);
+            centerPos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
+            territoryMap.setCenter(centerPos); 
+            setTerritoryCenter(centerPos);
         } else {
             const savedBase = localStorage.getItem('deliveryProCompanyBase');
             if (savedBase) {
                 const baseData = JSON.parse(savedBase);
-                if (baseData.lat && baseData.lng) territoryMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng));
-            } else territoryMap.setCenter(new kakao.maps.LatLng(37.566826, 126.978656));
+                if (baseData.lat && baseData.lng) {
+                    centerPos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
+                    territoryMap.setCenter(centerPos);
+                }
+            } else {
+                territoryMap.setCenter(centerPos);
+            }
             const addrDisplayEl = document.getElementById('territory-selected-address');
             if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
         }
@@ -332,7 +355,14 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
             }
         });
 
-        setTimeout(() => { if (territoryMap) territoryMap.relayout(); }, 200);
+        // 🌟 모달 렌더링 애니메이션 딜레이로 인해 핀이 우측으로 밀리는 카카오맵 버그 해결
+        setTimeout(() => { 
+            if (territoryMap) {
+                territoryMap.relayout(); 
+                // relayout 직후에 저장해둔 중앙 좌표(또는 핀 위치)로 지도를 강제 재정렬
+                territoryMap.setCenter(territoryMarker ? territoryMarker.getPosition() : centerPos);
+            }
+        }, 300);
     }, 200);
 }
 
@@ -379,8 +409,17 @@ export function setTerritoryCenter(latLng) {
         if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
     });
 
-    territoryMarker = new kakao.maps.Marker({ position: latLng });
+    // 🌟 마커 생성 시 현재 isTerritoryPinMode 에 맞춰 마커 드래그 속성 주입
+    territoryMarker = new kakao.maps.Marker({ 
+        position: latLng,
+        draggable: isTerritoryPinMode 
+    });
     territoryMarker.setMap(territoryMap);
+
+    // 🌟 마커를 마우스로 직접 잡고 드래그(움직임) 완료 시, 원(반경) 범위도 함께 이동하도록 연결
+    kakao.maps.event.addListener(territoryMarker, 'dragend', function() {
+        setTerritoryCenter(territoryMarker.getPosition());
+    });
 
     let r1, r2, r3;
     if (state.currentTerritoryScale === 'dong') { r1 = 1500; r2 = 3000; r3 = 5000; } 
