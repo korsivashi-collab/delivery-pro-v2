@@ -6,7 +6,7 @@ import {
     getBatchMemosFromFirestore, saveMemoToFirestore, likeMemoInFirestore, 
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
     deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto,
-    firebaseDisconnectTMS // 🌟 [추가됨] TMS 연결 해제를 위한 API 함수
+    firebaseSetTmsPermission // 🌟 [변경됨] 차단/허용 상태를 기록하는 API 함수
 } from './api.js';
 import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 
@@ -40,7 +40,6 @@ export function getOrCreateDeviceId() {
 }
 
 export function startGpsWatcher() {
-    // 🌟 [추가됨] GPS 설정 스위치가 꺼져있으면 작동하지 않음
     if (localStorage.getItem('deliveryProGpsEnabled') === 'false') return; 
 
     if (!navigator.geolocation || gpsWatchId !== null) return;
@@ -115,6 +114,9 @@ export async function initApp() {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
             if (res.valid) {
                 localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
+                // 🌟 [추가됨] 앱 시작 시 서버의 차단/허용 상태를 기기 로컬 저장소에 동기화
+                localStorage.setItem('deliveryProAllowTms', res.allowTms !== false ? 'true' : 'false');
+                
                 unlockApp();
                 updateExpireBadge(res.expireDate);
                 startLicenseRealtimeWatcher(res.actualKey || savedKey);
@@ -170,6 +172,8 @@ function startLicenseRealtimeWatcher(key) {
     }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
+        // 🌟 [추가됨] 실시간으로 관제 쪽에서 상태가 변하면 동기화
+        localStorage.setItem('deliveryProAllowTms', docData.allowTms !== false ? 'true' : 'false');
         updatePhotoCompButtonState(!!linkedKey);
     });
 }
@@ -196,13 +200,11 @@ function updateExpireBadge(serverDate) {
     badge.classList.remove('hidden');
 }
 
-// 🌟 [수정됨] 사진 완료 버튼 상태 제어 (제한 해제)
 function updatePhotoCompButtonState(isLinked) {
     const btn = document.getElementById('btn-photo-comp');
     const subtext = document.getElementById('photo-comp-subtext');
     if (!btn || !subtext) return;
 
-    // 관제 연결 여부와 관계없이 버튼은 항상 활성화
     btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
     
     if (isLinked) {
@@ -257,6 +259,9 @@ export async function verifyLicense() {
             localStorage.setItem('deliveryProKey', actualKey);
             localStorage.setItem('deliveryProUserPhone', formattedPhone); 
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
+            // 🌟 [추가됨] 로그인 시 차단 상태 동기화
+            localStorage.setItem('deliveryProAllowTms', res.allowTms !== false ? 'true' : 'false');
+
             if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
             
             unlockApp();
@@ -328,6 +333,8 @@ export async function startFreeTrial() {
             localStorage.setItem('deliveryProUserPhone', phoneInput);
             localStorage.setItem('deliveryProExpireDate', res.expireDate);
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
+            localStorage.setItem('deliveryProAllowTms', 'true'); // 🌟 체험판은 시작 시 무조건 허용
+
             alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
             closeTrialModal();
             unlockApp();
@@ -1142,7 +1149,6 @@ export function closeCompletionModal() {
     pendingCompletionId = null;
 }
 
-// 🌟 [수정됨] 제한 없이 사진 선택 창 호출
 export function triggerPhotoCompletion() {
     document.getElementById('completion-photo-input')?.click();
 }
@@ -1474,15 +1480,15 @@ export function initPhotoCompletion() {
     });
 }
 
-// 🌟 [추가됨] 모달 제어 및 스위치 로직
+// 🌟 [추가됨] 설정창 호출 및 동기화 처리
 export function openSettingsModal() {
-    const dispatchKey = localStorage.getItem('deliveryProDispatchKey');
-    const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false'; // 기본값 true
+    const isTmsAllowed = localStorage.getItem('deliveryProAllowTms') !== 'false'; // 기본값 허용
+    const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false'; // 기본값 허용
     
     const tmsToggle = document.getElementById('tms-toggle');
     const gpsToggle = document.getElementById('gps-toggle');
     
-    if (tmsToggle) tmsToggle.checked = !!dispatchKey;
+    if (tmsToggle) tmsToggle.checked = isTmsAllowed;
     if (gpsToggle) gpsToggle.checked = isGpsEnabled;
     
     document.getElementById('settings-modal')?.classList.remove('hidden');
@@ -1492,36 +1498,31 @@ export function closeSettingsModal() {
     document.getElementById('settings-modal')?.classList.add('hidden');
 }
 
+// 🌟 [수정됨] 스위치를 끄면 서버에 차단 상태 기록 및 연결 초기화, 켜면 허용 기록
 export async function toggleTMS(isChecked) {
     const tmsToggle = document.getElementById('tms-toggle');
     const myKey = localStorage.getItem('deliveryProKey');
     
-    if (!isChecked) {
-        if (confirm("TMS(관제) 연결을 해제하시겠습니까?\n해제 시 소속 정보가 초기화되며 배송 자동할당 및 관제 메시지를 받을 수 없습니다.")) {
-            if (myKey && typeof firebaseDisconnectTMS === 'function') {
-                showLoading("TMS 연결 해제 중...");
-                try {
-                    await firebaseDisconnectTMS(myKey);
-                    localStorage.removeItem('deliveryProDispatchKey');
-                    updatePhotoCompButtonState(false);
-                    hideLoading();
-                    alert("TMS 연결이 안전하게 해제되었습니다.\n이제 다른 관제 계정에 새롭게 연결될 수 있습니다.");
-                } catch(e) {
-                    hideLoading();
-                    alert("해제 중 오류가 발생했습니다: " + e.message);
-                    if (tmsToggle) tmsToggle.checked = true; // 실패 시 원상복구
-                }
-            } else {
-                localStorage.removeItem('deliveryProDispatchKey');
-                updatePhotoCompButtonState(false);
-            }
+    if (!myKey || typeof firebaseSetTmsPermission !== 'function') return;
+
+    showLoading("설정 변경 중...");
+    try {
+        await firebaseSetTmsPermission(myKey, isChecked);
+        localStorage.setItem('deliveryProAllowTms', isChecked ? 'true' : 'false');
+        
+        if (!isChecked) {
+            localStorage.removeItem('deliveryProDispatchKey');
+            updatePhotoCompButtonState(false);
+            hideLoading();
+            alert("TMS 연결이 차단되었습니다.\n기존 소속 정보가 초기화되었으며, 더 이상 관제 센터에서 기사님을 강제로 연결할 수 없습니다.");
         } else {
-            // 취소 시 스위치를 다시 원래대로(true)
-            if (tmsToggle) tmsToggle.checked = true;
+            hideLoading();
+            alert("TMS 연결이 허용되었습니다.\n본사 또는 관제 센터 관리자에게 기사님의 '라이선스 키'를 전달하여 시스템에 등록을 요청해 주세요.");
         }
-    } else {
-        alert("TMS(관제) 연결은 스스로 활성화할 수 없습니다.\n본사 또는 관제 센터(사무실) 관리자에게 기사님의 '라이선스 키'를 전달하여 시스템에 등록을 요청해 주세요.");
-        if (tmsToggle) tmsToggle.checked = false; // 스스로 활성화 불가
+    } catch(e) {
+        hideLoading();
+        alert("설정 변경 중 오류가 발생했습니다: " + e.message);
+        if (tmsToggle) tmsToggle.checked = !isChecked; // 실패 시 스위치 원상복구
     }
 }
 
@@ -1578,7 +1579,6 @@ window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
-// 🌟 [추가됨] window 객체에 연결
 window.openSettingsModal = openSettingsModal;
 window.closeSettingsModal = closeSettingsModal;
 window.toggleTMS = toggleTMS;

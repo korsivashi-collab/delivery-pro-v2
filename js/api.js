@@ -114,7 +114,8 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
         expireDate: data.expireDate, 
         phone: phone, 
         actualKey: docSnap.id,
-        dispatchKey: data.dispatchKey || "" 
+        dispatchKey: data.dispatchKey || "",
+        allowTms: data.allowTms !== false // 🌟 추가됨: 기본값 true로 취급
     };
 }
 
@@ -246,6 +247,7 @@ export async function firebaseStartTrial(phone, deviceId) {
         expireDate: expDateStr,
         status: 'active',
         dispatchKey: '',
+        allowTms: true, // 🌟 처음엔 무조건 허용
         createdAt: now.getTime()
     });
 
@@ -398,8 +400,8 @@ export async function firebaseClearDeviceData(key) {
     }
 }
 
-// 🌟 9. [추가됨] TMS(관제) 연결 해제 함수
-export async function firebaseDisconnectTMS(key) {
+// 🌟 9. [변경됨] TMS(관제) 연결 허용/차단 상태 제어 함수
+export async function firebaseSetTmsPermission(key, isAllowed) {
     try {
         if (!key) throw new Error("유효한 라이선스 키 값이 없습니다.");
         
@@ -416,13 +418,18 @@ export async function firebaseDisconnectTMS(key) {
         }
         
         if (docSnap.exists()) {
-            // 관제 연결 정보를 비워버림
-            await updateDoc(docRef, { dispatchKey: "" });
+            if (isAllowed) {
+                // 스위치를 켜면: 관제 연결을 허용함
+                await updateDoc(docRef, { allowTms: true });
+            } else {
+                // 스위치를 끄면: 관제 연결을 차단하고, 기존 연결도 끊음
+                await updateDoc(docRef, { allowTms: false, dispatchKey: "" });
+            }
         } else {
             throw new Error("서버에서 계정 정보를 찾을 수 없습니다.");
         }
     } catch(e) {
-        console.error("TMS 연결 해제 오류:", e);
+        console.error("TMS 상태 변경 오류:", e);
         throw e;
     }
 }
