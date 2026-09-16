@@ -5,7 +5,8 @@ import {
     startDispatchMessageListener, firebaseStartTrial, getMemosFromFirestore, 
     getBatchMemosFromFirestore, saveMemoToFirestore, likeMemoInFirestore, 
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
-    deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto 
+    deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto,
+    firebaseSetTmsPermission // 🌟 새로 추가된 부분
 } from './api.js';
 import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 
@@ -34,7 +35,6 @@ let gpsWatchId = null;
 // ==========================================
 function getPureAddress(address) {
     if (!address) return "";
-    // [상호명] 패턴이 존재하면 그 뒷부분의 주소만 추출, 없으면 그대로 사용
     let match = address.match(/^\[(.*?)\]\s*(.*)$/);
     return match ? match[2].trim() : address.trim();
 }
@@ -705,12 +705,8 @@ function initSortable() {
     }
 }
 
-// ==========================================
-// 🌟 [원칙 적용] 메모를 서버에서 가져올 때 '순수 주소' 배열을 만들어 요청
-// ==========================================
 async function preloadBatchMemos() {
     if (destinations.length === 0) return;
-    // 모든 배송지 주소에서 상호명을 제거한 순수 주소 추출
     const addresses = destinations.map(d => getPureAddress(d.address));
     const uniqueAddrs = [...new Set(addresses)];
     try { 
@@ -720,9 +716,6 @@ async function preloadBatchMemos() {
     }
 }
 
-// ==========================================
-// 🌟 [원칙 적용] 미리보기를 렌더링 할 때 '순수 주소'로 메모 캐시 검색
-// ==========================================
 function renderMemoPreview(dest) {
     const previewEl = document.getElementById(`memo-preview-${dest.id}`); 
     const tagsEl = document.getElementById(`memo-tags-${dest.id}`);
@@ -951,13 +944,10 @@ export function toggleEtcTag(btn) {
     else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); }
 }
 
-// ==========================================
-// 🌟 [원칙 적용] 메모 모달을 열 때 상호명이 제거된 주소 기준으로 검색
-// ==========================================
 export async function openMemoModal(id) {
     const item = destinations.find(d => d.id === id); if (!item) return; 
     
-    currentMemoAddress = getPureAddress(item.address); // <-- [적용됨] 순수 주소 기반 동작
+    currentMemoAddress = getPureAddress(item.address);
     
     const titleEl = document.getElementById('memo-modal-title');
     if (titleEl) titleEl.innerText = currentMemoAddress; 
@@ -1050,9 +1040,6 @@ function resetMemoForm() {
     if (countEl) countEl.innerText = "0 / 30";
 }
 
-// ==========================================
-// 🌟 [원칙 적용] 메모 등록 시 '순수 주소' 기준으로만 저장하고 화면 갱신
-// ==========================================
 export async function saveCurrentMemo() {
     const rawText = (document.getElementById('memo-input')?.value || '').trim();
     let tags = [];
@@ -1067,7 +1054,6 @@ export async function saveCurrentMemo() {
 
     showLoading("주차정보 등록/수정 중...");
     try {
-        // currentMemoAddress는 이미 괄호 [상호명]이 제거된 순수 주소입니다.
         await saveMemoToFirestore(currentMemoAddress, getOrCreateDeviceId(), finalMemo);
         hideLoading(); alert("주차 정보가 등록(수정)되었습니다.");
         
@@ -1076,9 +1062,6 @@ export async function saveCurrentMemo() {
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
 
-// ==========================================
-// 🌟 [원칙 적용] 좋아요 및 갱신 처리 시 '순수 주소' 유지
-// ==========================================
 export async function likeMemo(docId) {
     try {
         await likeMemoInFirestore(docId);
@@ -1501,6 +1484,75 @@ export function initPhotoCompletion() {
     });
 }
 
+// ==========================================
+// 🌟 [추가됨] 연결 설정 모달 및 TMS/GPS 제어 함수들
+// ==========================================
+let pendingTmsState = null;
+
+export function openSettingsModal() {
+    document.getElementById('settings-modal')?.classList.remove('hidden');
+}
+
+export function closeSettingsModal() {
+    document.getElementById('settings-modal')?.classList.add('hidden');
+}
+
+export function toggleTMS(isChecked) {
+    if (!isChecked) {
+        document.getElementById('tms-confirm-modal')?.classList.remove('hidden');
+        pendingTmsState = false;
+    } else {
+        pendingTmsState = true;
+        confirmTMSToggle();
+    }
+}
+
+export function cancelTMSToggle() {
+    const tmsToggle = document.getElementById('tms-toggle');
+    if (tmsToggle) tmsToggle.checked = true;
+    document.getElementById('tms-confirm-modal')?.classList.add('hidden');
+}
+
+export async function confirmTMSToggle() {
+    const key = localStorage.getItem('deliveryProKey');
+    if (!key) return;
+
+    showLoading("TMS 설정 변경 중...");
+    try {
+        await firebaseSetTmsPermission(key, pendingTmsState);
+        document.getElementById('tms-confirm-modal')?.classList.add('hidden');
+        
+        const descEl = document.getElementById('tms-success-desc');
+        if (descEl) {
+            descEl.innerHTML = pendingTmsState 
+                ? "관제(TMS) 연결이 <b>허용</b>되었습니다.<br>이제 사무실과 데이터가 동기화됩니다." 
+                : "관제(TMS) 연결이 <b>차단</b>되었습니다.<br>기존 연결이 해제되었습니다.";
+        }
+        document.getElementById('tms-success-modal')?.classList.remove('hidden');
+    } catch (e) {
+        alert("상태 변경 중 오류가 발생했습니다: " + e.message);
+        const tmsToggle = document.getElementById('tms-toggle');
+        if (tmsToggle) tmsToggle.checked = !pendingTmsState; // 실패 시 상태 원복
+    } finally {
+        hideLoading();
+    }
+}
+
+export function toggleGPS(isChecked) {
+    if (isChecked) {
+        startGpsWatcher();
+    } else {
+        if (typeof gpsWatchId !== 'undefined' && gpsWatchId !== null) {
+            navigator.geolocation.clearWatch(gpsWatchId);
+            gpsWatchId = null;
+        }
+    }
+}
+
+
+// ==========================================
+// 🌟 Window 전역 객체 바인딩 (기존 + 신규 함수)
+// ==========================================
 window.logout = logout;
 window.renderList = renderList;
 window.verifyLicense = verifyLicense;
@@ -1540,6 +1592,14 @@ window.initPhotoCompletion = initPhotoCompletion;
 window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
+
+// 🌟 이번에 새로 추가된 설정창 관련 함수들 연결
+window.openSettingsModal = openSettingsModal;
+window.closeSettingsModal = closeSettingsModal;
+window.toggleTMS = toggleTMS;
+window.cancelTMSToggle = cancelTMSToggle;
+window.confirmTMSToggle = confirmTMSToggle;
+window.toggleGPS = toggleGPS;
 
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
