@@ -180,7 +180,6 @@
                     </h1>
                     
                     <div class="flex items-center gap-1.5 shrink-0">
-                        <!-- 연결설정 버튼 추가 -->
                         <button onclick="window.openSettingsModal()" class="relative bg-gray-50 hover:bg-gray-100 text-gray-600 border border-gray-200 px-2.5 py-1.5 rounded-xl text-xs font-black shadow-xs transition active:scale-95 flex items-center gap-1.5" title="연결설정">
                             <i class="fa-solid fa-gear text-xs"></i>
                             <span>연결설정</span>
@@ -246,7 +245,6 @@
     <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[13px] z-0 select-none pointer-events-none tracking-tight">
         밀어서 동선 최적화 <i class="fa-solid fa-angles-right ml-1.5 animate-pulse"></i>
     </div>
-    <!-- 아이폰 스타일의 우측 방향 화살표(>>) 아이콘으로 변경 -->
     <div id="swipe-btn" class="absolute left-1 w-[44px] h-[44px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
         <i class="fa-solid fa-angles-right text-lg"></i>
     </div>
@@ -288,7 +286,6 @@
 
             <div class="space-y-2 mt-4">
                 <div class="grid grid-cols-2 gap-2">
-                    <!-- 변경된 사진 전송 버튼 -->
                     <button onclick="window.triggerPhotoCompletion()" id="btn-photo-comp" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer">
                         <span class="flex items-center gap-1 font-black text-sm"><i class="fa-solid fa-camera"></i> 사진 전송</span>
                         <span id="photo-comp-subtext" class="text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter">관제/일반 모두 사용 가능</span>
@@ -332,10 +329,8 @@
                         <p class="text-[10px] text-gray-500 mt-0.5">계정당 1개만 등록되며, 다시 쓰면 이전 내용이 수정됩니다.</p>
                     </div>
                     
-                    <!-- 레이아웃 다이어트: Grid 2열 배치로 부피 축소 -->
                     <div class="space-y-3 mb-3">
                         <div class="grid grid-cols-2 gap-3">
-                            <!-- 1. 높이 태그 (2개로 축소) -->
                             <div>
                                 <span class="text-[10px] font-bold text-gray-400 block mb-1">주차장 높이</span>
                                 <div class="flex gap-1.5">
@@ -344,7 +339,6 @@
                                 </div>
                             </div>
                             
-                            <!-- 2. 시간 태그 -->
                             <div>
                                 <span class="text-[10px] font-bold text-gray-400 block mb-1">무료 회차 시간</span>
                                 <div class="flex flex-wrap gap-1.5">
@@ -356,7 +350,6 @@
                             </div>
                         </div>
                         
-                        <!-- 3. 간편 입력 태그 -->
                         <div>
                             <span class="text-[10px] font-bold text-gray-400 block mb-1">간편 입력 (다중선택 가능)</span>
                             <div class="flex flex-wrap gap-1.5">
@@ -389,7 +382,6 @@
             </h3>
             
             <div class="space-y-5 mb-6">
-                <!-- TMS 연결 토글 -->
                 <div class="flex items-center justify-between">
                     <div>
                         <h4 class="text-sm font-bold text-gray-800">TMS 연결</h4>
@@ -403,7 +395,6 @@
                 
                 <div class="w-full h-px bg-gray-100"></div>
 
-                <!-- GPS 위치 확인 토글 -->
                 <div class="flex items-center justify-between">
                     <div>
                         <h4 class="text-sm font-bold text-gray-800">GPS 위치 확인</h4>
@@ -417,6 +408,35 @@
             </div>
             
             <button onclick="window.closeSettingsModal()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-3.5 rounded-xl transition text-sm active:scale-95 shadow-md">닫기</button>
+        </div>
+    </div>
+
+    <!-- 🌟 TMS 연결 차단 확인 커스텀 모달 🌟 -->
+    <div id="tms-confirm-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center">
+            <div class="w-14 h-14 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner">
+                <i class="fa-solid fa-link-slash"></i>
+            </div>
+            <h3 class="font-black text-gray-900 text-lg mb-2">TMS 연결을 차단할까요?</h3>
+            <p class="text-xs text-gray-500 font-bold mb-6 leading-relaxed">
+                차단 시 기존 관제 소속이 해제되며,<br>새로운 연결 요청도 거부됩니다.
+            </p>
+            <div class="flex gap-2">
+                <button onclick="window.cancelTMSToggle()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3.5 rounded-xl text-sm transition">취소 (유지)</button>
+                <button onclick="window.confirmTMSToggle()" class="flex-1 bg-red-600 hover:bg-red-700 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95">차단하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 🌟 TMS 상태 변경 완료 커스텀 모달 🌟 -->
+    <div id="tms-success-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center">
+            <div id="tms-success-icon" class="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner">
+                <i class="fa-solid fa-check"></i>
+            </div>
+            <h3 id="tms-success-title" class="font-black text-gray-900 text-lg mb-2">상태 변경 완료</h3>
+            <p id="tms-success-desc" class="text-xs text-gray-500 font-bold mb-6 leading-relaxed"></p>
+            <button onclick="document.getElementById('tms-success-modal').classList.add('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95">확인했습니다</button>
         </div>
     </div>
 
