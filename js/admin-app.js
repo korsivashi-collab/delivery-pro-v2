@@ -36,7 +36,7 @@ import {
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
     openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver,
     renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
-    runAutoDispatchAlgorithm, toggleDispatchDriver, adjustDriverWeight,
+    runAutoDispatchAlgorithm, toggleDispatchDriver, adjustDriverWeight, adjustDriverScope,
     saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI
 } from "./admin-dispatch-core.js";
 
@@ -72,7 +72,7 @@ import {
     fitMapToAllDrivers, openDriverTerritoryModal, closeDriverTerritoryModal,
     setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
     openAllTerritoriesMap, closeAllTerritoriesMap,
-    toggleTerritoryPinMode, searchTerritoryAddress, adjustModalTerritorySize // 🌟 새로 추가된 권역 조절 함수 임포트
+    toggleTerritoryPinMode, searchTerritoryAddress
 } from "./admin-dispatch-territory.js";
 
 // 6. 배송 리포트(엑셀) 추출
@@ -395,7 +395,7 @@ window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.focusMapPosition = focusMapPosition;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
-// 🌟 삭제된 이전 권역조절 함수 윈도우 바인딩 해제 완료
+window.adjustDriverScope = adjustDriverScope;
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
@@ -437,7 +437,6 @@ window.openAllTerritoriesMap = openAllTerritoriesMap;
 window.closeAllTerritoriesMap = closeAllTerritoriesMap;
 window.toggleTerritoryPinMode = toggleTerritoryPinMode;
 window.searchTerritoryAddress = searchTerritoryAddress;
-window.adjustModalTerritorySize = adjustModalTerritorySize; // 🌟 새로 추가된 권역 조절 함수 바인딩
 
 // [관제 엑셀(Excel)]
 window.loadExcelFromFirebase = loadExcelFromFirebase;
