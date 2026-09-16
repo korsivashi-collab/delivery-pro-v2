@@ -2,7 +2,7 @@
 
 import { state, getLocalDateString } from "./admin-state.js";
 // formatNumber 함수는 아직 admin-dispatch.js(추후 admin-dispatch-core.js)에 있으므로 해당 위치에서 가져옵니다.
-import { formatNumber } from "./admin-dispatch.js"; 
+import { formatNumber } from "./admin-dispatch-core.js";
 
 // ==========================================
 // 1. 주문 명세서 출력 모달 열기 & 데이터 세팅
