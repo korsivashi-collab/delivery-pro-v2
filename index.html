@@ -19,7 +19,6 @@
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .pt-safe { padding-top: max(1.5rem, env(safe-area-inset-top)); }
         .pb-safe { padding-bottom: max(1.5rem, env(safe-area-inset-bottom)); }
-        .tag-scroll-container { display: flex; gap: 0.375rem; overflow-x: auto; white-space: nowrap; padding-bottom: 0.25rem; }
         
         .sortable-drag {
             opacity: 0.95 !important;
@@ -45,17 +44,15 @@
         }
     </style>
 
-    <!-- 🌟 단 하나뿐인 모듈 진입점 (중복 코드 완벽 제거) -->
     <script type="module">
         import { initApp } from './js/app.js';
 
-        // Kakao SDK 초기화 (앱 시작 시 1회만 실행)
+        // Kakao SDK 초기화
         const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
         if (window.Kakao && !window.Kakao.isInitialized()) { 
             window.Kakao.init(KAKAO_JS_KEY); 
         }
 
-        // 앱 실행
         window.onload = () => {
             initApp();
         };
@@ -225,9 +222,9 @@
 
         <main class="flex-1 overflow-y-auto px-4 py-3 hide-scrollbar bg-gray-100 relative">
             <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px]">
-                <li id="empty-state" class="text-center text-gray-400 py-16 no-drag">
+                <li id="empty-state" class="text-center text-gray-400 py-16 no-drag border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
-                    <p class="font-medium text-sm">주소지를 스캔하면 동선이 생성됩니다.</p>
+                    <p class="font-medium text-xs">주소지를 스캔하면 동선이 생성됩니다.</p>
                 </li>
             </ul>
         </main>
@@ -327,28 +324,35 @@
                         <span class="text-xs font-black text-yellow-700"><i class="fa-solid fa-building mr-1"></i>주차 및 건물정보 등록/수정</span>
                         <p class="text-[10px] text-gray-500 mt-0.5">계정당 1개만 등록되며, 다시 쓰면 이전 내용이 수정됩니다.</p>
                     </div>
+                    
+                    <!-- 🌟 레이아웃 다이어트: Grid 2열 배치로 부피 축소 -->
                     <div class="space-y-3 mb-3">
-                        <div>
-                            <span class="text-[10px] font-bold text-gray-400 block mb-1">주차장 높이</span>
-                            <div class="tag-scroll-container">
-                                <button onclick="window.selectHeightTag(this, '2.3m')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">2.3m</button>
-                                <button onclick="window.selectHeightTag(this, '2.5m 이상')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">2.5m 이상</button>
-                                <button onclick="window.selectHeightTag(this, '제한 없음')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">제한 없음</button>
+                        <div class="grid grid-cols-2 gap-3">
+                            <!-- 1. 높이 태그 (2개로 축소) -->
+                            <div>
+                                <span class="text-[10px] font-bold text-gray-400 block mb-1">주차장 높이</span>
+                                <div class="flex gap-1.5">
+                                    <button onclick="window.selectHeightTag(this, '2.2m 이하')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.2m 이하</button>
+                                    <button onclick="window.selectHeightTag(this, '2.3m 이상')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.3m 이상</button>
+                                </div>
+                            </div>
+                            
+                            <!-- 2. 시간 태그 -->
+                            <div>
+                                <span class="text-[10px] font-bold text-gray-400 block mb-1">무료 회차 시간</span>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button onclick="window.selectTimeTag(this, '10분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">10분</button>
+                                    <button onclick="window.selectTimeTag(this, '15분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">15분</button>
+                                    <button onclick="window.selectTimeTag(this, '30분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">30분</button>
+                                    <button onclick="window.selectTimeTag(this, '과금 없음')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">무료</button>
+                                </div>
                             </div>
                         </div>
+                        
+                        <!-- 3. 간편 입력 태그 -->
                         <div>
-                            <span class="text-[10px] font-bold text-gray-400 block mb-1">무료 회차(주차) 시간</span>
-                            <div class="tag-scroll-container">
-                                <button onclick="window.selectTimeTag(this, '10분')" class="time-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">10분</button>
-                                <button onclick="window.selectTimeTag(this, '15분')" class="time-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">15분</button>
-                                <button onclick="window.selectTimeTag(this, '30분')" class="time-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">30분</button>
-                                <button onclick="window.selectTimeTag(this, '과금 없음')" class="time-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">과금 없음</button>
-                            </div>
-                        </div>
-                        <div>
-                            <!-- 🌟 엘리베이터 버튼 추가됨 -->
                             <span class="text-[10px] font-bold text-gray-400 block mb-1">간편 입력 (다중선택 가능)</span>
-                            <div class="tag-scroll-container">
+                            <div class="flex flex-wrap gap-1.5">
                                 <button onclick="window.toggleEtcTag(this)" data-val="도로변 주차" class="etc-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">도로변 주차</button>
                                 <button onclick="window.toggleEtcTag(this)" data-val="지하주차장" class="etc-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">지하주차장</button>
                                 <button onclick="window.toggleEtcTag(this)" data-val="지상주차장" class="etc-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-3 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100">지상주차장</button>
@@ -356,6 +360,7 @@
                             </div>
                         </div>
                     </div>
+                    
                     <textarea id="memo-input" rows="2" maxlength="30" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm font-medium rounded-xl focus:ring-yellow-500 focus:border-yellow-500 block p-3 outline-none resize-none" placeholder="주차 위치 상세정보 (최대 30자) 비밀번호 금지!"></textarea>
                     <div class="flex justify-between items-center mt-2">
                         <span id="memo-char-count" class="text-[10px] font-bold text-gray-400">0 / 30</span>
