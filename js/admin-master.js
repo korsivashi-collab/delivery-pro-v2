@@ -44,7 +44,7 @@ export function renderMasterTables() {
 
     renderPagedTableTab('regular', regulars, 'table-body-regular', 'pagination-regular', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
-            <td class="py-3 px-3 font-bold text-gray-400">${idx}</td>
+            <td class="py-3 px-3 font-bold text-gray-400 text-center">${idx}</td>
             <td class="py-3 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
             <td class="py-3 px-3 font-black text-gray-900">${item.phone || '<span class="text-gray-400 text-[11px] font-normal">로그인 대기</span>'}</td>
             <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-700">${item.deviceId || '미등록'}</span></td>
@@ -59,7 +59,7 @@ export function renderMasterTables() {
 
     renderPagedTableTab('trial', trials, 'table-body-trial', 'pagination-trial', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
-            <td class="py-3 px-3 font-bold text-gray-400">${idx}</td>
+            <td class="py-3 px-3 font-bold text-gray-400 text-center">${idx}</td>
             <td class="py-3 px-3 font-mono font-black text-emerald-600 select-all">${item.key}</td>
             <td class="py-3 px-3 font-black text-gray-900">${item.phone || '-'}</td>
             <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-700">${item.deviceId || '-'}</span></td>
@@ -78,7 +78,7 @@ export function renderMasterTables() {
         const proBadge = item.isPro ? `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-black ml-1 border border-amber-300"><i class="fa-solid fa-crown text-amber-500"></i> PRO</span>` : ``;
         return `
         <tr class="hover:bg-gray-50/80 transition">
-            <td class="py-3 px-3 font-bold text-gray-400">${idx}</td>
+            <td class="py-3 px-3 font-bold text-gray-400 text-center">${idx}</td>
             <td class="py-3 px-3 font-mono font-black text-purple-600 select-all">${item.key}</td>
             <td class="py-3 px-3 font-black text-gray-900">${item.phone ? `<i class="fa-solid fa-phone text-blue-500 mr-1 text-[10px]"></i>${item.phone}` : '<span class="text-gray-400 text-[11px]">연락처 미등록</span>'}</td>
             <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-600">${item.deviceId ? `<i class="fa-solid fa-display text-blue-500 mr-1"></i>${item.deviceId}` : '오프라인'}</span></td>
@@ -103,11 +103,44 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
     const tbody = document.getElementById(tbodyId);
     const pagEl = document.getElementById(paginationId);
     if (!tbody) return;
+
+    // 🌟 [UI 개선] 누락되었던 테이블 헤더(thead)를 동적으로 주입하여 레이아웃 교정
+    const table = tbody.parentElement;
+    if (!table.querySelector('thead')) {
+        const thead = document.createElement('thead');
+        if (tabKey === 'regular' || tabKey === 'trial') {
+            thead.innerHTML = `
+                <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
+                    <th class="py-3 px-3 w-12 text-center">순번</th>
+                    <th class="py-3 px-3">라이선스 키</th>
+                    <th class="py-3 px-3">전화번호</th>
+                    <th class="py-3 px-3">기기 고유번호</th>
+                    <th class="py-3 px-3">만료일</th>
+                    <th class="py-3 px-3">상태</th>
+                    <th class="py-3 px-3 text-center">관리</th>
+                </tr>`;
+        } else if (tabKey === 'dispatch') {
+            thead.innerHTML = `
+                <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
+                    <th class="py-3 px-3 w-12 text-center">순번</th>
+                    <th class="py-3 px-3">관제 라이선스 키</th>
+                    <th class="py-3 px-3">사무실 전화번호</th>
+                    <th class="py-3 px-3">기기 고유번호</th>
+                    <th class="py-3 px-3">연결된 기사</th>
+                    <th class="py-3 px-3">만료일</th>
+                    <th class="py-3 px-3">상태</th>
+                    <th class="py-3 px-3 text-center">관리</th>
+                </tr>`;
+        }
+        table.insertBefore(thead, tbody);
+    }
+
     if (list.length === 0) {
         tbody.innerHTML = `<tr><td colspan="8" class="py-12 text-center text-gray-400 font-bold">등록된 내역이 없습니다.</td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
         return;
     }
+
     const total = list.length;
     const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
     let curPage = state.masterPages[tabKey] || 1;
@@ -353,6 +386,23 @@ export function renderMemosTable(memos) {
     const tbody = document.getElementById('table-body-memos');
     const pagEl = document.getElementById('pagination-memos');
     if (!tbody) return;
+
+    // 🌟 [UI 개선] 누락되었던 테이블 헤더(thead)를 동적으로 주입
+    const table = tbody.parentElement;
+    if (!table.querySelector('thead')) {
+        const thead = document.createElement('thead');
+        thead.innerHTML = `
+            <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
+                <th class="py-3 px-3 w-12 text-center">순번</th>
+                <th class="py-3 px-3">배송지 주소</th>
+                <th class="py-3 px-3">등록된 주차/건물 메모</th>
+                <th class="py-3 px-3 text-center">작성 일시</th>
+                <th class="py-3 px-3 text-center">추천수(좋아요)</th>
+                <th class="py-3 px-3 text-center">관리</th>
+            </tr>`;
+        table.insertBefore(thead, tbody);
+    }
+
     if (!memos || memos.length === 0) {
         tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-gray-400 font-bold">등록된 주차 메모가 없습니다.</td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
@@ -385,12 +435,12 @@ export function renderMemosTable(memos) {
 
     tbody.innerHTML = pagedMemos.map((m, idx) => `
         <tr class="hover:bg-gray-50 transition">
-            <td class="py-3 px-3 font-bold text-gray-400">${start + idx + 1}</td>
-            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate">${m.address}</td>
-            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate">${m.memo}</td>
-            <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap">${m.time || '-'}</td>
+            <td class="py-3 px-3 font-bold text-gray-400 text-center">${start + idx + 1}</td>
+            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate" title="${m.address}">${m.address}</td>
+            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate" title="${m.memo}">${m.memo}</td>
+            <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap text-center">${m.time || '-'}</td>
             <td class="py-3 px-3 text-center font-bold text-blue-600">${m.likes || 0}</td>
-            <td class="py-3 px-3 text-center whitespace-nowrap"><button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px]">삭제</button></td>
+            <td class="py-3 px-3 text-center whitespace-nowrap"><button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95">삭제</button></td>
         </tr>
     `).join('');
     if (pagEl) pagEl.innerHTML = renderPaginationControls('memos', curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');

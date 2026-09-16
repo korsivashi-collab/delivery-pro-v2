@@ -221,6 +221,29 @@ window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
+        
+        // 🌟 [추가됨] 실시간 관제 계정 삭제/정지 감지 및 자동 로그아웃(튕김) 처리 🌟
+        const currentRole = sessionStorage.getItem('deliveryProRole');
+        const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+        
+        if (currentRole === 'DISPATCH' && currentKey) {
+            const myAccount = state.allLicenses.find(l => l.key === currentKey || l.id === currentKey);
+            
+            // 내 계정이 데이터베이스에서 완전히 삭제된 경우
+            if (!myAccount) {
+                alert("⚠️ 관리자에 의해 관제 계정이 삭제되었습니다.\n시스템 보안을 위해 즉시 로그아웃됩니다.");
+                window.systemLogout();
+                return; 
+            }
+            
+            // 내 계정이 '사용 정지(suspended)' 처리된 경우
+            if (myAccount.status === 'suspended') {
+                alert("⚠️ 관리자에 의해 관제 계정 사용이 정지되었습니다.\n시스템 보안을 위해 즉시 로그아웃됩니다.");
+                window.systemLogout();
+                return;
+            }
+        }
+
         if (typeof renderMasterTables === 'function') renderMasterTables();
         if (typeof populateDriverSelect === 'function') populateDriverSelect();
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
