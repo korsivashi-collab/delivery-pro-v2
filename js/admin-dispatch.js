@@ -1106,6 +1106,13 @@ export async function confirmLinkDriver() {
         }
 
         if (!targetLic) { alert("기사 계정을 찾을 수 없습니다."); return; }
+
+        // 🌟 [추가됨] 기사가 TMS 연결 스위치를 껐는지 확인 (연결 원천 차단)
+        if (targetLic.allowTms === false) {
+            alert(`해당 기사님([${targetLic.phone || targetLic.key}])이 앱에서 'TMS 연결'을 차단(OFF) 상태로 설정했습니다.\n기사님에게 앱의 [연결설정]에서 스위치를 켜달라고 요청해 주셔야 연결이 가능합니다.`);
+            return;
+        }
+
         if (targetLic.dispatchKey && targetLic.dispatchKey !== currentKey && currentKey !== 'MASTER') {
             alert(`이미 다른 관제소([${targetLic.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); return;
         }
@@ -1852,7 +1859,7 @@ export function executeExcelExport() {
     const isCanceled = document.getElementById('chk-export-canceled').checked;
 
     if (!startDateStr || !endDateStr) { alert("시작일과 종료일을 모두 선택해주세요."); return; }
-    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 없습니다. 날짜를 다시 확인해주세요."); return; }
+    if (startDateStr > endDateStr) { alert("시작일이 종료일보다 클 수 세 없습니다. 날짜를 다시 확인해주세요."); return; }
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
