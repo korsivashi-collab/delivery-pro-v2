@@ -19,7 +19,7 @@ import {
     changeHistoryPage, toggleHistoryNoticeMode, toggleHistoryItemSelection,
     toggleHistorySelectAll, sendHistoryNoticeToSelected, setHistoryMasterSubTab,
     deleteAccountFromHistory, renderAccountHistoryView, openMasterNoticeHistoryModal,
-    closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
+    closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList, sortMemos
 } from "./admin-master.js";
 
 // ==========================================
@@ -36,7 +36,8 @@ import {
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
     openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver,
     renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
-    runAutoDispatchAlgorithm
+    runAutoDispatchAlgorithm, toggleDispatchDriver, adjustDriverWeight, adjustDriverScope,
+    saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI
 } from "./admin-dispatch-core.js";
 
 // 2. 회사 알림 및 메시지 수발신
@@ -70,7 +71,8 @@ import {
     showFallbackLocation, closeCurrentLocationOverlay, drawAllDriversOnMap,
     fitMapToAllDrivers, openDriverTerritoryModal, closeDriverTerritoryModal,
     setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
-    openAllTerritoriesMap, closeAllTerritoriesMap
+    openAllTerritoriesMap, closeAllTerritoriesMap,
+    toggleTerritoryPinMode, searchTerritoryAddress
 } from "./admin-dispatch-territory.js";
 
 // 6. 배송 리포트(엑셀) 추출
@@ -179,39 +181,55 @@ window.systemLogout = function() {
     window.location.reload();
 };
 
+// 🌟 에러 방어 코드가 추가된 마스터 대시보드 렌더링 함수
 window.showMasterPanel = function(name = '마스터') {
     state.currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
     if (badge) badge.innerText = name;
     
-    document.getElementById('login-screen').classList.add('hidden');
+    const loginScreen = document.getElementById('login-screen');
+    if (loginScreen) loginScreen.classList.add('hidden');
+    
     const disp = document.getElementById('dispatch-panel');
     if (disp) { disp.classList.add('hidden'); disp.classList.remove('flex'); }
+    
     const mast = document.getElementById('master-panel');
     if (mast) { mast.classList.remove('hidden'); mast.classList.add('flex'); }
     
     window.initMasterDataSync();
-    switchMasterTab('regular');
+    if (typeof switchMasterTab === 'function') switchMasterTab('regular');
 };
 
+// 🌟 에러 방어 코드가 추가된 관제 대시보드 렌더링 함수
 window.showDispatchPanel = function() {
     state.currentUserRole = 'DISPATCH';
-    document.getElementById('login-screen').classList.add('hidden');
-    document.getElementById('dispatch-panel').classList.remove('hidden');
-    document.getElementById('dispatch-panel').classList.add('flex');
+    
+    const loginScreen = document.getElementById('login-screen');
+    if (loginScreen) loginScreen.classList.add('hidden');
+    
+    const dispatchPanel = document.getElementById('dispatch-panel');
+    if (dispatchPanel) {
+        dispatchPanel.classList.remove('hidden');
+        dispatchPanel.classList.add('flex');
+    } else {
+        console.error("오류: HTML에서 dispatch-panel 요소를 찾을 수 없어 UI를 표시하지 못했습니다.");
+    }
 
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
-    if (currentKey) {
+    const subtitle = document.getElementById('dispatch-sub-title');
+    
+    if (currentKey && subtitle) {
         if (localToken && localToken.startsWith('MONITOR-')) {
-            document.getElementById('dispatch-sub-title').innerHTML = `<span class="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black flex items-center gap-1"><i class="fa-solid fa-eye animate-pulse"></i> 마스터 모니터링: [${currentKey}]</span>`;
+            subtitle.innerHTML = `<span class="bg-emerald-100 text-emerald-800 px-1.5 py-0.5 rounded font-black flex items-center gap-1"><i class="fa-solid fa-eye animate-pulse"></i> 마스터 모니터링: [${currentKey}]</span>`;
         } else {
-            document.getElementById('dispatch-sub-title').innerText = `관제 센터 [${currentKey}]`;
+            subtitle.innerText = `관제 센터 [${currentKey}]`;
         }
     }
+    
     if(typeof initKakaoMap === 'function') initKakaoMap();
     window.initMasterDataSync();
-    setDispatchMode('DELIVERY');
+    if(typeof setDispatchMode === 'function') setDispatchMode('DELIVERY');
 };
 
 // ==========================================
@@ -343,6 +361,7 @@ window.openMasterNoticeHistoryModal = openMasterNoticeHistoryModal;
 window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
 window.renderMasterTables = renderMasterTables;
 window.renderAccountHistoryView = renderAccountHistoryView;
+window.sortMemos = sortMemos;
 
 // [관제 코어]
 window.setDispatchMode = setDispatchMode;
@@ -374,6 +393,12 @@ window.selectDispatchDriver = selectDispatchDriver;
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.focusMapPosition = focusMapPosition;
+window.toggleDispatchDriver = toggleDispatchDriver;
+window.adjustDriverWeight = adjustDriverWeight;
+window.adjustDriverScope = adjustDriverScope;
+window.saveCompanyBaseAddress = saveCompanyBaseAddress;
+window.clearCompanyBaseAddress = clearCompanyBaseAddress;
+window.updateCompanyBaseUI = updateCompanyBaseUI;
 
 // [관제 메시지]
 window.renderMessageSidebar = renderMessageSidebar;
@@ -410,6 +435,8 @@ window.setTerritoryCenter = setTerritoryCenter;
 window.saveDriverTerritory = saveDriverTerritory;
 window.openAllTerritoriesMap = openAllTerritoriesMap;
 window.closeAllTerritoriesMap = closeAllTerritoriesMap;
+window.toggleTerritoryPinMode = toggleTerritoryPinMode;
+window.searchTerritoryAddress = searchTerritoryAddress;
 
 // [관제 엑셀(Excel)]
 window.loadExcelFromFirebase = loadExcelFromFirebase;
