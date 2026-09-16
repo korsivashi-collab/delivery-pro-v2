@@ -180,6 +180,12 @@
                     </h1>
                     
                     <div class="flex items-center gap-1.5 shrink-0">
+                        <!-- 연결설정 버튼 추가 -->
+                        <button onclick="window.openSettingsModal()" class="relative bg-gray-50 hover:bg-gray-100 text-gray-600 border border-gray-200 px-2.5 py-1.5 rounded-xl text-xs font-black shadow-xs transition active:scale-95 flex items-center gap-1.5" title="연결설정">
+                            <i class="fa-solid fa-gear text-xs"></i>
+                            <span>연결설정</span>
+                        </button>
+                        
                         <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2.5 py-1.5 rounded-xl text-xs font-black shadow-xs transition active:scale-95 flex items-center gap-1.5" title="알림 보관함">
                             <i class="fa-solid fa-bell text-xs"></i>
                             <span>알림함</span>
@@ -282,9 +288,10 @@
 
             <div class="space-y-2 mt-4">
                 <div class="grid grid-cols-2 gap-2">
-                    <button onclick="window.triggerPhotoCompletion()" id="btn-photo-comp" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center">
+                    <!-- 변경된 사진 전송 버튼 -->
+                    <button onclick="window.triggerPhotoCompletion()" id="btn-photo-comp" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer">
                         <span class="flex items-center gap-1 font-black text-sm"><i class="fa-solid fa-camera"></i> 사진 전송</span>
-                        <span id="photo-comp-subtext" class="text-[9px] font-normal text-blue-100 mt-0.5 tracking-tighter">(계정 연결 시 사용)</span>
+                        <span id="photo-comp-subtext" class="text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter">관제/일반 모두 사용 가능</span>
                     </button>
                     <button onclick="window.confirmCompletion(null)" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-md text-sm active:scale-95 transition flex items-center justify-center gap-1.5">
                         <i class="fa-solid fa-check"></i> 완료 확정
@@ -325,7 +332,7 @@
                         <p class="text-[10px] text-gray-500 mt-0.5">계정당 1개만 등록되며, 다시 쓰면 이전 내용이 수정됩니다.</p>
                     </div>
                     
-                    <!-- 🌟 레이아웃 다이어트: Grid 2열 배치로 부피 축소 -->
+                    <!-- 레이아웃 다이어트: Grid 2열 배치로 부피 축소 -->
                     <div class="space-y-3 mb-3">
                         <div class="grid grid-cols-2 gap-3">
                             <!-- 1. 높이 태그 (2개로 축소) -->
@@ -371,6 +378,45 @@
             <div class="p-3 bg-white border-t border-gray-200 flex gap-2 z-10 shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)]">
                 <button onclick="window.closeMemoModal()" class="w-full bg-gray-900 text-white font-bold py-3.5 rounded-xl transition text-sm">닫기</button>
             </div>
+        </div>
+    </div>
+
+    <!-- 연결 설정 모달 추가 -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/60 z-[250] flex items-center justify-center p-4 animate-slide-up backdrop-blur-sm">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden">
+            <h3 class="font-black text-gray-900 text-lg mb-6 flex items-center gap-2">
+                <i class="fa-solid fa-gear text-gray-600"></i> 연결 설정
+            </h3>
+            
+            <div class="space-y-5 mb-6">
+                <!-- TMS 연결 토글 -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h4 class="text-sm font-bold text-gray-800">TMS 연결</h4>
+                        <p class="text-[10px] text-gray-500 mt-0.5 leading-tight">관제 계정(사무실)과의 정보 송수신을<br>허용하거나 차단합니다.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="tms-toggle" class="sr-only peer" onchange="window.toggleTMS(this.checked)" checked>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                
+                <div class="w-full h-px bg-gray-100"></div>
+
+                <!-- GPS 위치 확인 토글 -->
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h4 class="text-sm font-bold text-gray-800">GPS 위치 확인</h4>
+                        <p class="text-[10px] text-gray-500 mt-0.5 leading-tight">앱 전환 시 위치 권한 설정 및<br>백그라운드 GPS 사용 여부를 결정합니다.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer">
+                        <input type="checkbox" id="gps-toggle" class="sr-only peer" onchange="window.toggleGPS(this.checked)" checked>
+                        <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+            </div>
+            
+            <button onclick="window.closeSettingsModal()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-3.5 rounded-xl transition text-sm active:scale-95 shadow-md">닫기</button>
         </div>
     </div>
 
