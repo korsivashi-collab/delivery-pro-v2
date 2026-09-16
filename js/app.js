@@ -5,8 +5,7 @@ import {
     startDispatchMessageListener, firebaseStartTrial, getMemosFromFirestore, 
     getBatchMemosFromFirestore, saveMemoToFirestore, likeMemoInFirestore, 
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
-    deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto,
-    firebaseSetTmsPermission 
+    deleteCompletionFromFirestore, firebaseClearDeviceData, firebaseUploadDeliveryPhoto 
 } from './api.js';
 import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 
@@ -30,6 +29,15 @@ let currentActiveAlertMsgId = null;
 let lastKnownGps = null;
 let gpsWatchId = null;
 
+// ==========================================
+// 🌟 [추가됨] 상호명을 제외한 '순수 주소' 추출 헬퍼 함수
+// ==========================================
+function getPureAddress(address) {
+    if (!address) return "";
+    let match = address.match(/^\[(.*?)\]\s*(.*)$/);
+    return match ? match[2].trim() : address.trim();
+}
+
 export function getOrCreateDeviceId() {
     let deviceId = localStorage.getItem('deliveryProDeviceId');
     if (!deviceId) {
@@ -40,8 +48,6 @@ export function getOrCreateDeviceId() {
 }
 
 export function startGpsWatcher() {
-    if (localStorage.getItem('deliveryProGpsEnabled') === 'false') return; 
-
     if (!navigator.geolocation || gpsWatchId !== null) return;
     gpsWatchId = navigator.geolocation.watchPosition(
         (pos) => {
@@ -114,8 +120,6 @@ export async function initApp() {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
             if (res.valid) {
                 localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-                localStorage.setItem('deliveryProAllowTms', res.allowTms !== false ? 'true' : 'false');
-                
                 unlockApp();
                 updateExpireBadge(res.expireDate);
                 startLicenseRealtimeWatcher(res.actualKey || savedKey);
@@ -168,19 +172,9 @@ function startLicenseRealtimeWatcher(key) {
         if (mainApp) { mainApp.classList.add('hidden'); mainApp.classList.remove('flex'); }
         if (authScreen) authScreen.classList.remove('hidden');
         window.location.reload();
-    }, async (docData) => {
-        // 🌟 기사님이 스위치를 꺼두었는데, 관제가 억지로 연결을 시도해 DB에 dispatchKey가 들어온 경우 
-        // 0.1초만에 기사 앱이 즉시 서버의 연결 상태를 빈칸으로 덮어써서 관제를 쫓아냅니다.
-        if (docData.allowTms === false && docData.dispatchKey) {
-            try {
-                await firebaseSetTmsPermission(key, false);
-            } catch(e) {}
-            return; 
-        }
-
+    }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
-        localStorage.setItem('deliveryProAllowTms', docData.allowTms !== false ? 'true' : 'false');
         updatePhotoCompButtonState(!!linkedKey);
     });
 }
@@ -212,14 +206,14 @@ function updatePhotoCompButtonState(isLinked) {
     const subtext = document.getElementById('photo-comp-subtext');
     if (!btn || !subtext) return;
 
-    btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
-    
     if (isLinked) {
+        btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
         subtext.className = "text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter flex items-center gap-1";
         subtext.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 관제 연결됨';
     } else {
-        subtext.className = "text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter";
-        subtext.innerText = "일반 모드 (사진전송 가능)";
+        btn.className = "bg-gray-100 border border-gray-200 text-gray-400 font-bold py-2.5 px-2 rounded-xl text-xs transition flex flex-col items-center justify-center cursor-not-allowed opacity-75";
+        subtext.className = "text-[9px] font-normal text-gray-400 mt-0.5 tracking-tighter";
+        subtext.innerText = "(계정 연결 시 사용)";
     }
 }
 
@@ -266,8 +260,6 @@ export async function verifyLicense() {
             localStorage.setItem('deliveryProKey', actualKey);
             localStorage.setItem('deliveryProUserPhone', formattedPhone); 
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            localStorage.setItem('deliveryProAllowTms', res.allowTms !== false ? 'true' : 'false');
-
             if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
             
             unlockApp();
@@ -339,8 +331,6 @@ export async function startFreeTrial() {
             localStorage.setItem('deliveryProUserPhone', phoneInput);
             localStorage.setItem('deliveryProExpireDate', res.expireDate);
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            localStorage.setItem('deliveryProAllowTms', 'true');
-
             alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
             closeTrialModal();
             unlockApp();
@@ -714,21 +704,30 @@ function initSortable() {
     }
 }
 
+// ==========================================
+// 🌟 [수정됨] 메모를 불러오기 전 주소 배열에서 상호명 제거
+// ==========================================
 async function preloadBatchMemos() {
     if (destinations.length === 0) return;
-    const addresses = destinations.map(d => d.address);
+    const addresses = destinations.map(d => getPureAddress(d.address));
+    const uniqueAddrs = [...new Set(addresses)];
     try { 
-        batchMemosCache = await getBatchMemosFromFirestore(addresses); 
+        batchMemosCache = await getBatchMemosFromFirestore(uniqueAddrs); 
     } catch (e) { 
         batchMemosCache = {}; 
     }
 }
 
+// ==========================================
+// 🌟 [수정됨] 미리보기 렌더링 시 상호명을 제외한 순수 주소로 캐시 검색
+// ==========================================
 function renderMemoPreview(dest) {
     const previewEl = document.getElementById(`memo-preview-${dest.id}`); 
     const tagsEl = document.getElementById(`memo-tags-${dest.id}`);
     if (!previewEl || !tagsEl) return;
-    const memos = batchMemosCache[dest.address] || []; 
+    
+    const pureAddr = getPureAddress(dest.address);
+    const memos = batchMemosCache[pureAddr] || []; 
     const memoText = memos.length > 0 ? memos[0].memo : null;
 
     if (memoText) {
@@ -950,8 +949,14 @@ export function toggleEtcTag(btn) {
     else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); }
 }
 
+// ==========================================
+// 🌟 [수정됨] 메모 모달을 열 때 상호명이 제거된 주소 기준으로 검색
+// ==========================================
 export async function openMemoModal(id) {
-    const item = destinations.find(d => d.id === id); if (!item) return; currentMemoAddress = item.address;
+    const item = destinations.find(d => d.id === id); if (!item) return; 
+    
+    currentMemoAddress = getPureAddress(item.address); // <-- [변경점] 순수 주소 추출 적용
+    
     const titleEl = document.getElementById('memo-modal-title');
     if (titleEl) titleEl.innerText = currentMemoAddress; 
     resetMemoForm();
@@ -982,7 +987,7 @@ export async function openMemoModal(id) {
                 });
             }
 
-            ['도로변 주차', '지하주차장', '지상주차장', '엘리베이터'].forEach(tag => {
+            ['도로변 주차', '지하주차장', '지상주차장'].forEach(tag => {
                 if (rawMemo.includes(`[${tag}]`)) {
                     document.querySelectorAll('.etc-tag-btn').forEach(b => {
                         if (b.dataset.val === tag && b.dataset.active !== "true") toggleEtcTag(b);
@@ -1043,6 +1048,9 @@ function resetMemoForm() {
     if (countEl) countEl.innerText = "0 / 30";
 }
 
+// ==========================================
+// 🌟 [수정됨] 메모 등록 시 '순수 주소' 기준으로 저장하고 화면 갱신
+// ==========================================
 export async function saveCurrentMemo() {
     const rawText = (document.getElementById('memo-input')?.value || '').trim();
     let tags = [];
@@ -1059,26 +1067,33 @@ export async function saveCurrentMemo() {
     try {
         await saveMemoToFirestore(currentMemoAddress, getOrCreateDeviceId(), finalMemo);
         hideLoading(); alert("주차 정보가 등록(수정)되었습니다.");
-        const dest = destinations.find(d => d.address === currentMemoAddress);
+        
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); // <-- [변경점]
         if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
 
+// ==========================================
+// 🌟 [수정됨] 좋아요 후 '순수 주소' 기준으로 화면 갱신
+// ==========================================
 export async function likeMemo(docId) {
     try {
         await likeMemoInFirestore(docId);
-        const dest = destinations.find(d => d.address === currentMemoAddress);
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); // <-- [변경점]
         if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
     } catch (e) { alert("통신 오류가 발생했습니다."); }
 }
 
+// ==========================================
+// 🌟 [수정됨] 신고 후 '순수 주소' 기준으로 화면 갱신
+// ==========================================
 export async function reportMemo(docId) {
     if (!confirm("이 메모에 부적절한 내용이 있습니까?\n신고하시면 즉시 블라인드 처리됩니다.")) return;
     showLoading("신고 처리 중...");
     try {
         await reportMemoInFirestore(docId);
         hideLoading(); alert("신고가 접수되어 블라인드 처리되었습니다."); 
-        const dest = destinations.find(d => d.address === currentMemoAddress);
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); // <-- [변경점]
         if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
     } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
 }
@@ -1486,105 +1501,6 @@ export function initPhotoCompletion() {
     });
 }
 
-export function openSettingsModal() {
-    const isTmsAllowed = localStorage.getItem('deliveryProAllowTms') !== 'false';
-    const isGpsEnabled = localStorage.getItem('deliveryProGpsEnabled') !== 'false';
-    
-    const tmsToggle = document.getElementById('tms-toggle');
-    const gpsToggle = document.getElementById('gps-toggle');
-    
-    if (tmsToggle) tmsToggle.checked = isTmsAllowed;
-    if (gpsToggle) gpsToggle.checked = isGpsEnabled;
-    
-    document.getElementById('settings-modal')?.classList.remove('hidden');
-}
-
-export function closeSettingsModal() {
-    document.getElementById('settings-modal')?.classList.add('hidden');
-}
-
-// 🌟 [추가/변경됨] 비동기 커스텀 모달 제어를 통한 토글 로직
-export function toggleTMS(isChecked) {
-    const myKey = localStorage.getItem('deliveryProKey');
-    if (!myKey || typeof firebaseSetTmsPermission !== 'function') return;
-
-    if (!isChecked) {
-        // 스위치를 끌 때: 앱을 멈추지 않는 커스텀 확인 모달 띄우기
-        document.getElementById('tms-confirm-modal')?.classList.remove('hidden');
-    } else {
-        // 스위치를 켤 때: 바로 허용 로직 실행
-        proceedTMSToggle(true);
-    }
-}
-
-// 모달에서 '취소'를 눌렀을 때
-export function cancelTMSToggle() {
-    document.getElementById('tms-confirm-modal')?.classList.add('hidden');
-    const tmsToggle = document.getElementById('tms-toggle');
-    if (tmsToggle) tmsToggle.checked = true; // 스위치를 다시 켠 상태(원상복구)로 되돌림
-}
-
-// 모달에서 '차단하기'를 눌렀을 때
-export async function confirmTMSToggle() {
-    document.getElementById('tms-confirm-modal')?.classList.add('hidden');
-    await proceedTMSToggle(false);
-}
-
-// 실제 서버와 통신하는 핵심 비동기 함수
-async function proceedTMSToggle(isAllowed) {
-    const tmsToggle = document.getElementById('tms-toggle');
-    const myKey = localStorage.getItem('deliveryProKey');
-    
-    showLoading("설정 변경 중...");
-    try {
-        await firebaseSetTmsPermission(myKey, isAllowed);
-        localStorage.setItem('deliveryProAllowTms', isAllowed ? 'true' : 'false');
-        
-        hideLoading();
-
-        // 성공 안내를 위한 커스텀 모달 세팅
-        const titleEl = document.getElementById('tms-success-title');
-        const descEl = document.getElementById('tms-success-desc');
-        const iconEl = document.getElementById('tms-success-icon');
-
-        if (!isAllowed) {
-            // 차단 시의 로컬 스토리지 및 UI 정리
-            localStorage.removeItem('deliveryProDispatchKey');
-            updatePhotoCompButtonState(false);
-            
-            if(titleEl) titleEl.innerText = "연결 차단 완료";
-            if(descEl) descEl.innerHTML = "TMS 연결이 차단되었습니다.<br>기존 소속 정보가 초기화되었으며, 더 이상 관제 센터에서 기사님을 강제로 연결할 수 없습니다.";
-            if(iconEl) iconEl.className = "w-14 h-14 bg-red-50 text-red-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner";
-            if(iconEl) iconEl.innerHTML = '<i class="fa-solid fa-link-slash"></i>';
-        } else {
-            if(titleEl) titleEl.innerText = "연결 허용 완료";
-            if(descEl) descEl.innerHTML = "TMS 연결이 허용되었습니다.<br>본사 또는 관제 센터 관리자에게 기사님의 '라이선스 키'를 전달하여 시스템에 등록을 요청해 주세요.";
-            if(iconEl) iconEl.className = "w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner";
-            if(iconEl) iconEl.innerHTML = '<i class="fa-solid fa-check"></i>';
-        }
-        
-        document.getElementById('tms-success-modal')?.classList.remove('hidden');
-
-    } catch(e) {
-        hideLoading();
-        alert("설정 변경 중 오류가 발생했습니다: " + e.message);
-        if (tmsToggle) tmsToggle.checked = !isAllowed; // 실패 시 스위치 원상복구
-    }
-}
-
-export function toggleGPS(isChecked) {
-    localStorage.setItem('deliveryProGpsEnabled', isChecked ? 'true' : 'false');
-    
-    if (isChecked) {
-        startGpsWatcher();
-    } else {
-        if (gpsWatchId !== null && navigator.geolocation) {
-            navigator.geolocation.clearWatch(gpsWatchId);
-            gpsWatchId = null;
-        }
-    }
-}
-
 window.logout = logout;
 window.renderList = renderList;
 window.verifyLicense = verifyLicense;
@@ -1624,14 +1540,6 @@ window.initPhotoCompletion = initPhotoCompletion;
 window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
-
-window.openSettingsModal = openSettingsModal;
-window.closeSettingsModal = closeSettingsModal;
-window.toggleTMS = toggleTMS;
-window.toggleGPS = toggleGPS;
-// 🌟 [추가됨] window 객체에 모달 제어 함수 연결
-window.cancelTMSToggle = cancelTMSToggle;
-window.confirmTMSToggle = confirmTMSToggle;
 
 window.appActions = {
     initApp, optimizeRouteAction, getDeviceRealGPS, renderList
