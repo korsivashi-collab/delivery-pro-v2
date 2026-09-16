@@ -396,8 +396,21 @@
                         <i class="fa-solid fa-file-excel text-[11px]"></i> 데이터 추출
                     </button>
                 </div>
-            </div>
-            
+                
+                 <div class="flex items-center gap-1.5 flex-none ml-2">
+    <!-- 변경 전: onclick="handleProFeature('AUTO_DISPATCH')" -->
+    <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
+        <span class="absolute -top-2 -right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white">PRO</span>
+        <i class="fa-solid fa-satellite-dish text-amber-200"></i><span>배송 자동할당</span>
+    </button>
+    
+    <!-- 변경 전: onclick="handleProFeature('INVOICE')" -->
+    <button type="button" id="btn-pro-invoice" onclick="window.handleProFeature('INVOICE')" class="relative bg-slate-800 text-white text-xs font-black px-3 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:bg-slate-900 active:scale-95">
+        <span class="absolute -top-2 -right-1 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.2 rounded-full border border-white">PRO</span>
+        <i class="fa-solid fa-print text-amber-200"></i><span>주문서 통합관리</span>
+    </button>
+</div>   
+
             <div class="flex-1 max-w-xl relative">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
