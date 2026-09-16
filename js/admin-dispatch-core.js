@@ -649,6 +649,7 @@ export function saveCompanyBaseAddress() {
         const geocoder = new kakao.maps.services.Geocoder();
         geocoder.addressSearch(input, (result, status) => {
             if (status === kakao.maps.services.Status.OK && result[0]) {
+                // 🌟 1번 문제 해결: 사용자가 입력한 전체 주소(input)를 그대로 저장하도록 수정
                 const data = { address: input, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
                 localStorage.setItem('deliveryProCompanyBase', JSON.stringify(data));
                 updateCompanyBaseUI(data);
@@ -691,7 +692,6 @@ export function updateCompanyBaseUI(data) {
 export const autoDispatchState = {
     selectedDrivers: new Set(),
     weights: {},
-    territoryAdjustments: {},
     isInit: false
 };
 
@@ -738,9 +738,8 @@ export function renderDispatchDriverList() {
         const isChecked = autoDispatchState.selectedDrivers.has(devId);
         const weight = autoDispatchState.weights[devId] || 0;
         const weightText = weight > 0 ? `+${weight}` : weight;
-        const scopeMod = autoDispatchState.territoryAdjustments[devId] || 1.0;
-        const scopeText = Math.round(scopeMod * 100) + '%';
 
+        // 🌟 2번 문제 해결: 사이드바에서 권역 크기 UI(%, + - 버튼 등) 삭제 및 배점 조절 UI 넓이 조정
         html += `
         <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex flex-col gap-2 shadow-xs transition mb-2">
             <div class="flex items-start justify-between">
@@ -752,21 +751,12 @@ export function renderDispatchDriverList() {
             </div>
             
             <div class="flex items-center justify-between bg-gray-50/80 p-1.5 rounded-lg border border-gray-100" onclick="event.stopPropagation()">
-                <div class="flex items-center gap-1">
-                    <span class="text-[9px] font-bold text-gray-500 w-10">할당배점</span>
+                <div class="flex items-center gap-1.5 flex-1">
+                    <span class="text-[10px] font-bold text-gray-500 w-12">할당 배점</span>
                     <div class="flex items-center bg-white border border-gray-200 rounded shadow-sm">
-                        <button onclick="window.adjustDriverWeight('${devId}', -0.5)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-r border-gray-200">-</button>
-                        <span class="w-7 text-center text-[10px] font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
-                        <button onclick="window.adjustDriverWeight('${devId}', 0.5)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-l border-gray-200">+</button>
-                    </div>
-                </div>
-                
-                <div class="flex items-center gap-1">
-                    <span class="text-[9px] font-bold text-gray-500 w-10 text-right">권역크기</span>
-                    <div class="flex items-center bg-white border border-gray-200 rounded shadow-sm">
-                        <button onclick="window.adjustDriverScope('${devId}', -0.2)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-r border-gray-200">-</button>
-                        <span class="w-9 text-center text-[10px] font-black text-emerald-700">${scopeText}</span>
-                        <button onclick="window.adjustDriverScope('${devId}', 0.2)" class="px-2 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-l border-gray-200">+</button>
+                        <button onclick="window.adjustDriverWeight('${devId}', -0.5)" class="px-2.5 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-r border-gray-200 transition active:scale-95">-</button>
+                        <span class="w-8 text-center text-[11px] font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
+                        <button onclick="window.adjustDriverWeight('${devId}', 0.5)" class="px-2.5 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-l border-gray-200 transition active:scale-95">+</button>
                     </div>
                 </div>
             </div>
@@ -785,16 +775,6 @@ export function adjustDriverWeight(devId, delta) {
     let w = autoDispatchState.weights[devId] || 0;
     w += delta;
     autoDispatchState.weights[devId] = w;
-    renderDispatchDriverList();
-}
-
-export function adjustDriverScope(devId, delta) {
-    let modifier = autoDispatchState.territoryAdjustments[devId] || 1.0;
-    modifier += delta; 
-    // 범위 배수는 최소 20% ~ 최대 300% 까지만 조절 가능하도록 제한
-    if(modifier < 0.2) modifier = 0.2;
-    if(modifier > 3.0) modifier = 3.0;
-    autoDispatchState.territoryAdjustments[devId] = modifier;
     renderDispatchDriverList();
 }
 
@@ -868,11 +848,14 @@ export function runAutoDispatchAlgorithm() {
         let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
         if (exactCap < 0) exactCap = 0;
         
+        // 🌟 DB에서 가져온 기사별 커스텀 사이즈(%) 반영 (없으면 100%)
+        const savedTerritorySize = d.territorySize || 100;
+        
         return {
             devId, phone: d.phone || devId,
             exactCap, targetCap: Math.floor(exactCap), remainder: exactCap - Math.floor(exactCap),
             assignedCount: 0, tLat: d.territoryLat || null, tLng: d.territoryLng || null,
-            radiusMultiplier: autoDispatchState.territoryAdjustments[devId] || 1.0
+            radiusMultiplier: savedTerritorySize / 100 // 🌟 거리 계산 시 패널티를 줄여주는 배수로 적용
         };
     });
 
@@ -909,7 +892,7 @@ export function runAutoDispatchAlgorithm() {
             if (order.lat && order.lng) {
                 if (ds.tLat && ds.tLng) {
                     // 기사의 권역이 설정되어 있을 경우 거리 측정
-                    // 권역 크기를 키웠다면(radiusMultiplier > 1.0), 실제 거리를 축소시켜 더 먼곳의 배송건도 쉽게 가져오도록 패널티 완화
+                    // 🌟 권역 크기(%)를 키웠다면 실제 거리를 축소시켜 더 먼 곳의 배송 건도 쉽게 가져오도록 패널티 완화
                     dist = getDist(order.lat, order.lng, ds.tLat, ds.tLng) / ds.radiusMultiplier;
                 } else if (companyBase && companyBase.lat && companyBase.lng) {
                     // 권역 설정이 없는 기사는 본사 거점을 기준으로 측정
@@ -946,7 +929,6 @@ export function runAutoDispatchAlgorithm() {
 // ==========================================
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
-window.adjustDriverScope = adjustDriverScope;
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
