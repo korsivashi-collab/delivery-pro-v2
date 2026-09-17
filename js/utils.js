@@ -74,7 +74,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증)
+// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증 -> 4차 표준 명세서 블록 정규식)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -168,8 +168,7 @@ export function extractStoreNameLogic(fullText) {
                 }
             }
 
-            // 💡 [대표님 규칙] 오직 2번 이상 겹치는(교집합) 데이터만 상호로 확정하고 뱉는다. 
-            // 억지로 하나를 뱉어내는 4차 규칙 전면 삭제.
+            // 💡 [대표님 규칙] 오직 2번 이상 겹치는(교집합) 데이터만 상호로 확정
             for (let candidate of candidates) {
                 let firstIdx = flatText.indexOf(candidate);
                 let lastIdx = flatText.lastIndexOf(candidate);
@@ -180,8 +179,40 @@ export function extractStoreNameLogic(fullText) {
             }
         }
 
+        // =====================================================================
+        // 🚀 [4차 알고리즘] (추가) 표준 거래명세표 맞춤형 구간 추출 (Block Regex)
+        // 1~3차에서 실패했을 경우, 정형화된 양식의 "시작 단어"와 "종료 단어" 사이를 캡처합니다.
+        // =====================================================================
+        // 1. 모든 줄바꿈과 다중 공백을 1칸 공백으로 통일하여 텍스트를 길게 폅니다.
+        let flatForRegex = fullText.replace(/\n/g, ' ').replace(/\s+/g, ' '); 
+
+        // 2. 붉은 명세서에 자주 등장하는 시작 라벨 (OCR이 띄어쓰기를 맘대로 하는 것을 대비)
+        const startRegex = /(?:상\s*호\s*\(?\s*법\s*인\s*명\s*\)?|상\s*호\s*명?|업\s*체\s*명)/;
+        
+        // 3. 상호 바로 아래나 옆에 항상 따라붙는 종료 라벨
+        const endRegex = /(?:성\s*명|대\s*표\s*자|사\s*업\s*장|업\s*태|종\s*목)/;
+
+        // 4. "시작라벨 [가져올 텍스트] 종료라벨" 구조를 정규식으로 묶어 추출
+        const captureRegex = new RegExp(startRegex.source + "\\s*[:\\-]?\\s*(.+?)\\s*" + endRegex.source);
+        let match4 = flatForRegex.match(captureRegex);
+        
+        if (match4 && match4[1]) {
+            let candidate4 = match4[1].trim();
+            
+            // 앞뒤 쓸데없는 기호 제거 (콜론, 하이픈 등)
+            candidate4 = candidate4.replace(/^[:\-\s]+|[:\-\s]+$/g, '');
+            
+            // 혹시 섞여 들어왔을 수 있는 서식용 단어 제거
+            candidate4 = candidate4.replace(/(공급받는자|공급자|귀하)/g, '').trim(); 
+
+            // 추출된 텍스트가 2자 이상, 25자 이하이고, 숫자로만 이루어지지 않았다면 상호로 확정!
+            if (candidate4.length >= 2 && candidate4.length <= 25 && !/^\d+$/.test(candidate4)) {
+                return candidate4;
+            }
+        }
+
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
-    return null; // 모든 규칙(1~3차)에서 실패하면 깔끔하게 null 반환
+    return null; // 모든 규칙(1~4차)에서 실패하면 깔끔하게 null 반환
 }
