@@ -74,16 +74,19 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 [최종 개선] 라벨 완전 삭제 및 띄어쓰기 기준 첫 단어 추출 컨트롤러
+// 🌟 [최종 개선] 연결 끊김(띄어쓰기 및 특수기호) 감지 시 앞부분만 추출하고 뒤는 버리는 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         let lines = fullText.split(/\n/);
         
-        // 완벽하게 제거할 대상 앵커 키워드들 ('간판명', '상호명' 등 전체가 깔끔하게 소멸됨)
+        // 완벽하게 제거할 대상 앵커 키워드들
         const anchors = ['상호명', '상호(법인명)', '상호', '간판명', '배송지명', '업체명', '법인명'];
         // 수집을 차단하는 경계선 라벨들
         const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액)/;
+        
+        // 💡 [핵심] 띄어쓰기뿐만 아니라 괄호, 쉼표, 콜론 등 "연결이 끊기는" 모든 기호를 감지하는 정규식
+        const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
         // [1단계] 라벨 포함 줄 탐색 및 우측 데이터 첫 단어 추출
         for (let line of lines) {
@@ -93,11 +96,12 @@ export function extractStoreNameLogic(fullText) {
                     // 앵커 단어 이후의 우측 텍스트만 추출
                     let rightSide = line.substring(idx + anchor.length).trim();
                     // 콜론(:)이나 특수문자 제거
-                    rightSide = rightSide.replace(/^[:\s\-()]+/, '');
+                    rightSide = rightSide.replace(/^[:\s\-]+/, '');
                     
-                    // [핵심] 띄어쓰기가 감지되면 뒷정보는 과감히 버리고 첫 번째 단어만 채택
-                    let words = rightSide.split(/\s+/);
-                    if (words.length > 0 && words[0]) {
+                    // 띄어쓰기 및 특수기호(괄호 등)로 연결이 끊기는 구간을 기준으로 완전히 분해
+                    let words = rightSide.split(breakRegex).filter(w => w.length > 0);
+                    if (words.length > 0) {
+                        // 가장 먼저 등장하는 조각(앞부분)만 추출하고 뒷자리는 과감히 버림
                         let candidate = words[0].replace(/[^\w가-힣]/g, '');
                         if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate)) {
                             return candidate;
@@ -108,25 +112,35 @@ export function extractStoreNameLogic(fullText) {
         }
 
         // [2단계] 토큰 단위 연쇄 탐색 (키워드가 단독으로 떨어져 있을 때)
-        let tokens = fullText.split(/[\s\n,;|]+/);
+        // 전체 텍스트를 '연결이 끊기는' 기호 기준으로 완전히 산산조각 냄
+        let tokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
+        
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
             if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
-                if (i + 1 < tokens.length) {
-                    let nextTok = tokens[i + 1].replace(/^[|:;()\[\]{}]+|[|:;()\[\]{}]+$/g, '').trim();
-                    let cleanNext = nextTok.replace(/[^\w가-힣]/g, '');
+                // 앵커 바로 다음 단어들을 탐색
+                for (let j = i + 1; j < tokens.length; j++) {
+                    let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
+                    if (cleanNext.length === 0) continue;
                     
-                    // 띄어쓰기로 분리된 바로 다음 단어 하나만 취함
-                    let firstWord = cleanNext.split(/\s+/)[0];
-                    if (firstWord && firstWord.length >= 2 && !stopLabels.test(firstWord) && !anchors.includes(firstWord) && !/^\d+$/.test(firstWord)) {
-                        return firstWord;
+                    // 만약 다음 단어도 '간판명' 같은 앵커라면 (이중 라벨 방어) 패스하고 그 다음으로 넘어감
+                    if (anchors.includes(cleanNext)) {
+                        continue;
                     }
+                    
+                    // 앵커가 아닌 실질 데이터 첫 단어를 잡은 경우
+                    if (cleanNext.length >= 2 && !stopLabels.test(cleanNext) && !/^\d+$/.test(cleanNext)) {
+                        return cleanNext;
+                    }
+                    
+                    // 첫 번째 실질 데이터가 상호명 조건에 안 맞으면 뒷자리는 버림 (탐색 중단)
+                    break;
                 }
             }
         }
 
         // [3단계 폴백] 키워드가 아예 없는 영수증: 상호 접미사 패턴 단독 탐색
-        let allTokens = fullText.split(/[\s\n]+/);
+        let allTokens = fullText.split(breakRegex).filter(t => t.length > 0);
         const suffixRegex = /(맛집|식당|점|상회|상사|농원|농장|마트|카페|통닭|고기|나라|유통|물류|F&B|에프앤비)$/;
         for (let i = 0; i < allTokens.length; i++) {
             let tClean = allTokens[i].replace(/[^\w가-힣]/g, '');
