@@ -11,12 +11,10 @@ export function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// 2. [신규] 차량 진행 방향(우회전) 판별 및 가중치 계산 (벡터 외적 활용)
-// P1 -> P2 -> P3 로 이동할 때 꺾이는 각도를 계산합니다.
+// 2. 차량 진행 방향(우회전/좌회전) 판별 및 가중치 계산 (벡터 외적 활용)
 function getTurnPenalty(p1, p2, p3) {
     if (!p1 || !p2 || !p3) return 0;
     
-    // 경도(Longitude)에 따른 거리 왜곡을 보정하기 위해 위도(Latitude) 코사인 값 적용
     const latAvg = p2.lat * Math.PI / 180;
     const cosLat = Math.cos(latAvg);
     
@@ -26,20 +24,17 @@ function getTurnPenalty(p1, p2, p3) {
     const v2_x = (p3.lng - p2.lng) * cosLat;
     const v2_y = (p3.lat - p2.lat);
     
-    // 벡터 외적 (Cross Product)
     const crossProduct = (v1_x * v2_y) - (v1_y * v2_x);
     
-    // crossProduct > 0 이면 반시계 방향(좌회전/중앙선 횡단)을 의미함
-    // 좌회전일 경우 가상의 거리 페널티 300m(0.3km)를 부여하여 우회전을 유도함
-    return crossProduct > 0 ? 0.3 : 0; 
+    // crossProduct > 0 은 반시계 방향(좌회전/중앙선 횡단) ➔ 페널티 200m(0.2km) 부여
+    return crossProduct > 0 ? 0.2 : 0; 
 }
 
-// 3. [신규] 특정 경로의 전체 비용(거리 + 회전 페널티)을 계산하는 함수
+// 3. 경로의 전체 비용 (거리 + 회전 페널티) 계산
 function getPathCost(path) {
     let cost = 0;
     for (let i = 0; i < path.length - 1; i++) {
         cost += getDistance(path[i].lat, path[i].lng, path[i+1].lat, path[i+1].lng);
-        // 이전 노드가 존재하면(즉, 3개의 점이 형성되면) 회전 페널티 계산
         if (i > 0) {
             cost += getTurnPenalty(path[i-1], path[i], path[i+1]);
         }
@@ -47,80 +42,54 @@ function getPathCost(path) {
     return cost;
 }
 
-// 4. [신규] 소규모 구역(Zone) 정밀 최적화 엔진 (Nearest Neighbor + 2-opt)
-function optimizeSubRoute(nodesToOpt, startNode, endNode) {
-    if (!nodesToOpt || nodesToOpt.length === 0) return [];
-    if (nodesToOpt.length === 1) return nodesToOpt;
-    
-    // [1단계] 구역 내부 그리디(Nearest Neighbor) 초기 배정
-    let unassigned = [...nodesToOpt];
-    let route = [];
-    let curr = startNode;
-    
-    while(unassigned.length > 0) {
-        let bestIdx = -1;
-        let bestScore = Infinity;
-        for(let i = 0; i < unassigned.length; i++) {
-            let n = unassigned[i];
-            let dist = getDistance(curr.lat, curr.lng, n.lat, n.lng);
-            if (route.length > 0) {
-                dist += getTurnPenalty(route[route.length-1], curr, n);
-            }
-            if (dist < bestScore) {
-                bestScore = dist;
-                bestIdx = i;
-            }
-        }
-        route.push(unassigned[bestIdx]);
-        curr = unassigned[bestIdx];
-        unassigned.splice(bestIdx, 1);
-    }
-    
-    // [2단계] 정밀 2-opt 알고리즘 (우회전 페널티를 고려한 스왑 검사)
-    let fullPath = [startNode, ...route];
-    if (endNode) fullPath.push(endNode);
+// 4. 거시적 뼈대를 지키며 인접 범위 내에서만 미세 조정하는 스무딩 엔진
+function applyLocalSmoothing(routePoints, startPoint, endPoint) {
+    let fullPath = [startPoint, ...routePoints];
+    let hasEnd = (endPoint && endPoint.lat && endPoint.lat !== 0);
+    if (hasEnd) fullPath.push(endPoint);
     
     let improved = true;
     let iter = 0;
-    let maxIter = 1500;
-    // 시작점(0)과 종료점(endIndex 초과)은 스왑하지 않음
-    let endIndex = endNode ? fullPath.length - 2 : fullPath.length - 1;
+    let maxIter = 500;
+    
+    // 뼈대를 완전히 뒤바꾸지 않고, 인접한 5개 이내의 노드들 간에 꼬인 순서만 국소적으로 바로잡음
+    const WINDOW_SIZE = 5; 
+    let endIndex = hasEnd ? fullPath.length - 2 : fullPath.length - 1;
     
     while(improved && iter < maxIter) {
         improved = false;
         iter++;
-        let currentTotalCost = getPathCost(fullPath);
+        let currentCost = getPathCost(fullPath);
         
         for(let i = 1; i <= endIndex; i++) {
-            for(let j = i + 1; j <= endIndex; j++) {
-                // 배열의 i부터 j까지의 순서를 뒤집어 새로운 경로 생성
+            let limitJ = Math.min(i + WINDOW_SIZE, endIndex);
+            for(let j = i + 1; j <= limitJ; j++) {
                 let newPath = [
                     ...fullPath.slice(0, i),
                     ...fullPath.slice(i, j + 1).reverse(),
                     ...fullPath.slice(j + 1)
                 ];
                 
-                let newTotalCost = getPathCost(newPath);
+                let newCost = getPathCost(newPath);
                 
-                // 부동소수점 오차 방지를 위해 0.0001km(10cm) 이상의 이득이 있을 때만 교환
-                if (newTotalCost < currentTotalCost - 0.0001) {
+                if (newCost < currentCost - 0.0001) {
                     fullPath = newPath;
-                    currentTotalCost = newTotalCost;
+                    currentCost = newCost;
                     improved = true;
                 }
             }
         }
     }
     
-    // 시작점과 종료점을 떼어내고 내부 노드들만 반환
-    if (endNode) {
+    // 시작점과 종료점 제외하고 내부 순서만 추출
+    if (hasEnd) {
         return fullPath.slice(1, fullPath.length - 1);
     } else {
         return fullPath.slice(1);
     }
 }
 
-// 5. 동선 최적화 메인 알고리즘 (Macro Routing ➔ Zone Splitting ➔ Merge)
+// 5. 동선 최적화 메인 알고리즘 (Macro Backbone 우선 생성 + Local Smoothing)
 export function calculateOptimizedRoute(destinations, startLocation, endLocation) {
     if (destinations.length < 2) {
         throw new Error("출발지를 포함하여 최소 2곳의 배송지가 필요합니다.");
@@ -134,7 +103,7 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
     let unassigned = destinations.slice(1).sort((a, b) => a.id - b.id);
     
     // ==========================================
-    // [STEP 1] 전체 거시적 흐름(Macro Routing) 뼈대 잡기
+    // [STEP 1] 전체 거시적 뼈대(Macro Backbone) 생성
     // ==========================================
     let allPoints = [startPoint, ...unassigned];
     if (hasEnd) allPoints.push(endLocation);
@@ -163,6 +132,7 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
         n.progress = axisLenSq > 0.000001 ? (vLat * axisLat + vLng * axisLng) / axisLenSq : 0;
     });
 
+    // 진척도(Progress)를 기준으로 거시적 정렬 수행 (가상의 선 기준 뼈대 완성)[cite: 3]
     let macroRoute = []; 
     let curr = startPoint;
     
@@ -173,8 +143,7 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
             let n = unassigned[i];
             let dist = getDistance(curr.lat, curr.lng, n.lat, n.lng);
             let progressDiff = (curr.progress !== undefined && n.progress !== undefined) ? (curr.progress - n.progress) : 0;
-            // 진행률(축)을 거스르는 역행에 강한 페널티 부여
-            let backwardPenalty = progressDiff > 0 ? (progressDiff * 10) : 0; 
+            let backwardPenalty = progressDiff > 0 ? (progressDiff * 15) : 0; 
             let score = dist + backwardPenalty;
             if(score < bestScore) { 
                 bestScore = score; 
@@ -186,35 +155,16 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
         unassigned.splice(bestIdx, 1);
     }
 
-    // 배송지가 너무 적을 경우 굳이 3구역으로 쪼개지 않고 전체를 한 번에 정밀 최적화
-    let total = macroRoute.length;
-    if (total < 6) { 
-        return [startPoint, ...optimizeSubRoute(macroRoute, startPoint, hasEnd ? endLocation : null)];
-    }
+    // ==========================================
+    // [STEP 2] 뼈대를 훼손하지 않는 범위 내에서 국소 미세 정렬 (Smoothing)
+    // ==========================================
+    let smoothedRoute = applyLocalSmoothing(macroRoute, startPoint, hasEnd ? endLocation : null);
 
     // ==========================================
-    // [STEP 2 & 3] 3구역 클러스터 분할 및 꼬리물기 정밀 최적화
+    // [STEP 3] 최종 반환
     // ==========================================
-    let z1_endIdx = Math.floor(total / 3);
-    let z2_endIdx = Math.floor((total * 2) / 3);
-    
-    let Z1 = macroRoute.slice(0, z1_endIdx);
-    let Z2 = macroRoute.slice(z1_endIdx, z2_endIdx);
-    let Z3 = macroRoute.slice(z2_endIdx);
-    
-    // Zone 1: 시작점(startPoint) ~ Zone 2의 첫 지점(Z2[0])을 향해 최적화
-    let opt_Z1 = optimizeSubRoute(Z1, startPoint, Z2[0]);
-    let z1_last = opt_Z1[opt_Z1.length - 1]; // Z1의 마지막 지점이 Z2의 시작점이 됨
-    
-    // Zone 2: Zone 1의 끝(z1_last) ~ Zone 3의 첫 지점(Z3[0])을 향해 최적화
-    let opt_Z2 = optimizeSubRoute(Z2, z1_last, Z3[0]);
-    let z2_last = opt_Z2[opt_Z2.length - 1]; // Z2의 마지막 지점이 Z3의 시작점이 됨
-    
-    // Zone 3: Zone 2의 끝(z2_last) ~ 최종 도착지(endLocation)를 향해 최적화
-    let opt_Z3 = optimizeSubRoute(Z3, z2_last, hasEnd ? endLocation : null);
-    
-    // ==========================================
-    // [STEP 4] 최종 병합 반환
-    // ==========================================
-    return [startPoint, ...opt_Z1, ...opt_Z2, ...opt_Z3];
+    let fullResult = [startPoint, ...smoothedRoute];
+    if (hasEnd) fullResult.push(endLocation);
+
+    return fullResult;
 }
