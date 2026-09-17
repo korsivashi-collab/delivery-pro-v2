@@ -649,8 +649,13 @@ export function saveCompanyBaseAddress() {
         const geocoder = new kakao.maps.services.Geocoder();
         geocoder.addressSearch(input, (result, status) => {
             if (status === kakao.maps.services.Status.OK && result[0]) {
-                // 🌟 1번 문제 해결: 사용자가 입력한 전체 주소(input)를 그대로 저장하도록 수정
-                const data = { address: input, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
+                // 🌟 오류 복구: 사용자가 입력한 짧은 텍스트 대신 카카오 API가 식별한 '공식 전체 주소'를 우선 사용하도록 복구
+                let fullAddress = result[0].address_name;
+                if (result[0].road_address && result[0].road_address.address_name) {
+                    fullAddress = result[0].road_address.address_name;
+                }
+
+                const data = { address: fullAddress, lat: parseFloat(result[0].y), lng: parseFloat(result[0].x) };
                 localStorage.setItem('deliveryProCompanyBase', JSON.stringify(data));
                 updateCompanyBaseUI(data);
                 alert("본사 거점이 성공적으로 저장되었습니다.");
@@ -739,7 +744,6 @@ export function renderDispatchDriverList() {
         const weight = autoDispatchState.weights[devId] || 0;
         const weightText = weight > 0 ? `+${weight}` : weight;
 
-        // 🌟 2번 문제 해결: 사이드바에서 권역 크기 UI(%, + - 버튼 등) 삭제 및 배점 조절 UI 넓이 조정
         html += `
         <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex flex-col gap-2 shadow-xs transition mb-2">
             <div class="flex items-start justify-between">
@@ -818,7 +822,6 @@ export function runAutoDispatchAlgorithm() {
         alert("할당할 엑셀 데이터가 없습니다."); return;
     }
     
-    // 체크박스로 선택된 대상 기사들만 필터링
     const activeDrivers = getFilteredVisibleDrivers().filter(d => 
         autoDispatchState.selectedDrivers.has(d.deviceId || d.key)
     );
@@ -835,41 +838,34 @@ export function runAutoDispatchAlgorithm() {
     const totalOrders = unassignedOrders.length;
     const numDrivers = activeDrivers.length;
     
-    // 사용자가 조절한 전체 할당 배점 합산
     let totalWeights = 0;
     activeDrivers.forEach(d => { totalWeights += (autoDispatchState.weights[d.deviceId || d.key] || 0); });
 
-    // 1단계: 기사별로 목표 할당량(Capacity) 수학적 계산 (배점 1 = 1건 추가 배정)
     let driverStats = activeDrivers.map(d => {
         const devId = d.deviceId || d.key;
         let w = autoDispatchState.weights[devId] || 0;
         
-        // (전체물량 / 전체기사수) 로 얻은 기본 할당치에서 본인 배점(w)을 더하고, 총 배점 평균을 빼서 전체 파이를 완벽히 일치시킴
         let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
         if (exactCap < 0) exactCap = 0;
         
-        // 🌟 DB에서 가져온 기사별 커스텀 사이즈(%) 반영 (없으면 100%)
         const savedTerritorySize = d.territorySize || 100;
         
         return {
             devId, phone: d.phone || devId,
             exactCap, targetCap: Math.floor(exactCap), remainder: exactCap - Math.floor(exactCap),
             assignedCount: 0, tLat: d.territoryLat || null, tLng: d.territoryLng || null,
-            radiusMultiplier: savedTerritorySize / 100 // 🌟 거리 계산 시 패널티를 줄여주는 배수로 적용
+            radiusMultiplier: savedTerritorySize / 100 
         };
     });
 
-    // 소수점(0.5단위 등)으로 인해 남는 잉여 물량 분배 로직
     let currentSum = driverStats.reduce((sum, d) => sum + d.targetCap, 0);
     let diff = totalOrders - currentSum;
     
-    // 소수점 잔여치가 높은 기사부터 우선적으로 1건씩 추가 배정하여 완벽하게 전체 물량 갯수를 맞춤
     driverStats.sort((a, b) => b.remainder - a.remainder);
     for(let i=0; i<diff; i++) {
         driverStats[i % driverStats.length].targetCap++;
     }
 
-    // 위경도 거리 계산 함수 (하버사인 공식)
     const getDist = (lat1, lon1, lat2, lon2) => {
         if(!lat1 || !lon1 || !lat2 || !lon2) return 999999;
         const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLon = (lon2 - lon1) * Math.PI / 180;
@@ -880,25 +876,20 @@ export function runAutoDispatchAlgorithm() {
     const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
     const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
 
-    // 2단계: 최적 거리 및 권역 크기를 고려한 실제 물량 배정
     unassignedOrders.forEach(order => {
         let bestDriver = null; let bestScore = Infinity;
 
         driverStats.forEach(ds => {
-            // 해당 기사가 본인의 목표 할당량을 다 채웠으면 건너뜀
             if (ds.assignedCount >= ds.targetCap) return;
 
             let dist = 999999;
             if (order.lat && order.lng) {
                 if (ds.tLat && ds.tLng) {
-                    // 기사의 권역이 설정되어 있을 경우 거리 측정
-                    // 🌟 권역 크기(%)를 키웠다면 실제 거리를 축소시켜 더 먼 곳의 배송 건도 쉽게 가져오도록 패널티 완화
                     dist = getDist(order.lat, order.lng, ds.tLat, ds.tLng) / ds.radiusMultiplier;
                 } else if (companyBase && companyBase.lat && companyBase.lng) {
-                    // 권역 설정이 없는 기사는 본사 거점을 기준으로 측정
                     dist = getDist(order.lat, order.lng, companyBase.lat, companyBase.lng);
                 } else {
-                    dist = 100; // 기준이 아무것도 없을 때 기본 패널티
+                    dist = 100;
                 }
             }
             
@@ -908,7 +899,6 @@ export function runAutoDispatchAlgorithm() {
             }
         });
 
-        // 만약 모든 조건에 안맞아 배정되지 못했다면 현재 가장 덜 받은 기사에게 강제 배정 (오류 방지)
         if (!bestDriver) {
             bestDriver = driverStats.reduce((prev, curr) => (prev.assignedCount < curr.assignedCount) ? prev : curr);
         }
