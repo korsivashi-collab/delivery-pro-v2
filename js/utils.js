@@ -74,22 +74,51 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [완성본] 대표님 설계 파이프라인 (1단계 -> 2단계 소거/필터링 -> 3단계 교집합 -> 4단계 없음 처리)
+// 🌟 4. [최종 완성본] 공급자 분리 + 사람 이름 블랙리스트 + 앵커 필터링 파이프라인
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        let lines = fullText.split(/\n/);
-        
-        // 앵커 키워드 목록
-        const anchors = ['상호명', '상호(법인명)', '상호', '간판명', '배송지명', '업체명', '법인명'];
-        // 경계선 및 차단 라벨
-        const stopLabels = /(성명|대표자|대표|사업장소재지|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|총액|합계)/;
-        // 💡 띄어쓰기, 괄호, 쉼표, 콜론 등 "연결이 끊기는" 기호
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
+        const anchors = ['상호명', '상호(법인명)', '상호', '간판명', '배송지명', '업체명', '법인명'];
+        const stopLabels = /(성명|대표자|대표|사업장소재지|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|총액|합계|인)/;
+
+        // -----------------------------------------------------------------
+        // [사전 준비 1] 공급받는 자 영역 우선 확보 (납품회사 '물봉' 등 혼선 방지)
+        // -----------------------------------------------------------------
+        let targetText = fullText;
+        if (fullText.includes('공급받는자') || fullText.includes('공급받는 자')) {
+            let splitIdx = fullText.indexOf('공급받는자');
+            if (splitIdx === -1) splitIdx = fullText.indexOf('공급받는 자');
+            if (splitIdx !== -1) {
+                targetText = fullText.substring(splitIdx); // 공급받는 자 이후의 데이터만 분석
+            }
+        }
+
+        // -----------------------------------------------------------------
+        // [사전 준비 2] 사람 이름 동적 블랙리스트 구축 ('강경운', '윤희영', '한승제' 차단)
+        // -----------------------------------------------------------------
+        let personBlacklist = new Set();
+        let allTokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
+        
+        for (let i = 0; i < allTokens.length; i++) {
+            let clean = allTokens[i].replace(/[^\w가-힣]/g, '');
+            // '성명', '대표자', '구매자명', '담당자' 뒤에 오는 2~4글자 단어는 무조건 이름으로 등록
+            if (/(성명|대표자?|구매자명?|담당자)/.test(clean)) {
+                for (let j = i + 1; j < Math.min(i + 4, allTokens.length); j++) {
+                    let nextClean = allTokens[j].replace(/[^\w가-힣]/g, '');
+                    if (nextClean === '인' || nextClean.length === 0) continue;
+                    if (nextClean.length >= 2 && nextClean.length <= 4 && !stopLabels.test(nextClean) && !anchors.includes(nextClean)) {
+                        personBlacklist.add(nextClean);
+                    }
+                    break;
+                }
+            }
+        }
 
         // =====================================================================
-        // [1단계] 라벨 포함 줄 단독 탐색 (기존 1단계 유지)
+        // [1단계] 라벨 포함 줄 단독 탐색 (앵커 우측 데이터 앞자리)
         // =====================================================================
+        let lines = targetText.split(/\n/);
         for (let line of lines) {
             for (let anchor of anchors) {
                 if (line.includes(anchor)) {
@@ -100,7 +129,7 @@ export function extractStoreNameLogic(fullText) {
                     let words = rightSide.split(breakRegex).filter(w => w.length > 0);
                     if (words.length > 0) {
                         let candidate = words[0].replace(/[^\w가-힣]/g, '');
-                        if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate)) {
+                        if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !personBlacklist.has(candidate)) {
                             return candidate;
                         }
                     }
@@ -109,46 +138,38 @@ export function extractStoreNameLogic(fullText) {
         }
 
         // =====================================================================
-        // [2단계] 라벨링 & 노이즈 데이터 소거 작업 후 남은 데이터 필터링
+        // [2단계] 라벨링 & 노이즈 소거 후 앵커 필터링
         // =====================================================================
-        let cleanedText = fullText;
+        let cleanedText = targetText;
 
-        // 2-1. 확정 주소 패턴 소거
+        // 주소, 전화번호, 사업자등록번호, 금액/수량 소거
         const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
         cleanedText = cleanedText.replace(regionPrefixedRegex, ' ');
-
-        // 2-2. 전화번호 및 팩스번호 소거
         cleanedText = cleanedText.replace(/(010|050\d|070|0[2-9][0-9]?|1[5-9]\d{2})[\s\-\.]*(\d{3,4})[\s\-\.]*(\d{4})/g, ' ');
-
-        // 2-3. 사업자등록번호 소거 (xxx-xx-xxxxx 및 10자리 연속 숫자)
         cleanedText = cleanedText.replace(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/g, ' ');
         cleanedText = cleanedText.replace(/\b\d{10}\b/g, ' ');
-
-        // 2-4. 금액, 단위, 단순 숫자 소거
         cleanedText = cleanedText.replace(/\b\d{1,3}(,\d{3})+(\s*원)?\b/g, ' ');
         cleanedText = cleanedText.replace(/\b\d+\s*(원|kg|BOX|판|개|포)\b/gi, ' ');
         cleanedText = cleanedText.replace(/\b\d{4,}\b/g, ' ');
 
-        // 2-5. [핵심] '성명 강경운' 등 사람 이름 및 노이즈 라벨 덩어리 제거
-        cleanedText = cleanedText.replace(/(성명|대표자?)\s*[:\s\-]?\s*[가-힣]{2,4}/g, ' ');
+        // 양식 라벨 소거
         cleanedText = cleanedText.replace(/(사업장소재지|사업장|업태|종목|등록번호|공급받는자|공급자|규격|단위|제조사|원산지|수량|단가|총액|합계|잔액|영수|청구)/g, ' ');
 
-        // 2-6. 불필요한 데이터가 날아간 상태에서 앵커 필터링 진행
+        // 앵커 추적
         let tokens = cleanedText.split(breakRegex).filter(t => t.trim().length > 0);
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
             if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
-                // 앵커를 찾았으면 뒤따라오는 토큰 중 유효한 첫 번째 상호 데이터 추출
                 for (let j = i + 1; j < tokens.length; j++) {
                     let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
-                    if (cleanNext.length === 0) continue;
-
-                    // 또 다른 앵커 라벨이면 건너뜀
+                    if (cleanNext.length === 0 || cleanNext === '인') continue;
                     if (anchors.includes(cleanNext)) continue;
 
-                    // 노이즈가 제거된 상태이므로 처음 마주친 2글자 이상 한글/영문 단어가 곧 상호명!
+                    // 💡 사람 이름 블랙리스트에 걸리면 즉시 제외
+                    if (personBlacklist.has(cleanNext)) continue;
+
                     if (cleanNext.length >= 2 && !stopLabels.test(cleanNext) && !/^\d+$/.test(cleanNext)) {
-                        return cleanNext; // 붙어있던 정보(괄호 끊김 앞자리) 출력!
+                        return cleanNext;
                     }
                     break;
                 }
@@ -158,33 +179,28 @@ export function extractStoreNameLogic(fullText) {
         // =====================================================================
         // [3단계] 주소 뒷부분 데이터와 전체 데이터의 '교집합' 확인
         // =====================================================================
-        let flatText = fullText.replace(/\n/g, ' ');
+        let flatText = targetText.replace(/\n/g, ' ');
         let match = flatText.match(regionPrefixedRegex);
         if (match) {
             let matchStr = match[0];
             let idx = flatText.indexOf(matchStr);
             
-            // 주소 뒷부분 40글자 추출
             let tailStr = flatText.substring(idx + matchStr.length, idx + matchStr.length + 40);
             tailStr = tailStr.replace(/(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g, ' ');
             
             let tailWords = tailStr.split(breakRegex).filter(w => w.trim().length > 0);
             for (let tailWord of tailWords) {
                 let candidate = tailWord.replace(/[^\w가-힣]/g, '');
-                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                    // 전체 문서에서 2번 이상 등장(겹침)하는지 확인
+                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !personBlacklist.has(candidate) && !/^\d+$/.test(candidate)) {
                     let firstIdx = flatText.indexOf(candidate);
                     let lastIdx = flatText.lastIndexOf(candidate);
                     if (firstIdx !== -1 && firstIdx !== lastIdx) {
-                        return candidate; // 교집합 확인되어 출력
+                        return candidate;
                     }
                 }
             }
         }
 
-        // =====================================================================
-        // [4단계] 위 모든 단계에서 없으면 상호 정보가 없는 것으로 간주
-        // =====================================================================
         return null;
 
     } catch (e) {
