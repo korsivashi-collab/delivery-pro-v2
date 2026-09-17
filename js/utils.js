@@ -74,7 +74,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 탐색 -> 2차 단어 탐색 -> 3차 주소 교집합 검증)
+// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 평면 교집합 -> 4차 폴백)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -95,14 +95,11 @@ export function extractStoreNameLogic(fullText) {
             for (let anchor of anchors) {
                 if (line.includes(anchor)) {
                     let idx = line.indexOf(anchor);
-                    // 앵커 단어 이후의 우측 텍스트만 추출
                     let rightSide = line.substring(idx + anchor.length).trim();
                     rightSide = rightSide.replace(/^[:\s\-]+/, '');
                     
-                    // 기호나 띄어쓰기로 텍스트를 분해
                     let words = rightSide.split(breakRegex).filter(w => w.length > 0);
                     if (words.length > 0) {
-                        // 가장 먼저 등장하는 조각(앞자리)만 추출하고 뒷자리는 과감히 버림
                         let candidate = words[0].replace(/[^\w가-힣]/g, '');
                         if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate)) {
                             return candidate;
@@ -120,68 +117,63 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
             if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
-                // 앵커 바로 다음 단어들을 탐색
                 for (let j = i + 1; j < tokens.length; j++) {
                     let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
                     if (cleanNext.length === 0) continue;
                     
-                    // 우측 단어가 다시 인식되는 단어(이중 라벨)이면 건너뛰고 다음 우측 데이터를 읽어옴
-                    if (anchors.includes(cleanNext)) {
-                        continue; 
-                    }
+                    if (anchors.includes(cleanNext)) continue; 
                     
-                    // 조건에 맞는 실질 데이터 첫 단어(앞자리)를 잡은 경우 채택하고 종료
                     if (cleanNext.length >= 2 && !stopLabels.test(cleanNext) && !/^\d+$/.test(cleanNext)) {
                         return cleanNext;
                     }
-                    
-                    // 첫 번째 실질 데이터가 상호명 조건에 안 맞으면 뒷자리는 버림 (탐색 중단)
                     break;
                 }
             }
         }
 
         // =====================================================================
-        // [3차 알고리즘] 1, 2차 실패 시 -> 주소 뒷부분과 남은 데이터의 '교집합' 추출
+        // [3차 알고리즘] 텍스트를 한 줄로 펴서 주소 뒷부분 '교집합' 탐색 (줄바꿈 단절 방어)
         // =====================================================================
+        let flatText = fullText.replace(/\n/g, ' ');
         const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
         
-        for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
-            let match = line.match(regionPrefixedRegex);
-            if (match) {
-                // 주소 줄에서 '실제 주소 부분(match[0])'을 공백으로 날려버림
-                let remainder = line.replace(match[0], ' ');
+        let match = flatText.match(regionPrefixedRegex);
+        if (match) {
+            let matchStr = match[0];
+            let idx = flatText.indexOf(matchStr);
+            
+            // 주소 바로 뒷부분 40글자 추출 (여기에 상호명이 섞여 있음)
+            let tailStr = flatText.substring(idx + matchStr.length, idx + matchStr.length + 40);
+            
+            // 우편번호, 층수, 괄호 속 지역명 등 불필요한 꼬리표 사전 제거
+            tailStr = tailStr.replace(/(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g, ' ');
+            
+            let tailWords = tailStr.split(breakRegex).filter(w => w.trim().length > 0);
+            let firstValidCandidate = null;
+
+            for (let tailWord of tailWords) {
+                let candidate = tailWord.replace(/[^\w가-힣]/g, '');
                 
-                // 우편번호, 층수, '주소' 라벨 등 명세서에 흔히 붙는 불필요한 정보 소거
-                remainder = remainder.replace(/(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+)/g, ' ');
-                
-                // 주소 뒷부분에 남은 텍스트 조각들 추출
-                let tailWords = remainder.split(breakRegex).filter(w => w.trim().length > 0);
-                
-                for (let tailWord of tailWords) {
-                    let candidate = tailWord.replace(/[^\w가-힣]/g, '');
+                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
                     
-                    if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                        
-                        // 💡 [교집합 검증] 이 단어가 주소 줄이 아닌 '다른 줄'에도 겹쳐서 나오는지 확인
-                        let isOverlapping = false;
-                        for (let j = 0; j < lines.length; j++) {
-                            if (i === j) continue; // 주소가 있던 원본 줄은 제외
-                            
-                            // 다른 줄에 이 단어가 존재한다면 교집합 성립
-                            if (lines[j].includes(candidate)) {
-                                isOverlapping = true;
-                                break;
-                            }
-                        }
-                        
-                        // 겹치는 내용(교집합)이 확인되면 상호명으로 확실시하고 내보냄
-                        if (isOverlapping) {
-                            return candidate;
-                        }
+                    if (!firstValidCandidate) firstValidCandidate = candidate; // 4차 폴백용으로 가장 첫 단어 저장
+
+                    // 💡 [교집합 검증] 이 단어가 전체 텍스트에서 2번 이상 등장하는지 확인
+                    let firstIdx = flatText.indexOf(candidate);
+                    let lastIdx = flatText.lastIndexOf(candidate);
+                    
+                    // 2번 이상 등장했다면 (주소 옆에 한 번, 영수증 다른 곳에 한 번) 상호명으로 100% 확정!
+                    if (firstIdx !== -1 && firstIdx !== lastIdx) {
+                        return candidate;
                     }
                 }
+            }
+            
+            // =====================================================================
+            // [4차 알고리즘] 교집합이 없더라도, 주소 바로 뒤에 남은 유효한 단어가 있다면 최후의 상호로 간주
+            // =====================================================================
+            if (firstValidCandidate) {
+                return firstValidCandidate;
             }
         }
 
