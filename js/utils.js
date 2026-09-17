@@ -74,22 +74,21 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증)
+// 🌟 4. [완성본] 대표님 설계 파이프라인 (1단계 -> 2단계 소거/필터링 -> 3단계 교집합 -> 4단계 없음 처리)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         let lines = fullText.split(/\n/);
         
-        // 완벽하게 제거할 대상 앵커 키워드들 (라벨)
+        // 앵커 키워드 목록
         const anchors = ['상호명', '상호(법인명)', '상호', '간판명', '배송지명', '업체명', '법인명'];
-        // 수집을 차단하는 경계선 라벨들
-        const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액)/;
-        
-        // 💡 [핵심] 띄어쓰기 및 괄호, 쉼표, 콜론 등 "연결이 끊기는" 모든 기호를 감지
+        // 경계선 및 차단 라벨
+        const stopLabels = /(성명|대표자|대표|사업장소재지|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|총액|합계)/;
+        // 💡 띄어쓰기, 괄호, 쉼표, 콜론 등 "연결이 끊기는" 기호
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
         // =====================================================================
-        // [1차 알고리즘] 라벨 포함 줄 탐색 -> 우측 데이터 가져옴 -> 끊기면 앞자리만
+        // [1단계] 라벨 포함 줄 단독 탐색 (기존 1단계 유지)
         // =====================================================================
         for (let line of lines) {
             for (let anchor of anchors) {
@@ -110,21 +109,46 @@ export function extractStoreNameLogic(fullText) {
         }
 
         // =====================================================================
-        // [2차 알고리즘] 단어 단위 연쇄 탐색 -> 이중 라벨 건너뜀 -> 끊기면 앞자리만
+        // [2단계] 라벨링 & 노이즈 데이터 소거 작업 후 남은 데이터 필터링
         // =====================================================================
-        let tokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
-        
+        let cleanedText = fullText;
+
+        // 2-1. 확정 주소 패턴 소거
+        const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
+        cleanedText = cleanedText.replace(regionPrefixedRegex, ' ');
+
+        // 2-2. 전화번호 및 팩스번호 소거
+        cleanedText = cleanedText.replace(/(010|050\d|070|0[2-9][0-9]?|1[5-9]\d{2})[\s\-\.]*(\d{3,4})[\s\-\.]*(\d{4})/g, ' ');
+
+        // 2-3. 사업자등록번호 소거 (xxx-xx-xxxxx 및 10자리 연속 숫자)
+        cleanedText = cleanedText.replace(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/g, ' ');
+        cleanedText = cleanedText.replace(/\b\d{10}\b/g, ' ');
+
+        // 2-4. 금액, 단위, 단순 숫자 소거
+        cleanedText = cleanedText.replace(/\b\d{1,3}(,\d{3})+(\s*원)?\b/g, ' ');
+        cleanedText = cleanedText.replace(/\b\d+\s*(원|kg|BOX|판|개|포)\b/gi, ' ');
+        cleanedText = cleanedText.replace(/\b\d{4,}\b/g, ' ');
+
+        // 2-5. [핵심] '성명 강경운' 등 사람 이름 및 노이즈 라벨 덩어리 제거
+        cleanedText = cleanedText.replace(/(성명|대표자?)\s*[:\s\-]?\s*[가-힣]{2,4}/g, ' ');
+        cleanedText = cleanedText.replace(/(사업장소재지|사업장|업태|종목|등록번호|공급받는자|공급자|규격|단위|제조사|원산지|수량|단가|총액|합계|잔액|영수|청구)/g, ' ');
+
+        // 2-6. 불필요한 데이터가 날아간 상태에서 앵커 필터링 진행
+        let tokens = cleanedText.split(breakRegex).filter(t => t.trim().length > 0);
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
             if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
+                // 앵커를 찾았으면 뒤따라오는 토큰 중 유효한 첫 번째 상호 데이터 추출
                 for (let j = i + 1; j < tokens.length; j++) {
                     let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
                     if (cleanNext.length === 0) continue;
-                    
-                    if (anchors.includes(cleanNext)) continue; 
-                    
+
+                    // 또 다른 앵커 라벨이면 건너뜀
+                    if (anchors.includes(cleanNext)) continue;
+
+                    // 노이즈가 제거된 상태이므로 처음 마주친 2글자 이상 한글/영문 단어가 곧 상호명!
                     if (cleanNext.length >= 2 && !stopLabels.test(cleanNext) && !/^\d+$/.test(cleanNext)) {
-                        return cleanNext;
+                        return cleanNext; // 붙어있던 정보(괄호 끊김 앞자리) 출력!
                     }
                     break;
                 }
@@ -132,56 +156,39 @@ export function extractStoreNameLogic(fullText) {
         }
 
         // =====================================================================
-        // [3차 알고리즘] 주소 주변 텍스트와 전체 텍스트의 '엄격한 교집합' 검증
+        // [3단계] 주소 뒷부분 데이터와 전체 데이터의 '교집합' 확인
         // =====================================================================
         let flatText = fullText.replace(/\n/g, ' ');
-        const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
-        
         let match = flatText.match(regionPrefixedRegex);
         if (match) {
             let matchStr = match[0];
             let idx = flatText.indexOf(matchStr);
             
-            // 주소 기준 양방향 탐색
-            let headStr = flatText.substring(Math.max(0, idx - 40), idx);
+            // 주소 뒷부분 40글자 추출
             let tailStr = flatText.substring(idx + matchStr.length, idx + matchStr.length + 40);
+            tailStr = tailStr.replace(/(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g, ' ');
             
-            const cleanUpRegex = /(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g;
-            headStr = headStr.replace(cleanUpRegex, ' ');
-            tailStr = tailStr.replace(cleanUpRegex, ' ');
-            
-            let headWords = headStr.split(breakRegex).filter(w => w.trim().length > 0);
             let tailWords = tailStr.split(breakRegex).filter(w => w.trim().length > 0);
-            
-            let candidates = [];
-            
-            for (let i = headWords.length - 1; i >= 0; i--) {
-                let candidate = headWords[i].replace(/[^\w가-힣]/g, '');
+            for (let tailWord of tailWords) {
+                let candidate = tailWord.replace(/[^\w가-힣]/g, '');
                 if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                    candidates.push(candidate);
-                }
-            }
-            for (let i = 0; i < tailWords.length; i++) {
-                let candidate = tailWords[i].replace(/[^\w가-힣]/g, '');
-                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                    candidates.push(candidate);
-                }
-            }
-
-            // 💡 [대표님 규칙] 오직 2번 이상 겹치는(교집합) 데이터만 상호로 확정하고 뱉는다. 
-            // 억지로 하나를 뱉어내는 4차 규칙 전면 삭제.
-            for (let candidate of candidates) {
-                let firstIdx = flatText.indexOf(candidate);
-                let lastIdx = flatText.lastIndexOf(candidate);
-                
-                if (firstIdx !== -1 && firstIdx !== lastIdx) {
-                    return candidate;
+                    // 전체 문서에서 2번 이상 등장(겹침)하는지 확인
+                    let firstIdx = flatText.indexOf(candidate);
+                    let lastIdx = flatText.lastIndexOf(candidate);
+                    if (firstIdx !== -1 && firstIdx !== lastIdx) {
+                        return candidate; // 교집합 확인되어 출력
+                    }
                 }
             }
         }
 
+        // =====================================================================
+        // [4단계] 위 모든 단계에서 없으면 상호 정보가 없는 것으로 간주
+        // =====================================================================
+        return null;
+
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
-    return null; // 모든 규칙(1~3차)에서 실패하면 깔끔하게 null 반환
+    return null;
 }
