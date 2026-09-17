@@ -6,27 +6,31 @@ import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 
 // ==========================================
-// [마스터 기능 모듈 가져오기]
+// [마스터 기능 모듈 3개 가져오기]
 // ==========================================
 import {
     switchMasterTab, changeMasterTabPagination, renderMasterTables,
     generateNewLicense, openEditLicenseModal, closeEditModal,
     renderModalConnectedDrivers, linkDriverFromModal, unlinkDriverFromModal,
-    saveLicenseEdit, deleteLicense, deleteLicenseFromModal,
-    renderMemosTable, deleteParkingMemo, setHistorySort,
-    setHistoryAccountTypeFilter, populateDriverSelect, filterDriverDropdown,
-    onDriverSelectChange, selectAccountDirectly, backToAllAccountsView,
-    changeHistoryPage, toggleHistoryNoticeMode, toggleHistoryItemSelection,
-    toggleHistorySelectAll, sendHistoryNoticeToSelected, setHistoryMasterSubTab,
-    deleteAccountFromHistory, renderAccountHistoryView, openMasterNoticeHistoryModal,
-    closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList, sortMemos
-} from "./admin-master.js";
+    saveLicenseEdit, deleteLicense, deleteLicenseFromModal
+} from "./admin-master-licenses.js";
+
+import {
+    renderMemosTable, deleteParkingMemo, sortMemos
+} from "./admin-master-memos.js";
+
+import {
+    setHistorySort, setHistoryAccountTypeFilter, populateDriverSelect,
+    filterDriverDropdown, onDriverSelectChange, selectAccountDirectly,
+    backToAllAccountsView, changeHistoryPage, toggleHistoryNoticeMode,
+    toggleHistoryItemSelection, toggleHistorySelectAll, sendHistoryNoticeToSelected,
+    setHistoryMasterSubTab, deleteAccountFromHistory, renderAccountHistoryView,
+    openMasterNoticeHistoryModal, closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
+} from "./admin-master-history.js";
 
 // ==========================================
-// [관제/PRO 기능 - 6개로 분할된 모듈 가져오기]
+// [관제/PRO 기능 모듈 가져오기]
 // ==========================================
-
-// 1. 관제 코어 (UI, 검색, 배송 상태, 마커 렌더링)
 import {
     formatNumber, forceClearMap, getFilteredVisibleDrivers, setDispatchMode, renderSidebar,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView, selectDriver,
@@ -40,7 +44,6 @@ import {
     saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI
 } from "./admin-dispatch-core.js";
 
-// 2. 회사 알림 및 메시지 수발신
 import {
     renderMessageSidebar, toggleMessageDriver, toggleAllMessageSelection,
     updateMessageCharCount, sendDispatchMessage, deleteDispatchMessage,
@@ -50,14 +53,12 @@ import {
     deleteNoticeFromDispatchInbox, clearAllDispatchInbox
 } from "./admin-dispatch-msg.js";
 
-// 3. 엑셀 업로드 및 처리 (PRO)
 import {
     loadExcelFromFirebase, autoSaveExcelToFirebase, renderExcelTable, processExcelData,
     initExcelDropZone, handleExcelUpload, processSingleExcelFile,
     toggleRowCheckbox, deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows
 } from "./admin-dispatch-excel.js";
 
-// 4. 명세서 출력 및 폼 관리 (PRO)
 import {
     exportToInvoiceModal, previewInvoiceRow, syncPreviewData, loadSavedForms,
     executeBatchPrint, selectFormTemplate, cancelProviderFormEdit, saveProviderForm,
@@ -65,17 +66,15 @@ import {
     switchInvoiceTab
 } from "./admin-dispatch-print.js";
 
-// 5. 기사 권역(지도) 및 실시간 위치 관제
 import {
     renderLocationSidebar, jumpToDriverDelivery, focusDriverLocationOnMap,
     showFallbackLocation, closeCurrentLocationOverlay, drawAllDriversOnMap,
     fitMapToAllDrivers, openDriverTerritoryModal, closeDriverTerritoryModal,
     setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
     openAllTerritoriesMap, closeAllTerritoriesMap,
-    toggleTerritoryPinMode, searchTerritoryAddress, adjustModalTerritorySize // 🌟 새로 추가된 권역 조절 함수 임포트
+    toggleTerritoryPinMode, searchTerritoryAddress, adjustModalTerritorySize
 } from "./admin-dispatch-territory.js";
 
-// 6. 배송 리포트(엑셀) 추출
 import {
     openExcelExportModal, closeExcelExportModal, executeExcelExport
 } from "./admin-dispatch-export.js";
@@ -85,7 +84,6 @@ import {
 // 1. 초기화 및 인증 관리 (App Lifecycle)
 // ==========================================
 window.onload = () => {
-    // [날짜 기본값 세팅]
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
     
@@ -95,17 +93,14 @@ window.onload = () => {
         assignDateInput.onchange = () => { window.loadExcelFromFirebase(); };
     }
 
-    // [마스터 계정 생성용 - 만료일 기본 세팅 (30일 뒤)]
     const defaultExpire = new Date();
     defaultExpire.setDate(defaultExpire.getDate() + 30);
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
-    // [로컬 데이터(명세서 폼 등) 초기 로드]
     if (typeof loadSavedForms === 'function') loadSavedForms();
     if (typeof initExcelDropZone === 'function') initExcelDropZone(); 
 
-    // [모니터링 모드 URL 파라미터 체크]
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
     if (monitorKey) {
@@ -117,7 +112,6 @@ window.onload = () => {
         return;
     }
 
-    // [세션 검사 후 자동 로그인 처리]
     const savedRole = sessionStorage.getItem('deliveryProRole');
     const savedName = sessionStorage.getItem('deliveryProAdminName');
     if (savedRole === 'MASTER') showMasterPanel(savedName);
@@ -181,7 +175,6 @@ window.systemLogout = function() {
     window.location.reload();
 };
 
-// 🌟 에러 방어 코드가 추가된 마스터 대시보드 렌더링 함수
 window.showMasterPanel = function(name = '마스터') {
     state.currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
@@ -200,7 +193,6 @@ window.showMasterPanel = function(name = '마스터') {
     if (typeof switchMasterTab === 'function') switchMasterTab('regular');
 };
 
-// 🌟 에러 방어 코드가 추가된 관제 대시보드 렌더링 함수
 window.showDispatchPanel = function() {
     state.currentUserRole = 'DISPATCH';
     
@@ -211,8 +203,6 @@ window.showDispatchPanel = function() {
     if (dispatchPanel) {
         dispatchPanel.classList.remove('hidden');
         dispatchPanel.classList.add('flex');
-    } else {
-        console.error("오류: HTML에서 dispatch-panel 요소를 찾을 수 없어 UI를 표시하지 못했습니다.");
     }
 
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
@@ -240,21 +230,16 @@ window.initMasterDataSync = function() {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
         
-        // 🌟 [추가됨] 실시간 관제 계정 삭제/정지 감지 및 자동 로그아웃(튕김) 처리 🌟
         const currentRole = sessionStorage.getItem('deliveryProRole');
         const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
         
         if (currentRole === 'DISPATCH' && currentKey) {
             const myAccount = state.allLicenses.find(l => l.key === currentKey || l.id === currentKey);
-            
-            // 내 계정이 데이터베이스에서 완전히 삭제된 경우
             if (!myAccount) {
                 alert("⚠️ 관리자에 의해 관제 계정이 삭제되었습니다.\n시스템 보안을 위해 즉시 로그아웃됩니다.");
                 window.systemLogout();
                 return; 
             }
-            
-            // 내 계정이 '사용 정지(suspended)' 처리된 경우
             if (myAccount.status === 'suspended') {
                 alert("⚠️ 관리자에 의해 관제 계정 사용이 정지되었습니다.\n시스템 보안을 위해 즉시 로그아웃됩니다.");
                 window.systemLogout();
@@ -330,19 +315,26 @@ window.initMasterDataSync = function() {
 // ==========================================
 window.formatNumber = formatNumber;
 
-// [마스터]
+// [마스터 - Licenses]
 window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
+window.renderMasterTables = renderMasterTables;
 window.generateNewLicense = generateNewLicense;
 window.openEditLicenseModal = openEditLicenseModal;
 window.closeEditModal = closeEditModal;
+window.renderModalConnectedDrivers = renderModalConnectedDrivers;
 window.linkDriverFromModal = linkDriverFromModal;
 window.unlinkDriverFromModal = unlinkDriverFromModal;
 window.saveLicenseEdit = saveLicenseEdit;
 window.deleteLicense = deleteLicense;
 window.deleteLicenseFromModal = deleteLicenseFromModal;
+
+// [마스터 - Memos]
 window.renderMemosTable = renderMemosTable;
 window.deleteParkingMemo = deleteParkingMemo;
+window.sortMemos = sortMemos;
+
+// [마스터 - History]
 window.setHistorySort = setHistorySort;
 window.setHistoryAccountTypeFilter = setHistoryAccountTypeFilter;
 window.populateDriverSelect = populateDriverSelect;
@@ -357,11 +349,10 @@ window.toggleHistorySelectAll = toggleHistorySelectAll;
 window.sendHistoryNoticeToSelected = sendHistoryNoticeToSelected;
 window.setHistoryMasterSubTab = setHistoryMasterSubTab;
 window.deleteAccountFromHistory = deleteAccountFromHistory;
+window.renderAccountHistoryView = renderAccountHistoryView;
 window.openMasterNoticeHistoryModal = openMasterNoticeHistoryModal;
 window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
-window.renderMasterTables = renderMasterTables;
-window.renderAccountHistoryView = renderAccountHistoryView;
-window.sortMemos = sortMemos;
+window.renderMasterNoticeHistoryList = renderMasterNoticeHistoryList;
 
 // [관제 코어]
 window.setDispatchMode = setDispatchMode;
@@ -395,7 +386,6 @@ window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.focusMapPosition = focusMapPosition;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
-// 🌟 삭제된 이전 권역조절 함수 윈도우 바인딩 해제 완료
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
@@ -437,7 +427,7 @@ window.openAllTerritoriesMap = openAllTerritoriesMap;
 window.closeAllTerritoriesMap = closeAllTerritoriesMap;
 window.toggleTerritoryPinMode = toggleTerritoryPinMode;
 window.searchTerritoryAddress = searchTerritoryAddress;
-window.adjustModalTerritorySize = adjustModalTerritorySize; // 🌟 새로 추가된 권역 조절 함수 바인딩
+window.adjustModalTerritorySize = adjustModalTerritorySize;
 
 // [관제 엑셀(Excel)]
 window.loadExcelFromFirebase = loadExcelFromFirebase;
