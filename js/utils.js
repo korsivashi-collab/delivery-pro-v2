@@ -74,7 +74,7 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 평면 교집합 -> 4차 폴백)
+// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -132,7 +132,7 @@ export function extractStoreNameLogic(fullText) {
         }
 
         // =====================================================================
-        // [3차 알고리즘] 텍스트를 한 줄로 펴서 주소 뒷부분 '교집합' 탐색 (줄바꿈 단절 방어)
+        // [3차 알고리즘] 주소 주변 텍스트와 전체 텍스트의 '엄격한 교집합' 검증
         // =====================================================================
         let flatText = fullText.replace(/\n/g, ' ');
         const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
@@ -142,43 +142,46 @@ export function extractStoreNameLogic(fullText) {
             let matchStr = match[0];
             let idx = flatText.indexOf(matchStr);
             
-            // 주소 바로 뒷부분 40글자 추출 (여기에 상호명이 섞여 있음)
+            // 주소 기준 양방향 탐색
+            let headStr = flatText.substring(Math.max(0, idx - 40), idx);
             let tailStr = flatText.substring(idx + matchStr.length, idx + matchStr.length + 40);
             
-            // 우편번호, 층수, 괄호 속 지역명 등 불필요한 꼬리표 사전 제거
-            tailStr = tailStr.replace(/(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g, ' ');
+            const cleanUpRegex = /(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g;
+            headStr = headStr.replace(cleanUpRegex, ' ');
+            tailStr = tailStr.replace(cleanUpRegex, ' ');
             
+            let headWords = headStr.split(breakRegex).filter(w => w.trim().length > 0);
             let tailWords = tailStr.split(breakRegex).filter(w => w.trim().length > 0);
-            let firstValidCandidate = null;
-
-            for (let tailWord of tailWords) {
-                let candidate = tailWord.replace(/[^\w가-힣]/g, '');
-                
+            
+            let candidates = [];
+            
+            for (let i = headWords.length - 1; i >= 0; i--) {
+                let candidate = headWords[i].replace(/[^\w가-힣]/g, '');
                 if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                    
-                    if (!firstValidCandidate) firstValidCandidate = candidate; // 4차 폴백용으로 가장 첫 단어 저장
-
-                    // 💡 [교집합 검증] 이 단어가 전체 텍스트에서 2번 이상 등장하는지 확인
-                    let firstIdx = flatText.indexOf(candidate);
-                    let lastIdx = flatText.lastIndexOf(candidate);
-                    
-                    // 2번 이상 등장했다면 (주소 옆에 한 번, 영수증 다른 곳에 한 번) 상호명으로 100% 확정!
-                    if (firstIdx !== -1 && firstIdx !== lastIdx) {
-                        return candidate;
-                    }
+                    candidates.push(candidate);
                 }
             }
-            
-            // =====================================================================
-            // [4차 알고리즘] 교집합이 없더라도, 주소 바로 뒤에 남은 유효한 단어가 있다면 최후의 상호로 간주
-            // =====================================================================
-            if (firstValidCandidate) {
-                return firstValidCandidate;
+            for (let i = 0; i < tailWords.length; i++) {
+                let candidate = tailWords[i].replace(/[^\w가-힣]/g, '');
+                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
+                    candidates.push(candidate);
+                }
+            }
+
+            // 💡 [대표님 규칙] 오직 2번 이상 겹치는(교집합) 데이터만 상호로 확정하고 뱉는다. 
+            // 억지로 하나를 뱉어내는 4차 규칙 전면 삭제.
+            for (let candidate of candidates) {
+                let firstIdx = flatText.indexOf(candidate);
+                let lastIdx = flatText.lastIndexOf(candidate);
+                
+                if (firstIdx !== -1 && firstIdx !== lastIdx) {
+                    return candidate;
+                }
             }
         }
 
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
-    return null;
+    return null; // 모든 규칙(1~3차)에서 실패하면 깔끔하게 null 반환
 }
