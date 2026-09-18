@@ -74,93 +74,91 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [최종 개선판] 네거티브 섹터 스캔 + 경계선 방어 로직
+// 🌟 4. [최종 완성] 클리너 + 더블 앵커(라벨&사업자번호) 네거티브 섹터 스캔
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         const extractedAddress = extractAddressLogic(fullText) || "";
         const addrTokens = extractedAddress.split(/\s+/);
 
-        // [지옥의 네거티브 필터] 상호가 될 수 없는 모든 조건을 배제합니다.
+        // [핵심 1] 토큰에 달라붙은 "배송지명(간판명)" 같은 라벨 찌꺼기를 강제로 도려내는 클리너
+        const cleanLabelGarbage = (str) => {
+            return str.replace(/배송지명?\(?간판명?\)?|제조사\(?원산지\)?|공급받는자|상호\(?법인명\)?|상호명?|법인명?|위\)/g, '')
+                      .replace(/^(명칭|성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계|영수|청구|팩스|FAX|TEL|바코드|담당자)$/g, '');
+        };
+
+        // [지옥의 네거티브 필터]
         const isInvalidToken = (str) => {
-            let pureText = str.replace(/[\(\)]/g, ''); // 검사를 위해 괄호 임시 제거
-            
-            // 0. (핵심 수정) 라벨/앵커 단어 자체는 무조건 즉사 (법인명, 상호 등 출력 원천 차단)
-            if (/^(상호|법인명?|간판명?|배송지명?|업체명?|공급받는자|명칭|성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계|영수|청구|팩스|FAX|TEL|바코드|담당자)$/.test(pureText)) return true;
-            // 1. 사업자번호 양식
+            let pureText = str.replace(/[\(\)]/g, '');
+            // 1. 단독 라벨 단어 차단
+            if (/^(상호|법인명?|간판명?|배송지명?|업체명?|공급받는자|명칭|성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계|영수|청구|팩스|FAX|TEL|바코드|담당자|제조사|원산지|위)$/.test(pureText)) return true;
+            // 2. 사업자번호
             if (/^\d{3}-\d{2}-\d{5}$/.test(pureText)) return true;
-            // 2. 전화번호 양식
+            // 3. 전화번호
             if (/^(010|02|0[3-9]\d)-?\d{3,4}-?\d{4}$/.test(pureText) || /^\d{8,12}$/.test(pureText)) return true;
-            // 3. 주문번호 (영문+숫자 혼합)
+            // 4. 주문/송장번호 (영문+숫자 혼합)
             if (/(?=.*[a-zA-Z])(?=.*\d)[a-zA-Z\d-]{4,}/.test(pureText)) return true;
-            // 4. 순수 숫자 또는 금액
-            if (/^[0-9,]+원?$/.test(pureText)) return true;
-            // 5. 단독 부속어
+            // 5. 순수 숫자/금액
+            if (/^[0-9,\.]+원?$/.test(pureText)) return true;
+            // 6. 단독 부속어
             if (/^(주|유|주식회사|유한회사)$/.test(pureText)) return true;
-            // 6. 주소에 포함된 단어 중복 방지
+            // 7. 주소 토큰 중복 방지
             if (addrTokens.includes(str) || /동$|구$|시$|면$|읍$|리$|로\d*길?$/.test(pureText)) return true;
 
-            return false; // 위 조건을 모두 피하면 생존
+            return false;
         };
 
         let lines = fullText.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
+        const boundaryStopLabels = /^(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계|제조사|원산지)$/;
         const anchors = ['상호', '법인', '배송', '간판', '업체명', '공급받는자'];
-        const boundaryStopLabels = /^(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계)$/;
+        let targetLines = []; // 스캔을 시작할 기준점(앵커)이 있는 줄 번호 모음
 
-        // [1차 시도] 섹터 스캔 (경계선 방어 적용)
+        // [핵심 2] 스캔 앵커 찾기 (라벨 + 사업자번호 더블 체크)
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
-            
-            for (let anchor of anchors) {
-                if (line.includes(anchor)) {
-                    let survivors = []; 
-
-                    // 1. 위로 1칸 스캔 (라벨보다 상호가 먼저 읽혔을 경우)
-                    if (i > 0) {
-                        let prevTokens = lines[i-1].split(/[\s,:;\|]+/).filter(w => w.trim().length > 0);
-                        if (!boundaryStopLabels.test(prevTokens[0].replace(/[\(\)]/g, ''))) {
-                            for (let token of prevTokens) {
-                                let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
-                                if (cleanTok.length >= 2 && !isInvalidToken(cleanTok)) survivors.push(cleanTok);
-                            }
-                        }
-                    }
-
-                    // 2. 현재 줄 스캔 (앵커 단어는 isInvalidToken에서 알아서 죽여줌)
-                    let currentTokens = line.split(/[\s,:;\|]+/).filter(w => w.trim().length > 0);
-                    for (let token of currentTokens) {
-                        let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
-                        if (cleanTok.length >= 2 && !isInvalidToken(cleanTok)) survivors.push(cleanTok);
-                    }
-
-                    // 3. 아래로 최대 3칸 스캔 (동대문엽기떡볶이 이신촌점 융합)
-                    for (let j = i + 1; j <= Math.min(i + 3, lines.length - 1); j++) {
-                        let nextTokens = lines[j].split(/[\s,:;\|]+/).filter(w => w.trim().length > 0);
-                        
-                        // [핵심 방어선] 아랫줄이 '성명', '주소' 등 다른 칸의 라벨로 시작하면 즉시 아랫줄 스캔 중단!
-                        if (boundaryStopLabels.test(nextTokens[0].replace(/[\(\)]/g, ''))) break;
-                        
-                        for (let token of nextTokens) {
-                            let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
-                            if (cleanTok.length >= 2 && !isInvalidToken(cleanTok)) survivors.push(cleanTok);
-                        }
-                    }
-
-                    // 살아남은 조각 조립
-                    if (survivors.length > 0) {
-                        survivors = [...new Set(survivors)]; // 중복 단어 제거
-                        let finalName = survivors.join(' '); 
-                        
-                        // 괄호 앞뒤 정리 (예: 원조남산왕돈가스 (주) -> 원조남산왕돈가스(주))
-                        finalName = finalName.replace(/\s+\(/g, '(').replace(/\)\s+/g, ')');
-                        
-                        if (finalName.length >= 2) return finalName;
-                    }
-                }
+            if (anchors.some(a => line.includes(a))) {
+                targetLines.push(i);
+            }
+            // 세금계산서 맹점 극복: 사업자번호(XXX-XX-XXXXX) 근처에 무조건 상호가 있음!
+            else if (/\d{3}-\d{2}-\d{5}/.test(line)) {
+                targetLines.push(i);
             }
         }
 
-        // [2차 시도] 최후의 보루: 주소 뒷부분 교집합 검증 로직 (기존 유지)
+        // 찾아낸 앵커들을 기준으로 상하단 섹터 스캔
+        for (let i of targetLines) {
+            let survivors = [];
+            let scanStart = Math.max(0, i - 1);
+            let scanEnd = Math.min(lines.length - 1, i + 3);
+
+            for (let j = scanStart; j <= scanEnd; j++) {
+                let nextTokens = lines[j].split(/[\s,:;\|]+/).filter(w => w.trim().length > 0);
+                
+                // 경계선 방어: 아랫줄 탐색 중 다른 구역 라벨 만나면 스톱
+                if (j > i && boundaryStopLabels.test(nextTokens[0].replace(/[\(\)]/g, ''))) break;
+
+                for (let token of nextTokens) {
+                    // 전처리: "배송지명(간판명)Atlas" -> "Atlas" 로 분리
+                    let cleanedFromLabel = cleanLabelGarbage(token);
+                    if (cleanedFromLabel.length === 0) continue; 
+                    
+                    let cleanTok = cleanedFromLabel.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
+                    
+                    if (cleanTok.length >= 2 && !isInvalidToken(cleanTok)) {
+                        survivors.push(cleanTok);
+                    }
+                }
+            }
+
+            if (survivors.length > 0) {
+                survivors = [...new Set(survivors)];
+                let finalName = survivors.join(' '); 
+                finalName = finalName.replace(/\s+\(/g, '(').replace(/\)\s+/g, ')');
+                if (finalName.length >= 2) return finalName;
+            }
+        }
+
+        // [최후의 보루] 주소 뒷부분 꼬리표 교집합 검증 (기존 유지)
         if (extractedAddress) {
             let flatText = fullText.replace(/\n/g, ' ');
             let idx = flatText.indexOf(extractedAddress);
@@ -171,7 +169,8 @@ export function extractStoreNameLogic(fullText) {
                 let tailTokens = tailStr.split(/[\s,:;\|]+/).filter(w => w.trim().length > 0);
                 
                 for (let token of tailTokens) {
-                    let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
+                    let cleanedFromLabel = cleanLabelGarbage(token);
+                    let cleanTok = cleanedFromLabel.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
                     if (cleanTok.length >= 2 && !isInvalidToken(cleanTok)) {
                         let headText = flatText.substring(0, idx); 
                         if (headText.includes(cleanTok.replace(/[\(\)]/g, ''))) return cleanTok; 
