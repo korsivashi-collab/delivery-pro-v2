@@ -74,14 +74,12 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [완전 개편판] 구역(Block) 단위 상호 추출 로직 (띄어쓰기 완벽 보존)
+// 🌟 4. [3세대] 다중 줄 병합(Multi-line Aggregation) 상호 추출 로직
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         const anchors = ['상호(법인명)', '상호명', '상호', '간판명', '배송지명', '업체명', '법인명', '공급받는자'];
-        
-        // [핵심 1] 다음 표 칸으로 넘어가는 것을 알리는 정지 라벨들
-        const stopLabelsRegex = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계)/;
+        const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일|합계)/;
         const skipWords = /^\(?(주|유|주식회사|유한회사)\)?$/;
         
         let lines = fullText.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
@@ -94,42 +92,49 @@ export function extractStoreNameLogic(fullText) {
                     let rightSide = line.substring(line.indexOf(anchor) + anchor.length).trim();
                     rightSide = rightSide.replace(/^[:\-\s]+/, ''); 
                     
-                    let candidate = "";
-
-                    // [핵심 2] 라벨과 같은 줄에 있는 텍스트를 '다음 라벨'이 나오기 전까지 띄어쓰기 통째로 캡처
-                    if (rightSide.length > 0) {
-                        let splitByLabel = rightSide.split(stopLabelsRegex);
-                        candidate = splitByLabel[0].trim();
-                    }
+                    // 여러 줄에 걸친 상호명을 담을 배열
+                    let extractedPieces = [];
                     
-                    // [핵심 3] 같은 줄이 비어있다면(표 틀어짐), 다음 1~2줄을 통째로 탐색
-                    if (!candidate || candidate.length < 2 || skipWords.test(candidate)) {
-                        for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
-                            let nextLine = lines[j];
-                            
-                            // 다음 줄이 상호 관련 라벨이 아닌 다른 칸 라벨(성명 등)로 시작하면 탐색 중단
-                            if (stopLabelsRegex.test(nextLine.split(' ')[0])) break; 
-                            
-                            let splitByLabel = nextLine.split(stopLabelsRegex);
-                            let tempCandidate = splitByLabel[0].trim();
-                            
-                            if (tempCandidate.length >= 2 && !skipWords.test(tempCandidate) && !/^\d+$/.test(tempCandidate)) {
-                                candidate = tempCandidate;
-                                break;
-                            }
+                    // 1. 첫 번째 줄 데이터 수집
+                    if (rightSide.length > 0) {
+                        let cleanText = rightSide.split(stopLabels)[0].trim();
+                        if (cleanText.length > 0 && !skipWords.test(cleanText)) {
+                            extractedPieces.push(cleanText);
                         }
                     }
                     
-                    // 추출된 상호명 특수문자 다듬기 (단어 사이 띄어쓰기와 정상적인 괄호는 유지)
-                    if (candidate && candidate.length >= 2) {
+                    // 2. 아래 2줄까지 추가 탐색 (동대문엽기떡볶이 + 이신촌점 결합용)
+                    for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
+                        let nextLine = lines[j];
+                        
+                        // 아랫줄이 다른 칸의 제목(예: 성명, 주소)으로 시작하면 병합 즉시 중단
+                        if (stopLabels.test(nextLine.split(/[\s:]+/)[0])) break;
+                        
+                        let cleanNextLine = nextLine.split(stopLabels)[0].trim();
+                        // 주소처럼 너무 긴 문장이거나 숫자로만 된 값이 아니면 병합 배열에 추가
+                        if (cleanNextLine.length > 0 && cleanNextLine.length < 20 && !/^\d+$/.test(cleanNextLine)) {
+                            extractedPieces.push(cleanNextLine);
+                        }
+                    }
+                    
+                    // 3. 수집된 조각들을 하나로 조립
+                    if (extractedPieces.length > 0) {
+                        let candidate = extractedPieces.join(' '); // 띄어쓰기로 연결
+                        
+                        // '(주)' 앞의 불필요한 띄어쓰기 정리 (예: 원조남산왕돈가스 (주) -> 원조남산왕돈가스(주))
+                        candidate = candidate.replace(/\s+\(주\)/g, '(주)').replace(/\s+\(유\)/g, '(유)');
+                        // 맨 앞뒤의 의미 없는 특수문자 제거
                         candidate = candidate.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
-                        if (!skipWords.test(candidate)) return candidate;
+                        
+                        if (candidate.length >= 2 && !skipWords.test(candidate)) {
+                            return candidate;
+                        }
                     }
                 }
             }
         }
 
-        // 최후의 보루: 주소 뒤 꼬리표 추출
+        // 최후의 보루: 주소 뒤 꼬리표 추출 (기존 유지)
         let flatText = fullText.replace(/\n/g, ' ');
         const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
         
@@ -139,10 +144,9 @@ export function extractStoreNameLogic(fullText) {
             let idx = flatText.indexOf(addrStr);
             let tailStr = flatText.substring(idx + addrStr.length).trim();
             
-            // [개선] 주소 뒤에 붙는 불필요한 층수 및 괄호(예장동 등) 꼬리표 원천 제거
             tailStr = tailStr.replace(/^[,\s]*(지하\s*\d+층|지상\s*\d+층|B?\d+층|\d+층|[가-힣]+\([가-힣]+\)|[가-힣]+동)\s*/, '');
             
-            let splitByLabel = tailStr.split(stopLabelsRegex);
+            let splitByLabel = tailStr.split(stopLabels);
             let candidate = splitByLabel[0].trim().split(/[\s,:;\|]+/)[0]; 
             
             if (candidate.length >= 2 && !skipWords.test(candidate)) {
