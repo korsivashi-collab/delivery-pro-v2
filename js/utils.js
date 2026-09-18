@@ -74,48 +74,58 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [신규 Document AI 맞춤형] 상호 추출 로직
+// 🌟 4. [신규 Document AI 맞춤형 v2] 상호 추출 로직 (법인명 예외처리 완벽 보완)
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        // [개선 1] 괄호 보존: (주), (유) 및 (계림닭도리) 같은 텍스트가 쪼개지지 않도록 구분자에서 괄호 제외
         const breakRegex = /[\s,:;\|]+/; 
 
         const anchors = ['상호(법인명)', '상호명', '상호', '간판명', '배송지명', '업체명', '법인명', '공급받는자'];
-        // [개선 2] 표 형태(세금계산서)에서 잘못 읽히는 테이블 헤더 라벨들 강력 필터링
         const stopLabels = /^(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|단가|수량|규격|품목|비고|구분|일자|월|일)$/;
+        // [개선 3] (주), (유) 등 상호가 아닌 부속 단어가 단독으로 추출되는 것 방지
+        const skipWords = /^\(?(주|유|주식회사|유한회사)\)?$/;
         
         let lines = fullText.split(/\n/).map(l => l.trim()).filter(l => l.length > 0);
 
-        // =====================================================================
-        // [1차 알고리즘] 라벨 기반 세로/가로 탐색 (세금계산서 줄바꿈 틀어짐 대응)
-        // =====================================================================
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
             for (let anchor of anchors) {
                 if (line.includes(anchor)) {
                     let rightSide = line.substring(line.indexOf(anchor) + anchor.length).trim();
-                    rightSide = rightSide.replace(/^[:\-\s]+/, ''); // 콜론, 대시 등 시작 특수문자 제거
+                    rightSide = rightSide.replace(/^[:\-\s]+/, ''); 
                     
                     let candidate = null;
                     
-                    // 1단계: 라벨과 같은 줄에 값이 있는지 탐색
+                    // 1단계: 라벨과 같은 줄 탐색
                     let tokens = rightSide.split(breakRegex).filter(w => w.length > 0);
                     for (let token of tokens) {
-                        let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, ''); // 앞뒤 특수문자만 제거, 내부 괄호는 유지
-                        if (cleanTok.length >= 2 && !stopLabels.test(cleanTok) && !anchors.includes(cleanTok) && !/^\d+$/.test(cleanTok)) {
+                        let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
+                        // [핵심] (법인명) 처럼 괄호가 있는 경우 괄호를 벗겨서 앵커/라벨 리스트와 대조
+                        let pureText = cleanTok.replace(/[\(\)]/g, ''); 
+                        
+                        if (cleanTok.length >= 2 
+                            && !stopLabels.test(pureText) 
+                            && !anchors.includes(pureText) 
+                            && !skipWords.test(cleanTok)
+                            && !/^\d+$/.test(pureText)) {
                             candidate = cleanTok;
                             break;
                         }
                     }
                     
-                    // 2단계: [핵심] 같은 줄에서 못 찾았다면(표 양식이 틀어진 경우), 다음 1~2줄(아래 칸)을 세로로 탐색
+                    // 2단계: 다음 줄(아래 칸) 세로 탐색
                     if (!candidate) {
                         for (let j = i + 1; j < Math.min(i + 3, lines.length); j++) {
                             let nextTokens = lines[j].split(breakRegex).filter(w => w.length > 0);
                             for (let token of nextTokens) {
                                 let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
-                                if (cleanTok.length >= 2 && !stopLabels.test(cleanTok) && !anchors.includes(cleanTok) && !/^\d+$/.test(cleanTok)) {
+                                let pureText = cleanTok.replace(/[\(\)]/g, '');
+                                
+                                if (cleanTok.length >= 2 
+                                    && !stopLabels.test(pureText) 
+                                    && !anchors.includes(pureText) 
+                                    && !skipWords.test(cleanTok)
+                                    && !/^\d+$/.test(pureText)) {
                                     candidate = cleanTok;
                                     break;
                                 }
@@ -129,9 +139,7 @@ export function extractStoreNameLogic(fullText) {
             }
         }
 
-        // =====================================================================
-        // [2차 알고리즘] 주소 뒷부분 직접 추출 (거래명세서 꼬리표 연속 기입 대응)
-        // =====================================================================
+        // 2차 알고리즘 (주소 뒷부분 추출)
         let flatText = fullText.replace(/\n/g, ' ');
         const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
         
@@ -141,13 +149,18 @@ export function extractStoreNameLogic(fullText) {
             let idx = flatText.indexOf(addrStr);
             let tailStr = flatText.substring(idx + addrStr.length).trim();
             
-            // 1층, B1층 같은 층수 표기 건너뛰기
             tailStr = tailStr.replace(/^[,\s]*(지하\s*\d+층|지상\s*\d+층|B?\d+층|\d+층)\s*/, '');
             
             let tailTokens = tailStr.split(breakRegex).filter(w => w.length > 0);
             for (let token of tailTokens) {
                 let cleanTok = token.replace(/^[^\w가-힣\(]+|[^\w가-힣\)]+$/g, '');
-                if (cleanTok.length >= 2 && !stopLabels.test(cleanTok) && !anchors.includes(cleanTok) && !/^\d+$/.test(cleanTok)) {
+                let pureText = cleanTok.replace(/[\(\)]/g, '');
+                
+                if (cleanTok.length >= 2 
+                    && !stopLabels.test(pureText) 
+                    && !anchors.includes(pureText) 
+                    && !skipWords.test(cleanTok)
+                    && !/^\d+$/.test(pureText)) {
                     return cleanTok; 
                 }
             }
