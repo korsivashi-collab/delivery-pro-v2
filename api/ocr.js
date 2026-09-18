@@ -1,3 +1,27 @@
+const { DocumentProcessorServiceClient } = require('@google-cloud/documentai').v1;
+
+// Vercel 환경 변수에 등록할 서비스 계정 JSON 키 설정
+let credentialsConfig = {};
+try {
+    if (process.env.GCP_SERVICE_ACCOUNT_KEY) {
+        credentialsConfig = JSON.parse(process.env.GCP_SERVICE_ACCOUNT_KEY);
+    }
+} catch (e) {
+    console.error("GCP_SERVICE_ACCOUNT_KEY 파싱 오류:", e);
+}
+
+// Document AI 클라이언트 초기화
+const client = new DocumentProcessorServiceClient({
+    credentials: credentialsConfig.client_email ? credentialsConfig : undefined
+});
+
+// 방금 생성하신 GCP 프로젝트 및 프로세서 정보
+const projectId = 'delivery-ocr-506302'; 
+const location = 'us'; 
+const processorId = 'acd7355012d6c4a9'; 
+
+const resourceName = `projects/${projectId}/locations/${location}/processors/${processorId}`;
+
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
@@ -10,31 +34,39 @@ module.exports = async function handler(req, res) {
         }
         const imageContent = body?.imageContent;
 
-        const apiKey = process.env.GOOGLE_VISION_API_KEY;
-
-        if (!apiKey || apiKey === 'undefined' || apiKey.trim() === '') {
-            return res.status(500).json({ 
-                error: 'Vercel 환경 변수(GOOGLE_VISION_API_KEY)를 찾을 수 없습니다.' 
-            });
+        if (!imageContent) {
+            return res.status(400).json({ error: '이미지 데이터가 없습니다.' });
         }
 
-        const googleRes = await fetch(`https://vision.googleapis.com/v1/images:annotate?key=${apiKey.trim()}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                requests: [{ image: { content: imageContent }, features: [{ type: "TEXT_DETECTION" }] }]
-            })
+        // Base64 이미지를 버퍼로 변환
+        const encodedImage = Buffer.from(imageContent, 'base64');
+        const request = {
+            name: resourceName,
+            rawDocument: {
+                content: encodedImage,
+                mimeType: 'image/jpeg',
+            },
+        };
+
+        // Enterprise Document AI OCR 호출
+        const [result] = await client.processDocument(request);
+        const { document } = result;
+
+        if (!document || !document.text) {
+            return res.status(404).json({ error: "사진에서 텍스트를 찾을 수 없습니다." });
+        }
+
+        // 기존 프론트엔드(app.js)와 완벽히 호환되는 응답 포맷
+        return res.status(200).json({
+            responses: [{
+                fullTextAnnotation: {
+                    text: document.text
+                }
+            }]
         });
 
-        const data = await googleRes.json();
-        
-        if (data.error) {
-            return res.status(500).json({ error: `구글 거부 원인: ${data.error.message}` });
-        }
-
-        return res.status(200).json(data);
-        
     } catch (error) {
-        return res.status(500).json({ error: '서버 처리 중 오류가 발생했습니다.' });
+        console.error("Document AI OCR 처리 중 오류:", error);
+        return res.status(500).json({ error: `Document AI 오류: ${error.message}` });
     }
 };
