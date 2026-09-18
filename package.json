@@ -1,5 +1,8 @@
 {
   "name": "delivery-pro",
   "version": "1.0.0",
-  "private": true
+  "private": true,
+  "dependencies": {
+    "@google-cloud/documentai": "^8.0.0"
+  }
 }
