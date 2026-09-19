@@ -13,8 +13,8 @@ import {
     saveMessageToLocalHistory, showDispatchAlertPopup, 
     setRestoreDestinationHandler, setGpsToggleHandler 
 } from './support.js';
-// 🌟 새롭게 분리한 kakao.js 모듈에서 필요한 함수들만 깔끔하게 불러옵니다.
-import { geocodeAddress, coordToAddress, getNearbyPOIs, findStoreNameFromOCR } from './kakao.js';
+// 🌟 주소 키워드 검색 함수(getPOIsByAddress)가 추가된 kakao.js 모듈 임포트
+import { geocodeAddress, coordToAddress, getNearbyPOIs, getPOIsByAddress, findStoreNameFromOCR } from './kakao.js';
 
 // 전역 상태 변수들
 let sortableInstance = null;
@@ -1159,7 +1159,7 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
 }
 
 // ==========================================
-// 🚀 메인 스캔 로직 (카카오 API 상호명 자동 매칭 적용)
+// 🚀 메인 스캔 로직 (카카오 주소 키워드 검색 + 주변 POI 결합 적용)
 // ==========================================
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
@@ -1211,15 +1211,21 @@ export function initCameraScan() {
             }
         }
 
-        // 3. (NEW) 확보된 좌표로 주변 상호명 조회 및 OCR 텍스트 비교 매칭
+        // 3. 확보된 주소와 좌표를 바탕으로 상호명 정답지 확보 및 대조
         let finalStoreName = null;
-        if (coords && coords.lat && coords.lng && rawOCRText) {
+        if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                // 반경 50m 실제 상호명 정답지 확보
-                let nearbyPlaces = await getNearbyPOIs(coords.lat, coords.lng);
-                // OCR 텍스트와 80% 이상 유사한 정답이 있는지 대조
-                finalStoreName = findStoreNameFromOCR(rawOCRText, nearbyPlaces);
+                // A. 주소 키워드로 해당 건물 상가 목록 조회 (카카오맵 검색과 동일한 방식)
+                let addressPlaces = await getPOIsByAddress(addressStr);
+                // B. 좌표 반경 내 카테고리 상가 목록 보조 조회
+                let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
+                
+                // 두 리스트 통합 (중복 제거)
+                let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
+
+                // OCR 텍스트와 대조
+                finalStoreName = findStoreNameFromOCR(rawOCRText, combinedPlaces);
             } catch (error) {
                 console.error("상호명 매칭 오류:", error);
             }

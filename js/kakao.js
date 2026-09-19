@@ -51,12 +51,30 @@ export async function coordToAddress(x, y) {
     return null;
 }
 
-// 3. 🌟 [개선됨] 주변 상가(POI) 탐색 반경을 100m로 넓히고 키워드 검색 병행
+// 3. 🌟 [핵심 추가] 주소 문자열 자체를 키워드로 검색하여 해당 주소지의 상가 목록을 정확히 가져오기
+export async function getPOIsByAddress(addressStr) {
+    if (!addressStr) return [];
+    let places = [];
+    try {
+        let cleanAddr = addressStr.replace(/\[.*?\]/g, '').trim();
+        let res = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanAddr)}`, { 
+            headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
+        });
+        let data = await res.json();
+        if (data.documents) {
+            places.push(...data.documents.map(d => d.place_name));
+        }
+    } catch(e) {
+        console.error("주소 키워드 POI 조회 오류:", e);
+    }
+    return [...new Set(places)];
+}
+
+// 4. 주변 좌표 반경 기반 보조 검색 (기존 유지)
 export async function getNearbyPOIs(lat, lng) {
-    const cats = ['FD6', 'CE7', 'CS2', 'MT1', 'HP8', 'PM9']; // 음식점, 카페, 편의점 등
+    const cats = ['FD6', 'CE7', 'CS2', 'MT1', 'HP8', 'PM9']; 
     let places = [];
     
-    // 반경을 50m -> 100m로 확대하여 건물 오차 커버
     await Promise.all(cats.map(async (cat) => {
         try {
             let res = await fetch(`https://dapi.kakao.com/v2/local/search/category.json?category_group_code=${cat}&y=${lat}&x=${lng}&radius=100`, { 
@@ -68,22 +86,10 @@ export async function getNearbyPOIs(lat, lng) {
             }
         } catch(e) {}
     }));
-
-    // 주변 주소 기반 키워드 검색도 함께 수행하여 상가 누락 방지
-    try {
-        let resKw = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?y=${lat}&x=${lng}&radius=100&query=상회`, { 
-            headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
-        });
-        let dataKw = await resKw.json();
-        if (dataKw.documents) {
-            places.push(...dataKw.documents.map(d => d.place_name));
-        }
-    } catch(e) {}
-    
     return [...new Set(places)]; 
 }
 
-// 레벤슈타인 거리 기반 유사도 측정
+// 5. 레벤슈타인 거리 기반 유사도 측정
 export function getSimilarity(s1, s2) {
     if (!s1.length || !s2.length) return 0;
     let matrix = [];
@@ -108,30 +114,28 @@ export function getSimilarity(s1, s2) {
     return ((maxLength - distance) / maxLength) * 100;
 }
 
-// 4. 🌟 [개선됨] 괄호, (주), 특수문자를 유연하게 무시하고 매칭하는 상호 판별 로직
+// 6. 상호 판별 로직 (기준을 60%로 완화하여 유사 매칭 성공률 극대화)
 export function findStoreNameFromOCR(rawOCRText, places) {
     let cleanOCR = rawOCRText.replace(/\s+/g, '');
     let bestMatch = null;
     let highestSim = 0;
 
     for (let place of places) {
-        // (주), 유한회사, 괄호 내용 및 특수문자 완벽 제거 후 비교
         let cleanPlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
         if (cleanPlace.length < 2) continue;
         
-        // 1. OCR 텍스트 안에 상호명이 포함된 경우
         if (cleanOCR.includes(cleanPlace)) {
             return place; 
         }
 
-        // 2. 줄 단위 비교 (유사도 기준을 75%로 살짝 완화하여 오인식 대응)
         let lines = rawOCRText.split(/\n/);
         for (let line of lines) {
             let cleanLine = line.replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
             if(cleanLine.length < 2) continue;
             
             let sim = getSimilarity(cleanPlace, cleanLine);
-            if (sim > highestSim && sim >= 75) {
+            // 유사도 기준을 60%로 완화하여 오인식 극복
+            if (sim > highestSim && sim >= 60) {
                 highestSim = sim;
                 bestMatch = place;
             }
