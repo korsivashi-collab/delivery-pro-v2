@@ -54,7 +54,6 @@ export async function getNearbyPOIs(lat, lng) {
     return [...new Set(places)]; 
 }
 
-// 레벤슈타인 거리 계산 (수정본)
 function getLevenshteinDistance(s1, s2) {
     if (!s1.length) return s2.length;
     if (!s2.length) return s1.length;
@@ -75,7 +74,8 @@ function getLevenshteinDistance(s1, s2) {
 }
 
 export function findStoreNameFromOCR(rawOCRText, places) {
-    let cleanOCR = rawOCRText.replace(/\s+/g, '');
+    // 모든 특수기호와 공백을 제거한 하나의 긴 문자열 생성
+    let fullCleanOCR = rawOCRText.replace(/[^\w가-힣]/g, '');
     let bestMatch = null;
     let highestSim = 0;
 
@@ -83,30 +83,33 @@ export function findStoreNameFromOCR(rawOCRText, places) {
         let cleanPlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
         if (cleanPlace.length <= 1) continue; 
         
-        // 1단계: 완전 포함 검사
-        if (cleanOCR.includes(cleanPlace)) return place;
+        // 1단계: 100% 완전 포함 시 즉시 반환
+        if (fullCleanOCR.includes(cleanPlace)) return place;
 
-        // 2단계: 줄 단위 슬라이딩 윈도우 검사 (버그 수정됨)
-        let ocrLines = rawOCRText.split(/\n/);
-        for (let line of ocrLines) {
-            let cleanLine = line.replace(/[^\w가-힣]/g, '');
-            if (cleanLine.length < cleanPlace.length - 1) continue; 
+        // 2단계: 동적 커트라인 설정 (대표님의 70% 아이디어 적용)
+        let simThreshold = 75; // 기본 75%
+        if (cleanPlace.length >= 5) {
+            simThreshold = 65; // 5글자 이상 긴 상호명은 65%까지 대폭 완화
+        } else if (cleanPlace.length <= 3) {
+            simThreshold = 80; // 3글자 이하 짧은 상호명은 엄격하게 80% 유지
+        }
 
-            let targetLen = cleanPlace.length;
-            // 허용 오차를 주어 부분 문자열 생성 (목표 길이의 -1 ~ +2)
-            for (let i = 0; i <= cleanLine.length - targetLen + 1; i++) {
-                for (let j = Math.max(2, targetLen - 1); j <= targetLen + 2; j++) {
-                    let subStr = cleanLine.substring(i, i + j);
-                    if (subStr.length < 2) continue;
+        if (fullCleanOCR.length < cleanPlace.length - 1) continue; 
 
-                    let dist = getLevenshteinDistance(cleanPlace, subStr);
-                    let maxLen = Math.max(cleanPlace.length, subStr.length);
-                    let sim = ((maxLen - dist) / maxLen) * 100;
+        let targetLen = cleanPlace.length;
+        for (let i = 0; i <= fullCleanOCR.length - targetLen + 1; i++) {
+            for (let j = Math.max(2, targetLen - 1); j <= targetLen + 2; j++) {
+                let subStr = fullCleanOCR.substring(i, i + j);
+                if (subStr.length < 2) continue;
 
-                    if (sim >= 80 && sim > highestSim) {
-                        highestSim = sim;
-                        bestMatch = place;
-                    }
+                let dist = getLevenshteinDistance(cleanPlace, subStr);
+                let maxLen = Math.max(cleanPlace.length, subStr.length);
+                let sim = ((maxLen - dist) / maxLen) * 100;
+
+                // 동적 커트라인을 통과한 경우에만 매칭 후보로 등록
+                if (sim >= simThreshold && sim > highestSim) {
+                    highestSim = sim;
+                    bestMatch = place;
                 }
             }
         }
