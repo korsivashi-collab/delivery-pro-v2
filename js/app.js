@@ -39,7 +39,9 @@ import {
     toggleEtcTag, 
     saveCurrentMemo, 
     likeMemo, 
-    reportMemo 
+    reportMemo,
+    savePersonalMemo,
+    deletePersonalMemo
 } from './memo.js';
 
 import { 
@@ -359,7 +361,9 @@ export function renderList() {
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
                 </div>
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-1 mt-1"></div>
-                <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded p-1.5 text-[11px] text-gray-800 border border-gray-100 truncate shadow-sm mb-1.5 mt-1"></div>
+                <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded p-1.5 text-[11px] text-gray-800 border border-gray-100 truncate shadow-sm mb-1 mt-1"></div>
+                <!-- 공용 메모 아랫단에 개인 메모 표시 슬롯 -->
+                <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50 rounded p-1.5 text-[11px] text-emerald-950 border border-emerald-200 truncate shadow-sm mb-1.5 mt-0.5"></div>
                 
                 <div class="flex flex-col gap-1.5 mt-1 pt-2 border-t border-gray-100">
                     <div class="flex gap-1.5 h-[40px]">
@@ -460,6 +464,8 @@ window.closeMemoModal = closeMemoModal;
 window.saveCurrentMemo = saveCurrentMemo;
 window.likeMemo = likeMemo;
 window.reportMemo = reportMemo;
+window.savePersonalMemo = savePersonalMemo;
+window.deletePersonalMemo = deletePersonalMemo;
 window.cancelDestination = cancelDestination;
 window.completeDestination = completeDestination;
 window.selectCompletionTag = selectCompletionTag;
