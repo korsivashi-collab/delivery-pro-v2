@@ -7,12 +7,14 @@ import {
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
     firebaseClearDeviceData, firebaseUploadDeliveryPhoto
 } from './api.js';
-import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
+import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic } from './utils.js';
 import { 
     archiveCompletedDelivery, cleanOldHistory, checkUnreadNotices, 
     saveMessageToLocalHistory, showDispatchAlertPopup, 
     setRestoreDestinationHandler, setGpsToggleHandler 
 } from './support.js';
+// 🌟 새롭게 분리한 kakao.js 모듈에서 필요한 함수들만 깔끔하게 불러옵니다.
+import { geocodeAddress, coordToAddress, getNearbyPOIs, findStoreNameFromOCR } from './kakao.js';
 
 // 전역 상태 변수들
 let sortableInstance = null;
@@ -730,30 +732,6 @@ export async function applyHeaderCustomEnd() {
     } catch(error) { alert("종료지 주소를 찾을 수 없습니다."); } finally { hideLoading(); }
 }
 
-async function geocodeAddress(address) {
-    const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
-    let response = await fetch(`https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(address)}`, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } });
-    let data = await response.json();
-    if (data.documents && data.documents.length > 0) return { lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x), address_name: data.documents[0].address_name };
-    response = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(address)}`, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } });
-    data = await response.json();
-    if (data.documents && data.documents.length > 0) {
-        let finalName = data.documents[0].place_name;
-        if(data.documents[0].address_name) finalName += ` (${data.documents[0].address_name})`;
-        return { lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x), address_name: finalName };
-    }
-    throw new Error('검색 실패');
-}
-
-async function coordToAddress(x, y) {
-    const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
-    try {
-        const response = await fetch(`https://dapi.kakao.com/v2/local/geo/coord2address.json?x=${x}&y=${y}`, { headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } });
-        const data = await response.json();
-        if (data.documents && data.documents.length > 0) return data.documents[0].address.address_name;
-    } catch (e) {} return null;
-}
-
 export function openTmap(lat, lng, name) { 
     window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
 }
@@ -1180,6 +1158,9 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
     });
 }
 
+// ==========================================
+// 🚀 메인 스캔 로직 (카카오 API 상호명 자동 매칭 적용)
+// ==========================================
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
     if (!cameraInput) return;
@@ -1189,7 +1170,9 @@ export function initCameraScan() {
         if (!file) return;
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
-        let addressStr = null; let rawOCRText = ""; let extractedPhone = null; let storeName = null;
+        let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
+        
+        // 1. 사진 OCR 판독 및 주소/전화번호 정규식 추출
         showLoading("사진 판독 중...");
         try {
             const base64Image = await toBase64_SafeCompress(file);
@@ -1197,10 +1180,6 @@ export function initCameraScan() {
             rawOCRText = await performOCR(imageContent);
             addressStr = extractAddressLogic(rawOCRText);
             extractedPhone = extractPhoneLogic(rawOCRText);
-            
-            if (addressStr) {
-                storeName = extractStoreNameLogic(rawOCRText, addressStr);
-            }
             hideLoading();
         } catch (error) {
             hideLoading();
@@ -1209,6 +1188,7 @@ export function initCameraScan() {
             addressStr = result.address; extractedPhone = result.phone;
         }
 
+        // 주소 추출 실패 시 사용자 개입 (Fallback)
         if (!addressStr && rawOCRText) {
             let snippet = rawOCRText.replace(/\n/g, ' ').substring(0, 40);
             const result = await promptAddressCustom(snippet + "...", "", extractedPhone, false);
@@ -1216,6 +1196,7 @@ export function initCameraScan() {
             addressStr = result.address; extractedPhone = result.phone;
         }
 
+        // 2. 카카오 지오코딩으로 위도(lat)/경도(lng) 좌표 확실히 획득
         let coords = null;
         while (!coords) {
             try {
@@ -1230,10 +1211,28 @@ export function initCameraScan() {
             }
         }
 
+        // 3. (NEW) 확보된 좌표로 주변 상호명 조회 및 OCR 텍스트 비교 매칭
+        let finalStoreName = null;
+        if (coords && coords.lat && coords.lng && rawOCRText) {
+            showLoading("상호명 AI 매칭 중...");
+            try {
+                // 반경 50m 실제 상호명 정답지 확보
+                let nearbyPlaces = await getNearbyPOIs(coords.lat, coords.lng);
+                // OCR 텍스트와 80% 이상 유사한 정답이 있는지 대조
+                finalStoreName = findStoreNameFromOCR(rawOCRText, nearbyPlaces);
+            } catch (error) {
+                console.error("상호명 매칭 오류:", error);
+            }
+            hideLoading();
+        }
+
+        // 4. 최종 데이터 조합 및 리스트 등록
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
-            if (storeName && !resolvedAddress.includes(storeName)) {
-                resolvedAddress = `[${storeName}] ${resolvedAddress}`;
+            
+            // 상호명 매칭에 성공했다면 주소 맨 앞에 [상호명]을 깔끔하게 붙여줌
+            if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
+                resolvedAddress = `[${finalStoreName}] ${resolvedAddress}`;
             }
 
             let nextNum = destinations.length > 0 ? Math.max(...destinations.map(d => d.displayNumber)) + 1 : 1;
