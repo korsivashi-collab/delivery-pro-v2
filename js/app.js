@@ -7,14 +7,19 @@ import {
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
     firebaseClearDeviceData, firebaseUploadDeliveryPhoto
 } from './api.js';
-import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic } from './utils.js';
+// 🌟 예비군(Fallback)으로 사용할 기존 상호 추출 로직(extractStoreNameLogic) 정상 포함
+import { 
+    toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic 
+} from './utils.js';
 import { 
     archiveCompletedDelivery, cleanOldHistory, checkUnreadNotices, 
     saveMessageToLocalHistory, showDispatchAlertPopup, 
     setRestoreDestinationHandler, setGpsToggleHandler 
 } from './support.js';
-// 🌟 주소 키워드 검색 함수(getPOIsByAddress)가 추가된 kakao.js 모듈 임포트
-import { geocodeAddress, coordToAddress, getNearbyPOIs, getPOIsByAddress, findStoreNameFromOCR } from './kakao.js';
+// 🌟 카카오 매칭 모듈 정상 포함
+import { 
+    geocodeAddress, coordToAddress, getNearbyPOIs, getPOIsByAddress, findStoreNameFromOCR 
+} from './kakao.js';
 
 // 전역 상태 변수들
 let sortableInstance = null;
@@ -438,9 +443,13 @@ function initSwipeButton() {
 }
 
 export function openStartSelectionModal() {
-    if (destinations.length === 0) { alert("스캔된 배송지가 최소 1곳 이상 있어야 합니다."); return; }
+    if (destinations.length === 0) { 
+        alert("스캔된 배송지가 최소 1곳 이상 있어야 합니다."); 
+        return; 
+    }
     const listEl = document.getElementById('start-select-list');
     if (!listEl) return;
+    
     let html = '';
     destinations.forEach(d => {
         html += `
@@ -517,26 +526,49 @@ function saveActiveData() {
 
 function loadActiveData() {
     const savedList = localStorage.getItem('deliveryPro_active_destinations');
-    if (savedList) { try { destinations = JSON.parse(savedList); } catch (e) { destinations = []; } }
+    if (savedList) { 
+        try { destinations = JSON.parse(savedList); } catch (e) { destinations = []; } 
+    }
     
     const savedEnd = localStorage.getItem('deliveryPro_end_location');
-    if (savedEnd) { try { endLocation = JSON.parse(savedEnd); } catch(e){} }
+    if (savedEnd) { 
+        try { endLocation = JSON.parse(savedEnd); } catch(e){} 
+    }
     renderList();
 }
 
 function initSortable() {
     const el = document.getElementById('destination-list');
     if (!el) return;
+    
     if (sortableInstance) sortableInstance.destroy();
     
     if (window.Sortable) {
         sortableInstance = new Sortable(el, {
-            handle: '.drag-handle', animation: 250, easing: "cubic-bezier(0.25, 1, 0.5, 1)", delay: 200, delayOnTouchOnly: true, forceFallback: true, fallbackClass: "sortable-drag", fallbackOnBody: true, swapThreshold: 0.4, invertSwap: true, scroll: true, scrollSensitivity: 80, scrollSpeed: 20, fallbackTolerance: 5, filter: '.no-drag', ghostClass: 'sortable-ghost',
+            handle: '.drag-handle', 
+            animation: 250, 
+            easing: "cubic-bezier(0.25, 1, 0.5, 1)", 
+            delay: 200, 
+            delayOnTouchOnly: true, 
+            forceFallback: true, 
+            fallbackClass: "sortable-drag", 
+            fallbackOnBody: true, 
+            swapThreshold: 0.4, 
+            invertSwap: true, 
+            scroll: true, 
+            scrollSensitivity: 80, 
+            scrollSpeed: 20, 
+            fallbackTolerance: 5, 
+            filter: '.no-drag', 
+            ghostClass: 'sortable-ghost',
             onEnd: function (evt) {
                 const liElements = el.querySelectorAll('li[data-id]');
                 const newOrderIds = Array.from(liElements).map(li => parseInt(li.getAttribute('data-id')));
                 const newDestinations = [];
-                newOrderIds.forEach(id => { const found = destinations.find(d => d.id === id); if(found) newDestinations.push(found); });
+                newOrderIds.forEach(id => { 
+                    const found = destinations.find(d => d.id === id); 
+                    if(found) newDestinations.push(found); 
+                });
                 destinations = newDestinations; 
                 updateDisplayNumbers(); 
             }
@@ -565,11 +597,19 @@ function renderMemoPreview(dest) {
     const memoText = memos.length > 0 ? memos[0].memo : null;
 
     if (memoText) {
-        const tagRegex = /\[(.*?)\]/g; let tags = []; let match;
+        const tagRegex = /\[(.*?)\]/g; 
+        let tags = []; 
+        let match;
+        
         while ((match = tagRegex.exec(memoText)) !== null) {
-            let text = match[1]; text = text.replace('주차장 높이 ', '높이:'); text = text.replace('무료 회차 시간 ', '회차:'); tags.push(text);
+            let text = match[1]; 
+            text = text.replace('주차장 높이 ', '높이:'); 
+            text = text.replace('무료 회차 시간 ', '회차:'); 
+            tags.push(text);
         }
+        
         let rawText = memoText.replace(/\[.*?\]/g, '').trim();
+        
         if (tags.length > 0) {
             tagsEl.innerHTML = tags.map(t => `<span class="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0">${t}</span>`).join(''); 
             tagsEl.classList.remove('hidden');
@@ -577,6 +617,7 @@ function renderMemoPreview(dest) {
             tagsEl.classList.add('hidden'); 
             tagsEl.innerHTML = ''; 
         }
+        
         if (rawText) { 
             previewEl.innerHTML = `<i class="fa-solid fa-circle-info text-blue-500 mr-1"></i><span class="font-bold">주차정보:</span> <span class="text-gray-700">${rawText}</span>`; 
             previewEl.classList.remove('hidden');
@@ -743,32 +784,65 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
 export function selectHeightTag(btn, val) {
     const isActive = btn.dataset.active === "true";
-    document.querySelectorAll('.height-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
-    if (isActive) { selectedHeightText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedHeightText = `[주차장 높이 ${val}]`; }
+    document.querySelectorAll('.height-tag-btn').forEach(b => { 
+        b.dataset.active = "false"; 
+        b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    });
+    if (isActive) { 
+        selectedHeightText = ""; 
+    } else { 
+        btn.dataset.active = "true"; 
+        btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+        btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        selectedHeightText = `[주차장 높이 ${val}]`; 
+    }
 }
 
 export function selectTimeTag(btn, val) {
     const isActive = btn.dataset.active === "true";
-    document.querySelectorAll('.time-tag-btn').forEach(b => { b.dataset.active = "false"; b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); });
-    if (isActive) { selectedTimeText = ""; } else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); selectedTimeText = `[무료 회차 시간 ${val}]`; }
+    document.querySelectorAll('.time-tag-btn').forEach(b => { 
+        b.dataset.active = "false"; 
+        b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    });
+    if (isActive) { 
+        selectedTimeText = ""; 
+    } else { 
+        btn.dataset.active = "true"; 
+        btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+        btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        selectedTimeText = `[무료 회차 시간 ${val}]`; 
+    }
 }
 
 export function toggleEtcTag(btn) {
     const isActive = btn.dataset.active === "true";
-    if (isActive) { btn.dataset.active = "false"; btn.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); btn.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); } 
-    else { btn.dataset.active = "true"; btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); }
+    if (isActive) { 
+        btn.dataset.active = "false"; 
+        btn.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        btn.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    } else { 
+        btn.dataset.active = "true"; 
+        btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+        btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+    }
 }
 
 export async function openMemoModal(id) {
-    const item = destinations.find(d => d.id === id); if (!item) return; 
+    const item = destinations.find(d => d.id === id); 
+    if (!item) return; 
     
     currentMemoAddress = getPureAddress(item.address);
     
     const titleEl = document.getElementById('memo-modal-title');
     if (titleEl) titleEl.innerText = currentMemoAddress; 
     resetMemoForm();
+    
     const listContainer = document.getElementById('memo-list-container');
-    if (listContainer) listContainer.innerHTML = `<div class="flex justify-center items-center py-6 text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>목록을 불러오는 중...</div>`;
+    if (listContainer) {
+        listContainer.innerHTML = `<div class="flex justify-center items-center py-6 text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>목록을 불러오는 중...</div>`;
+    }
     document.getElementById('memo-modal')?.classList.remove('hidden');
 
     try {
@@ -805,6 +879,7 @@ export async function openMemoModal(id) {
             const pureText = rawMemo.replace(/\[.*?\]/g, '').trim();
             const memoInput = document.getElementById('memo-input');
             const countEl = document.getElementById('memo-char-count');
+            
             if (memoInput) memoInput.value = pureText;
             if (countEl) countEl.innerText = `${pureText.length} / 30`;
         }
@@ -848,9 +923,13 @@ function resetMemoForm() {
         b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
         b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
     });
-    selectedHeightText = ""; selectedTimeText = ""; 
+    
+    selectedHeightText = ""; 
+    selectedTimeText = ""; 
+    
     const memoInput = document.getElementById('memo-input');
     const countEl = document.getElementById('memo-char-count');
+    
     if (memoInput) memoInput.value = ""; 
     if (countEl) countEl.innerText = "0 / 30";
 }
@@ -858,46 +937,89 @@ function resetMemoForm() {
 export async function saveCurrentMemo() {
     const rawText = (document.getElementById('memo-input')?.value || '').trim();
     let tags = [];
-    if (selectedHeightText) tags.push(selectedHeightText); if (selectedTimeText) tags.push(selectedTimeText);
-    document.querySelectorAll('.etc-tag-btn').forEach(btn => { if (btn.dataset.active === "true") tags.push(`[${btn.dataset.val}]`); });
-    const tagString = tags.join(" "); let finalMemo = "";
-    if (tagString && rawText) finalMemo = tagString + "\n" + rawText; else finalMemo = (tagString + rawText).trim();
+    
+    if (selectedHeightText) tags.push(selectedHeightText); 
+    if (selectedTimeText) tags.push(selectedTimeText);
+    
+    document.querySelectorAll('.etc-tag-btn').forEach(btn => { 
+        if (btn.dataset.active === "true") tags.push(`[${btn.dataset.val}]`); 
+    });
+    
+    const tagString = tags.join(" "); 
+    let finalMemo = "";
+    if (tagString && rawText) {
+        finalMemo = tagString + "\n" + rawText; 
+    } else {
+        finalMemo = (tagString + rawText).trim();
+    }
 
-    if (!finalMemo) { alert("항목을 선택하거나 내용을 입력해주세요."); return; }
+    if (!finalMemo) { 
+        alert("항목을 선택하거나 내용을 입력해주세요."); 
+        return; 
+    }
+    
     const sensitiveRegex = /(비번|비밀번호|패스워드|#|\*|\d{4,})/g;
-    if (sensitiveRegex.test(rawText)) { alert("⚠️ [보안 경고]\n현관 비밀번호 등은 법적 문제로 공유할 수 없습니다."); return; }
+    if (sensitiveRegex.test(rawText)) { 
+        alert("⚠️ [보안 경고]\n현관 비밀번호 등은 법적 문제로 공유할 수 없습니다."); 
+        return; 
+    }
 
     showLoading("주차정보 등록/수정 중...");
     try {
         await saveMemoToFirestore(currentMemoAddress, getOrCreateDeviceId(), finalMemo);
-        hideLoading(); alert("주차 정보가 등록(수정)되었습니다.");
+        hideLoading(); 
+        alert("주차 정보가 등록(수정)되었습니다.");
         
         const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); 
-        if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
-    } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
+        if(dest) { 
+            saveActiveData(); 
+            renderList(); 
+            openMemoModal(dest.id); 
+        }
+    } catch (e) { 
+        hideLoading(); 
+        alert("통신 오류가 발생했습니다."); 
+    }
 }
 
 export async function likeMemo(docId) {
     try {
         await likeMemoInFirestore(docId);
         const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
-        if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
-    } catch (e) { alert("통신 오류가 발생했습니다."); }
+        if(dest) { 
+            saveActiveData(); 
+            renderList(); 
+            openMemoModal(dest.id); 
+        }
+    } catch (e) { 
+        alert("통신 오류가 발생했습니다."); 
+    }
 }
 
 export async function reportMemo(docId) {
     if (!confirm("이 메모에 부적절한 내용이 있습니까?\n신고하시면 즉시 블라인드 처리됩니다.")) return;
+    
     showLoading("신고 처리 중...");
     try {
         await reportMemoInFirestore(docId);
-        hideLoading(); alert("신고가 접수되어 블라인드 처리되었습니다."); 
+        hideLoading(); 
+        alert("신고가 접수되어 블라인드 처리되었습니다."); 
+        
         const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
-        if(dest) { saveActiveData(); renderList(); openMemoModal(dest.id); }
-    } catch (e) { hideLoading(); alert("통신 오류가 발생했습니다."); }
+        if(dest) { 
+            saveActiveData(); 
+            renderList(); 
+            openMemoModal(dest.id); 
+        }
+    } catch (e) { 
+        hideLoading(); 
+        alert("통신 오류가 발생했습니다."); 
+    }
 }
 
 export async function cancelDestination(id) {
     if (!confirm("이 배송지를 취소하시겠습니까?\n취소된 내역은 '지난배송' 목록에 기록됩니다.")) return;
+    
     const item = destinations.find(d => d.id === id);
     if (!item) return;
 
@@ -909,7 +1031,9 @@ export async function cancelDestination(id) {
         let isRealGpsCaptured = false;
 
         if (realGps && realGps.lat && realGps.lng) {
-            actualLat = realGps.lat; actualLng = realGps.lng; isRealGpsCaptured = true;
+            actualLat = realGps.lat;
+            actualLng = realGps.lng;
+            isRealGpsCaptured = true;
         }
 
         const deviceId = getOrCreateDeviceId();
@@ -931,12 +1055,15 @@ export async function cancelDestination(id) {
 export function completeDestination(id) {
     pendingCompletionId = id;
     selectedCompTag = "";
+    
     document.querySelectorAll('.comp-tag-btn').forEach(b => {
         b.classList.remove('bg-emerald-100', 'border-emerald-400', 'text-emerald-800');
         b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700');
     });
+    
     const etcContainer = document.getElementById('comp-etc-input-container');
     const etcInput = document.getElementById('comp-etc-input');
+    
     if (etcContainer) etcContainer.classList.add('hidden');
     if (etcInput) etcInput.value = "";
     
@@ -949,12 +1076,15 @@ export function selectCompletionTag(btn, tag) {
         b.classList.remove('bg-emerald-100', 'border-emerald-400', 'text-emerald-800');
         b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700');
     });
+    
     btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700');
     btn.classList.add('bg-emerald-100', 'border-emerald-400', 'text-emerald-800');
     
     selectedCompTag = tag;
+    
     const etcContainer = document.getElementById('comp-etc-input-container');
     const etcInput = document.getElementById('comp-etc-input');
+    
     if (tag === '기타') {
         if (etcContainer) etcContainer.classList.remove('hidden');
         setTimeout(() => { if (etcInput) etcInput.focus(); }, 100);
@@ -974,12 +1104,14 @@ export function triggerPhotoCompletion() {
 
 export async function confirmCompletion(photoUrl = null) {
     if (typeof photoUrl !== 'string') photoUrl = null;
+    
     if (!photoUrl && !selectedCompTag) { 
         alert("배송 완료 태그를 선택해 주세요."); 
         return; 
     }
     
     let finalTag = selectedCompTag;
+    
     if (selectedCompTag === '기타') {
         const etcText = (document.getElementById('comp-etc-input')?.value || '').trim();
         if (!etcText && !photoUrl) { 
@@ -992,7 +1124,10 @@ export async function confirmCompletion(photoUrl = null) {
     }
 
     const item = destinations.find(d => d.id === pendingCompletionId);
-    if (!item) { closeCompletionModal(); return; }
+    if (!item) { 
+        closeCompletionModal(); 
+        return; 
+    }
 
     document.getElementById('completion-modal')?.classList.add('hidden');
 
@@ -1007,7 +1142,9 @@ export async function confirmCompletion(photoUrl = null) {
     let isRealGpsCaptured = false;
 
     if (realGps && realGps.lat && realGps.lng) {
-        actualLat = realGps.lat; actualLng = realGps.lng; isRealGpsCaptured = true;
+        actualLat = realGps.lat;
+        actualLng = realGps.lng;
+        isRealGpsCaptured = true;
     }
 
     const deviceId = getOrCreateDeviceId();
@@ -1024,7 +1161,8 @@ export async function confirmCompletion(photoUrl = null) {
 }
 
 export async function editDestinationAddress(id) {
-    const item = destinations.find(d => d.id === id); if (!item) return;
+    const item = destinations.find(d => d.id === id); 
+    if (!item) return;
     
     const result = await promptAddressCustom("", item.address, item.phone || "", true); 
     if (!result) return;
@@ -1033,6 +1171,7 @@ export async function editDestinationAddress(id) {
     const newPhone = result.phone;
     let addrChanged = newAddr !== item.address; 
     let phoneChanged = newPhone !== (item.phone || "");
+    
     if (!addrChanged && !phoneChanged) return;
 
     if (addrChanged) {
@@ -1046,7 +1185,8 @@ export async function editDestinationAddress(id) {
             }
         } catch (e) { 
             alert("수정된 주소를 지도에서 찾을 수 없습니다."); 
-            hideLoading(); return; 
+            hideLoading(); 
+            return; 
         } finally { 
             hideLoading(); 
         }
@@ -1070,8 +1210,8 @@ function hideLoading() {
 
 export async function logout() {
     if (!confirm("로그아웃 하시겠습니까?\n로그아웃 시 기기 정보가 초기화되어 다른 기기에서 로그인할 수 있습니다.")) return;
-    const currentKey = localStorage.getItem('deliveryProKey');
     
+    const currentKey = localStorage.getItem('deliveryProKey');
     if (currentKey && typeof firebaseClearDeviceData === 'function') {
         try {
             await firebaseClearDeviceData(currentKey);
@@ -1095,13 +1235,26 @@ function checkScanLimit() {
     const now = Date.now();
     const currentMonth = new Date().toISOString().slice(0, 7);
     const lastScanTime = localStorage.getItem('deliveryProLastScanTime');
-    if (lastScanTime && (now - parseInt(lastScanTime) < SCAN_COOLDOWN_MS)) { alert("1초 후 다시 스캔해주세요."); return false; }
+    
+    if (lastScanTime && (now - parseInt(lastScanTime) < SCAN_COOLDOWN_MS)) { 
+        alert("1초 후 다시 스캔해주세요."); 
+        return false; 
+    }
+    
     let scanData = JSON.parse(localStorage.getItem('deliveryProScanData') || '{"month": "", "count": 0}');
-    if (scanData.month !== currentMonth) { scanData = { month: currentMonth, count: 0 }; }
-    if (scanData.count >= MAX_MONTHLY_SCANS) { alert(`⚠️ 월간 최대 스캔 한도(${MAX_MONTHLY_SCANS}장) 초과.`); return false; }
+    if (scanData.month !== currentMonth) { 
+        scanData = { month: currentMonth, count: 0 }; 
+    }
+    
+    if (scanData.count >= MAX_MONTHLY_SCANS) { 
+        alert(`⚠️ 월간 최대 스캔 한도(${MAX_MONTHLY_SCANS}장) 초과.`); 
+        return false; 
+    }
+    
     scanData.count++;
     localStorage.setItem('deliveryProScanData', JSON.stringify(scanData));
     localStorage.setItem('deliveryProLastScanTime', now.toString());
+    
     return true;
 }
 
@@ -1112,9 +1265,11 @@ async function performOCR(base64Data) {
         body: JSON.stringify({ imageContent: base64Data }) 
     });
     const data = await response.json();
+    
     if (data.error) throw new Error(data.error);
     if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
     if (data.responses && data.responses[0].fullTextAnnotation) return data.responses[0].fullTextAnnotation.text;
+    
     throw new Error("사진에서 글자를 찾을 수 없습니다.");
 }
 
@@ -1144,22 +1299,30 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
         if(addrInput) addrInput.value = defaultText || ""; 
         if(phoneInput) phoneInput.value = defaultPhone || "";
         if(modal) modal.classList.remove('hidden');
+        
         setTimeout(() => { if(addrInput) addrInput.focus(); }, 100);
 
-        const onConfirm = () => { cleanup(); resolve({ address: addrInput.value.trim(), phone: phoneInput.value.trim() }); };
-        const onCancel = () => { cleanup(); resolve(null); };
+        const onConfirm = () => { 
+            cleanup(); 
+            resolve({ address: addrInput.value.trim(), phone: phoneInput.value.trim() }); 
+        };
+        const onCancel = () => { 
+            cleanup(); 
+            resolve(null); 
+        };
         const cleanup = () => { 
             btnConfirm.removeEventListener('click', onConfirm); 
             btnCancel.removeEventListener('click', onCancel); 
             if(modal) modal.classList.add('hidden'); 
         };
+        
         btnConfirm.addEventListener('click', onConfirm); 
         btnCancel.addEventListener('click', onCancel);
     });
 }
 
 // ==========================================
-// 🚀 메인 스캔 로직 (카카오 주소 키워드 검색 + 주변 POI 결합 적용)
+// 🚀 메인 스캔 로직 (카카오 하이브리드 + Fallback 매칭 적용)
 // ==========================================
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
@@ -1170,9 +1333,11 @@ export function initCameraScan() {
         if (!file) return;
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
-        let addressStr = null; let rawOCRText = ""; let extractedPhone = null;
+        let addressStr = null; 
+        let rawOCRText = ""; 
+        let extractedPhone = null;
         
-        // 1. 사진 OCR 판독 및 주소/전화번호 정규식 추출
+        // 1. OCR 판독
         showLoading("사진 판독 중...");
         try {
             const base64Image = await toBase64_SafeCompress(file);
@@ -1185,18 +1350,19 @@ export function initCameraScan() {
             hideLoading();
             const result = await promptAddressCustom("사진 인식 실패", "", "", false);
             if (!result || !result.address) { e.target.value = ''; return; }
-            addressStr = result.address; extractedPhone = result.phone;
+            addressStr = result.address; 
+            extractedPhone = result.phone;
         }
 
-        // 주소 추출 실패 시 사용자 개입 (Fallback)
         if (!addressStr && rawOCRText) {
             let snippet = rawOCRText.replace(/\n/g, ' ').substring(0, 40);
             const result = await promptAddressCustom(snippet + "...", "", extractedPhone, false);
             if (!result || !result.address) { e.target.value = ''; return; }
-            addressStr = result.address; extractedPhone = result.phone;
+            addressStr = result.address; 
+            extractedPhone = result.phone;
         }
 
-        // 2. 카카오 지오코딩으로 위도(lat)/경도(lng) 좌표 확실히 획득
+        // 2. 주소 좌표 획득
         let coords = null;
         while (!coords) {
             try {
@@ -1207,36 +1373,41 @@ export function initCameraScan() {
                 hideLoading();
                 const result = await promptAddressCustom("지도에서 주소를 찾을 수 없습니다.", addressStr, extractedPhone, true);
                 if (!result || !result.address) { e.target.value = ''; return; }
-                addressStr = result.address; extractedPhone = result.phone;
+                addressStr = result.address; 
+                extractedPhone = result.phone;
             }
         }
 
-        // 3. 확보된 주소와 좌표를 바탕으로 상호명 정답지 확보 및 대조
+        // 3. 하이브리드 상호명 매칭 (카카오 API 최우선 -> 실패 시 기존 로직 사용)
         let finalStoreName = null;
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                // A. 주소 키워드로 해당 건물 상가 목록 조회 (카카오맵 검색과 동일한 방식)
+                // A. 카카오 정답지 확보
                 let addressPlaces = await getPOIsByAddress(addressStr);
-                // B. 좌표 반경 내 카테고리 상가 목록 보조 조회
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
-                
-                // 두 리스트 통합 (중복 제거)
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // OCR 텍스트와 대조
+                // B. 카카오 기반 1차 매칭 시도
                 finalStoreName = findStoreNameFromOCR(rawOCRText, combinedPlaces);
+
+                // C. 카카오 매칭이 실패했다면 기존(Fallback) 로직으로 2차 시도
+                if (!finalStoreName) {
+                    finalStoreName = extractStoreNameLogic(rawOCRText);
+                }
             } catch (error) {
                 console.error("상호명 매칭 오류:", error);
+                // 에러가 났을 때도 최후의 보루로 기존 로직 실행
+                if (!finalStoreName) {
+                    finalStoreName = extractStoreNameLogic(rawOCRText);
+                }
             }
             hideLoading();
         }
 
-        // 4. 최종 데이터 조합 및 리스트 등록
+        // 4. 리스트 추가
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
-            
-            // 상호명 매칭에 성공했다면 주소 맨 앞에 [상호명]을 깔끔하게 붙여줌
             if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
                 resolvedAddress = `[${finalStoreName}] ${resolvedAddress}`;
             }
@@ -1244,10 +1415,17 @@ export function initCameraScan() {
             let nextNum = destinations.length > 0 ? Math.max(...destinations.map(d => d.displayNumber)) + 1 : 1;
             const newDestId = idCounter++; 
             destinations.push({
-                id: newDestId, address: resolvedAddress,
-                lat: coords.lat, lng: coords.lng, phone: extractedPhone, displayNumber: nextNum
+                id: newDestId, 
+                address: resolvedAddress,
+                lat: coords.lat, 
+                lng: coords.lng, 
+                phone: extractedPhone, 
+                displayNumber: nextNum
             });
-            saveActiveData(); renderList();
+            
+            saveActiveData(); 
+            renderList();
+            
             setTimeout(() => { 
                 const newEl = document.querySelector(`li[data-id="${newDestId}"]`); 
                 if (newEl) newEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
@@ -1317,5 +1495,8 @@ window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
 window.appActions = {
-    initApp, optimizeRouteAction, getDeviceRealGPS, renderList
+    initApp, 
+    optimizeRouteAction, 
+    getDeviceRealGPS, 
+    renderList
 };
