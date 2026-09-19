@@ -6,7 +6,7 @@
 
 import { calculateOptimizedRoute } from './optimizer.js';
 import { saveRouteToFirestore } from './api.js';
-import { showLoading, hideLoading } from './utils.js';
+import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state } from './state.js';
 
@@ -73,6 +73,9 @@ let sortableInstance = null;
 // 1. 앱 기동 및 라이프사이클 초기화
 // ==========================================
 export async function initApp() {
+    // 안드로이드 / iOS 기기 해상도 및 뷰포트 자동 최적화 즉시 구동
+    initResponsiveViewport();
+
     localStorage.removeItem('deliveryPro_start_location'); 
     state.loadActiveData();
     cleanOldHistory();

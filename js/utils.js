@@ -209,3 +209,49 @@ export function extractStoreNameLogic(fullText) {
     }
     return null;
 }
+
+// ==========================================
+// 7. 안드로이드 / iOS 기기별 해상도 및 뷰포트 자동 최적화 엔진
+// ==========================================
+export function initResponsiveViewport() {
+    function applyViewportMetrics() {
+        // 1. 실제 내부 가용 높이(innerHeight)를 읽어 주소창 높이 변화 보정 (--vh)
+        const vh = window.innerHeight * 0.01;
+        document.documentElement.style.setProperty('--vh', `${vh}px`);
+
+        // 2. 가로 화면 폭(innerWidth)을 읽어 소형/대형 폰 자동 배율 계산
+        const screenWidth = window.innerWidth || document.documentElement.clientWidth || 375;
+        
+        // 기준 너비(375px: 아이폰 기본 크기) 대비 배율 산출 (0.90 ~ 1.10 사이로 안정적 클램프)
+        let scaleRatio = screenWidth / 375;
+        if (scaleRatio < 0.90) scaleRatio = 0.90; // 아주 작은 폰에서 과도한 축소 방지
+        if (scaleRatio > 1.10) scaleRatio = 1.10; // 대화면 폰에서 과도한 확대 방지
+        document.documentElement.style.setProperty('--app-scale', scaleRatio.toFixed(3));
+
+        // 3. 360px 이하 소형 폰(아이폰 SE 등) 특화 플래그 클래스 지정
+        if (screenWidth <= 360) {
+            document.body.classList.add('screen-compact');
+        } else {
+            document.body.classList.remove('screen-compact');
+        }
+
+        // 4. 모바일 가상 키보드 및 다이내믹 주소창 대응 (visualViewport 지원 시)
+        if (window.visualViewport) {
+            const visualHeight = window.visualViewport.height * 0.01;
+            document.documentElement.style.setProperty('--vvh', `${visualHeight}px`);
+        }
+    }
+
+    // 초기 1회 즉시 실행
+    applyViewportMetrics();
+
+    // 화면 크기 변경(회전, 주소창 스크롤 확장/축소) 시 자동 재계산
+    window.addEventListener('resize', applyViewportMetrics, { passive: true });
+    window.addEventListener('orientationchange', () => {
+        setTimeout(applyViewportMetrics, 100);
+    });
+
+    if (window.visualViewport) {
+        window.visualViewport.addEventListener('resize', applyViewportMetrics, { passive: true });
+    }
+}
