@@ -1,6 +1,32 @@
 // js/utils.js
 
-// 1. 클라이언트단 사진 안전 압축 (기존 유지)
+// ==========================================
+// 1. 공통 로딩 오버레이 제어 함수
+// ==========================================
+export function showLoading(text) { 
+    const elText = document.getElementById('loading-text');
+    const elOverlay = document.getElementById('loading-overlay');
+    if (elText) elText.innerText = text; 
+    if (elOverlay) elOverlay.classList.remove('hidden'); 
+}
+
+export function hideLoading() { 
+    const elOverlay = document.getElementById('loading-overlay');
+    if (elOverlay) elOverlay.classList.add('hidden'); 
+}
+
+// ==========================================
+// 2. 순수 도로명/지번 주소 추출 (상호명 대괄호 제거용)
+// ==========================================
+export function getPureAddress(address) {
+    if (!address) return "";
+    let match = address.match(/^\[(.*?)\]\s*(.*)$/);
+    return match ? match[2].trim() : address.trim();
+}
+
+// ==========================================
+// 3. 사진 고속 안전 압축 (클라이언트단)
+// ==========================================
 export function toBase64_SafeCompress(file) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -28,7 +54,9 @@ export function toBase64_SafeCompress(file) {
     });
 }
 
-// 2. 전화번호 추출 로직 (기존 유지)
+// ==========================================
+// 4. 전화번호 추출 로직
+// ==========================================
 export function extractPhoneLogic(text) {
     if (!text) return null;
     let candidates = [];
@@ -60,7 +88,9 @@ export function extractPhoneLogic(text) {
     return null;
 }
 
-// 3. 스마트 주소 추출 로직 (기존 유지)
+// ==========================================
+// 5. 도로명 주소 정밀 추출 로직
+// ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
@@ -74,7 +104,9 @@ export function extractAddressLogic(text) {
     return null;
 }
 
-// 🌟 4. [최종 완성본] 상호 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증)
+// ==========================================
+// 6. 상호명 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증)
+// ==========================================
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
@@ -85,12 +117,10 @@ export function extractStoreNameLogic(fullText) {
         // 수집을 차단하는 경계선 라벨들
         const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액)/;
         
-        // 💡 [핵심] 띄어쓰기 및 괄호, 쉼표, 콜론 등 "연결이 끊기는" 모든 기호를 감지
+        // 연결이 끊기는 모든 기호 감지
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
-        // =====================================================================
-        // [1차 알고리즘] 라벨 포함 줄 탐색 -> 우측 데이터 가져옴 -> 끊기면 앞자리만
-        // =====================================================================
+        // [1차 알고리즘] 라벨 포함 줄 탐색
         for (let line of lines) {
             for (let anchor of anchors) {
                 if (line.includes(anchor)) {
@@ -109,9 +139,7 @@ export function extractStoreNameLogic(fullText) {
             }
         }
 
-        // =====================================================================
-        // [2차 알고리즘] 단어 단위 연쇄 탐색 -> 이중 라벨 건너뜀 -> 끊기면 앞자리만
-        // =====================================================================
+        // [2차 알고리즘] 단어 단위 연쇄 탐색
         let tokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
         
         for (let i = 0; i < tokens.length; i++) {
@@ -131,9 +159,7 @@ export function extractStoreNameLogic(fullText) {
             }
         }
 
-        // =====================================================================
         // [3차 알고리즘] 주소 주변 텍스트와 전체 텍스트의 '엄격한 교집합' 검증
-        // =====================================================================
         let flatText = fullText.replace(/\n/g, ' ');
         const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
         
@@ -142,7 +168,6 @@ export function extractStoreNameLogic(fullText) {
             let matchStr = match[0];
             let idx = flatText.indexOf(matchStr);
             
-            // 주소 기준 양방향 탐색
             let headStr = flatText.substring(Math.max(0, idx - 40), idx);
             let tailStr = flatText.substring(idx + matchStr.length, idx + matchStr.length + 40);
             
@@ -168,8 +193,7 @@ export function extractStoreNameLogic(fullText) {
                 }
             }
 
-            // 💡 [대표님 규칙] 오직 2번 이상 겹치는(교집합) 데이터만 상호로 확정하고 뱉는다. 
-            // 억지로 하나를 뱉어내는 4차 규칙 전면 삭제.
+            // 2번 이상 중복되는 단어만 최종 상호명으로 확정
             for (let candidate of candidates) {
                 let firstIdx = flatText.indexOf(candidate);
                 let lastIdx = flatText.lastIndexOf(candidate);
@@ -183,5 +207,5 @@ export function extractStoreNameLogic(fullText) {
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
-    return null; // 모든 규칙(1~3차)에서 실패하면 깔끔하게 null 반환
+    return null;
 }
