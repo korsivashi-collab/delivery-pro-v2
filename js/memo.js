@@ -9,7 +9,10 @@ import {
     getBatchMemosFromFirestore, 
     saveMemoToFirestore, 
     likeMemoInFirestore, 
-    reportMemoInFirestore 
+    reportMemoInFirestore,
+    firebaseUploadTempMemoBackup,
+    firebaseGetTempMemoBackup,
+    firebaseDeleteTempMemoBackup
 } from './api.js';
 import { getPureAddress, showLoading, hideLoading } from './utils.js';
 import { state } from './state.js';
@@ -24,7 +27,6 @@ let selectedTimeText = "";
 // 1. 메모 글자 수 실시간 카운트 리스너 초기화
 // ==========================================
 export function initMemoEvents() {
-    // 1-1. 공용 주차 메모 입력 글자수
     const memoInputEl = document.getElementById('memo-input');
     if (memoInputEl) {
         memoInputEl.addEventListener('input', function() {
@@ -33,7 +35,6 @@ export function initMemoEvents() {
         });
     }
 
-    // 1-2. 개인 로컬 메모 입력 글자수 (30자 제한)
     const personalMemoInputEl = document.getElementById('personal-memo-input');
     if (personalMemoInputEl) {
         personalMemoInputEl.addEventListener('input', function() {
@@ -78,7 +79,7 @@ export function getPersonalMemo(address) {
 }
 
 // ==========================================
-// 4. 메인 배송 카드 내 메모(공용 주차 + 로컬 개인) 미리보기 렌더링
+// 4. 메인 배송 카드 내 메모 미리보기 렌더링
 // ==========================================
 export function renderMemoPreview(dest) {
     const previewEl = document.getElementById(`memo-preview-${dest.id}`); 
@@ -126,7 +127,7 @@ export function renderMemoPreview(dest) {
         }
     }
 
-    // [B] 개인 로컬 메모 렌더링 (공용 메모 바로 아랫단 표시)
+    // [B] 개인 로컬 메모 렌더링 (공용 메모 바로 아랫단)
     if (personalPreviewEl) {
         const personalMemo = getPersonalMemo(pureAddr);
         if (personalMemo) {
@@ -226,7 +227,6 @@ export async function openMemoModal(id) {
     if (titleEl) titleEl.innerText = currentMemoAddress; 
     resetMemoForm();
 
-    // 6-1. 해당 주소의 개인 로컬 메모 로드
     const savedPersonal = getPersonalMemo(currentMemoAddress);
     const pInput = document.getElementById('personal-memo-input');
     const pCount = document.getElementById('personal-memo-char-count');
@@ -238,7 +238,6 @@ export async function openMemoModal(id) {
         else pDelBtn.classList.add('hidden');
     }
     
-    // 6-2. 공용 주차 정보 불러오기
     const listContainer = document.getElementById('memo-list-container');
     if (listContainer) {
         listContainer.innerHTML = `<div class="flex justify-center items-center py-6 text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>목록을 불러오는 중...</div>`;
@@ -407,7 +406,7 @@ export async function reportMemo(docId) {
 }
 
 // ==========================================
-// 8. 개인 로컬 메모 저장 및 삭제 액션 (기기 내부 단독)
+// 8. 개인 로컬 메모 저장 및 삭제 액션
 // ==========================================
 export function savePersonalMemo() {
     if (!currentMemoAddress) {
@@ -474,7 +473,143 @@ export function deletePersonalMemo() {
 }
 
 // ==========================================
-// 9. Window 전역 바인딩 (HTML 인라인 이벤트 호환)
+// 9. 기기단 자체 암호화 / 복호화 유틸리티
+// ==========================================
+function getMemoSecretKey() {
+    const rawKey = localStorage.getItem('deliveryProKey') || 'DEV_KEY';
+    return (rawKey + '_DELIVERY_PRO_ENC_SALT').replace(/[^a-zA-Z0-9_]/g, '');
+}
+
+function encryptPayload(text, secretKey) {
+    const encoded = encodeURIComponent(text);
+    let result = '';
+    for (let i = 0; i < encoded.length; i++) {
+        result += String.fromCharCode(encoded.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
+    }
+    return btoa(result);
+}
+
+function decryptPayload(cipher, secretKey) {
+    const decoded = atob(cipher);
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+        result += String.fromCharCode(decoded.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
+    }
+    return decodeURIComponent(result);
+}
+
+// ==========================================
+// 10. 개인 메모 기기변경 임시 백업 및 복구 (3중 안전장치)
+// ==========================================
+
+// 10-1. 기기변경용 12시간 암호화 백업
+export async function backupPersonalMemosToCloud() {
+    const rawKey = localStorage.getItem('deliveryProKey');
+    if (!rawKey) {
+        alert("로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.");
+        return;
+    }
+    const cleanKey = rawKey.trim().replace(/[\/\\#?]/g, '_');
+    const allMemos = getAllPersonalMemos();
+    const memoKeys = Object.keys(allMemos);
+    const count = memoKeys.length;
+
+    // [안전장치 1] 빈 데이터(0건) 백업 원천 차단
+    if (count === 0) {
+        alert("⚠️ 현재 핸드폰에 저장된 개인 메모가 0건입니다.\n기존 메모를 가져오시려면 [복구] 버튼을 눌러주세요.");
+        return;
+    }
+
+    try {
+        // [안전장치 2] 기존 백업 존재 여부 사전 검증 및 덮어쓰기 2중 확인
+        showLoading("기존 서버 백업 확인 중...");
+        const existing = await firebaseGetTempMemoBackup(cleanKey);
+        hideLoading();
+
+        if (existing && !existing.expired && existing.count > 0) {
+            const ok = confirm(`⚠️ 서버에 기존 백업(${existing.count}건)이 보관되어 있습니다.\n현재 폰의 메모(${count}건)로 덮어쓰시겠습니까?`);
+            if (!ok) return;
+        }
+
+        showLoading("개인 메모 암호화 보관 중...");
+        const secretKey = getMemoSecretKey();
+        const encrypted = encryptPayload(JSON.stringify(allMemos), secretKey);
+
+        await firebaseUploadTempMemoBackup(cleanKey, encrypted, count);
+        hideLoading();
+
+        alert(`✅ 개인 메모 ${count}건이 서버에 암호화 보관되었습니다.\n\n[안내]\n1. 유효시간은 12시간입니다.\n2. 구 핸드폰에서 [로그아웃] 후, 새 핸드폰에서 로그인하여 [개인메모 복구]를 누르시면 됩니다.`);
+    } catch (e) {
+        hideLoading();
+        alert("백업 처리 중 오류가 발생했습니다: " + e.message);
+    }
+}
+
+// 10-2. 새 기기에서 복구 실행 (병합 복구 및 서버 즉시 파기)
+export async function restorePersonalMemosFromCloud() {
+    const rawKey = localStorage.getItem('deliveryProKey');
+    if (!rawKey) {
+        alert("로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.");
+        return;
+    }
+    const cleanKey = rawKey.trim().replace(/[\/\\#?]/g, '_');
+
+    try {
+        showLoading("서버 백업 확인 중...");
+        const backup = await firebaseGetTempMemoBackup(cleanKey);
+        hideLoading();
+
+        if (!backup) {
+            alert("서버에 보관된 임시 백업이 없습니다.\n기존 핸드폰에서 먼저 [기기변경 백업]을 실행해 주세요.");
+            return;
+        }
+
+        if (backup.expired) {
+            alert("⚠️ 백업 유효시간(12시간)이 초과되어 데이터가 보안상 자동 파기되었습니다.\n기존 기기에서 다시 백업을 진행해 주세요.");
+            return;
+        }
+
+        const ok = confirm(`서버에서 ${backup.count}건의 암호화 백업을 찾았습니다.\n기존 메모와 병합하여 복구하시겠습니까?`);
+        if (!ok) return;
+
+        showLoading("암호 해독 및 복구 중...");
+        const secretKey = getMemoSecretKey();
+        let restoredObj = {};
+
+        try {
+            const decryptedJson = decryptPayload(backup.payload, secretKey);
+            restoredObj = JSON.parse(decryptedJson);
+        } catch (err) {
+            hideLoading();
+            alert("암호 해독에 실패했습니다. 키 정보가 일치하지 않습니다.");
+            return;
+        }
+
+        // [안전장치 3] 기존 메모를 지우지 않고 병합(Merge)
+        const currentMemos = getAllPersonalMemos();
+        const mergedMemos = { ...currentMemos, ...restoredObj };
+        localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(mergedMemos));
+
+        // 복구 성공 즉시 서버 데이터 완전 파기
+        await firebaseDeleteTempMemoBackup(cleanKey);
+        hideLoading();
+
+        // 화면 갱신
+        const destinations = state.getDestinations();
+        destinations.forEach(d => renderMemoPreview(d));
+        if (typeof window.renderList === 'function') window.renderList();
+
+        alert(`🎉 개인 메모 복구가 성공적으로 완료되었습니다!\n(총 ${Object.keys(mergedMemos).length}건 반영됨)\n\n보안을 위해 서버의 임시 백업 데이터는 영구 파기되었습니다.`);
+    } catch (e) {
+        hideLoading();
+        alert("복구 처리 중 오류가 발생했습니다: " + e.message);
+    }
+}
+
+// ==========================================
+// 11. Window 전역 바인딩
 // ==========================================
 window.savePersonalMemo = savePersonalMemo;
 window.deletePersonalMemo = deletePersonalMemo;
+window.backupPersonalMemosToCloud = backupPersonalMemosToCloud;
+window.restorePersonalMemosFromCloud = restorePersonalMemosFromCloud;

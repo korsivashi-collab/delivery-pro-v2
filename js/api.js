@@ -115,7 +115,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
         phone: phone, 
         actualKey: docSnap.id,
         dispatchKey: data.dispatchKey || "",
-        allowTms: data.allowTms !== false // 🌟 추가됨: 기본값 true로 취급
+        allowTms: data.allowTms !== false
     };
 }
 
@@ -247,7 +247,7 @@ export async function firebaseStartTrial(phone, deviceId) {
         expireDate: expDateStr,
         status: 'active',
         dispatchKey: '',
-        allowTms: true, // 🌟 처음엔 무조건 허용
+        allowTms: true,
         createdAt: now.getTime()
     });
 
@@ -400,7 +400,7 @@ export async function firebaseClearDeviceData(key) {
     }
 }
 
-// 🌟 9. [변경됨] TMS(관제) 연결 허용/차단 상태 제어 함수
+// 9. TMS(관제) 연결 허용/차단 상태 제어 함수
 export async function firebaseSetTmsPermission(key, isAllowed) {
     try {
         if (!key) throw new Error("유효한 라이선스 키 값이 없습니다.");
@@ -419,10 +419,8 @@ export async function firebaseSetTmsPermission(key, isAllowed) {
         
         if (docSnap.exists()) {
             if (isAllowed) {
-                // 스위치를 켜면: 관제 연결을 허용함
                 await updateDoc(docRef, { allowTms: true });
             } else {
-                // 스위치를 끄면: 관제 연결을 차단하고, 기존 연결도 끊음
                 await updateDoc(docRef, { allowTms: false, dispatchKey: "" });
             }
         } else {
@@ -431,5 +429,62 @@ export async function firebaseSetTmsPermission(key, isAllowed) {
     } catch(e) {
         console.error("TMS 상태 변경 오류:", e);
         throw e;
+    }
+}
+
+// =================================================================
+// 10. 개인 메모 기기변경 임시 금고 (12시간 자동 파기 및 암호화 보관)
+// =================================================================
+
+// 10-1. 암호화된 개인 메모 임시 백업 업로드
+export async function firebaseUploadTempMemoBackup(cleanKey, encryptedPayload, count) {
+    if (!cleanKey) throw new Error("라이선스 식별자가 올바르지 않습니다.");
+    const now = Date.now();
+    const expireTime = now + (12 * 60 * 60 * 1000); // 12시간 후 자동 만료 기준 시점
+
+    const docRef = doc(db, "temp_memo_backups", cleanKey);
+    await setDoc(docRef, {
+        licenseKey: cleanKey,
+        payload: encryptedPayload,
+        count: count,
+        createdAt: now,
+        expireAt: expireTime
+    });
+}
+
+// 10-2. 임시 백업 데이터 조회 및 만료 검사
+export async function firebaseGetTempMemoBackup(cleanKey) {
+    if (!cleanKey) return null;
+    const docRef = doc(db, "temp_memo_backups", cleanKey);
+    const docSnap = await getDoc(docRef);
+
+    if (!docSnap.exists()) return null;
+
+    const data = docSnap.data();
+    const now = Date.now();
+
+    // 12시간이 경과한 데이터는 서버에서 즉시 영구 파기 처리
+    if (data.expireAt && now > data.expireAt) {
+        try { await deleteDoc(docRef); } catch (e) {}
+        return { expired: true };
+    }
+
+    return {
+        expired: false,
+        payload: data.payload,
+        count: data.count || 0,
+        createdAt: data.createdAt,
+        expireAt: data.expireAt
+    };
+}
+
+// 10-3. 복구 완료 후 서버 임시 데이터 즉시 파기
+export async function firebaseDeleteTempMemoBackup(cleanKey) {
+    if (!cleanKey) return;
+    try {
+        const docRef = doc(db, "temp_memo_backups", cleanKey);
+        await deleteDoc(docRef);
+    } catch (e) {
+        console.error("임시 백업 파기 오류:", e);
     }
 }
