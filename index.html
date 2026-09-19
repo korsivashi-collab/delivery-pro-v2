@@ -446,7 +446,7 @@
         </div>
     </div>
 
-    <!-- 연결 설정 모달 -->
+    <!-- 연결 설정 모달 (TMS, GPS, 기기변경 개인메모 임시백업/복구 통합) -->
     <div id="settings-modal" class="hidden fixed inset-0 bg-black/60 z-[250] flex items-center justify-center p-4 animate-slide-up backdrop-blur-sm">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden">
             <h3 class="font-black text-gray-900 text-lg mb-6 flex items-center gap-2">
@@ -454,6 +454,7 @@
             </h3>
             
             <div class="space-y-5 mb-6">
+                <!-- TMS 연결 토글 -->
                 <div class="flex items-center justify-between">
                     <div>
                         <h4 class="text-sm font-bold text-gray-800">TMS 연결</h4>
@@ -467,6 +468,7 @@
                 
                 <div class="w-full h-px bg-gray-100"></div>
 
+                <!-- GPS 위치 확인 토글 -->
                 <div class="flex items-center justify-between">
                     <div>
                         <h4 class="text-sm font-bold text-gray-800">GPS 위치 확인</h4>
@@ -476,6 +478,29 @@
                         <input type="checkbox" id="gps-toggle" class="sr-only peer" onchange="window.toggleGPS(this.checked)" checked>
                         <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
+                </div>
+
+                <div class="w-full h-px bg-gray-100"></div>
+
+                <!-- 기기변경 개인메모 이전 블록 (12시간 암호화 임시 금고) -->
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
+                            <i class="fa-solid fa-shield-halved text-emerald-600"></i> 기기변경 개인메모 이전
+                        </h4>
+                        <span class="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">12시간 암호화</span>
+                    </div>
+                    <p class="text-[10px] text-gray-500 mb-3 leading-tight">
+                        폰 교체 시 메모를 암호화하여 서버에 12시간 동안 임시 보관합니다. 새 폰 로그인 후 [복구]를 누르세요.
+                    </p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="window.backupPersonalMemosToCloud()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-300 font-bold py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition">
+                            <i class="fa-solid fa-cloud-arrow-up text-[13px]"></i> 임시 백업 (12h)
+                        </button>
+                        <button onclick="window.restorePersonalMemosFromCloud()" class="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-300 font-bold py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition">
+                            <i class="fa-solid fa-cloud-arrow-down text-[13px]"></i> 메모 복구
+                        </button>
+                    </div>
                 </div>
             </div>
             
