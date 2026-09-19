@@ -7,19 +7,14 @@ import {
     reportMemoInFirestore, saveRouteToFirestore, saveCompletionToFirestore, 
     firebaseClearDeviceData, firebaseUploadDeliveryPhoto
 } from './api.js';
-// 🌟 예비군(Fallback)으로 사용할 기존 상호 추출 로직(extractStoreNameLogic) 정상 포함
-import { 
-    toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic 
-} from './utils.js';
+// 🌟 2단계 촘촘한 그물망(기존 알고리즘) 호출용
+import { toBase64_SafeCompress, extractPhoneLogic, extractAddressLogic, extractStoreNameLogic } from './utils.js';
 import { 
     archiveCompletedDelivery, cleanOldHistory, checkUnreadNotices, 
     saveMessageToLocalHistory, showDispatchAlertPopup, 
     setRestoreDestinationHandler, setGpsToggleHandler 
 } from './support.js';
-// 🌟 카카오 매칭 모듈 정상 포함
-import { 
-    geocodeAddress, coordToAddress, getNearbyPOIs, getPOIsByAddress, findStoreNameFromOCR 
-} from './kakao.js';
+import { geocodeAddress, coordToAddress, getNearbyPOIs, getPOIsByAddress, findStoreNameFromOCR } from './kakao.js';
 
 // 전역 상태 변수들
 let sortableInstance = null;
@@ -40,9 +35,6 @@ let gpsRequestWatcherUnsub = null;
 let lastKnownGps = null;
 let gpsWatchId = null;
 
-// ==========================================
-// 상호명을 완벽히 제외한 '순수 주소' 추출 함수
-// ==========================================
 function getPureAddress(address) {
     if (!address) return "";
     let match = address.match(/^\[(.*?)\]\s*(.*)$/);
@@ -99,7 +91,6 @@ export async function initApp() {
     startGpsWatcher();
     checkUnreadNotices();
     
-    // support.js와 통신할 콜백 등록
     setRestoreDestinationHandler((itemToRestore) => {
         destinations.push(itemToRestore);
         updateDisplayNumbers();
@@ -1393,6 +1384,7 @@ export function initCameraScan() {
 
                 // C. 카카오 매칭이 실패했다면 기존(Fallback) 로직으로 2차 시도
                 if (!finalStoreName) {
+                    // utils.js에서 불러온 기존 로직이 여기서 사용됩니다!
                     finalStoreName = extractStoreNameLogic(rawOCRText);
                 }
             } catch (error) {
@@ -1408,6 +1400,7 @@ export function initCameraScan() {
         // 4. 리스트 추가
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
+            // 대표 상가가 주소 뒤에 붙어있거나, 매칭된 상호명이 있으면 맨 앞에 괄호치고 붙여줌
             if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
                 resolvedAddress = `[${finalStoreName}] ${resolvedAddress}`;
             }
