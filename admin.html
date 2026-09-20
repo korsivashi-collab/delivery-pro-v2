@@ -105,7 +105,7 @@
         </header>
 
         <div class="flex-1 overflow-y-auto p-6 max-w-[1650px] mx-auto w-full hide-scrollbar space-y-5">
-            <!-- 🌟 마스터 대시보드: 전체 데이터 추출 및 사진 데이터, 신규 계정 생성 영역 -->
+            <!-- 마스터 대시보드: 전체 데이터 추출 및 사진 데이터, 신규 계정 생성 영역 -->
             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex justify-between items-center flex-wrap gap-4">
                 <div>
                     <h3 class="text-sm font-black text-gray-800 flex items-center gap-2"><i class="fa-solid fa-server text-blue-600"></i> 시스템 및 데이터 통합 관리</h3>
@@ -702,7 +702,7 @@
         </div>
     </div>
 
-    <!-- 🌟 수정: 마스터용 배송 사진 데이터 관리 모달 (가벼운 텍스트 테이블 리스트 형태) -->
+    <!-- 🌟 수정: 마스터용 배송 사진 데이터 관리 모달 (가벼운 텍스트 테이블 리스트 형태 & 실시간 기사 검색 인풋) -->
     <div id="photo-gallery-modal" class="hidden fixed inset-0 bg-black/70 z-[500] flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white w-full max-w-6xl rounded-3xl shadow-2xl relative flex flex-col h-[90vh] overflow-hidden">
             <!-- 모달 헤더 -->
@@ -716,7 +716,7 @@
                             배송 완료 사진 데이터 목록
                             <span id="photo-total-count-badge" class="bg-indigo-100 text-indigo-800 text-xs font-black px-2.5 py-0.5 rounded-full border border-indigo-200">총 0건</span>
                         </h3>
-                        <p class="text-[11px] text-gray-400 font-bold">기사별/날짜별 완료 기록을 리스트로 확인하고 사진을 열람하거나 삭제합니다.</p>
+                        <p class="text-[11px] text-gray-400 font-bold">기사 검색 및 날짜별 완료 기록을 리스트로 확인하고 사진을 열람하거나 삭제합니다.</p>
                     </div>
                 </div>
                 <button onclick="window.closePhotoGalleryModal()" class="w-9 h-9 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-xl flex items-center justify-center transition">
@@ -724,15 +724,17 @@
                 </button>
             </div>
 
-            <!-- 필터 바 -->
+            <!-- 필터 바 (드롭다운을 제거하고 빠른 기사 검색 인풋으로 전환) -->
             <div class="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 flex-none">
                 <div class="flex items-center gap-3 flex-wrap">
-                    <!-- 기사 필터 -->
+                    <!-- 🌟 기사 검색 필터 (대규모 기사 지원) -->
                     <div class="flex items-center gap-1.5">
-                        <span class="text-xs font-bold text-gray-600"><i class="fa-solid fa-truck text-blue-500"></i> 기사:</span>
-                        <select id="photo-filter-driver" onchange="window.filterPhotoGallery()" class="bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:border-indigo-500 shadow-sm min-w-[200px]">
-                            <option value="ALL">전체 기사 보기</option>
-                        </select>
+                        <span class="text-xs font-bold text-gray-600"><i class="fa-solid fa-truck text-blue-500"></i> 기사 검색:</span>
+                        <div class="relative flex items-center">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 text-gray-400 text-xs"></i>
+                            <input type="text" id="photo-filter-driver-search" oninput="window.filterPhotoGallery()" placeholder="전화번호 또는 키 입력..." class="bg-white border border-gray-300 rounded-xl pl-8 pr-7 py-1.5 text-xs font-bold outline-none focus:border-indigo-500 shadow-sm w-48">
+                            <button type="button" onclick="document.getElementById('photo-filter-driver-search').value=''; window.filterPhotoGallery();" class="absolute right-2.5 text-gray-400 hover:text-gray-600 text-xs" title="검색어 지우기"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
                     </div>
 
                     <!-- 날짜 필터 -->
@@ -748,7 +750,7 @@
                 </div>
             </div>
 
-            <!-- 🌟 리소스 최적화: 가벼운 텍스트 테이블 리스트 영역 -->
+            <!-- 리소스 최적화: 가벼운 텍스트 테이블 리스트 영역 -->
             <div class="flex-1 overflow-x-auto custom-scrollbar flex flex-col bg-white">
                 <div class="flex-1 overflow-y-auto custom-scrollbar p-4">
                     <table class="w-full text-left border-collapse text-xs min-w-[950px]">
@@ -773,7 +775,7 @@
         </div>
     </div>
 
-    <!-- 🌟 사진 원본 크게보기 팝업 모달 (버튼 클릭 시에만 해당 사진 1장 단독 로딩) -->
+    <!-- 사진 원본 크게보기 팝업 모달 (버튼 클릭 시에만 해당 사진 1장 단독 로딩) -->
     <div id="photo-preview-modal" class="hidden fixed inset-0 bg-black/85 z-[600] flex items-center justify-center p-4 backdrop-blur-sm" onclick="window.closePhotoPreviewModal()">
         <div class="bg-white rounded-3xl overflow-hidden shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
             <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
