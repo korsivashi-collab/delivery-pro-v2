@@ -253,14 +253,14 @@ export function optimizeRouteAction() {
 export function moveDestinationUp(id) {
     const destinations = state.getDestinations();
     const idx = destinations.findIndex(d => d.id === id);
-    if (idx <= 0) return; // 이미 최상단이거나 없는 경우
+    if (idx <= 0) return; 
 
-    // 위쪽 배송지와 순서 맞교환
+    // 윗 배송지와 순서 맞교환
     const temp = destinations[idx];
     destinations[idx] = destinations[idx - 1];
     destinations[idx - 1] = temp;
 
-    // 만약 시작 지점이 설정된 상태에서 1번 항목이 바뀌었을 경우 시작 좌표 동기화
+    // 시작 지점이 설정된 상태에서 1번 항목이 변경된 경우 시작 좌표 동기화
     if (state.getStartLocation() && destinations[0]) {
         state.setStartLocation({
             lat: destinations[0].lat,
@@ -278,14 +278,14 @@ export function moveDestinationUp(id) {
 export function moveDestinationDown(id) {
     const destinations = state.getDestinations();
     const idx = destinations.findIndex(d => d.id === id);
-    if (idx === -1 || idx >= destinations.length - 1) return; // 이미 최하단이거나 없는 경우
+    if (idx === -1 || idx >= destinations.length - 1) return; 
 
-    // 아래쪽 배송지와 순서 맞교환
+    // 아랫 배송지와 순서 맞교환
     const temp = destinations[idx];
     destinations[idx] = destinations[idx + 1];
     destinations[idx + 1] = temp;
 
-    // 만약 시작 지점이 설정된 상태에서 1번 항목이 바뀌었을 경우 시작 좌표 동기화
+    // 시작 지점이 설정된 상태에서 1번 항목이 변경된 경우 시작 좌표 동기화
     if (state.getStartLocation() && destinations[0]) {
         state.setStartLocation({
             lat: destinations[0].lat,
@@ -367,12 +367,12 @@ export function renderList() {
 
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
-                    <!-- 위로/아래로 이동 버튼 (가로줄 3개 대체) -->
-                    <div class="flex items-center gap-1 shrink-0 -ml-1">
-                        <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-6 flex items-center justify-center rounded-md bg-gray-50 border border-gray-200 text-gray-600 active:bg-gray-200 disabled:opacity-20 disabled:pointer-events-none transition shadow-xs" title="위로 이동">
+                    <!-- 위/아래 수직(상하) 배치 및 오터치 방지 간격(gap-1.5) 확보 -->
+                    <div class="flex flex-col items-center justify-center gap-1.5 shrink-0 -ml-1 mr-0.5">
+                        <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[18px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
                         </button>
-                        <button onclick="moveDestinationDown(${dest.id})" ${isLast ? 'disabled' : ''} class="w-6 h-6 flex items-center justify-center rounded-md bg-gray-50 border border-gray-200 text-gray-600 active:bg-gray-200 disabled:opacity-20 disabled:pointer-events-none transition shadow-xs" title="아래로 이동">
+                        <button onclick="moveDestinationDown(${dest.id})" ${isLast ? 'disabled' : ''} class="w-6 h-[18px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="아래로 이동">
                             <i class="fa-solid fa-chevron-down text-[10px]"></i>
                         </button>
                     </div>
@@ -502,7 +502,7 @@ window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
-// 순서 이동 신규 전역 함수 바인딩
+// 순서 이동 전역 함수 바인딩
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
