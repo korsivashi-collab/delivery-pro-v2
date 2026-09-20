@@ -251,7 +251,7 @@ export function optimizeRouteAction() {
 }
 
 // ==========================================
-// 6. 드래그 앤 드롭 순서 변경 (Sortable)
+// 6. 드래그 앤 드롭 순서 변경 (Sortable 최적화 적용)
 // ==========================================
 function initSortable() {
     const el = document.getElementById('destination-list');
@@ -261,22 +261,29 @@ function initSortable() {
     
     if (window.Sortable) {
         sortableInstance = new Sortable(el, {
-            handle: '.drag-handle', 
-            animation: 250, 
-            easing: "cubic-bezier(0.25, 1, 0.5, 1)", 
-            delay: 200, 
-            delayOnTouchOnly: true, 
-            forceFallback: true, 
-            fallbackClass: "sortable-drag", 
-            fallbackOnBody: true, 
-            swapThreshold: 0.4, 
-            invertSwap: true, 
-            scroll: true, 
-            scrollSensitivity: 80, 
-            scrollSpeed: 20, 
-            fallbackTolerance: 5, 
+            handle: '.drag-handle',          // 지정된 가로바 3개 아이콘으로만 드래그 구동
+            animation: 200,                  // 빠르고 부드러운 카드 전환 속도
+            easing: "cubic-bezier(0.2, 0, 0, 1)", // 자연스러운 감속 곡선
+            delay: 0,                        // 불필요한 터치 대기시간(0.2초) 제거하여 즉각 반응
+            touchStartThreshold: 3,          // 미세한 손떨림은 방지하고 의도된 터치는 즉각 감지
+            direction: 'vertical',           // 수직 리스트 고정으로 상하 이동 판정 정확도 향상
+            swapThreshold: 0.65,             // 카드 사이 진입 시 65% 통과 시 부드럽게 공간 확보
+            invertSwap: false,               // 불필요한 역방향 스왑 간섭을 꺼서 덜컥거림 원천 차단
+            scroll: true,                    // 화면 끝 도달 시 자동 스크롤
+            scrollSensitivity: 100,          // 스크롤 감도 최적화
+            scrollSpeed: 15,                 // 부드러운 자동 스크롤 속도
             filter: '.no-drag', 
-            ghostClass: 'sortable-ghost',
+            ghostClass: 'sortable-ghost',    // 이동 중 비워질 자리의 스타일
+            chosenClass: 'sortable-chosen',  // 터치하여 선택된 순간의 스타일
+            dragClass: 'sortable-drag',      // 손가락에 들려 이동 중인 카드의 스타일
+            forceFallback: true,             // 모바일 브라우저 간 일관된 터치 애니메이션 보장
+            fallbackClass: 'sortable-drag', 
+            fallbackOnBody: true, 
+            fallbackTolerance: 2, 
+            onStart: function () {
+                // 터치하여 이동이 시작될 때 손끝에 전달되는 미세 진동 피드백
+                if (navigator.vibrate) navigator.vibrate(15);
+            },
             onEnd: function () {
                 const liElements = el.querySelectorAll('li[data-id]');
                 const newOrderIds = Array.from(liElements).map(li => parseInt(li.getAttribute('data-id')));
@@ -333,7 +340,7 @@ export function renderList() {
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
-            li.className = "bg-white p-2.5 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-1.5";
+            li.className = "bg-white p-2.5 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-1.5 transition-shadow";
             
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
                 `<div class="bg-indigo-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
@@ -358,7 +365,8 @@ export function renderList() {
 
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
-                    <div class="drag-handle cursor-grab active:cursor-grabbing p-1.5 -ml-1 text-gray-400 shrink-0"><i class="fa-solid fa-bars text-[16px]"></i></div>
+                    <!-- 터치 제스처 간섭을 차단(touch-none select-none)하여 손끝에 즉시 반응하는 드래그 핸들 -->
+                    <div class="drag-handle cursor-grab active:cursor-grabbing p-2 -ml-1 text-gray-400 hover:text-gray-600 shrink-0 touch-none select-none"><i class="fa-solid fa-bars text-[16px]"></i></div>
                     ${numberBadge}
                     <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">${displayAddressHTML}</div>
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
