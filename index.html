@@ -11,7 +11,6 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/sortablejs@latest/Sortable.min.js"></script>
     
     <style>
         :root {
@@ -40,36 +39,6 @@
         /* Safe-Area 안전 여백 (iOS 홈 인디케이터 및 상단 노치 대응) */
         .pt-safe { padding-top: max(1rem, env(safe-area-inset-top)); }
         .pb-safe { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
-        
-        /* 자연스러운 드래그 앤 드롭 애니메이션 스타일 */
-        .drag-handle {
-            touch-action: none;
-            -webkit-touch-callout: none;
-        }
-
-        /* 손가락에 잡혀 이동 중인 카드: 부드러운 그림자와 자연스러운 떠오름 */
-        .sortable-drag {
-            opacity: 0.98 !important;
-            transform: scale(1.02) !important;
-            box-shadow: 0 14px 28px rgba(0, 0, 0, 0.12), 0 6px 10px rgba(0, 0, 0, 0.05) !important;
-            background-color: #ffffff !important;
-            border-radius: 0.75rem !important;
-            z-index: 9999 !important;
-            cursor: grabbing !important;
-        }
-
-        /* 카드가 비켜서며 합류할 자리: 자연스러운 은은한 슬롯 가이드 */
-        .sortable-ghost { 
-            opacity: 0.3 !important; 
-            background-color: #f8fafc !important; 
-            border: 1.5px dashed #cbd5e1 !important; 
-            border-radius: 0.75rem !important;
-            box-shadow: none !important;
-        }
-
-        .sortable-chosen {
-            cursor: grabbing !important;
-        }
         
         .animate-slide-up {
             animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
@@ -276,7 +245,7 @@
 
         <main class="flex-1 overflow-y-auto px-4 py-3 hide-scrollbar bg-gray-100 relative">
             <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px]">
-                <li id="empty-state" class="text-center text-gray-400 py-16 no-drag border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
+                <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
                     <p class="font-medium text-xs">주소지를 스캔하면 동선이 생성됩니다.</p>
                 </li>
