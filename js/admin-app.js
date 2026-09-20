@@ -25,7 +25,11 @@ import {
     backToAllAccountsView, changeHistoryPage, toggleHistoryNoticeMode,
     toggleHistoryItemSelection, toggleHistorySelectAll, sendHistoryNoticeToSelected,
     setHistoryMasterSubTab, deleteAccountFromHistory, renderAccountHistoryView,
-    openMasterNoticeHistoryModal, closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
+    openMasterNoticeHistoryModal, closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList,
+    // 🌟 사진 데이터 관리 모듈 함수 추가
+    openPhotoGalleryModal, closePhotoGalleryModal, filterPhotoGallery,
+    clearPhotoDateFilter, togglePhotoSort, renderPhotoGalleryGrid,
+    previewPhotoModal, closePhotoPreviewModal, deletePhotoItem
 } from "./admin-master-history.js";
 
 // ==========================================
@@ -293,6 +297,12 @@ window.initMasterDataSync = function() {
             drawDriverOnMap(state.selectedDeviceId);
         }
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
+
+        // 🌟 사진 갤러리 모달이 열려 있을 때 실시간 화면 갱신
+        const photoModal = document.getElementById('photo-gallery-modal');
+        if (photoModal && !photoModal.classList.contains('hidden') && typeof renderPhotoGalleryGrid === 'function') {
+            renderPhotoGalleryGrid();
+        }
     });
 
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
@@ -353,6 +363,17 @@ window.renderAccountHistoryView = renderAccountHistoryView;
 window.openMasterNoticeHistoryModal = openMasterNoticeHistoryModal;
 window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
 window.renderMasterNoticeHistoryList = renderMasterNoticeHistoryList;
+
+// 🌟 [마스터 - 사진 데이터 관리 모듈]
+window.openPhotoGalleryModal = openPhotoGalleryModal;
+window.closePhotoGalleryModal = closePhotoGalleryModal;
+window.filterPhotoGallery = filterPhotoGallery;
+window.clearPhotoDateFilter = clearPhotoDateFilter;
+window.togglePhotoSort = togglePhotoSort;
+window.renderPhotoGalleryGrid = renderPhotoGalleryGrid;
+window.previewPhotoModal = previewPhotoModal;
+window.closePhotoPreviewModal = closePhotoPreviewModal;
+window.deletePhotoItem = deletePhotoItem;
 
 // [관제 코어]
 window.setDispatchMode = setDispatchMode;

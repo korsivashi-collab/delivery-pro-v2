@@ -10,8 +10,25 @@ import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/fireb
 // ==========================================
 
 // 🌟 메모 테이블 정렬 상태 변수
-let memoSortField = 'time'; // 'time' (작성 일시) 또는 'likes' (추천수)
-let memoSortAsc = false;    // 기본적으로 최신순/추천많은순(내림차순) 표시
+let memoSortField = 'time'; // 'time' (작성 일시), 'likes' (추천수), 또는 'author' (작성자)
+let memoSortAsc = false;    // 기본 정렬 방향
+
+// 🌟 메모 작성자 표기 정보 추출 함수
+function getMemoAuthorDisplay(m) {
+    if (m.phone) return m.phone;
+    if (m.author) return m.author;
+    if (m.writer) return m.writer;
+    
+    // deviceId로 라이선스 계정 매칭 시도
+    if (m.deviceId && state.allLicenses && state.allLicenses.length > 0) {
+        const matched = state.allLicenses.find(l => l.deviceId === m.deviceId || l.key === m.deviceId);
+        if (matched) {
+            return matched.phone || matched.key || m.deviceId;
+        }
+        return m.deviceId;
+    }
+    return '미확인';
+}
 
 // 🌟 헤더 클릭 시 호출되는 정렬 실행 함수
 export function sortMemos(field) {
@@ -19,7 +36,8 @@ export function sortMemos(field) {
         memoSortAsc = !memoSortAsc; // 동일 항목 클릭 시 오름/내림차순 변경
     } else {
         memoSortField = field;
-        memoSortAsc = false; // 다른 항목 클릭 시 무조건 내림차순(최신/인기)부터 시작
+        // 작성자는 가나다순(오름차순) 시작, 시간/추천수는 최신/인기순(내림차순) 시작
+        memoSortAsc = (field === 'author');
     }
     state.masterPages['memos'] = 1; // 정렬 시 페이지를 1페이지로 리셋
     renderMemosTable(state.allMemos);
@@ -31,17 +49,25 @@ export function renderMemosTable(memos) {
     if (!tbody) return;
 
     // 🌟 1. 테이블 헤더 화살표 UI 및 색상 업데이트
+    const arrowAuthor = document.getElementById('sort-arrow-author');
     const arrowTime = document.getElementById('sort-arrow-time');
     const arrowLikes = document.getElementById('sort-arrow-likes');
     
-    if (arrowTime && arrowLikes) {
-        // 작성 일시 헤더 상태 갱신
+    if (arrowAuthor) {
+        arrowAuthor.innerText = (memoSortField === 'author') ? (memoSortAsc ? '▲' : '▼') : '↕';
+        arrowAuthor.parentElement.className = (memoSortField === 'author') 
+            ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
+            : "sortable-th py-3 px-3 text-center text-gray-500 hover:bg-gray-100 transition";
+    }
+
+    if (arrowTime) {
         arrowTime.innerText = (memoSortField === 'time') ? (memoSortAsc ? '▲' : '▼') : '↕';
         arrowTime.parentElement.className = (memoSortField === 'time') 
             ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
             : "sortable-th py-3 px-3 text-center text-gray-500 hover:bg-gray-100 transition";
-        
-        // 추천수 헤더 상태 갱신
+    }
+
+    if (arrowLikes) {
         arrowLikes.innerText = (memoSortField === 'likes') ? (memoSortAsc ? '▲' : '▼') : '↕';
         arrowLikes.parentElement.className = (memoSortField === 'likes') 
             ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
@@ -49,15 +75,19 @@ export function renderMemosTable(memos) {
     }
 
     if (!memos || memos.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="py-12 text-center text-gray-400 font-bold">등록된 주차 메모가 없습니다.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="py-12 text-center text-gray-400 font-bold">등록된 주차 메모가 없습니다.</td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
         return;
     }
 
-    // 🌟 2. 선택된 기준(시간 or 좋아요)에 맞게 데이터 배열 실제 정렬 적용
+    // 🌟 2. 선택된 기준(시간, 좋아요, 작성자)에 맞게 데이터 정렬
     let sortedMemos = [...memos];
     sortedMemos.sort((a, b) => {
-        if (memoSortField === 'likes') {
+        if (memoSortField === 'author') {
+            const authorA = getMemoAuthorDisplay(a);
+            const authorB = getMemoAuthorDisplay(b);
+            return memoSortAsc ? authorA.localeCompare(authorB) : authorB.localeCompare(authorA);
+        } else if (memoSortField === 'likes') {
             const valA = a.likes || 0;
             const valB = b.likes || 0;
             return memoSortAsc ? (valA - valB) : (valB - valA);
@@ -79,21 +109,35 @@ export function renderMemosTable(memos) {
     const start = (curPage - 1) * PAGE_SIZE_MASTER;
     const pagedMemos = sortedMemos.slice(start, start + PAGE_SIZE_MASTER);
 
-    tbody.innerHTML = pagedMemos.map((m, idx) => `
+    tbody.innerHTML = pagedMemos.map((m, idx) => {
+        const authorDisplay = getMemoAuthorDisplay(m);
+        return `
         <tr class="hover:bg-gray-50 transition">
             <td class="py-3 px-3 font-bold text-gray-400 text-center">${start + idx + 1}</td>
-            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate" title="${m.address}">${m.address}</td>
-            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate" title="${m.memo}">${m.memo}</td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <span class="font-black text-gray-800 text-xs flex items-center justify-center gap-1">
+                    <i class="fa-solid fa-user-pen text-blue-500 text-[10px]"></i>${authorDisplay}
+                </span>
+            </td>
+            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate" title="${m.address || ''}">${m.address || '-'}</td>
+            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate" title="${m.memo || ''}">${m.memo || '-'}</td>
             <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap text-center">${m.time || '-'}</td>
             <td class="py-3 px-3 text-center font-bold text-blue-600">${m.likes || 0}</td>
-            <td class="py-3 px-3 text-center whitespace-nowrap"><button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95">삭제</button></td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95 hover:bg-red-100 transition">삭제</button>
+            </td>
         </tr>
-    `).join('');
+    `;
+    }).join('');
     
     if (pagEl) pagEl.innerHTML = renderPaginationControls('memos', curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');
 }
 
 export async function deleteParkingMemo(id) {
     if (!confirm("이 주차 메모를 삭제하시겠습니까?")) return;
-    try { await deleteDoc(doc(db, "memos", id)); } catch (e) { alert("삭제 오류: " + e.message); }
+    try { 
+        await deleteDoc(doc(db, "memos", id)); 
+    } catch (e) { 
+        alert("삭제 오류: " + e.message); 
+    }
 }
