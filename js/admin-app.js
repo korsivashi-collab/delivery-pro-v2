@@ -26,9 +26,9 @@ import {
     toggleHistoryItemSelection, toggleHistorySelectAll, sendHistoryNoticeToSelected,
     setHistoryMasterSubTab, deleteAccountFromHistory, renderAccountHistoryView,
     openMasterNoticeHistoryModal, closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList,
-    // 🌟 사진 데이터 관리 모듈 함수 추가
+    // 🌟 사진 데이터 관리 모듈 함수 (경량 텍스트 테이블 리스트 및 정렬/페이지네이션)
     openPhotoGalleryModal, closePhotoGalleryModal, filterPhotoGallery,
-    clearPhotoDateFilter, togglePhotoSort, renderPhotoGalleryGrid,
+    clearPhotoDateFilter, sortPhotos, changePhotoPage, renderPhotoListTable,
     previewPhotoModal, closePhotoPreviewModal, deletePhotoItem
 } from "./admin-master-history.js";
 
@@ -298,10 +298,10 @@ window.initMasterDataSync = function() {
         }
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
 
-        // 🌟 사진 갤러리 모달이 열려 있을 때 실시간 화면 갱신
+        // 🌟 사진 관리 모달이 열려 있을 때 실시간 테이블 화면 갱신
         const photoModal = document.getElementById('photo-gallery-modal');
-        if (photoModal && !photoModal.classList.contains('hidden') && typeof renderPhotoGalleryGrid === 'function') {
-            renderPhotoGalleryGrid();
+        if (photoModal && !photoModal.classList.contains('hidden') && typeof renderPhotoListTable === 'function') {
+            renderPhotoListTable();
         }
     });
 
@@ -364,13 +364,14 @@ window.openMasterNoticeHistoryModal = openMasterNoticeHistoryModal;
 window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
 window.renderMasterNoticeHistoryList = renderMasterNoticeHistoryList;
 
-// 🌟 [마스터 - 사진 데이터 관리 모듈]
+// 🌟 [마스터 - 사진 데이터 관리 모듈 (경량 텍스트 테이블 리스트)]
 window.openPhotoGalleryModal = openPhotoGalleryModal;
 window.closePhotoGalleryModal = closePhotoGalleryModal;
 window.filterPhotoGallery = filterPhotoGallery;
 window.clearPhotoDateFilter = clearPhotoDateFilter;
-window.togglePhotoSort = togglePhotoSort;
-window.renderPhotoGalleryGrid = renderPhotoGalleryGrid;
+window.sortPhotos = sortPhotos;
+window.changePhotoPage = changePhotoPage;
+window.renderPhotoListTable = renderPhotoListTable;
 window.previewPhotoModal = previewPhotoModal;
 window.closePhotoPreviewModal = closePhotoPreviewModal;
 window.deletePhotoItem = deletePhotoItem;

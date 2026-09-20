@@ -241,7 +241,7 @@ export function renderAccountHistoryView() {
         processedItems.sort((a, b) => {
             let vA = a[state.historySortField];
             let vB = b[state.historySortField];
-            if (typeof vA === 'string') return state.historySortAsc ? vA.localeCompare(vB) : vB.localeCompare(a);
+            if (typeof vA === 'string') return state.historySortAsc ? vA.localeCompare(vB) : vB.localeCompare(vA);
             else return state.historySortAsc ? (vA - vB) : (vB - vA);
         });
 
@@ -569,16 +569,32 @@ export function renderMasterNoticeHistoryList() {
 }
 
 // ==========================================
-// 🌟 2. 마스터 전용 사진 데이터 관리 모듈
+// 🌟 2. 마스터 전용 사진 데이터 관리 모듈 (경량 텍스트 테이블 리스트)
 // ==========================================
 
-let photoSortDesc = true; // true: 최신 완료순, false: 과거 완료순
+let photoSortField = 'time'; // 'time' (완료 일시) 또는 'author' (작성자 기사)
+let photoSortAsc = false;    // 기본 내림차순(최신 완료순)
+let photoCurrentPage = 1;
+
+// 🌟 사진 등록 기사 식별 함수
+function getPhotoAuthorDisplay(item) {
+    if (item.phone) return item.phone;
+    if (item.deviceId && state.allLicenses && state.allLicenses.length > 0) {
+        const matched = state.allLicenses.find(l => l.deviceId === item.deviceId || l.key === item.deviceId);
+        if (matched) return matched.phone || matched.key || item.deviceId;
+        return item.deviceId;
+    }
+    return '기사 미등록';
+}
 
 export function openPhotoGalleryModal() {
     populatePhotoDriverSelect();
     const dateInput = document.getElementById('photo-filter-date');
-    if (dateInput) dateInput.value = ''; // 기본값 전체 일자
-    renderPhotoGalleryGrid();
+    if (dateInput) dateInput.value = ''; // 기본값: 전체 일자
+    photoSortField = 'time';
+    photoSortAsc = false;
+    photoCurrentPage = 1;
+    renderPhotoListTable();
     document.getElementById('photo-gallery-modal')?.classList.remove('hidden');
 }
 
@@ -592,7 +608,7 @@ export function populatePhotoDriverSelect() {
     const currentVal = selectEl.value || 'ALL';
     let html = `<option value="ALL">전체 기사 보기</option>`;
     
-    // 일반 및 체험 기사 계정 목록 추가
+    // 일반 및 체험 기사 계정 목록 바인딩
     const drivers = state.allLicenses.filter(l => l.type !== 'dispatch');
     drivers.forEach(l => {
         const phone = l.phone || '번호미등록';
@@ -605,7 +621,8 @@ export function populatePhotoDriverSelect() {
 }
 
 export function filterPhotoGallery() {
-    renderPhotoGalleryGrid();
+    photoCurrentPage = 1;
+    renderPhotoListTable();
 }
 
 export function clearPhotoDateFilter() {
@@ -614,28 +631,52 @@ export function clearPhotoDateFilter() {
     filterPhotoGallery();
 }
 
-export function togglePhotoSort() {
-    photoSortDesc = !photoSortDesc;
-    const labelEl = document.getElementById('photo-sort-label');
-    const btnEl = document.getElementById('btn-photo-sort');
-    if (labelEl) labelEl.innerText = photoSortDesc ? '최신 완료순' : '과거 완료순';
-    if (btnEl) {
-        const icon = photoSortDesc ? 'fa-arrow-down-wide-short' : 'fa-arrow-up-wide-short';
-        const iEl = btnEl.querySelector('i');
-        if (iEl) iEl.className = `fa-solid ${icon} text-indigo-600`;
+// 🌟 테이블 헤더 클릭 시 작성자/완료일시 정렬 로직
+export function sortPhotos(field) {
+    if (photoSortField === field) {
+        photoSortAsc = !photoSortAsc;
+    } else {
+        photoSortField = field;
+        photoSortAsc = (field === 'author'); // 작성자는 가나다순(오름차순) 시작, 시간은 최신순(내림차순) 시작
     }
-    renderPhotoGalleryGrid();
+    photoCurrentPage = 1;
+    renderPhotoListTable();
 }
 
-export function renderPhotoGalleryGrid() {
-    const gridEl = document.getElementById('photo-gallery-grid');
-    const countBadgeEl = document.getElementById('photo-total-count-badge');
-    if (!gridEl) return;
+export function changePhotoPage(tabKey, targetPage) {
+    photoCurrentPage = targetPage;
+    renderPhotoListTable();
+}
 
-    // 사진 링크가 유효하게 등록된 배송 완료 데이터만 추출
+// 🌟 리소스 최적화: 텍스트 테이블 리스트 렌더링 함수
+export function renderPhotoListTable() {
+    const tbody = document.getElementById('photo-list-tbody');
+    const countBadgeEl = document.getElementById('photo-total-count-badge');
+    const pagEl = document.getElementById('pagination-photos');
+    if (!tbody) return;
+
+    // 1. 헤더 화살표 상태 갱신
+    const arrowAuthor = document.getElementById('sort-photo-arrow-author');
+    const arrowTime = document.getElementById('sort-photo-arrow-time');
+
+    if (arrowAuthor) {
+        arrowAuthor.innerText = (photoSortField === 'author') ? (photoSortAsc ? '▲' : '▼') : '↕';
+        arrowAuthor.parentElement.className = (photoSortField === 'author') 
+            ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
+            : "sortable-th py-3 px-3 text-center text-gray-600 font-black hover:bg-gray-100 transition";
+    }
+
+    if (arrowTime) {
+        arrowTime.innerText = (photoSortField === 'time') ? (photoSortAsc ? '▲' : '▼') : '↕';
+        arrowTime.parentElement.className = (photoSortField === 'time') 
+            ? "sortable-th py-3 px-3 text-center text-blue-700 font-black hover:bg-gray-100 transition" 
+            : "sortable-th py-3 px-3 text-center text-gray-600 font-black hover:bg-gray-100 transition";
+    }
+
+    // 사진 링크가 있는 완료 건만 추출
     let photos = state.allCompletions.filter(c => c.photoUrl && c.photoUrl.trim() !== '' && c.photoUrl !== '사진 없음');
 
-    // 1. 기사 필터링
+    // 2. 기사 필터링
     const selectedDriver = document.getElementById('photo-filter-driver')?.value || 'ALL';
     if (selectedDriver !== 'ALL') {
         const targetLic = state.allLicenses.find(l => l.key === selectedDriver);
@@ -646,7 +687,7 @@ export function renderPhotoGalleryGrid() {
         });
     }
 
-    // 2. 날짜 필터링
+    // 3. 날짜 필터링
     const selectedDate = document.getElementById('photo-filter-date')?.value || '';
     if (selectedDate) {
         photos = photos.filter(c => {
@@ -660,65 +701,75 @@ export function renderPhotoGalleryGrid() {
         });
     }
 
-    // 3. 완료 일시 기준 정렬
+    // 4. 정렬 (작성자 가나다순 또는 완료 일시순)
     photos.sort((a, b) => {
-        const tA = a.completedAt || 0;
-        const tB = b.completedAt || 0;
-        return photoSortDesc ? (tB - tA) : (tA - tB);
+        if (photoSortField === 'author') {
+            const authorA = getPhotoAuthorDisplay(a);
+            const authorB = getPhotoAuthorDisplay(b);
+            return photoSortAsc ? authorA.localeCompare(authorB) : authorB.localeCompare(authorA);
+        } else {
+            const tA = a.completedAt || 0;
+            const tB = b.completedAt || 0;
+            return photoSortAsc ? (tA - tB) : (tB - tA);
+        }
     });
 
-    if (countBadgeEl) countBadgeEl.innerText = `총 ${photos.length}장`;
+    const total = photos.length;
+    if (countBadgeEl) countBadgeEl.innerText = `총 ${total}건`;
 
-    if (photos.length === 0) {
-        gridEl.innerHTML = `<div class="col-span-full py-28 text-center text-gray-400 font-bold text-xs"><i class="fa-solid fa-images text-3xl text-gray-300 mb-2 block"></i>조건에 일치하는 배송 완료 사진 데이터가 없습니다.</div>`;
+    if (total === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-16 text-center text-gray-400 font-bold text-xs"><i class="fa-solid fa-camera text-2xl text-gray-300 mb-2 block"></i>조건에 일치하는 배송 완료 사진 내역이 없습니다.</td></tr>`;
+        if (pagEl) pagEl.innerHTML = '';
         return;
     }
 
-    let html = '';
-    photos.forEach(p => {
+    // 5. 페이지네이션 처리
+    const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
+    if (photoCurrentPage > totalPages) photoCurrentPage = totalPages;
+    if (photoCurrentPage < 1) photoCurrentPage = 1;
+
+    const start = (photoCurrentPage - 1) * PAGE_SIZE_MASTER;
+    const pagedPhotos = photos.slice(start, start + PAGE_SIZE_MASTER);
+
+    tbody.innerHTML = pagedPhotos.map((p, idx) => {
+        const authorDisplay = getPhotoAuthorDisplay(p);
         let dateTimeStr = p.timeString || '';
         if (!dateTimeStr && p.completedAt) {
             const dt = new Date(p.completedAt);
             dateTimeStr = `${getLocalDateString(dt)} ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
         }
 
-        html += `
-        <div class="bg-white rounded-2xl border border-gray-200 overflow-hidden shadow-xs hover:shadow-md transition flex flex-col group">
-            <div class="relative w-full h-36 bg-gray-900 cursor-pointer overflow-hidden" onclick="window.previewPhotoModal('${p.id}')">
-                <img src="${p.photoUrl}" alt="배송 완료 사진" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy" onerror="this.src='https://placehold.co/300x200?text=Image+Load+Error'">
-                <div class="absolute top-2 left-2 bg-black/65 backdrop-blur-xs text-white text-[10px] font-mono px-2 py-0.5 rounded-md shadow-xs">
-                    ${dateTimeStr}
-                </div>
-                <div class="absolute top-2 right-2">
-                    <span class="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded-md shadow-xs">
-                        ${p.tag || '전달완료'}
-                    </span>
-                </div>
-            </div>
-            <div class="p-3 flex flex-col gap-1.5 flex-1 justify-between">
-                <div>
-                    <div class="flex items-center gap-1 text-[11px] font-black text-gray-800 truncate mb-1">
-                        <i class="fa-solid fa-truck text-blue-500 text-[10px]"></i>
-                        <span>${p.phone || '기사 미등록'}</span>
-                    </div>
-                    <p class="text-xs font-bold text-gray-900 line-clamp-2 leading-tight break-keep" title="${p.address || ''}">
-                        <i class="fa-solid fa-location-dot text-red-500 text-[10px] mr-1"></i>${p.address || '-'}
-                    </p>
-                </div>
-                <div class="flex items-center justify-between pt-2 border-t border-gray-100 mt-1">
-                    <button onclick="window.previewPhotoModal('${p.id}')" class="text-[11px] text-blue-600 hover:text-blue-800 font-black flex items-center gap-1 active:scale-95 transition">
-                        <i class="fa-solid fa-magnifying-glass-plus"></i> 크게보기
-                    </button>
-                    <button onclick="window.deletePhotoItem('${p.id}')" class="text-[11px] text-red-500 hover:text-red-700 bg-red-50 hover:bg-red-100 px-2 py-1 rounded-lg font-bold transition active:scale-95 flex items-center gap-1">
-                        <i class="fa-solid fa-trash-can text-[10px]"></i> 삭제
-                    </button>
-                </div>
-            </div>
-        </div>`;
-    });
-    gridEl.innerHTML = html;
+        return `
+        <tr class="hover:bg-gray-50 transition">
+            <td class="py-3 px-3 font-bold text-gray-400 text-center">${start + idx + 1}</td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <span class="font-black text-gray-800 text-xs flex items-center justify-center gap-1">
+                    <i class="fa-solid fa-truck text-blue-500 text-[10px]"></i>${authorDisplay}
+                </span>
+            </td>
+            <td class="py-3 px-3 text-gray-500 font-medium whitespace-nowrap text-center">${dateTimeStr}</td>
+            <td class="py-3 px-3 font-bold text-gray-800 max-w-[320px] truncate" title="${p.address || ''}">${p.address || '-'}</td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs">${p.tag || '전달완료'}</span>
+            </td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <button onclick="window.previewPhotoModal('${p.id}')" class="px-2.5 py-1 bg-blue-50 hover:bg-blue-100 text-blue-600 font-black rounded-lg text-[11px] shadow-sm transition active:scale-95 flex items-center gap-1 mx-auto">
+                    <i class="fa-solid fa-camera"></i> 사진 확인
+                </button>
+            </td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <button onclick="window.deletePhotoItem('${p.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95 hover:bg-red-100 transition">삭제</button>
+            </td>
+        </tr>
+        `;
+    }).join('');
+
+    if (pagEl) {
+        pagEl.innerHTML = renderPaginationControls('photos', photoCurrentPage, total, PAGE_SIZE_MASTER, 'window.changePhotoPage');
+    }
 }
 
+// 🌟 사진 확인 버튼 클릭 시 단일 이미지 로딩
 export function previewPhotoModal(completionId) {
     const item = state.allCompletions.find(c => c.id === completionId);
     if (!item) return;
@@ -736,7 +787,7 @@ export function previewPhotoModal(completionId) {
     const linkEl = document.getElementById('photo-preview-link');
 
     if (addrEl) addrEl.innerText = item.address || '주소 정보 없음';
-    if (subEl) subEl.innerText = `${item.phone || '기사'} | ${dateTimeStr}`;
+    if (subEl) subEl.innerText = `${getPhotoAuthorDisplay(item)} | ${dateTimeStr}`;
     if (imgEl) imgEl.src = item.photoUrl || '';
     if (tagEl) tagEl.innerText = item.tag || '전달완료';
     if (linkEl) linkEl.href = item.photoUrl || '#';
@@ -746,14 +797,17 @@ export function previewPhotoModal(completionId) {
 
 export function closePhotoPreviewModal() {
     document.getElementById('photo-preview-modal')?.classList.add('hidden');
+    // 메모리 해제를 위해 닫을 때 이미지 소스 비우기
+    const imgEl = document.getElementById('photo-preview-img');
+    if (imgEl) imgEl.src = '';
 }
 
 export async function deletePhotoItem(completionId) {
-    if (!confirm("정말 이 배송 완료 사진 및 해당 완료 기록을 영구 삭제하시겠습니까?")) return;
+    if (!confirm("정말 이 배송 완료 사진 및 완료 기록을 영구 삭제하시겠습니까?")) return;
     try {
         await deleteDoc(doc(db, "completions", completionId));
-        alert("사진 및 완료 기록이 성공적으로 삭제되었습니다.");
-        renderPhotoGalleryGrid();
+        alert("성공적으로 삭제되었습니다.");
+        renderPhotoListTable();
     } catch (e) {
         alert("삭제 중 오류가 발생했습니다: " + e.message);
     }
