@@ -41,29 +41,31 @@
         .pt-safe { padding-top: max(1rem, env(safe-area-inset-top)); }
         .pb-safe { padding-bottom: max(1.25rem, env(safe-area-inset-bottom)); }
         
-        /* 드래그 앤 드롭 애니메이션 및 시각 피드백 고도화 */
+        /* 아이폰 네이티브 감성의 자연스러운 드래그 앤 드롭 스타일링 */
         .drag-handle {
             touch-action: none;
             -webkit-touch-callout: none;
         }
 
+        /* 손가락에 잡혀 떠 있는 카드: 부드러운 입체 그림자와 미세 확대 */
         .sortable-drag {
             opacity: 0.98 !important;
-            transform: scale(1.02) !important;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 8px 10px -6px rgba(0, 0, 0, 0.1) !important;
+            transform: scale(1.015) !important;
+            box-shadow: 0 14px 28px rgba(0, 0, 0, 0.12), 0 6px 10px rgba(0, 0, 0, 0.06) !important;
             background-color: #ffffff !important;
-            border: 1.5px solid #3b82f6 !important;
+            border: 1px solid rgba(0, 0, 0, 0.08) !important;
             border-radius: 0.75rem !important;
             z-index: 9999 !important;
             pointer-events: none;
         }
 
+        /* 이동 중 끼워 들어갈 자리: 이질감 없는 은은한 소프트 슬롯 */
         .sortable-ghost { 
-            opacity: 0.45 !important; 
-            background-color: #eff6ff !important; 
-            border: 2px dashed #3b82f6 !important; 
-            box-shadow: none !important;
+            opacity: 0.25 !important; 
+            background-color: #f1f5f9 !important; 
+            border: 1.5px dashed #cbd5e1 !important; 
             border-radius: 0.75rem !important;
+            box-shadow: none !important;
         }
 
         .sortable-chosen {
