@@ -241,7 +241,7 @@ export function renderAccountHistoryView() {
         processedItems.sort((a, b) => {
             let vA = a[state.historySortField];
             let vB = b[state.historySortField];
-            if (typeof vA === 'string') return state.historySortAsc ? vA.localeCompare(vB) : vB.localeCompare(vA);
+            if (typeof vA === 'string') return state.historySortAsc ? vA.localeCompare(vB) : vB.localeCompare(a);
             else return state.historySortAsc ? (vA - vB) : (vB - vA);
         });
 
@@ -569,7 +569,7 @@ export function renderMasterNoticeHistoryList() {
 }
 
 // ==========================================
-// 🌟 2. 마스터 전용 사진 데이터 관리 모듈 (경량 텍스트 테이블 리스트)
+// 🌟 2. 마스터 전용 사진 데이터 관리 모듈 (경량 텍스트 테이블 리스트 & 실시간 기사 검색)
 // ==========================================
 
 let photoSortField = 'time'; // 'time' (완료 일시) 또는 'author' (작성자 기사)
@@ -588,9 +588,10 @@ function getPhotoAuthorDisplay(item) {
 }
 
 export function openPhotoGalleryModal() {
-    populatePhotoDriverSelect();
+    const searchInput = document.getElementById('photo-filter-driver-search');
+    if (searchInput) searchInput.value = '';
     const dateInput = document.getElementById('photo-filter-date');
-    if (dateInput) dateInput.value = ''; // 기본값: 전체 일자
+    if (dateInput) dateInput.value = '';
     photoSortField = 'time';
     photoSortAsc = false;
     photoCurrentPage = 1;
@@ -600,24 +601,6 @@ export function openPhotoGalleryModal() {
 
 export function closePhotoGalleryModal() {
     document.getElementById('photo-gallery-modal')?.classList.add('hidden');
-}
-
-export function populatePhotoDriverSelect() {
-    const selectEl = document.getElementById('photo-filter-driver');
-    if (!selectEl) return;
-    const currentVal = selectEl.value || 'ALL';
-    let html = `<option value="ALL">전체 기사 보기</option>`;
-    
-    // 일반 및 체험 기사 계정 목록 바인딩
-    const drivers = state.allLicenses.filter(l => l.type !== 'dispatch');
-    drivers.forEach(l => {
-        const phone = l.phone || '번호미등록';
-        html += `<option value="${l.key}">${phone} [${l.key}]</option>`;
-    });
-    selectEl.innerHTML = html;
-    if (currentVal && selectEl.querySelector(`option[value="${currentVal}"]`)) {
-        selectEl.value = currentVal;
-    }
 }
 
 export function filterPhotoGallery() {
@@ -637,7 +620,7 @@ export function sortPhotos(field) {
         photoSortAsc = !photoSortAsc;
     } else {
         photoSortField = field;
-        photoSortAsc = (field === 'author'); // 작성자는 가나다순(오름차순) 시작, 시간은 최신순(내림차순) 시작
+        photoSortAsc = (field === 'author');
     }
     photoCurrentPage = 1;
     renderPhotoListTable();
@@ -676,14 +659,20 @@ export function renderPhotoListTable() {
     // 사진 링크가 있는 완료 건만 추출
     let photos = state.allCompletions.filter(c => c.photoUrl && c.photoUrl.trim() !== '' && c.photoUrl !== '사진 없음');
 
-    // 2. 기사 필터링
-    const selectedDriver = document.getElementById('photo-filter-driver')?.value || 'ALL';
-    if (selectedDriver !== 'ALL') {
-        const targetLic = state.allLicenses.find(l => l.key === selectedDriver);
+    // 2. 🌟 대규모 기사 환경 지원: 실시간 기사 검색어 필터링 (전화번호, 라이선스 키, 기기ID 매칭)
+    const driverSearchQuery = (document.getElementById('photo-filter-driver-search')?.value || '').trim().toLowerCase();
+    if (driverSearchQuery) {
+        const cleanDigits = driverSearchQuery.replace(/[^0-9]/g, '');
         photos = photos.filter(c => {
-            const matchesKey = (c.deviceId === selectedDriver || c.phone === selectedDriver);
-            const matchesLic = targetLic && ((targetLic.deviceId && c.deviceId === targetLic.deviceId) || (targetLic.phone && c.phone === targetLic.phone));
-            return matchesKey || matchesLic;
+            const author = getPhotoAuthorDisplay(c).toLowerCase();
+            const cPhone = (c.phone || '').replace(/[^0-9]/g, '');
+            const cDevId = (c.deviceId || '').toLowerCase();
+            
+            const matchesAuthor = author.includes(driverSearchQuery);
+            const matchesPhone = cleanDigits && cPhone.includes(cleanDigits);
+            const matchesDev = cDevId.includes(driverSearchQuery);
+            
+            return matchesAuthor || matchesPhone || matchesDev;
         });
     }
 
@@ -797,7 +786,6 @@ export function previewPhotoModal(completionId) {
 
 export function closePhotoPreviewModal() {
     document.getElementById('photo-preview-modal')?.classList.add('hidden');
-    // 메모리 해제를 위해 닫을 때 이미지 소스 비우기
     const imgEl = document.getElementById('photo-preview-img');
     if (imgEl) imgEl.src = '';
 }
