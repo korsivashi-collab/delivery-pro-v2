@@ -109,14 +109,14 @@
             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex justify-between items-center flex-wrap gap-4">
                 <div>
                     <h3 class="text-sm font-black text-gray-800 flex items-center gap-2"><i class="fa-solid fa-server text-blue-600"></i> 시스템 및 데이터 통합 관리</h3>
-                    <p class="text-[10px] text-gray-500 mt-1 font-bold">마스터 권한의 신규 키 발급, 전체 배송 기록 엑셀 추출 및 배송 완료 사진을 관리합니다.</p>
+                    <p class="text-[10px] text-gray-500 mt-1 font-bold">마스터 권한의 신규 키 발급, 전체 배송 기록 엑셀 추출 및 배송 완료 사진 목록을 관리합니다.</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <!-- 전체 데이터 추출 (엑셀) -->
                     <button onclick="window.openExcelExportModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-file-excel"></i> 전체 데이터 추출 (엑셀)
                     </button>
-                    <!-- 🌟 사진 데이터 모달 버튼 추가 -->
+                    <!-- 사진 데이터 모달 버튼 -->
                     <button onclick="window.openPhotoGalleryModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-images"></i> 사진 데이터
                     </button>
@@ -144,7 +144,6 @@
                         <span class="text-xs font-bold text-gray-500">등록된 전체 주차 및 건물 메모 리스트</span>
                         <span class="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded border border-blue-100">항목(작성자/일시/추천수)을 클릭하면 정렬됩니다.</span>
                     </div>
-                    <!-- 🌟 수정: 작성자 헤더 및 작성자 정렬 기능 추가 -->
                     <div class="p-4 overflow-x-auto custom-scrollbar flex-1">
                         <table class="w-full text-left border-collapse text-xs min-w-[950px]">
                             <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm border-b border-gray-200 text-gray-600">
@@ -703,7 +702,7 @@
         </div>
     </div>
 
-    <!-- 🌟 신규: 마스터용 배송 사진 데이터 관리 모달 -->
+    <!-- 🌟 수정: 마스터용 배송 사진 데이터 관리 모달 (가벼운 텍스트 테이블 리스트 형태) -->
     <div id="photo-gallery-modal" class="hidden fixed inset-0 bg-black/70 z-[500] flex items-center justify-center p-4 backdrop-blur-sm">
         <div class="bg-white w-full max-w-6xl rounded-3xl shadow-2xl relative flex flex-col h-[90vh] overflow-hidden">
             <!-- 모달 헤더 -->
@@ -714,10 +713,10 @@
                     </div>
                     <div>
                         <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
-                            배송 완료 사진 데이터 관리
-                            <span id="photo-total-count-badge" class="bg-indigo-100 text-indigo-800 text-xs font-black px-2.5 py-0.5 rounded-full border border-indigo-200">총 0장</span>
+                            배송 완료 사진 데이터 목록
+                            <span id="photo-total-count-badge" class="bg-indigo-100 text-indigo-800 text-xs font-black px-2.5 py-0.5 rounded-full border border-indigo-200">총 0건</span>
                         </h3>
-                        <p class="text-[11px] text-gray-400 font-bold">기사별/날짜별 배송 완료 사진 확인 및 삭제 관리</p>
+                        <p class="text-[11px] text-gray-400 font-bold">기사별/날짜별 완료 기록을 리스트로 확인하고 사진을 열람하거나 삭제합니다.</p>
                     </div>
                 </div>
                 <button onclick="window.closePhotoGalleryModal()" class="w-9 h-9 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-xl flex items-center justify-center transition">
@@ -725,7 +724,7 @@
                 </button>
             </div>
 
-            <!-- 필터 및 정렬 바 -->
+            <!-- 필터 바 -->
             <div class="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 flex-none">
                 <div class="flex items-center gap-3 flex-wrap">
                     <!-- 기사 필터 -->
@@ -744,25 +743,37 @@
                     </div>
                 </div>
 
-                <!-- 정렬 토글 -->
-                <div class="flex items-center gap-2">
-                    <span class="text-xs font-bold text-gray-500">정렬:</span>
-                    <button type="button" id="btn-photo-sort" onclick="window.togglePhotoSort()" class="px-3.5 py-1.5 bg-white border border-gray-300 hover:bg-gray-100 text-gray-700 rounded-xl text-xs font-black shadow-2xs transition active:scale-95 flex items-center gap-1.5">
-                        <i class="fa-solid fa-arrow-down-wide-short text-indigo-600"></i> <span id="photo-sort-label">최신 완료순</span>
-                    </button>
+                <div class="text-[11px] text-blue-600 font-bold bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
+                    * 헤더의 작성자 및 완료 일시를 클릭하면 정렬됩니다.
                 </div>
             </div>
 
-            <!-- 사진 갤러리 그리드 영역 -->
-            <div class="flex-1 overflow-y-auto p-5 custom-scrollbar bg-slate-100">
-                <div id="photo-gallery-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
-                    <!-- 자바스크립트로 사진 카드 렌더링 -->
+            <!-- 🌟 리소스 최적화: 가벼운 텍스트 테이블 리스트 영역 -->
+            <div class="flex-1 overflow-x-auto custom-scrollbar flex flex-col bg-white">
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-4">
+                    <table class="w-full text-left border-collapse text-xs min-w-[950px]">
+                        <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm border-b border-gray-200 text-gray-600">
+                            <tr>
+                                <th class="py-3 px-3 text-center w-12 font-black">순번</th>
+                                <th class="sortable-th py-3 px-3 font-black text-center" onclick="window.sortPhotos('author')">작성자(기사) <span id="sort-photo-arrow-author">↕</span></th>
+                                <th class="sortable-th py-3 px-3 font-black text-center" onclick="window.sortPhotos('time')">완료 일시 <span id="sort-photo-arrow-time">↕</span></th>
+                                <th class="py-3 px-3 font-black">배송지 주소</th>
+                                <th class="py-3 px-3 text-center font-black w-24">상태</th>
+                                <th class="py-3 px-3 text-center font-black w-24">사진 확인</th>
+                                <th class="py-3 px-3 text-center font-black w-16">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="photo-list-tbody" class="divide-y divide-gray-100 bg-white font-medium text-gray-700">
+                            <!-- JS로 텍스트 테이블 행 렌더링 -->
+                        </tbody>
+                    </table>
                 </div>
+                <div id="pagination-photos" class="flex-none"></div>
             </div>
         </div>
     </div>
 
-    <!-- 🌟 신규: 사진 원본 크게보기 팝업 모달 -->
+    <!-- 🌟 사진 원본 크게보기 팝업 모달 (버튼 클릭 시에만 해당 사진 1장 단독 로딩) -->
     <div id="photo-preview-modal" class="hidden fixed inset-0 bg-black/85 z-[600] flex items-center justify-center p-4 backdrop-blur-sm" onclick="window.closePhotoPreviewModal()">
         <div class="bg-white rounded-3xl overflow-hidden shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
             <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
