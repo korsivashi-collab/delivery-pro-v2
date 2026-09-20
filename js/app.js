@@ -66,9 +66,6 @@ import {
     setGpsToggleHandler 
 } from './support.js';
 
-// 전역 UI 인스턴스
-let sortableInstance = null;
-
 // ==========================================
 // 1. 앱 기동 및 라이프사이클 초기화
 // ==========================================
@@ -251,46 +248,56 @@ export function optimizeRouteAction() {
 }
 
 // ==========================================
-// 6. 드래그 앤 드롭 순서 변경 (처음 버전의 자연스러운 합류 애니메이션 복원)
+// 6. 버튼식 위치 이동 (위로 / 아래로 순서 변경)
 // ==========================================
-function initSortable() {
-    const el = document.getElementById('destination-list');
-    if (!el) return;
-    
-    if (sortableInstance) sortableInstance.destroy();
-    
-    if (window.Sortable) {
-        sortableInstance = new Sortable(el, {
-            handle: '.drag-handle',                  // 가로바 3개 아이콘으로 이동 제어
-            animation: 300,                          // 카드가 자리를 비켜서고 쏙 합류하는 부드러운 시간
-            easing: "cubic-bezier(0.25, 1, 0.5, 1)", // 처음 버전의 검증된 감속 스프링 곡선[cite: 1]
-            delay: 150,                              // 터치 시 안정적인 반응 딜레이[cite: 1]
-            delayOnTouchOnly: true,                  // 모바일 터치 환경에서만 딜레이 적용[cite: 1]
-            forceFallback: true,                     // 모바일 전 기종 일관된 카드 이동 모션[cite: 1]
-            fallbackClass: "sortable-drag",          //[cite: 1]
-            fallbackOnBody: true,                    //[cite: 1]
-            swapThreshold: 0.6,                      // 카드가 60% 이상 들어왔을 때 부드럽게 공간을 열어줌[cite: 1]
-            invertSwap: true,                        // 처음 버전의 핵심: 카드가 지나갈 때 다른 카드들이 스르륵 비켜섬[cite: 1]
-            scroll: true,                            //[cite: 1]
-            scrollSensitivity: 80,                   //[cite: 1]
-            scrollSpeed: 20,                         //[cite: 1]
-            fallbackTolerance: 4,                    //[cite: 1]
-            filter: '.no-drag',                      //[cite: 1]
-            ghostClass: 'sortable-ghost',            //[cite: 1]
-            onEnd: function () {                     //[cite: 1]
-                const liElements = el.querySelectorAll('li[data-id]');
-                const newOrderIds = Array.from(liElements).map(li => parseInt(li.getAttribute('data-id')));
-                const destinations = state.getDestinations();
-                const newDestinations = [];
-                newOrderIds.forEach(id => { 
-                    const found = destinations.find(d => d.id === id); 
-                    if (found) newDestinations.push(found); 
-                });
-                state.setDestinations(newDestinations); 
-                updateDisplayNumbers(); 
-            }
+export function moveDestinationUp(id) {
+    const destinations = state.getDestinations();
+    const idx = destinations.findIndex(d => d.id === id);
+    if (idx <= 0) return; // 이미 최상단이거나 없는 경우
+
+    // 위쪽 배송지와 순서 맞교환
+    const temp = destinations[idx];
+    destinations[idx] = destinations[idx - 1];
+    destinations[idx - 1] = temp;
+
+    // 만약 시작 지점이 설정된 상태에서 1번 항목이 바뀌었을 경우 시작 좌표 동기화
+    if (state.getStartLocation() && destinations[0]) {
+        state.setStartLocation({
+            lat: destinations[0].lat,
+            lng: destinations[0].lng,
+            address: destinations[0].address
         });
     }
+
+    state.setDestinations(destinations);
+    updateDisplayNumbers();
+
+    if (navigator.vibrate) navigator.vibrate(12);
+}
+
+export function moveDestinationDown(id) {
+    const destinations = state.getDestinations();
+    const idx = destinations.findIndex(d => d.id === id);
+    if (idx === -1 || idx >= destinations.length - 1) return; // 이미 최하단이거나 없는 경우
+
+    // 아래쪽 배송지와 순서 맞교환
+    const temp = destinations[idx];
+    destinations[idx] = destinations[idx + 1];
+    destinations[idx + 1] = temp;
+
+    // 만약 시작 지점이 설정된 상태에서 1번 항목이 바뀌었을 경우 시작 좌표 동기화
+    if (state.getStartLocation() && destinations[0]) {
+        state.setStartLocation({
+            lat: destinations[0].lat,
+            lng: destinations[0].lng,
+            address: destinations[0].address
+        });
+    }
+
+    state.setDestinations(destinations);
+    updateDisplayNumbers();
+
+    if (navigator.vibrate) navigator.vibrate(12);
 }
 
 // ==========================================
@@ -319,12 +326,11 @@ export function renderList() {
     if (destinations.length === 0) {
         if (listEl) {
             listEl.innerHTML = `
-                <li class="text-center text-gray-400 py-12 no-drag border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
+                <li class="text-center text-gray-400 py-12 border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
                     <p class="font-medium text-xs">주소지를 스캔하면 동선이 생성됩니다.</p>
                 </li>`;
         }
-        initSortable(); 
         return;
     }
 
@@ -356,9 +362,20 @@ export function renderList() {
                 displayAddressHTML = `<span class="block truncate">${dest.address}</span>`;
             }
 
+            const isFirst = index === 0;
+            const isLast = index === destinations.length - 1;
+
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
-                    <div class="drag-handle cursor-grab active:cursor-grabbing p-1.5 -ml-1 text-gray-400 shrink-0"><i class="fa-solid fa-bars text-[16px]"></i></div>
+                    <!-- 위로/아래로 이동 버튼 (가로줄 3개 대체) -->
+                    <div class="flex items-center gap-1 shrink-0 -ml-1">
+                        <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-6 flex items-center justify-center rounded-md bg-gray-50 border border-gray-200 text-gray-600 active:bg-gray-200 disabled:opacity-20 disabled:pointer-events-none transition shadow-xs" title="위로 이동">
+                            <i class="fa-solid fa-chevron-up text-[10px]"></i>
+                        </button>
+                        <button onclick="moveDestinationDown(${dest.id})" ${isLast ? 'disabled' : ''} class="w-6 h-6 flex items-center justify-center rounded-md bg-gray-50 border border-gray-200 text-gray-600 active:bg-gray-200 disabled:opacity-20 disabled:pointer-events-none transition shadow-xs" title="아래로 이동">
+                            <i class="fa-solid fa-chevron-down text-[10px]"></i>
+                        </button>
+                    </div>
                     ${numberBadge}
                     <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">${displayAddressHTML}</div>
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
@@ -391,7 +408,6 @@ export function renderList() {
         });
     }
     
-    initSortable();
     preloadBatchMemos().then(() => {
         destinations.forEach(dest => {
             renderMemoPreview(dest);
@@ -486,9 +502,15 @@ window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
+// 순서 이동 신규 전역 함수 바인딩
+window.moveDestinationUp = moveDestinationUp;
+window.moveDestinationDown = moveDestinationDown;
+
 window.appActions = {
     initApp, 
     optimizeRouteAction, 
     getDeviceRealGPS, 
-    renderList
+    renderList,
+    moveDestinationUp,
+    moveDestinationDown
 };
