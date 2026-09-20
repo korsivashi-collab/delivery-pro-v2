@@ -251,7 +251,7 @@ export function optimizeRouteAction() {
 }
 
 // ==========================================
-// 6. 드래그 앤 드롭 순서 변경 (자연스러운 슬라이딩 모션)
+// 6. 드래그 앤 드롭 순서 변경 (처음 버전의 자연스러운 합류 애니메이션 복원)
 // ==========================================
 function initSortable() {
     const el = document.getElementById('destination-list');
@@ -261,30 +261,23 @@ function initSortable() {
     
     if (window.Sortable) {
         sortableInstance = new Sortable(el, {
-            handle: '.drag-handle',
-            animation: 280,
-            easing: "cubic-bezier(0.25, 1, 0.5, 1)",
-            delay: 140,
-            delayOnTouchOnly: true,
-            touchStartThreshold: 4,
-            direction: 'vertical',
-            swapThreshold: 0.5,
-            invertSwap: false,
-            scroll: true,
-            scrollSensitivity: 75,
-            scrollSpeed: 18,
-            forceFallback: true,
-            fallbackClass: "sortable-drag", 
-            fallbackOnBody: true, 
-            fallbackTolerance: 3, 
-            filter: '.no-drag', 
-            ghostClass: 'sortable-ghost',
-            chosenClass: 'sortable-chosen',
-            dragClass: 'sortable-drag',
-            onStart: function () {
-                if (navigator.vibrate) navigator.vibrate(15);
-            },
-            onEnd: function () {
+            handle: '.drag-handle',                  // 가로바 3개 아이콘으로 이동 제어
+            animation: 300,                          // 카드가 자리를 비켜서고 쏙 합류하는 부드러운 시간
+            easing: "cubic-bezier(0.25, 1, 0.5, 1)", // 처음 버전의 검증된 감속 스프링 곡선[cite: 1]
+            delay: 150,                              // 터치 시 안정적인 반응 딜레이[cite: 1]
+            delayOnTouchOnly: true,                  // 모바일 터치 환경에서만 딜레이 적용[cite: 1]
+            forceFallback: true,                     // 모바일 전 기종 일관된 카드 이동 모션[cite: 1]
+            fallbackClass: "sortable-drag",          //[cite: 1]
+            fallbackOnBody: true,                    //[cite: 1]
+            swapThreshold: 0.6,                      // 카드가 60% 이상 들어왔을 때 부드럽게 공간을 열어줌[cite: 1]
+            invertSwap: true,                        // 처음 버전의 핵심: 카드가 지나갈 때 다른 카드들이 스르륵 비켜섬[cite: 1]
+            scroll: true,                            //[cite: 1]
+            scrollSensitivity: 80,                   //[cite: 1]
+            scrollSpeed: 20,                         //[cite: 1]
+            fallbackTolerance: 4,                    //[cite: 1]
+            filter: '.no-drag',                      //[cite: 1]
+            ghostClass: 'sortable-ghost',            //[cite: 1]
+            onEnd: function () {                     //[cite: 1]
                 const liElements = el.querySelectorAll('li[data-id]');
                 const newOrderIds = Array.from(liElements).map(li => parseInt(li.getAttribute('data-id')));
                 const destinations = state.getDestinations();
@@ -340,7 +333,7 @@ export function renderList() {
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
-            li.className = "bg-white p-2.5 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-1.5 transition-shadow";
+            li.className = "bg-white p-2.5 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-1.5";
             
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
                 `<div class="bg-indigo-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
@@ -365,13 +358,14 @@ export function renderList() {
 
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
-                    <div class="drag-handle cursor-grab active:cursor-grabbing p-2 -ml-1 text-gray-400 hover:text-gray-600 shrink-0 touch-none select-none"><i class="fa-solid fa-bars text-[16px]"></i></div>
+                    <div class="drag-handle cursor-grab active:cursor-grabbing p-1.5 -ml-1 text-gray-400 shrink-0"><i class="fa-solid fa-bars text-[16px]"></i></div>
                     ${numberBadge}
                     <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">${displayAddressHTML}</div>
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
                 </div>
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-1 mt-1"></div>
                 <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded p-1.5 text-[11px] text-gray-800 border border-gray-100 truncate shadow-sm mb-1 mt-1"></div>
+                <!-- 공용 메모 아랫단에 개인 메모 표시 슬롯 -->
                 <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50 rounded p-1.5 text-[11px] text-emerald-950 border border-emerald-200 truncate shadow-sm mb-1.5 mt-0.5"></div>
                 
                 <div class="flex flex-col gap-1.5 mt-1 pt-2 border-t border-gray-100">
