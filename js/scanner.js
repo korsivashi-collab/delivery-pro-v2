@@ -224,7 +224,7 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 정밀 파이프라인 (1단계: 좌표 POI 70% 매칭 절대 우선 -> 2단계: 자체 라벨 추출 -> 3단계: 주소 대표명 폴백)
+        // 3. 상호명 정밀 파이프라인 (1순위: 좌표 POI 매칭 -> 2순위: 자체 알고리즘 -> 3순위: 폴백)
         let finalStoreName = null;
         let addressPlaces = [];
 
@@ -235,28 +235,25 @@ export function initCameraScan() {
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // [1단계: 최우선순위] 좌표 POI 리스트와 스캔 텍스트 대조
-                // 주소 라인(한상빌딩, 에코테라스 등 건물명 기재부)을 제외하여 오매칭 방지
-                let ocrLines = rawOCRText.split(/\n/);
-                let nonAddressLines = ocrLines.filter(line => {
-                    if (/주소|배송지|사업장|\[\d{5}\]/.test(line)) return false;
-                    if (addressStr && line.includes(addressStr)) return false;
-                    return true;
-                });
-                let ocrForPoiMatch = nonAddressLines.join(' ').trim();
-                if (!ocrForPoiMatch) {
-                    ocrForPoiMatch = rawOCRText.replace(addressStr, ' ').trim();
+                // [1단계: 최우선순위] 좌표 기반 POI 리스트와 스캔 텍스트 대조
+                let textWithoutAddress = rawOCRText;
+                if (addressStr) {
+                    // 주소를 구성하는 단어들만 깔끔하게 분리해서 제거 (배송지 라벨을 통째로 날리던 기존 버그 해결)
+                    let addressTokens = addressStr.split(/\s+/).filter(tok => tok.length >= 2);
+                    addressTokens.forEach(tok => {
+                        textWithoutAddress = textWithoutAddress.split(tok).join(' ');
+                    });
                 }
+                
+                // 마스킹된 텍스트 내에서 POI 70% 일치 탐색
+                finalStoreName = findStoreNameFromOCR(textWithoutAddress, combinedPlaces, 70);
 
-                // 좌표 검색으로 나온 POI와 70% 이상 일치하는 상호가 있는지 먼저 대조
-                finalStoreName = findStoreNameFromOCR(ocrForPoiMatch, combinedPlaces, 70);
-
-                // [2단계] 1단계에서 겹치는 상호가 없을 때만 영수증 자체 추출 알고리즘(배송지명/간판명 라벨) 진입
+                // [2단계] 1단계에서 일치하는게 없을 때만 3단계 자체 텍스트 추출 알고리즘 진입
                 if (!finalStoreName) {
                     finalStoreName = extractStoreNameLogic(rawOCRText);
                 }
 
-                // [3단계] 1, 2단계 모두 실패했을 때만 최후의 수단으로 주소지 1순위 대표 상호 채택
+                // [3단계] 1, 2단계 모두 실패 시 최상위 대표 상호 폴백
                 if (!finalStoreName && addressPlaces.length > 0) {
                     finalStoreName = addressPlaces[0];
                 }
