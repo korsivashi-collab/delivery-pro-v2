@@ -144,9 +144,15 @@ export async function editDestinationAddress(id) {
     if (addrChanged) {
         showLoading("수정된 주소 확인 중...");
         try {
-            const coords = await geocodeAddress(newAddr.trim());
+            // 대괄호 상호명이 포함되어 있을 경우 순수 주소만 추출하여 좌표 검색
+            let pureAddr = newAddr.replace(/\[.*?\]/g, '').trim();
+            const coords = await geocodeAddress(pureAddr || newAddr.trim());
             if (coords) { 
-                item.address = coords.address_name || newAddr.trim(); 
+                // 사용자가 입력한 [상호명] 접두사가 있다면 그대로 유지
+                let prefixMatch = newAddr.match(/^(\[.*?\])\s*/);
+                let storePrefix = prefixMatch ? (prefixMatch[1] + " ") : "";
+                
+                item.address = storePrefix + (coords.address_name || pureAddr); 
                 item.lat = coords.lat; 
                 item.lng = coords.lng; 
             }
@@ -220,30 +226,42 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 하이브리드 상호명 매칭 (카카오 POI 1차 -> 실패 시 utils Fallback 2차)
+        // 3. 상호명 3단계 하이브리드 매칭 파이프라인
         let finalStoreName = null;
+        let addressPlaces = [];
+
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                let addressPlaces = await getPOIsByAddress(addressStr);
+                addressPlaces = await getPOIsByAddress(addressStr);
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                finalStoreName = findStoreNameFromOCR(rawOCRText, combinedPlaces);
+                // [1단계] 주소지 등록 상호(POI)와 판독 텍스트 간 70% 일치율 매칭
+                finalStoreName = findStoreNameFromOCR(rawOCRText, combinedPlaces, 70);
 
+                // [2단계] 매칭 상호가 없을 경우, 기존 3단계 자체 텍스트 추출 알고리즘(줄 -> 단어 -> 교집합) 가동
                 if (!finalStoreName) {
                     finalStoreName = extractStoreNameLogic(rawOCRText);
+                }
+
+                // [3단계] 2단계까지 찾아도 없을 때만, 최후의 수단으로 주소지 1순위 대표 상호명 채택
+                if (!finalStoreName && addressPlaces.length > 0) {
+                    finalStoreName = addressPlaces[0];
                 }
             } catch (error) {
                 console.error("상호명 매칭 오류:", error);
                 if (!finalStoreName) {
                     finalStoreName = extractStoreNameLogic(rawOCRText);
                 }
+                if (!finalStoreName && addressPlaces.length > 0) {
+                    finalStoreName = addressPlaces[0];
+                }
             }
             hideLoading();
         }
 
-        // 4. 리스트 추가
+        // 4. 배송 목록 추가 및 렌더링
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
             if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
