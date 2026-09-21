@@ -168,7 +168,46 @@ export async function editDestinationAddress(id) {
 }
 
 // ==========================================
-// 5. 카메라 스캔 및 하이브리드 판독 파이프라인
+// 5. 상호 매칭 전 주소 칸(셀) 전체 일괄 삭제 헬퍼
+// ==========================================
+function removeAddressCellFromOCR(rawText, addressStr) {
+    if (!rawText) return "";
+    let cleaned = rawText;
+
+    // 주소 칸 바로 다음에 등장하는 주요 필드 경계선 라벨
+    const nextFieldPattern = "(?=\\n\\s*(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가)|배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|$)";
+
+    // 1) '주소' 라벨로 시작하여 다음 필드 직전까지의 주소 칸 전체 제거
+    const addrLabelRegex = new RegExp(`(주소[\\s\\:\\|\\-]*(\\[\\d{5}\\]|\\d{5})?[\\s\\S]*?)${nextFieldPattern}`, 'i');
+    if (addrLabelRegex.test(cleaned)) {
+        cleaned = cleaned.replace(addrLabelRegex, ' ');
+    }
+
+    // 2) 우편번호([00000])로 시작하여 다음 필드 직전까지의 주소 칸 전체 제거
+    const zipRegex = new RegExp(`((\\[\\d{5}\\]|\\b\\d{5}\\b)[\\s\\S]*?)${nextFieldPattern}`, 'i');
+    if (zipRegex.test(cleaned)) {
+        cleaned = cleaned.replace(zipRegex, ' ');
+    }
+
+    // 3) 인식된 도로명 주소(addressStr)부터 다음 필드 직전까지 주소 칸 전체 제거
+    if (addressStr) {
+        let safeAddr = addressStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const directAddrRegex = new RegExp(`(${safeAddr}[\\s\\S]*?)${nextFieldPattern}`, 'i');
+        if (directAddrRegex.test(cleaned)) {
+            cleaned = cleaned.replace(directAddrRegex, ' ');
+        }
+    }
+
+    // 만약 마스킹으로 내용이 전부 날아갔다면 원본 복구 안전장치
+    if (!cleaned || cleaned.trim().length === 0) {
+        return rawText;
+    }
+
+    return cleaned;
+}
+
+// ==========================================
+// 6. 카메라 스캔 및 하이브리드 판독 파이프라인
 // ==========================================
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
@@ -208,7 +247,7 @@ export function initCameraScan() {
             extractedPhone = result.phone;
         }
 
-        // 2. 주소 좌표 획득
+        // 2. 주소 좌표 획득 (주소 인식 로직은 그대로 보존)
         let coords = null;
         while (!coords) {
             try {
@@ -224,7 +263,7 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 정밀 파이프라인 (1순위: 좌표 POI 매칭 -> 2순위: 자체 알고리즘 -> 3순위: 폴백)
+        // 3. 상호명 정밀 파이프라인 (주소 칸 일괄 삭제 -> 좌표 POI 70% 매칭 -> 자체 라벨 추출 -> 폴백)
         let finalStoreName = null;
         let addressPlaces = [];
 
@@ -235,20 +274,13 @@ export function initCameraScan() {
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // [1단계: 최우선순위] 좌표 기반 POI 리스트와 스캔 텍스트 대조
-                let textWithoutAddress = rawOCRText;
-                if (addressStr) {
-                    // 주소를 구성하는 단어들만 깔끔하게 분리해서 제거 (배송지 라벨을 통째로 날리던 기존 버그 해결)
-                    let addressTokens = addressStr.split(/\s+/).filter(tok => tok.length >= 2);
-                    addressTokens.forEach(tok => {
-                        textWithoutAddress = textWithoutAddress.split(tok).join(' ');
-                    });
-                }
-                
-                // 마스킹된 텍스트 내에서 POI 70% 일치 탐색
-                finalStoreName = findStoreNameFromOCR(textWithoutAddress, combinedPlaces, 70);
+                // [핵심 해결책] 주소 칸(셀)에 적힌 건물명, 층수 등을 통째로 지워 비교 텍스트 생성
+                let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
 
-                // [2단계] 1단계에서 일치하는게 없을 때만 3단계 자체 텍스트 추출 알고리즘 진입
+                // [1단계: 최우선순위] 주소 칸을 날린 스캔 텍스트와 좌표 POI 리스트 70% 대조
+                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, combinedPlaces, 70);
+
+                // [2단계] 1단계에서 일치하는 상호가 없을 때만 3단계 자체 텍스트 추출 알고리즘 진입
                 if (!finalStoreName) {
                     finalStoreName = extractStoreNameLogic(rawOCRText);
                 }
