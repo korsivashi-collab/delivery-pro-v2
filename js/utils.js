@@ -105,101 +105,82 @@ export function extractAddressLogic(text) {
 }
 
 // ==========================================
-// 6. 상호명 추출 로직 (1차 줄 -> 2차 단어 -> 3차 엄격한 교집합 검증)
+// 6. 상호명 라벨 정밀 추출 로직 (주소 교집합 로직 제거 및 라벨 집중)
 // ==========================================
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         let lines = fullText.split(/\n/);
         
-        // 완벽하게 제거할 대상 앵커 키워드들 (라벨)
-        const anchors = ['상호명', '상호(법인명)', '상호', '간판명', '배송지명', '업체명', '법인명'];
-        // 수집을 차단하는 경계선 라벨들
-        const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액)/;
+        // 탐색 대상 라벨 키워드 (긴 복합 키워드 우선)
+        const anchors = [
+            '배송지명(간판명)', 
+            '상호(법인명)', 
+            '배송지명', 
+            '간판명', 
+            '상호명', 
+            '상호', 
+            '업체명', 
+            '법인명'
+        ];
         
-        // 연결이 끊기는 모든 기호 감지
+        // 수집을 즉시 차단하는 경계선 라벨
+        const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|수량|단가|총액|규격|제조사|원산지|단위|합계)/;
+        
+        // 텍스트 분리 기호
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
-        // [1차 알고리즘] 라벨 포함 줄 탐색
-        for (let line of lines) {
+        // [1차 알고리즘] 줄 단위 라벨 우측 탐색 (표 서식 대응 포함)
+        for (let i = 0; i < lines.length; i++) {
+            let line = lines[i];
             for (let anchor of anchors) {
                 if (line.includes(anchor)) {
                     let idx = line.indexOf(anchor);
                     let rightSide = line.substring(idx + anchor.length).trim();
-                    rightSide = rightSide.replace(/^[:\s\-]+/, '');
+                    rightSide = rightSide.replace(/^[:\s\-\=\|\/]+/, '');
                     
                     let words = rightSide.split(breakRegex).filter(w => w.length > 0);
-                    if (words.length > 0) {
-                        let candidate = words[0].replace(/[^\w가-힣]/g, '');
-                        if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate)) {
+                    for (let w of words) {
+                        let candidate = w.replace(/[^\w가-힣]/g, '');
+                        if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
+                        if (stopLabels.test(candidate)) break;
+                        if (/^\d+$/.test(candidate)) continue;
+                        if (candidate.length >= 2) {
                             return candidate;
+                        }
+                    }
+                    
+                    // 같은 줄 우측에 내용이 없을 경우 바로 다음 줄 확인 (세로형 표 대응)
+                    if (i + 1 < lines.length) {
+                        let nextWords = lines[i + 1].split(breakRegex).filter(w => w.length > 0);
+                        for (let w of nextWords) {
+                            let candidate = w.replace(/[^\w가-힣]/g, '');
+                            if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
+                            if (stopLabels.test(candidate)) break;
+                            if (/^\d+$/.test(candidate)) continue;
+                            if (candidate.length >= 2) {
+                                return candidate;
+                            }
                         }
                     }
                 }
             }
         }
 
-        // [2차 알고리즘] 단어 단위 연쇄 탐색
+        // [2차 알고리즘] 토큰 연쇄 탐색
         let tokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
-        
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
             if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
-                for (let j = i + 1; j < tokens.length; j++) {
+                for (let j = i + 1; j < Math.min(tokens.length, i + 6); j++) {
                     let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
                     if (cleanNext.length === 0) continue;
-                    
-                    if (anchors.includes(cleanNext)) continue; 
-                    
-                    if (cleanNext.length >= 2 && !stopLabels.test(cleanNext) && !/^\d+$/.test(cleanNext)) {
+                    if (anchors.some(a => cleanNext === a || cleanNext.includes(a))) continue;
+                    if (stopLabels.test(cleanNext)) break;
+                    if (/^\d+$/.test(cleanNext)) continue;
+                    if (cleanNext.length >= 2) {
                         return cleanNext;
                     }
-                    break;
-                }
-            }
-        }
-
-        // [3차 알고리즘] 주소 주변 텍스트와 전체 텍스트의 '엄격한 교집합' 검증
-        let flatText = fullText.replace(/\n/g, ' ');
-        const regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/;
-        
-        let match = flatText.match(regionPrefixedRegex);
-        if (match) {
-            let matchStr = match[0];
-            let idx = flatText.indexOf(matchStr);
-            
-            let headStr = flatText.substring(Math.max(0, idx - 40), idx);
-            let tailStr = flatText.substring(idx + matchStr.length, idx + matchStr.length + 40);
-            
-            const cleanUpRegex = /(주소|배송지|\[\d{5}\]|\d{5}|지하\s*\d+층|\d+층|지상\s*\d+층|B\d+|\([가-힣0-9\s]+\))/g;
-            headStr = headStr.replace(cleanUpRegex, ' ');
-            tailStr = tailStr.replace(cleanUpRegex, ' ');
-            
-            let headWords = headStr.split(breakRegex).filter(w => w.trim().length > 0);
-            let tailWords = tailStr.split(breakRegex).filter(w => w.trim().length > 0);
-            
-            let candidates = [];
-            
-            for (let i = headWords.length - 1; i >= 0; i--) {
-                let candidate = headWords[i].replace(/[^\w가-힣]/g, '');
-                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                    candidates.push(candidate);
-                }
-            }
-            for (let i = 0; i < tailWords.length; i++) {
-                let candidate = tailWords[i].replace(/[^\w가-힣]/g, '');
-                if (candidate.length >= 2 && !stopLabels.test(candidate) && !anchors.includes(candidate) && !/^\d+$/.test(candidate)) {
-                    candidates.push(candidate);
-                }
-            }
-
-            // 2번 이상 중복되는 단어만 최종 상호명으로 확정
-            for (let candidate of candidates) {
-                let firstIdx = flatText.indexOf(candidate);
-                let lastIdx = flatText.lastIndexOf(candidate);
-                
-                if (firstIdx !== -1 && firstIdx !== lastIdx) {
-                    return candidate;
                 }
             }
         }
@@ -224,8 +205,8 @@ export function initResponsiveViewport() {
         
         // 기준 너비(375px: 아이폰 기본 크기) 대비 배율 산출 (0.90 ~ 1.10 사이로 안정적 클램프)
         let scaleRatio = screenWidth / 375;
-        if (scaleRatio < 0.90) scaleRatio = 0.90; // 아주 작은 폰에서 과도한 축소 방지
-        if (scaleRatio > 1.10) scaleRatio = 1.10; // 대화면 폰에서 과도한 확대 방지
+        if (scaleRatio < 0.90) scaleRatio = 0.90; 
+        if (scaleRatio > 1.10) scaleRatio = 1.10; 
         document.documentElement.style.setProperty('--app-scale', scaleRatio.toFixed(3));
 
         // 3. 360px 이하 소형 폰(아이폰 SE 등) 특화 플래그 클래스 지정
@@ -245,7 +226,7 @@ export function initResponsiveViewport() {
     // 초기 1회 즉시 실행
     applyViewportMetrics();
 
-    // 화면 크기 변경(회전, 주소창 스크롤 확장/축소) 시 자동 재계산
+    // 화면 크기 변경 시 자동 재계산
     window.addEventListener('resize', applyViewportMetrics, { passive: true });
     window.addEventListener('orientationchange', () => {
         setTimeout(applyViewportMetrics, 100);

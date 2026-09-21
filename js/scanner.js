@@ -144,11 +144,9 @@ export async function editDestinationAddress(id) {
     if (addrChanged) {
         showLoading("수정된 주소 확인 중...");
         try {
-            // 대괄호 상호명이 포함되어 있을 경우 순수 주소만 추출하여 좌표 검색
             let pureAddr = newAddr.replace(/\[.*?\]/g, '').trim();
             const coords = await geocodeAddress(pureAddr || newAddr.trim());
             if (coords) { 
-                // 사용자가 입력한 [상호명] 접두사가 있다면 그대로 유지
                 let prefixMatch = newAddr.match(/^(\[.*?\])\s*/);
                 let storePrefix = prefixMatch ? (prefixMatch[1] + " ") : "";
                 
@@ -226,7 +224,7 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 3단계 하이브리드 매칭 파이프라인
+        // 3. 상호명 정밀 매칭 3단계 파이프라인
         let finalStoreName = null;
         let addressPlaces = [];
 
@@ -237,15 +235,26 @@ export function initCameraScan() {
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // [1단계] 주소지 등록 상호(POI)와 판독 텍스트 간 70% 일치율 매칭
-                finalStoreName = findStoreNameFromOCR(rawOCRText, combinedPlaces, 70);
+                // [1단계] 영수증 라벨 기반(배송지명, 간판명 등) 자체 추출 우선 실행
+                let candidateFromReceipt = extractStoreNameLogic(rawOCRText);
 
-                // [2단계] 매칭 상호가 없을 경우, 기존 3단계 자체 텍스트 추출 알고리즘(줄 -> 단어 -> 교집합) 가동
-                if (!finalStoreName) {
-                    finalStoreName = extractStoreNameLogic(rawOCRText);
+                if (candidateFromReceipt) {
+                    // 영수증 라벨 단어가 카카오 POI와 70% 이상 일치하면 정식 명칭으로 보정, 등록되지 않았어도 영수증 단어 확정
+                    let matchedPoi = findStoreNameFromOCR(candidateFromReceipt, combinedPlaces, 70);
+                    finalStoreName = matchedPoi || candidateFromReceipt;
+                } else {
+                    // [2단계] 라벨이 없는 경우: 주소 단어를 제거한 나머지 본문과 좌표 기반 POI 간 70% 대조 매칭
+                    let textWithoutAddress = rawOCRText;
+                    if (addressStr) {
+                        let addressTokens = addressStr.split(/\s+/).filter(tok => tok.length >= 2);
+                        addressTokens.forEach(tok => {
+                            textWithoutAddress = textWithoutAddress.split(tok).join(' ');
+                        });
+                    }
+                    finalStoreName = findStoreNameFromOCR(textWithoutAddress, combinedPlaces, 70);
                 }
 
-                // [3단계] 2단계까지 찾아도 없을 때만, 최후의 수단으로 주소지 1순위 대표 상호명 채택
+                // [3단계] 1, 2단계 모두 실패한 경우에만 주소지 대표 등록 상호 채택
                 if (!finalStoreName && addressPlaces.length > 0) {
                     finalStoreName = addressPlaces[0];
                 }
