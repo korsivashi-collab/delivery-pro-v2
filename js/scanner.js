@@ -224,7 +224,7 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 정밀 매칭 3단계 파이프라인
+        // 3. 상호명 정밀 파이프라인 (1단계: 좌표 POI 70% 매칭 절대 우선 -> 2단계: 자체 라벨 추출 -> 3단계: 주소 대표명 폴백)
         let finalStoreName = null;
         let addressPlaces = [];
 
@@ -235,26 +235,28 @@ export function initCameraScan() {
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // [1단계] 영수증 라벨 기반(배송지명, 간판명 등) 자체 추출 우선 실행
-                let candidateFromReceipt = extractStoreNameLogic(rawOCRText);
-
-                if (candidateFromReceipt) {
-                    // 영수증 라벨 단어가 카카오 POI와 70% 이상 일치하면 정식 명칭으로 보정, 등록되지 않았어도 영수증 단어 확정
-                    let matchedPoi = findStoreNameFromOCR(candidateFromReceipt, combinedPlaces, 70);
-                    finalStoreName = matchedPoi || candidateFromReceipt;
-                } else {
-                    // [2단계] 라벨이 없는 경우: 주소 단어를 제거한 나머지 본문과 좌표 기반 POI 간 70% 대조 매칭
-                    let textWithoutAddress = rawOCRText;
-                    if (addressStr) {
-                        let addressTokens = addressStr.split(/\s+/).filter(tok => tok.length >= 2);
-                        addressTokens.forEach(tok => {
-                            textWithoutAddress = textWithoutAddress.split(tok).join(' ');
-                        });
-                    }
-                    finalStoreName = findStoreNameFromOCR(textWithoutAddress, combinedPlaces, 70);
+                // [1단계: 최우선순위] 좌표 POI 리스트와 스캔 텍스트 대조
+                // 주소 라인(한상빌딩, 에코테라스 등 건물명 기재부)을 제외하여 오매칭 방지
+                let ocrLines = rawOCRText.split(/\n/);
+                let nonAddressLines = ocrLines.filter(line => {
+                    if (/주소|배송지|사업장|\[\d{5}\]/.test(line)) return false;
+                    if (addressStr && line.includes(addressStr)) return false;
+                    return true;
+                });
+                let ocrForPoiMatch = nonAddressLines.join(' ').trim();
+                if (!ocrForPoiMatch) {
+                    ocrForPoiMatch = rawOCRText.replace(addressStr, ' ').trim();
                 }
 
-                // [3단계] 1, 2단계 모두 실패한 경우에만 주소지 대표 등록 상호 채택
+                // 좌표 검색으로 나온 POI와 70% 이상 일치하는 상호가 있는지 먼저 대조
+                finalStoreName = findStoreNameFromOCR(ocrForPoiMatch, combinedPlaces, 70);
+
+                // [2단계] 1단계에서 겹치는 상호가 없을 때만 영수증 자체 추출 알고리즘(배송지명/간판명 라벨) 진입
+                if (!finalStoreName) {
+                    finalStoreName = extractStoreNameLogic(rawOCRText);
+                }
+
+                // [3단계] 1, 2단계 모두 실패했을 때만 최후의 수단으로 주소지 1순위 대표 상호 채택
                 if (!finalStoreName && addressPlaces.length > 0) {
                     finalStoreName = addressPlaces[0];
                 }
