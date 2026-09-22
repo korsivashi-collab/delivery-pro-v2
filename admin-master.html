@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>배송 동선 PRO - 통합 마스터 센터</title>
+    <!-- Tailwind CSS & Font Awesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 공통 분리 스타일시트 -->
+    <link rel="stylesheet" href="./css/admin.css">
+
+    <!-- 카카오 맵 API (services 라이브러리 포함) -->
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=893c5c6ec8613974d84fa75fd6d0be11&libraries=services"></script>
+    
+    <!-- 엑셀 파일(.xlsx) 생성 라이브러리 (SheetJS) -->
+    <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body class="bg-slate-50 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
+
+    <!-- 마스터 통합 대시보드 메인 패널 -->
+    <div id="master-panel" class="flex flex-col h-full w-full bg-slate-50 overflow-hidden">
+        <!-- 1. 마스터 상단 헤더 -->
+        <header class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md flex-none">
+            <div class="flex items-center gap-2.5">
+                <i class="fa-solid fa-route text-blue-500 text-3xl"></i>
+                <div class="ml-1">
+                    <h1 class="text-base font-black tracking-tight leading-none text-white flex items-center gap-2">
+                        배송 동선 PRO 통합 마스터 센터
+                        <span id="master-name-badge" class="bg-amber-400/20 text-amber-300 border border-amber-400/40 text-[10px] px-2 py-0.5 rounded-full font-bold">마스터</span>
+                    </h1>
+                    <span class="text-[11px] text-gray-400 font-bold mt-0.5 block">라이선스 통제 및 물류 데이터 통합 감사</span>
+                </div>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                    <a href="/terms.html" target="_blank" class="hover:text-white underline transition">이용약관</a>
+                    <span>·</span>
+                    <a href="/privacy.html" target="_blank" class="hover:text-white underline font-bold text-slate-300 transition">개인정보</a>
+                    <span>·</span>
+                    <a href="/policy.html" target="_blank" class="hover:text-white underline transition">운영정책</a>
+                </div>
+                <button onclick="window.systemLogout()" class="bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-bold px-4 py-2 rounded-xl transition shadow-inner">로그아웃</button>
+            </div>
+        </header>
+
+        <!-- 2. 마스터 메인 작업 영역 -->
+        <div class="flex-1 overflow-y-auto p-6 max-w-[1650px] mx-auto w-full hide-scrollbar space-y-5">
+            <!-- 상단 작업 바: 전체 데이터 추출, 사진 데이터, 계정 생성 -->
+            <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex justify-between items-center flex-wrap gap-4">
+                <div>
+                    <h3 class="text-sm font-black text-gray-800 flex items-center gap-2"><i class="fa-solid fa-server text-blue-600"></i> 시스템 및 데이터 통합 관리</h3>
+                    <p class="text-[10px] text-gray-500 mt-1 font-bold">마스터 권한의 신규 키 발급, 전체 배송 기록 엑셀 추출 및 배송 완료 사진 목록을 관리합니다.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="window.openExcelExportModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-excel"></i> 전체 데이터 추출 (엑셀)
+                    </button>
+                    <button onclick="window.openPhotoGalleryModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
+                        <i class="fa-solid fa-images"></i> 사진 데이터
+                    </button>
+                    <button onclick="document.getElementById('create-account-modal').classList.remove('hidden')" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
+                        <i class="fa-solid fa-plus"></i> 신규 계정 생성하기
+                    </button>
+                </div>
+            </div>
+
+            <!-- 마스터 탭 패널 컨테이너 -->
+            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[560px]">
+                <div class="flex border-b border-gray-200 bg-gray-50/70 p-2 gap-1.5 flex-wrap">
+                    <button onclick="window.switchMasterTab('regular')" id="tab-btn-regular" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition bg-white text-blue-600 shadow-sm border border-gray-200"><i class="fa-solid fa-user mr-1 text-blue-600"></i> 일반 계정 (<span id="count-regular">0</span>)</button>
+                    <button onclick="window.switchMasterTab('trial')" id="tab-btn-trial" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-clock mr-1 text-emerald-500"></i> 무료 계정(7일) (<span id="count-trial">0</span>)</button>
+                    <button onclick="window.switchMasterTab('dispatch')" id="tab-btn-dispatch" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-building mr-1 text-purple-500"></i> 관제 계정 (<span id="count-dispatch">0</span>)</button>
+                    <button onclick="window.switchMasterTab('memos')" id="tab-btn-memos" class="flex-1 min-w-[140px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-square-parking mr-1 text-yellow-500"></i> 주차 메모 DB (<span id="count-memos">0</span>)</button>
+                    <button onclick="window.switchMasterTab('history')" id="tab-btn-history" class="flex-1 min-w-[150px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-address-book mr-1 text-indigo-500"></i> 계정/내역 조회</button>
+                </div>
+
+                <!-- 탭 1: 일반 계정 -->
+                <div id="tab-content-regular" class="flex flex-col flex-1">
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-regular"></tbody></table></div>
+                    <div id="pagination-regular"></div>
+                </div>
+
+                <!-- 탭 2: 무료(7일) 계정 -->
+                <div id="tab-content-trial" class="hidden flex-col flex-1">
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-trial"></tbody></table></div>
+                    <div id="pagination-trial"></div>
+                </div>
+
+                <!-- 탭 3: 관제 계정 -->
+                <div id="tab-content-dispatch" class="hidden flex-col flex-1">
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[1000px]"><tbody id="table-body-dispatch"></tbody></table></div>
+                    <div id="pagination-dispatch"></div>
+                </div>
+                
+                <!-- 탭 4: 주차 메모 DB -->
+                <div id="tab-content-memos" class="hidden flex-col flex-1">
+                    <div class="px-4 pt-4 flex justify-between items-center">
+                        <span class="text-xs font-bold text-gray-500">등록된 전체 주차 및 건물 메모 리스트</span>
+                        <span class="text-[10px] text-blue-600 font-bold bg-blue-50 px-2 py-1 rounded border border-blue-100">항목(작성자/일시/추천수)을 클릭하면 정렬됩니다.</span>
+                    </div>
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1">
+                        <table class="w-full text-left border-collapse text-xs min-w-[950px]">
+                            <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm border-b border-gray-200 text-gray-600">
+                                <tr>
+                                    <th class="py-3 px-3 text-center w-12 font-black">순번</th>
+                                    <th class="sortable-th py-3 px-3 font-black text-center" onclick="window.sortMemos('author')">작성자 <span id="sort-arrow-author">↕</span></th>
+                                    <th class="py-3 px-3 font-black">건물 주소</th>
+                                    <th class="py-3 px-3 font-black">메모 내용</th>
+                                    <th class="sortable-th py-3 px-3 text-center font-black" onclick="window.sortMemos('time')">작성 일시 <span id="sort-arrow-time">↕</span></th>
+                                    <th class="sortable-th py-3 px-3 text-center font-black" onclick="window.sortMemos('likes')">추천수 <span id="sort-arrow-likes">↕</span></th>
+                                    <th class="py-3 px-3 text-center font-black w-16">관리</th>
+                                </tr>
+                            </thead>
+                            <tbody id="table-body-memos" class="divide-y divide-gray-100 bg-white"></tbody>
+                        </table>
+                    </div>
+                    <div id="pagination-memos"></div>
+                </div>
+                
+                <!-- 탭 5: 계정/내역 조회 통합 뷰 -->
+                <div id="tab-content-history" class="hidden p-5 flex flex-col gap-3.5">
+                    <div id="account-back-bar" class="hidden justify-between items-center bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-xs">
+                        <button onclick="window.backToAllAccountsView()" class="inline-flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow transition active:scale-95"><i class="fa-solid fa-arrow-left"></i> 전체 계정 목록으로 돌아가기</button>
+                        <span class="text-xs text-blue-950 font-bold">현재 상세 확인 중: <b id="top-selected-account-label" class="font-black text-blue-700 text-sm"></b></span>
+                    </div>
+
+                    <div id="history-top-filter-bar" class="bg-gray-50 border border-gray-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-3 shadow-inner">
+                        <div class="flex items-center gap-3 flex-wrap">
+                            <div class="relative flex items-center">
+                                <i class="fa-solid fa-magnifying-glass absolute left-3 text-gray-400 text-xs"></i>
+                                <input type="text" id="history-driver-search" oninput="window.filterDriverDropdown(this.value)" placeholder="전화번호 또는 키 검색..." class="bg-white border border-gray-300 rounded-xl pl-8 pr-3 py-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm w-48">
+                            </div>
+                            <div class="flex items-center gap-1.5">
+                                <select id="history-driver-select" onchange="window.onDriverSelectChange(this.value)" class="bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm min-w-[240px]"><option value="ALL">전체 계정 확인 (목록 보기)</option></select>
+                            </div>
+                        </div>
+
+                        <div class="flex items-center gap-2 flex-wrap">
+                            <button type="button" onclick="window.toggleHistoryNoticeMode()" id="btn-toggle-history-notice" class="px-3.5 py-1.5 rounded-xl text-xs font-black bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 shadow-2xs transition active:scale-95 flex items-center gap-1.5"><i class="fa-solid fa-bell text-amber-500 text-xs"></i><span>운영사 알림 발송</span></button>
+                            <button type="button" onclick="window.openMasterNoticeHistoryModal()" class="px-3.5 py-1.5 rounded-xl text-xs font-black bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 shadow-2xs transition active:scale-95 flex items-center gap-1.5" title="마스터가 보낸 알림 이력 확인 및 삭제"><i class="fa-solid fa-clock-rotate-left text-xs"></i><span>발송 이력</span></button>
+                            <div id="history-type-filter-group" class="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-gray-200 shadow-xs">
+                                <button onclick="window.setHistoryAccountTypeFilter('ALL')" id="htype-btn-ALL" class="px-3 py-1 rounded-lg text-xs font-black bg-blue-600 text-white shadow-xs transition">전체보기 (<span id="htype-count-all">0</span>)</button>
+                                <button onclick="window.setHistoryAccountTypeFilter('regular')" id="htype-btn-regular" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">일반 (<span id="htype-count-reg">0</span>)</button>
+                                <button onclick="window.setHistoryAccountTypeFilter('trial')" id="htype-btn-trial" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">7일체험 (<span id="htype-count-trial">0</span>)</button>
+                                <button onclick="window.setHistoryAccountTypeFilter('dispatch')" id="htype-btn-dispatch" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">관제 (<span id="htype-count-dispatch">0</span>)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="history-notice-send-bar" class="hidden bg-amber-50 border border-amber-300 rounded-2xl p-4 shadow-sm flex-col gap-2.5 animate-slide-up">
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs font-black text-amber-950 flex items-center gap-1.5"><i class="fa-solid fa-bullhorn text-amber-600"></i> 선택 계정 대상 [운영사 알림] 팝업 발송</span>
+                            <span class="text-xs text-amber-900 font-bold">수신 대상: <b id="history-selected-count" class="text-amber-700 font-black text-sm">0</b>개 계정 선택됨</span>
+                        </div>
+                        <div class="flex gap-2.5 flex-col sm:flex-row">
+                            <textarea id="history-notice-input" rows="2" maxlength="300" placeholder="기사 및 관제 계정 화면에 즉시 팝업으로 전달할 [운영사 알림] 내용을 입력하세요... (최대 300자)" class="flex-1 bg-white border border-amber-300 rounded-xl p-3 text-xs font-bold text-gray-800 outline-none focus:border-amber-600 focus:ring-1 focus:ring-amber-500 resize-none shadow-inner leading-relaxed placeholder-gray-400"></textarea>
+                            <div class="flex sm:flex-col gap-2 shrink-0 justify-center">
+                                <button type="button" onclick="window.sendHistoryNoticeToSelected()" id="btn-send-history-notice" class="flex-1 sm:flex-none bg-amber-500 hover:bg-amber-600 text-white font-black text-xs px-5 py-2.5 rounded-xl shadow-md transition active:scale-95 flex items-center justify-center gap-1.5 whitespace-nowrap"><i class="fa-solid fa-paper-plane"></i> 알림 전송</button>
+                                <button type="button" onclick="window.toggleHistoryNoticeMode(false)" class="flex-1 sm:flex-none bg-white hover:bg-gray-100 text-gray-600 border border-amber-200 font-bold text-xs px-4 py-2 rounded-xl transition shadow-2xs whitespace-nowrap">취소 (닫기)</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="account-profile-card" class="hidden bg-slate-900 text-white rounded-2xl p-5 shadow-md flex-col gap-3.5">
+                        <div class="flex justify-between items-start flex-wrap gap-3">
+                            <div class="flex items-center gap-3.5">
+                                <div class="w-12 h-12 bg-blue-600 text-white rounded-2xl flex items-center justify-center text-xl font-black shadow"><i class="fa-solid fa-id-card"></i></div>
+                                <div>
+                                    <div class="flex items-center gap-2"><h3 id="acc-phone" class="text-lg font-black tracking-tight">010-0000-0000</h3><span id="acc-status-badge" class="bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">정상</span><span id="acc-type-badge" class="bg-blue-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full">일반 계정</span></div>
+                                    <div class="flex items-center gap-2 text-xs text-gray-400 mt-1 flex-wrap"><span>라이선스 키:</span><span id="acc-key" class="bg-slate-800 text-amber-300 font-mono font-black px-2 py-0.5 rounded border border-slate-700 select-all">KEY-NONE</span><span class="text-gray-500">|</span><span>기기 고유번호:</span><span id="acc-device" class="bg-slate-800 text-gray-300 font-mono font-bold px-2 py-0.5 rounded border border-slate-700 select-all">DEV-NONE</span><span class="text-gray-500">|</span><span id="acc-expire" class="text-gray-300">만료일: 2026.12.31</span></div>
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <button onclick="window.openEditLicenseModal(currentSelectedAccountKey)" class="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black px-4 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 active:scale-95"><i class="fa-solid fa-pen-to-square"></i> 정보 수정</button>
+                                <button onclick="window.deleteAccountFromHistory()" class="bg-red-600 hover:bg-red-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 active:scale-95"><i class="fa-solid fa-trash-can"></i> 계정 삭제</button>
+                                <button onclick="window.backToAllAccountsView()" class="bg-slate-800 hover:bg-slate-700 text-gray-200 text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 border border-slate-700"><i class="fa-solid fa-arrow-left"></i> 목록으로</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-sm min-h-[440px] overflow-hidden flex flex-col">
+                        <div id="account-history-main-content" class="w-full"><div class="text-center text-gray-400 py-28 text-xs font-bold">데이터를 불러오는 중...</div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ======================================================== -->
+    <!-- 마스터 전용 팝업 모달 목록 -->
+    <!-- ======================================================== -->
+
+    <!-- 1. 신규 계정 생성 모달 -->
+    <div id="create-account-modal" class="hidden fixed inset-0 bg-black/60 z-[700] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
+            <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2"><i class="fa-solid fa-user-plus text-blue-600"></i> 신규 계정 생성</h3>
+            <p class="text-xs text-gray-500 font-bold mb-4">발급할 계정 유형과 만료일을 선택해주세요.</p>
+            <div class="space-y-4 mb-6">
+                <div><label class="block text-[11px] font-bold text-gray-700 mb-1">발급 계정 유형</label><select id="new-key-type" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm cursor-pointer"><option value="regular">일반 계정 (정식 기사용)</option><option value="dispatch">관제 계정 (지사/사무실용)</option></select></div>
+                <div><label class="block text-[11px] font-bold text-gray-700 mb-1">사용 유효기간 (만료일)</label><input type="date" id="new-key-expire" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm cursor-pointer"></div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="document.getElementById('create-account-modal').classList.add('hidden')" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-xs transition">취소</button>
+                <button onclick="window.generateNewLicense(); document.getElementById('create-account-modal').classList.add('hidden');" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5"><i class="fa-solid fa-check"></i> 계정 발급</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 계정 정보 및 소속 연결 수정 모달 -->
+    <div id="edit-license-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div id="edit-modal-card" class="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+            <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-blue-600"></i> 계정 정보 및 연결 수정</h3>
+            <p class="text-xs text-gray-400 font-bold mb-3">계정 기본 정보와 소속 연결 기사를 한 화면에서 설정합니다.</p>
+            <input type="hidden" id="edit-orig-key"><input type="hidden" id="edit-type">
+            <div class="overflow-y-auto hide-scrollbar flex-1 space-y-4 pr-1">
+                <div class="space-y-3 bg-gray-50/70 p-3.5 rounded-2xl border border-gray-200">
+                    <span class="text-[11px] font-black text-gray-700 flex items-center gap-1 mb-1"><i class="fa-solid fa-sliders text-blue-600"></i> 기본 계정 정보</span>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">라이선스 키 (8자리)</label><input type="text" id="edit-key-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-mono font-black uppercase outline-none focus:border-blue-500"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">등록 휴대폰 번호</label><input type="tel" id="edit-phone-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500" placeholder="예: 010-1234-5678"></div>
+                    </div>
+                    <div>
+                        <label class="block text-[10px] font-bold text-gray-500 mb-1">기기 고유번호 (deviceId / 세션ID)</label>
+                        <div class="flex gap-1.5"><input type="text" id="edit-device-input" class="flex-1 bg-white border border-gray-300 rounded-xl p-2 text-xs font-mono font-bold outline-none focus:border-blue-500 text-gray-700" placeholder="미등록 상태"><button type="button" onclick="document.getElementById('edit-device-input').value=''" class="px-2.5 py-1 bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-xl text-[10px] font-bold text-gray-700">초기화</button></div>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">만료일 (YYYY.MM.DD)</label><input type="date" id="edit-expire-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label><select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"><option value="active">정상 운행 (Active)</option><option value="suspended">사용 정지 (Suspended)</option></select></div>
+                    </div>
+                    <div id="edit-slots-container" class="hidden"><label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 수 (0=무제한)</label><input type="number" id="edit-slots-input" class="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-black outline-none focus:border-purple-500"></div>
+                </div>
+
+                <div id="edit-dispatch-connected-section" class="hidden flex-col gap-2.5 bg-purple-50/50 p-3.5 rounded-2xl border border-purple-200">
+                    <div class="flex justify-between items-center"><span class="text-[11px] font-black text-purple-900 flex items-center gap-1.5"><i class="fa-solid fa-users text-purple-600"></i> 소속 연결 기사 목록</span><span id="modal-connected-count-badge" class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-purple-200">0명 연결됨</span></div>
+                    <div class="flex gap-1.5"><input type="text" id="modal-add-driver-input" placeholder="기사 8자리 키 또는 전화번호 입력" class="flex-1 bg-white border border-purple-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-purple-600 uppercase" onkeyup="if(window.event.keyCode==13){window.linkDriverFromModal()}"><button type="button" onclick="window.linkDriverFromModal()" class="bg-purple-600 hover:bg-purple-700 text-white font-black text-xs px-3.5 py-2 rounded-xl transition shadow-xs whitespace-nowrap active:scale-95 flex items-center gap-1"><i class="fa-solid fa-plus"></i> 연결 추가</button></div>
+                    <div id="modal-connected-drivers-list" class="space-y-1.5 max-h-48 overflow-y-auto hide-scrollbar pt-1"></div>
+                </div>
+            </div>
+            <div class="flex gap-2 pt-3 border-t border-gray-100 mt-2">
+                <button type="button" onclick="window.deleteLicenseFromModal()" class="bg-red-50 hover:bg-red-100 text-red-600 font-black py-2.5 px-3 rounded-xl text-xs transition">계정 삭제</button>
+                <button type="button" onclick="window.closeEditModal()" class="flex-1 bg-gray-100 text-gray-600 font-bold py-2.5 rounded-xl text-xs">취소</button>
+                <button type="button" onclick="window.saveLicenseEdit()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-2.5 rounded-xl text-xs shadow">수정 저장</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3. 마스터 엑셀 리포트 추출 모달 -->
+    <div id="excel-export-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative">
+            <div class="flex justify-between items-center pb-3 border-b border-gray-100 mb-4">
+                <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
+                    <i class="fa-solid fa-file-excel text-emerald-600"></i> 데이터 추출 (엑셀 리포트)
+                </h3>
+                <button onclick="window.closeExcelExportModal()" class="text-gray-400 hover:text-red-500 transition p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
+            </div>
+            
+            <div class="mb-5">
+                <label class="block text-xs font-black text-gray-700 mb-2"><i class="fa-regular fa-calendar text-blue-600 mr-1"></i> 조회 기간 설정</label>
+                <div class="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200 shadow-inner">
+                    <input type="date" id="export-start-date" class="flex-1 bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-blue-500 shadow-sm cursor-pointer">
+                    <span class="text-gray-400 font-black">~</span>
+                    <input type="date" id="export-end-date" class="flex-1 bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-blue-500 shadow-sm cursor-pointer">
+                </div>
+            </div>
+
+            <div class="mb-6">
+                <label class="block text-xs font-black text-gray-700 mb-2"><i class="fa-solid fa-list-check text-blue-600 mr-1"></i> 출력할 데이터 (복수 선택)</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <label class="flex items-center gap-2 p-2.5 border border-gray-200 rounded-xl cursor-pointer hover:bg-emerald-50 transition shadow-sm">
+                        <input type="checkbox" id="chk-export-completed" checked class="w-4 h-4 text-emerald-600 rounded border-gray-300 focus:ring-emerald-500 cursor-pointer">
+                        <span class="text-xs font-black text-gray-800">배송 완료</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 border border-gray-200 rounded-xl cursor-pointer hover:bg-blue-50 transition shadow-sm">
+                        <input type="checkbox" id="chk-export-pending" checked class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                        <span class="text-xs font-black text-gray-800">미처리 배송</span>
+                    </label>
+                    <label class="flex items-center gap-2 p-2.5 border border-gray-200 rounded-xl cursor-pointer hover:bg-red-50 transition shadow-sm">
+                        <input type="checkbox" id="chk-export-canceled" class="w-4 h-4 text-red-600 rounded border-gray-300 focus:ring-red-500 cursor-pointer">
+                        <span class="text-xs font-black text-gray-800">배송 취소</span>
+                    </label>
+                </div>
+                <p class="text-[10px] text-gray-400 font-bold mt-2 leading-relaxed">* 선택한 항목별로 엑셀 파일 내에 각각의 페이지(시트)가 나뉘어 생성됩니다.</p>
+            </div>
+
+            <div class="flex gap-2">
+                <button type="button" onclick="window.closeExcelExportModal()" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-600 font-bold py-3 rounded-xl text-xs transition">취소</button>
+                <button type="button" onclick="window.executeExcelExport()" class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-download"></i> 리포트 다운로드
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 4. 배송 사진 데이터 관리 모달 -->
+    <div id="photo-gallery-modal" class="hidden fixed inset-0 bg-black/70 z-[500] flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-6xl rounded-3xl shadow-2xl relative flex flex-col h-[90vh] overflow-hidden">
+            <div class="px-6 py-4 border-b border-gray-200 bg-white flex justify-between items-center flex-none">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 bg-indigo-50 text-indigo-600 rounded-xl flex items-center justify-center text-lg font-black shadow-inner">
+                        <i class="fa-solid fa-images"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
+                            배송 완료 사진 데이터 목록
+                            <span id="photo-total-count-badge" class="bg-indigo-100 text-indigo-800 text-xs font-black px-2.5 py-0.5 rounded-full border border-indigo-200">총 0건</span>
+                        </h3>
+                        <p class="text-[11px] text-gray-400 font-bold">기사 검색 및 날짜별 완료 기록을 리스트로 확인하고 사진을 열람하거나 삭제합니다.</p>
+                    </div>
+                </div>
+                <button onclick="window.closePhotoGalleryModal()" class="w-9 h-9 bg-gray-100 hover:bg-gray-200 text-gray-500 rounded-xl flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- 기사 검색 및 일자 필터 바 -->
+            <div class="p-4 bg-gray-50 border-b border-gray-200 flex flex-wrap items-center justify-between gap-3 flex-none">
+                <div class="flex items-center gap-3 flex-wrap">
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xs font-bold text-gray-600"><i class="fa-solid fa-truck text-blue-500"></i> 기사 검색:</span>
+                        <div class="relative flex items-center">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3 text-gray-400 text-xs"></i>
+                            <input type="text" id="photo-filter-driver-search" oninput="window.filterPhotoGallery()" placeholder="전화번호 또는 키 입력..." class="bg-white border border-gray-300 rounded-xl pl-8 pr-7 py-1.5 text-xs font-bold outline-none focus:border-indigo-500 shadow-sm w-48">
+                            <button type="button" onclick="document.getElementById('photo-filter-driver-search').value=''; window.filterPhotoGallery();" class="absolute right-2.5 text-gray-400 hover:text-gray-600 text-xs" title="검색어 지우기"><i class="fa-solid fa-xmark"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center gap-1.5">
+                        <span class="text-xs font-bold text-gray-600"><i class="fa-regular fa-calendar text-indigo-500"></i> 날짜:</span>
+                        <input type="date" id="photo-filter-date" onchange="window.filterPhotoGallery()" class="bg-white border border-gray-300 rounded-xl px-3 py-1.5 text-xs font-bold outline-none focus:border-indigo-500 shadow-sm cursor-pointer">
+                        <button type="button" onclick="window.clearPhotoDateFilter()" class="text-xs bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold px-2.5 py-1.5 rounded-lg transition">전체날짜</button>
+                    </div>
+                </div>
+
+                <div class="text-[11px] text-blue-600 font-bold bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100">
+                    * 헤더의 작성자 및 완료 일시를 클릭하면 정렬됩니다.
+                </div>
+            </div>
+
+            <!-- 사진 데이터 텍스트 테이블 리스트 -->
+            <div class="flex-1 overflow-x-auto custom-scrollbar flex flex-col bg-white">
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-4">
+                    <table class="w-full text-left border-collapse text-xs min-w-[950px]">
+                        <thead class="bg-gray-100 sticky top-0 z-10 shadow-sm border-b border-gray-200 text-gray-600">
+                            <tr>
+                                <th class="py-3 px-3 text-center w-12 font-black">순번</th>
+                                <th class="sortable-th py-3 px-3 font-black text-center" onclick="window.sortPhotos('author')">작성자(기사) <span id="sort-photo-arrow-author">↕</span></th>
+                                <th class="sortable-th py-3 px-3 font-black text-center" onclick="window.sortPhotos('time')">완료 일시 <span id="sort-photo-arrow-time">↕</span></th>
+                                <th class="py-3 px-3 font-black">배송지 주소</th>
+                                <th class="py-3 px-3 text-center font-black w-24">상태</th>
+                                <th class="py-3 px-3 text-center font-black w-24">사진 확인</th>
+                                <th class="py-3 px-3 text-center font-black w-16">관리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="photo-list-tbody" class="divide-y divide-gray-100 bg-white font-medium text-gray-700"></tbody>
+                    </table>
+                </div>
+                <div id="pagination-photos" class="flex-none"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 5. 사진 단독 뷰어 팝업 모달 -->
+    <div id="photo-preview-modal" class="hidden fixed inset-0 bg-black/85 z-[600] flex items-center justify-center p-4 backdrop-blur-sm" onclick="window.closePhotoPreviewModal()">
+        <div class="bg-white rounded-3xl overflow-hidden shadow-2xl max-w-2xl w-full max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
+            <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                <div class="min-w-0 pr-2">
+                    <h4 id="photo-preview-addr" class="font-black text-sm text-gray-900 truncate leading-snug">주소 확인 중</h4>
+                    <p id="photo-preview-sub" class="text-[11px] text-gray-500 font-bold mt-0.5">기사 | 완료 일시</p>
+                </div>
+                <button onclick="window.closePhotoPreviewModal()" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-700 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-[300px]">
+                <img id="photo-preview-img" src="" alt="배송 완료 사진" class="max-h-[65vh] max-w-full object-contain rounded-lg">
+            </div>
+            <div class="p-3 bg-white border-t border-gray-100 flex justify-between items-center text-xs">
+                <span id="photo-preview-tag" class="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-black">전달완료</span>
+                <a id="photo-preview-link" href="#" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-black px-4 py-2 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+                    <i class="fa-solid fa-arrow-up-right-from-square"></i> 원본 새창 보기
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. 운영사 발송 알림 이력 관리 모달 -->
+    <div id="master-notice-history-modal" class="hidden fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+        <div class="bg-white w-full max-w-xl rounded-3xl p-6 shadow-2xl relative max-h-[85vh] flex flex-col animate-slide-up">
+            <div class="flex justify-between items-center pb-3 border-b border-gray-100">
+                <div class="flex items-center gap-2">
+                    <span class="w-8 h-8 rounded-xl bg-slate-900 text-amber-400 flex items-center justify-center text-sm shadow-inner"><i class="fa-solid fa-clock-rotate-left"></i></span>
+                    <div><h3 class="font-black text-gray-900 text-sm">운영사 알림 발송 이력 관리</h3><p class="text-[10px] text-gray-400 font-bold">마스터 계정에서 보낸 전체 알림 내역 조회 및 삭제</p></div>
+                </div>
+                <button onclick="window.closeMasterNoticeHistoryModal()" class="text-gray-400 hover:text-gray-700 text-lg p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="master-notice-history-container" class="flex-1 overflow-y-auto p-2 space-y-2.5 hide-scrollbar my-2"></div>
+            <div class="pt-3 border-t border-gray-100 flex justify-end"><button onclick="window.closeMasterNoticeHistoryModal()" class="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl">닫기</button></div>
+        </div>
+    </div>
+
+    <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
+    <script type="module" src="./js/admin-app.js"></script>
+</body>
+</html>

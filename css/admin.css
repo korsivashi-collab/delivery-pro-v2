@@ -1,0 +1,264 @@
+/* ========================================================
+   배송 동선 PRO - 통합 관리자 센터 공통 스타일 (css/admin.css)
+   ======================================================== */
+
+/* 1. 지도 컨테이너 및 카카오맵 오버레이/핀 */
+#territory-map-container, 
+#all-territories-map-container { 
+    width: 100% !important; 
+    height: 100% !important; 
+    min-height: 400px; 
+}
+
+.custom-overlay { 
+    background: #2563eb; 
+    color: white; 
+    padding: 3px 7px; 
+    border-radius: 9999px; 
+    font-size: 11px; 
+    font-weight: 800; 
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.25); 
+    border: 2px solid white; 
+    white-space: nowrap; 
+    transition: all 0.2s; 
+    cursor: pointer; 
+}
+
+.custom-overlay.completed { 
+    background: #059669; 
+    border-color: #d1fae5; 
+}
+
+.custom-overlay.current { 
+    background: #ea580c; 
+    border-color: #fef08a; 
+    animation: pulse 2s infinite; 
+}
+
+.driver-pin { 
+    background: #0f172a; 
+    color: #f8fafc; 
+    border: 2px solid #38bdf8; 
+    padding: 5px 10px; 
+    border-radius: 12px; 
+    font-weight: 900; 
+    font-size: 11px; 
+    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.35); 
+    transition: all 0.2s; 
+    cursor: pointer; 
+    display: flex; 
+    align-items: center; 
+    gap: 6px; 
+}
+
+.driver-pin:hover { 
+    transform: translateY(-3px) scale(1.08); 
+    background: #0284c7; 
+    border-color: #ffffff; 
+    color: #ffffff; 
+    box-shadow: 0 10px 20px rgba(2, 132, 199, 0.4); 
+}
+
+/* 2. 스크롤바 제어 스타일 */
+.hide-scrollbar::-webkit-scrollbar { 
+    display: none; 
+}
+.hide-scrollbar { 
+    -ms-overflow-style: none; 
+    scrollbar-width: none; 
+}
+
+.custom-scrollbar::-webkit-scrollbar { 
+    height: 8px; 
+    width: 8px; 
+}
+.custom-scrollbar::-webkit-scrollbar-track { 
+    background: #f1f5f9; 
+    border-radius: 4px; 
+}
+.custom-scrollbar::-webkit-scrollbar-thumb { 
+    background: #94a3b8; 
+    border-radius: 4px; 
+}
+.custom-scrollbar::-webkit-scrollbar-thumb:hover { 
+    background: #64748b; 
+}
+
+/* 3. 테이블 및 공통 인터랙션 스타일 */
+.sortable-th { 
+    cursor: pointer; 
+    user-select: none; 
+    transition: background-color 0.15s; 
+    white-space: nowrap; 
+}
+.sortable-th:hover { 
+    background-color: #e2e8f0; 
+}
+
+.excel-table th { 
+    background-color: #f8fafc; 
+    position: sticky; 
+    top: 0; 
+    z-index: 10; 
+    box-shadow: inset 0 -1px 0 #e2e8f0; 
+}
+.excel-table td, 
+.excel-table th { 
+    border: 1px solid #e2e8f0; 
+    padding: 0.5rem 0.75rem; 
+    font-size: 11px; 
+}
+.excel-table tr:hover td { 
+    background-color: #eef2ff; 
+}
+
+/* 4. 애니메이션 효과 */
+@keyframes popIn {
+    0% { transform: translate(-50%, -85%) scale(0.9); opacity: 0; }
+    100% { transform: translate(-50%, -100%) scale(1); opacity: 1; }
+}
+.animate-pop-in { 
+    animation: popIn 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
+}
+
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.animate-slide-up { 
+    animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
+}
+
+/* 5. 거래명세표(A4 인쇄 규격) 전용 레이아웃 */
+.invoice-container { 
+    background-color: white; 
+    border: 1px solid #d1d5db; 
+    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15); 
+    width: 210mm; 
+    height: 296mm; 
+    margin: 0 auto; 
+    position: relative; 
+    display: flex; 
+    flex-direction: column; 
+    box-sizing: border-box; 
+    overflow: hidden; 
+    flex-shrink: 0; 
+}
+
+.invoice-half { 
+    height: 148mm; 
+    background-color: #ffeb5c !important; 
+    padding: 5mm 8mm; 
+    box-sizing: border-box; 
+    display: flex; 
+    flex-direction: column; 
+    overflow: hidden; 
+    -webkit-print-color-adjust: exact; 
+    print-color-adjust: exact; 
+}
+
+.invoice-cut-line { 
+    border-top: 1px dashed #6b7280; 
+    width: 100%; 
+    margin: 0; 
+}
+
+.invoice-title { 
+    text-align: center; 
+    font-size: 21px; 
+    font-weight: 900; 
+    letter-spacing: 6px; 
+    text-decoration: underline; 
+    margin-bottom: 5px; 
+    color: #000; 
+    font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+}
+
+.invoice-table { 
+    width: 100%; 
+    border-collapse: collapse; 
+    border: 2px solid #000; 
+    font-size: 10px; 
+    margin-bottom: 4px; 
+    table-layout: fixed; 
+    color: #000; 
+    font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+}
+
+.invoice-table th, 
+.invoice-table td { 
+    border: 1px solid #000; 
+    padding: 2px 5px; 
+    height: 27px; 
+    vertical-align: middle; 
+    overflow: hidden; 
+}
+
+.double-height { 
+    height: 54px !important; 
+}
+.double-height td { 
+    height: 54px !important; 
+}
+
+.multi-line-text { 
+    white-space: normal !important; 
+    word-break: break-all; 
+    line-height: 1.3; 
+}
+
+.invoice-label { 
+    background-color: transparent; 
+    font-weight: bold; 
+    text-align: center; 
+    white-space: nowrap; 
+    letter-spacing: -0.2px; 
+}
+
+.writing-mode-vertical { 
+    writing-mode: vertical-rl; 
+    text-orientation: upright; 
+    text-align: center; 
+    letter-spacing: 3px; 
+    padding: 2px !important; 
+}
+
+.text-fit-auto { 
+    font-size: 9.5px; 
+    letter-spacing: -0.3px; 
+    white-space: nowrap; 
+    overflow: hidden; 
+    text-overflow: ellipsis; 
+}
+
+.inv-text-center { text-align: center; }
+.inv-text-left { text-align: left; padding-left: 6px !important; }
+.inv-text-right { text-align: right; padding-right: 6px !important; }
+.inv-font-bold { font-weight: bold; }
+
+/* 인쇄 모드 최적화 (A4 Portrait) */
+@media print {
+    @page { 
+        size: A4 portrait; 
+        margin: 0; 
+    }
+    body, html { 
+        margin: 0; 
+        padding: 0; 
+        width: 100%; 
+        height: 100%; 
+        background: white; 
+    }
+    .invoice-container { 
+        box-shadow: none !important; 
+        border: none !important; 
+        margin: 0 !important; 
+        page-break-after: always; 
+        width: 210mm; 
+        height: 296mm; 
+    }
+    .invoice-half { 
+        height: 148mm; 
+        page-break-inside: avoid; 
+    }
+}
