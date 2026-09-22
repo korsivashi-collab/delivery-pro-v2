@@ -25,7 +25,7 @@ export function getPureAddress(address) {
 }
 
 // ==========================================
-// 3. 사진 고속 안전 압축 (클라이언트단)
+// 3. 사진 고속 안전 압축 및 OCR 전처리 엔진 (클라이언트단)
 // ==========================================
 export function toBase64_SafeCompress(file) {
     return new Promise((resolve, reject) => {
@@ -38,13 +38,24 @@ export function toBase64_SafeCompress(file) {
                 const canvas = document.createElement('canvas');
                 const MAX_SIZE = 1600; 
                 let width = img.width, height = img.height;
+                
+                // 비율 유지하며 최대 해상도 제한
                 if (width > height) { 
                     if (width > MAX_SIZE) { height *= MAX_SIZE / width; width = MAX_SIZE; } 
                 } else { 
                     if (height > MAX_SIZE) { width *= MAX_SIZE / height; height = MAX_SIZE; } 
                 }
-                canvas.width = width; canvas.height = height;
+                canvas.width = width; 
+                canvas.height = height;
+                
                 const ctx = canvas.getContext('2d'); 
+                
+                // [핵심 OCR 전처리]: 속도 저하 없이 하드웨어 가속으로 이미지 품질 극대화
+                // 1. grayscale(100%): 황색 명세표 등 컬러 노이즈 제거
+                // 2. contrast(150%): 글자와 배경의 명암비를 높여 선명도 극대화
+                // 3. brightness(110%): 차량 내부 등 어두운 환경 보정
+                ctx.filter = 'grayscale(100%) contrast(150%) brightness(110%)';
+                
                 ctx.drawImage(img, 0, 0, width, height);
                 resolve(canvas.toDataURL('image/jpeg', 0.85)); 
             };

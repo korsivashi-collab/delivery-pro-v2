@@ -81,7 +81,7 @@ export async function getNearbyPOIs(lat, lng) {
     return [...new Set(places)]; 
 }
 
-// 글자 순서 기반 레벤슈타인 편집거리 계산 함수 (순서가 다르면 거리가 멀어짐)
+// 글자 순서 기반 레벤슈타인 편집거리 계산 함수
 function getLevenshteinDistance(s1, s2) {
     if (!s1.length) return s2.length;
     if (!s2.length) return s1.length;
@@ -101,7 +101,7 @@ function getLevenshteinDistance(s1, s2) {
     return matrix[s1.length][s2.length];
 }
 
-// 5. 1단계: 순서 동일률(50% 이상) 기반 핵심 상호 매칭 알고리즘
+// 5. 1단계: 순서 동일률 기반 상호 매칭 (2글자 상호는 100% 필수, 3글자 이상은 50% 허용)
 export function findStoreNameFromOCR(rawOCRText, places, threshold = 50) {
     if (!rawOCRText || !places || places.length === 0) return null;
 
@@ -116,7 +116,7 @@ export function findStoreNameFromOCR(rawOCRText, places, threshold = 50) {
         // 100% 완전 포함 시 즉시 확정 반환
         if (fullCleanOCR.includes(cleanPlace)) return place;
 
-        // 지점명('~점') 및 띄어쓰기 뒷부분 분리 후 순서 비교 대상 추출
+        // 지점명('~점') 및 띄어쓰기 뒷부분 분리 후 핵심 상호 추출
         let corePlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').trim().split(/\s+/)[0];
         corePlace = corePlace.replace(/[가-힣0-9]{1,4}점$/, '').replace(/[^\w가-힣]/g, '');
         if (corePlace.length <= 1) corePlace = cleanPlace;
@@ -127,19 +127,20 @@ export function findStoreNameFromOCR(rawOCRText, places, threshold = 50) {
         let targetLen = targetWord.length;
         if (fullCleanOCR.length < targetLen - 1) continue;
 
-        let effectiveThreshold = threshold; // 50% 순차 일치 적용
+        // [핵심 보완] 2글자 상호('공간' 등)는 1글자 겹침(50%) 오인식을 막기 위해 100% 일치(effectiveThreshold = 100) 강제
+        // 3글자 이상('밥은화', '팔공냉면' 등)은 요청하신 50% 이상 순차 일치 적용
+        let effectiveThreshold = (targetLen <= 2) ? 100 : threshold;
 
         for (let i = 0; i <= fullCleanOCR.length - targetLen + 1; i++) {
             for (let j = Math.max(2, targetLen - 1); j <= targetLen + 2; j++) {
                 let subStr = fullCleanOCR.substring(i, i + j);
                 if (subStr.length < 2) continue;
 
-                // 글자 순서가 유지된 상태에서의 편집 거리 및 유사도 산출
                 let dist = getLevenshteinDistance(targetWord, subStr);
                 let maxLen = Math.max(targetWord.length, subStr.length);
                 let sim = ((maxLen - dist) / maxLen) * 100;
 
-                // 50% 이상 순차 일치하며 가장 유사도가 높은 최상위 POI 선정
+                // 기준치 이상 일치하며 가장 유사도가 높은 최상위 POI 선정
                 if (sim >= effectiveThreshold && sim > highestSim) {
                     highestSim = sim;
                     bestMatch = place;
