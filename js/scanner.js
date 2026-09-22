@@ -15,7 +15,6 @@ import {
 import { 
     geocodeAddress, 
     getPOIsByAddress, 
-    getNearbyPOIs, 
     findStoreNameFromOCR,
     findOverlappingPOIFromAddress
 } from './kakao.js';
@@ -235,7 +234,7 @@ function extractAddressAreaText(rawOCRText, addressStr) {
 }
 
 // ==========================================
-// 6. 카메라 스캔 및 하이브리드 판독 파이프라인
+// 6. 카메라 스캔 및 순수 주소 기반 3단계 판독 파이프라인
 // ==========================================
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
@@ -275,7 +274,7 @@ export function initCameraScan() {
             extractedPhone = result.phone;
         }
 
-        // 2. 주소 좌표 획득
+        // 2. 주소 좌표 획득 (위치 설정용)
         let coords = null;
         while (!coords) {
             try {
@@ -291,24 +290,23 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 3단계 순차 파이프라인
+        // 3. 상호명 순수 주소 기반 3단계 순차 파이프라인 (좌표 반경 검색 제거 완료)
         let finalStoreName = null;
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
+                // 오직 해당 주소 키워드로 등록된 공식 상점 리스트만 가져옴 (주변 무작위 상가 혼입 원천 차단)
                 let addressPlaces = await getPOIsByAddress(addressStr);
-                let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
-                let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
                 // [1단계] 순서 동일률 50% 이상 핵심 상호 매칭
                 let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
-                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, combinedPlaces, 50);
+                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, addressPlaces, 50);
 
-                // [2단계] 주소지 영역 텍스트와 POI 간 중복(교집합) 매칭
+                // [2단계] 주소지 영역 텍스트와 공식 주소 POI 간 중복(교집합) 매칭
                 if (!finalStoreName) {
                     let addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
-                    finalStoreName = findOverlappingPOIFromAddress(addressAreaText, combinedPlaces);
+                    finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
                 }
 
                 // [3단계] 황색 명세표 등 표 라벨 정밀 추출 및 가비지 필터링
