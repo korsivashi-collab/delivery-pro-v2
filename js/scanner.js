@@ -16,7 +16,8 @@ import {
     geocodeAddress, 
     getPOIsByAddress, 
     getNearbyPOIs, 
-    findStoreNameFromOCR 
+    findStoreNameFromOCR,
+    findOverlappingPOIFromAddress
 } from './kakao.js';
 import { state } from './state.js';
 
@@ -168,28 +169,27 @@ export async function editDestinationAddress(id) {
 }
 
 // ==========================================
-// 5. 상호 매칭 전 주소 칸(셀) 전체 일괄 삭제 헬퍼
+// 5-1. 상호 매칭 전 주소 칸(셀) 일괄 삭제 헬퍼 (1단계용)
 // ==========================================
 function removeAddressCellFromOCR(rawText, addressStr) {
     if (!rawText) return "";
     let cleaned = rawText;
 
-    // 주소 칸 바로 다음에 등장하는 주요 필드 경계선 라벨
     const nextFieldPattern = "(?=\\n\\s*(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가)|배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|$)";
 
-    // 1) '주소' 라벨로 시작하여 다음 필드 직전까지의 주소 칸 전체 제거
+    // 1) '주소' 라벨로 시작하는 영역 제거
     const addrLabelRegex = new RegExp(`(주소[\\s\\:\\|\\-]*(\\[\\d{5}\\]|\\d{5})?[\\s\\S]*?)${nextFieldPattern}`, 'i');
     if (addrLabelRegex.test(cleaned)) {
         cleaned = cleaned.replace(addrLabelRegex, ' ');
     }
 
-    // 2) 우편번호([00000])로 시작하여 다음 필드 직전까지의 주소 칸 전체 제거
+    // 2) 우편번호 영역 제거
     const zipRegex = new RegExp(`((\\[\\d{5}\\]|\\b\\d{5}\\b)[\\s\\S]*?)${nextFieldPattern}`, 'i');
     if (zipRegex.test(cleaned)) {
         cleaned = cleaned.replace(zipRegex, ' ');
     }
 
-    // 3) 인식된 도로명 주소(addressStr)부터 다음 필드 직전까지 주소 칸 전체 제거
+    // 3) 인식된 도로명 주소부터 다음 필드 직전까지 제거
     if (addressStr) {
         let safeAddr = addressStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const directAddrRegex = new RegExp(`(${safeAddr}[\\s\\S]*?)${nextFieldPattern}`, 'i');
@@ -198,12 +198,40 @@ function removeAddressCellFromOCR(rawText, addressStr) {
         }
     }
 
-    // 만약 마스킹으로 내용이 전부 날아갔다면 원본 복구 안전장치
     if (!cleaned || cleaned.trim().length === 0) {
         return rawText;
     }
 
     return cleaned;
+}
+
+// ==========================================
+// 5-2. 주소지 영역 텍스트 추출 헬퍼 (2단계용)
+// ==========================================
+function extractAddressAreaText(rawOCRText, addressStr) {
+    if (!rawOCRText) return "";
+
+    const nextFieldPattern = "(?=\\n\\s*(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가)|배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|$)";
+    const addrLabelRegex = new RegExp(`(주소[\\s\\:\\|\\-]*[\\s\\S]*?)${nextFieldPattern}`, 'i');
+    const match = rawOCRText.match(addrLabelRegex);
+    if (match && match[1]) {
+        return match[1];
+    }
+
+    if (addressStr) {
+        const lines = rawOCRText.split(/\n/);
+        const cleanAddr = addressStr.replace(/[^\w가-힣]/g, '');
+        for (let i = 0; i < lines.length; i++) {
+            const cleanLine = lines[i].replace(/[^\w가-힣]/g, '');
+            if (cleanLine.includes(cleanAddr) || (cleanAddr.length >= 6 && cleanLine.includes(cleanAddr.substring(0, 6)))) {
+                let block = lines[i];
+                if (i + 1 < lines.length) block += " " + lines[i + 1];
+                return block;
+            }
+        }
+    }
+
+    return addressStr || "";
 }
 
 // ==========================================
@@ -247,7 +275,7 @@ export function initCameraScan() {
             extractedPhone = result.phone;
         }
 
-        // 2. 주소 좌표 획득 (주소 인식 로직은 그대로 보존)
+        // 2. 주소 좌표 획득
         let coords = null;
         while (!coords) {
             try {
@@ -263,40 +291,57 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 정밀 파이프라인 (주소 칸 일괄 삭제 -> 좌표 POI 70% 매칭 -> 자체 라벨 추출 -> 폴백)
+        // 3. 상호명 3단계 순차 파이프라인
         let finalStoreName = null;
-        let addressPlaces = [];
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                addressPlaces = await getPOIsByAddress(addressStr);
+                let addressPlaces = await getPOIsByAddress(addressStr);
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // [핵심 해결책] 주소 칸(셀)에 적힌 건물명, 층수 등을 통째로 지워 비교 텍스트 생성
+                // [1단계] OCR 판독 텍스트(주소 칸 제외)와 지도 검색 POI 간 50% 핵심 상호 매칭
                 let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
+                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, combinedPlaces, 50);
 
-                // [1단계: 최우선순위] 주소 칸을 날린 스캔 텍스트와 좌표 POI 리스트 70% 대조
-                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, combinedPlaces, 70);
-
-                // [2단계] 1단계에서 일치하는 상호가 없을 때만 3단계 자체 텍스트 추출 알고리즘 진입
+                // [2단계] 1단계에서 50% 이상 일치 상호가 없을 경우, 주소지 영역 텍스트와 POI 중복 매칭
                 if (!finalStoreName) {
-                    finalStoreName = extractStoreNameLogic(rawOCRText);
+                    let addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
+                    finalStoreName = findOverlappingPOIFromAddress(addressAreaText, combinedPlaces);
                 }
 
-                // [3단계] 1, 2단계 모두 실패 시 최상위 대표 상호 폴백
-                if (!finalStoreName && addressPlaces.length > 0) {
-                    finalStoreName = addressPlaces[0];
+                // [3단계] 2단계까지 매칭되지 않을 경우, 예전 3단계 표 라벨 추출 알고리즘 작동 (황색 명세표 등)
+                if (!finalStoreName) {
+                    let extracted = extractStoreNameLogic(rawOCRText);
+                    if (extracted) {
+                        let isGarbage = false;
+                        let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        let textForRegex = rawOCRText.replace(/\n/g, ' ');
+
+                        // 사람 이름(성명, 받는분) 오검출 필터링
+                        let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
+                        if (blockRegex.test(textForRegex)) {
+                            isGarbage = true;
+                        }
+
+                        // 층수 필터링
+                        if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) {
+                            isGarbage = true;
+                        }
+
+                        // 길이 및 숫자 필터링
+                        if (extracted.length < 2 || /^\d+$/.test(extracted)) {
+                            isGarbage = true;
+                        }
+
+                        if (!isGarbage) {
+                            finalStoreName = extracted;
+                        }
+                    }
                 }
             } catch (error) {
                 console.error("상호명 매칭 오류:", error);
-                if (!finalStoreName) {
-                    finalStoreName = extractStoreNameLogic(rawOCRText);
-                }
-                if (!finalStoreName && addressPlaces.length > 0) {
-                    finalStoreName = addressPlaces[0];
-                }
             }
             hideLoading();
         }
