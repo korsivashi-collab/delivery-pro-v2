@@ -1,12 +1,13 @@
 // js/admin-app.js
 
 import { db } from "./admin-api.js";
-import { doc, getDoc, onSnapshot, collection, query, orderBy, updateDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, getDoc, onSnapshot, collection, query, orderBy, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
+import { renderPaginationControls } from "./admin-ui.js";
 
 // ==========================================
-// [마스터 기능 모듈 3개 가져오기]
+// [마스터 기능 모듈 가져오기]
 // ==========================================
 import {
     switchMasterTab, changeMasterTabPagination, renderMasterTables,
@@ -25,11 +26,7 @@ import {
     backToAllAccountsView, changeHistoryPage, toggleHistoryNoticeMode,
     toggleHistoryItemSelection, toggleHistorySelectAll, sendHistoryNoticeToSelected,
     setHistoryMasterSubTab, deleteAccountFromHistory, renderAccountHistoryView,
-    openMasterNoticeHistoryModal, closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList,
-    // 🌟 사진 데이터 관리 모듈 함수 (경량 텍스트 테이블 리스트 및 정렬/페이지네이션)
-    openPhotoGalleryModal, closePhotoGalleryModal, filterPhotoGallery,
-    clearPhotoDateFilter, sortPhotos, changePhotoPage, renderPhotoListTable,
-    previewPhotoModal, closePhotoPreviewModal, deletePhotoItem
+    openMasterNoticeHistoryModal, closeMasterNoticeHistoryModal, renderMasterNoticeHistoryList
 } from "./admin-master-history.js";
 
 // ==========================================
@@ -85,9 +82,15 @@ import {
 
 
 // ==========================================
-// 1. 초기화 및 인증 관리 (App Lifecycle)
+// 1. 초기화 및 페이지 라우팅 제어 (Lifecycle)
 // ==========================================
 window.onload = () => {
+    const path = window.location.pathname;
+    const isMasterPage = path.includes('admin-master.html');
+    const isDispatchPage = path.includes('admin-dispatch.html');
+    const isLoginPage = !isMasterPage && !isDispatchPage;
+
+    // 날짜 기본값 설정
     const todayInput = document.getElementById('dispatch-date-picker');
     if (todayInput) todayInput.value = todayStr;
     
@@ -102,26 +105,53 @@ window.onload = () => {
     const expEl = document.getElementById('new-key-expire');
     if (expEl) expEl.value = getLocalDateString(defaultExpire);
 
-    if (typeof loadSavedForms === 'function') loadSavedForms();
-    if (typeof initExcelDropZone === 'function') initExcelDropZone(); 
+    // 모듈 초기화 (해당 요소가 있는 페이지에서만 실행)
+    if (document.getElementById('pro-invoice-modal') && typeof loadSavedForms === 'function') loadSavedForms();
+    if (document.getElementById('excel-drop-zone') && typeof initExcelDropZone === 'function') initExcelDropZone(); 
 
+    // 모니터링 전용 URL 파라미터 (?monitor=KEY) 감지
     const urlParams = new URLSearchParams(window.location.search);
     const monitorKey = urlParams.get('monitor');
     if (monitorKey) {
         sessionStorage.setItem('deliveryProRole', 'DISPATCH');
         sessionStorage.setItem('deliveryProDispatchKey', monitorKey);
         sessionStorage.setItem('deliveryProSessionToken', 'MONITOR-' + Date.now()); 
-        window.history.replaceState({}, document.title, window.location.pathname);
-        showDispatchPanel();
-        return;
+        
+        if (!isDispatchPage) {
+            window.location.href = 'admin-dispatch.html';
+            return;
+        }
     }
 
     const savedRole = sessionStorage.getItem('deliveryProRole');
-    const savedName = sessionStorage.getItem('deliveryProAdminName');
-    if (savedRole === 'MASTER') showMasterPanel(savedName);
-    else if (savedRole === 'DISPATCH') showDispatchPanel();
+    const savedName = sessionStorage.getItem('deliveryProAdminName') || '마스터';
+
+    // 권한 및 페이지 검증 (접근 제어)
+    if (isMasterPage) {
+        if (savedRole !== 'MASTER') {
+            window.location.href = 'admin.html';
+            return;
+        }
+        showMasterPanel(savedName);
+    } else if (isDispatchPage) {
+        if (savedRole !== 'DISPATCH') {
+            window.location.href = 'admin.html';
+            return;
+        }
+        showDispatchPanel();
+    } else if (isLoginPage) {
+        // 로그인 페이지(admin.html) 진입 시 이미 세션이 있으면 자동 이동
+        if (savedRole === 'MASTER') {
+            window.location.href = 'admin-master.html';
+        } else if (savedRole === 'DISPATCH') {
+            window.location.href = 'admin-dispatch.html';
+        }
+    }
 };
 
+// ==========================================
+// 2. 통합 로그인 및 로그아웃
+// ==========================================
 window.handleSingleKeyLogin = async function() {
     const keyInput = document.getElementById('single-key-input').value.trim();
     const msgEl = document.getElementById('login-msg');
@@ -133,6 +163,7 @@ window.handleSingleKeyLogin = async function() {
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인증 확인 중...';
 
     try {
+        // 1. 마스터 계정 검증
         let adminSnap = await getDoc(doc(db, "admin", keyInput));
         if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admin", keyInput.toUpperCase()));
         if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admins", keyInput));
@@ -142,9 +173,11 @@ window.handleSingleKeyLogin = async function() {
             const adminData = adminSnap.data();
             sessionStorage.setItem('deliveryProRole', 'MASTER');
             sessionStorage.setItem('deliveryProAdminName', adminData.name || '마스터');
-            showMasterPanel(adminData.name || '마스터'); return;
+            window.location.href = 'admin-master.html';
+            return;
         }
 
+        // 2. 관제 계정 검증
         let licRef = doc(db, "licenses", keyInput);
         let licSnap = await getDoc(licRef);
         if (!licSnap.exists()) {
@@ -162,9 +195,10 @@ window.handleSingleKeyLogin = async function() {
             sessionStorage.setItem('deliveryProRole', 'DISPATCH');
             sessionStorage.setItem('deliveryProDispatchKey', licSnap.id);
             sessionStorage.setItem('deliveryProSessionToken', newSessionToken);
-            showDispatchPanel();
+            window.location.href = 'admin-dispatch.html';
             return;
         }
+
         msgEl.innerText = "등록되지 않았거나 권한이 없는 관리자 키입니다.";
     } catch (e) {
         msgEl.innerText = "로그인 오류: " + e.message;
@@ -176,7 +210,7 @@ window.handleSingleKeyLogin = async function() {
 
 window.systemLogout = function() {
     sessionStorage.clear();
-    window.location.reload();
+    window.location.href = 'admin.html';
 };
 
 window.showMasterPanel = function(name = '마스터') {
@@ -184,30 +218,12 @@ window.showMasterPanel = function(name = '마스터') {
     const badge = document.getElementById('master-name-badge');
     if (badge) badge.innerText = name;
     
-    const loginScreen = document.getElementById('login-screen');
-    if (loginScreen) loginScreen.classList.add('hidden');
-    
-    const disp = document.getElementById('dispatch-panel');
-    if (disp) { disp.classList.add('hidden'); disp.classList.remove('flex'); }
-    
-    const mast = document.getElementById('master-panel');
-    if (mast) { mast.classList.remove('hidden'); mast.classList.add('flex'); }
-    
     window.initMasterDataSync();
     if (typeof switchMasterTab === 'function') switchMasterTab('regular');
 };
 
 window.showDispatchPanel = function() {
     state.currentUserRole = 'DISPATCH';
-    
-    const loginScreen = document.getElementById('login-screen');
-    if (loginScreen) loginScreen.classList.add('hidden');
-    
-    const dispatchPanel = document.getElementById('dispatch-panel');
-    if (dispatchPanel) {
-        dispatchPanel.classList.remove('hidden');
-        dispatchPanel.classList.add('flex');
-    }
 
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
@@ -221,13 +237,13 @@ window.showDispatchPanel = function() {
         }
     }
     
-    if(typeof initKakaoMap === 'function') initKakaoMap();
+    if (typeof initKakaoMap === 'function') initKakaoMap();
     window.initMasterDataSync();
-    if(typeof setDispatchMode === 'function') setDispatchMode('DELIVERY');
+    if (typeof setDispatchMode === 'function') setDispatchMode('DELIVERY');
 };
 
 // ==========================================
-// 2. 실시간 데이터 동기화 (Firestore Snapshots)
+// 3. 실시간 데이터 동기화 (Firestore Snapshots)
 // ==========================================
 window.initMasterDataSync = function() {
     onSnapshot(collection(db, "licenses"), (snapshot) => {
@@ -263,7 +279,7 @@ window.initMasterDataSync = function() {
                 renderModalConnectedDrivers(target.key);
             }
         }
-        if(document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
+        if (document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
@@ -297,11 +313,8 @@ window.initMasterDataSync = function() {
             drawDriverOnMap(state.selectedDeviceId);
         }
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
-
-        // 🌟 사진 관리 모달이 열려 있을 때 실시간 테이블 화면 갱신
-        const photoModal = document.getElementById('photo-gallery-modal');
-        if (photoModal && !photoModal.classList.contains('hidden') && typeof renderPhotoListTable === 'function') {
-            renderPhotoListTable();
+        if (document.getElementById('photo-gallery-modal') && !document.getElementById('photo-gallery-modal').classList.contains('hidden')) {
+            renderPhotoGalleryTable();
         }
     });
 
@@ -321,7 +334,170 @@ window.initMasterDataSync = function() {
 };
 
 // ==========================================
-// 3. HTML 인라인 이벤트를 위한 window 전역 객체 맵핑
+// 4. 마스터 전용 배송 사진 데이터 갤러리 로직
+// ==========================================
+let photoSortField = 'time';
+let photoSortAsc = false;
+let photoCurrentPage = 1;
+const PAGE_SIZE_PHOTOS = 15;
+
+export function openPhotoGalleryModal() {
+    const modal = document.getElementById('photo-gallery-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+    renderPhotoGalleryTable();
+}
+
+export function closePhotoGalleryModal() {
+    const modal = document.getElementById('photo-gallery-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+export function clearPhotoDateFilter() {
+    const dateEl = document.getElementById('photo-filter-date');
+    if (dateEl) dateEl.value = '';
+    filterPhotoGallery();
+}
+
+export function filterPhotoGallery() {
+    photoCurrentPage = 1;
+    renderPhotoGalleryTable();
+}
+
+export function sortPhotos(field) {
+    if (photoSortField === field) {
+        photoSortAsc = !photoSortAsc;
+    } else {
+        photoSortField = field;
+        photoSortAsc = false;
+    }
+    renderPhotoGalleryTable();
+}
+
+export function renderPhotoGalleryTable() {
+    const tbody = document.getElementById('photo-list-tbody');
+    const badge = document.getElementById('photo-total-count-badge');
+    const pagEl = document.getElementById('pagination-photos');
+    if (!tbody) return;
+
+    const arrowAuthor = document.getElementById('sort-photo-arrow-author');
+    const arrowTime = document.getElementById('sort-photo-arrow-time');
+    if (arrowAuthor) arrowAuthor.innerText = (photoSortField === 'author') ? (photoSortAsc ? '▲' : '▼') : '↕';
+    if (arrowTime) arrowTime.innerText = (photoSortField === 'time') ? (photoSortAsc ? '▲' : '▼') : '↕';
+
+    const searchDriver = (document.getElementById('photo-filter-driver-search')?.value || '').trim().toLowerCase();
+    const filterDate = document.getElementById('photo-filter-date')?.value || '';
+
+    // 사진 링크가 있는 완료 건만 추출
+    let photoCompletions = state.allCompletions.filter(c => c.photoUrl);
+
+    if (searchDriver) {
+        photoCompletions = photoCompletions.filter(c => 
+            (c.phone && c.phone.includes(searchDriver)) || 
+            (c.deviceId && c.deviceId.toLowerCase().includes(searchDriver))
+        );
+    }
+
+    if (filterDate) {
+        const dotDate = filterDate.replace(/-/g, '.');
+        photoCompletions = photoCompletions.filter(c => {
+            return (c.timeString && c.timeString.startsWith(dotDate)) || 
+                   (c.completedAt && getLocalDateString(new Date(c.completedAt)) === filterDate);
+        });
+    }
+
+    if (badge) badge.innerText = `총 ${photoCompletions.length}건`;
+
+    if (photoCompletions.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="7" class="py-12 text-center text-gray-400 font-bold">등록된 배송 완료 사진이 없습니다.</td></tr>`;
+        if (pagEl) pagEl.innerHTML = '';
+        return;
+    }
+
+    photoCompletions.sort((a, b) => {
+        if (photoSortField === 'author') {
+            const valA = a.phone || a.deviceId || '';
+            const valB = b.phone || b.deviceId || '';
+            return photoSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+        } else {
+            const timeA = a.completedAt || 0;
+            const timeB = b.completedAt || 0;
+            return photoSortAsc ? (timeA - timeB) : (timeB - timeA);
+        }
+    });
+
+    const total = photoCompletions.length;
+    const totalPages = Math.ceil(total / PAGE_SIZE_PHOTOS) || 1;
+    if (photoCurrentPage > totalPages) photoCurrentPage = totalPages;
+    if (photoCurrentPage < 1) photoCurrentPage = 1;
+
+    const start = (photoCurrentPage - 1) * PAGE_SIZE_PHOTOS;
+    const paged = photoCompletions.slice(start, start + PAGE_SIZE_PHOTOS);
+
+    tbody.innerHTML = paged.map((c, idx) => {
+        const safeUrl = (c.photoUrl || '').replace(/"/g, '&quot;');
+        const safeAddr = (c.address || '-').replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const safePhone = (c.phone || '기사').replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const safeTime = (c.timeString || '-').replace(/"/g, '&quot;').replace(/'/g, "\\'");
+        const safeTag = (c.tag || '전달완료').replace(/"/g, '&quot;').replace(/'/g, "\\'");
+
+        return `
+        <tr class="hover:bg-gray-50/80 transition">
+            <td class="py-3 px-3 font-bold text-gray-400 text-center">${start + idx + 1}</td>
+            <td class="py-3 px-3 font-black text-gray-800 text-center">${c.phone || '<span class="text-gray-400 font-normal">연락처 없음</span>'}</td>
+            <td class="py-3 px-3 text-gray-500 font-medium text-center font-mono text-[11px]">${c.timeString || '-'}</td>
+            <td class="py-3 px-3 font-bold text-gray-900 truncate max-w-[280px]" title="${c.address || ''}">${c.address || '-'}</td>
+            <td class="py-3 px-3 text-center"><span class="px-2 py-0.5 rounded text-[10px] font-black bg-emerald-100 text-emerald-800">${c.tag || '전달완료'}</span></td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <button onclick="window.openPhotoPreviewModal('${safeUrl}', '${safeAddr}', '${safePhone}', '${safeTime}', '${safeTag}')" class="px-2.5 py-1 bg-indigo-600 hover:bg-indigo-700 text-white font-black rounded-lg text-[11px] shadow-sm transition active:scale-95 flex items-center gap-1 mx-auto">
+                    <i class="fa-solid fa-image"></i> 사진보기
+                </button>
+            </td>
+            <td class="py-3 px-3 text-center whitespace-nowrap">
+                <button onclick="window.deletePhotoCompletion('${c.id}')" class="px-2 py-1 bg-red-50 hover:bg-red-100 text-red-600 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">삭제</button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    if (pagEl) {
+        pagEl.innerHTML = renderPaginationControls('photos', photoCurrentPage, total, PAGE_SIZE_PHOTOS, 'window.changePhotoPage');
+    }
+}
+
+export function changePhotoPage(tabKey, targetPage) {
+    photoCurrentPage = targetPage;
+    renderPhotoGalleryTable();
+}
+
+export function openPhotoPreviewModal(imgUrl, addr, phone, time, tag) {
+    const modal = document.getElementById('photo-preview-modal');
+    if (!modal) return;
+    document.getElementById('photo-preview-img').src = imgUrl;
+    document.getElementById('photo-preview-addr').innerText = addr || '주소 정보 없음';
+    document.getElementById('photo-preview-sub').innerText = `${phone} | ${time}`;
+    document.getElementById('photo-preview-tag').innerText = tag || '전달완료';
+    document.getElementById('photo-preview-link').href = imgUrl;
+    modal.classList.remove('hidden');
+}
+
+export function closePhotoPreviewModal() {
+    const modal = document.getElementById('photo-preview-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+export async function deletePhotoCompletion(id) {
+    if (!confirm("이 배송 완료 기록(사진 포함)을 영구 삭제하시겠습니까?")) return;
+    try {
+        await deleteDoc(doc(db, "completions", id));
+        alert("사진 데이터가 삭제되었습니다.");
+        renderPhotoGalleryTable();
+    } catch(e) {
+        alert("삭제 오류: " + e.message);
+    }
+}
+
+// ==========================================
+// 5. HTML 인라인 이벤트를 위한 전역 Window 객체 바인딩
 // ==========================================
 window.formatNumber = formatNumber;
 
@@ -364,17 +540,17 @@ window.openMasterNoticeHistoryModal = openMasterNoticeHistoryModal;
 window.closeMasterNoticeHistoryModal = closeMasterNoticeHistoryModal;
 window.renderMasterNoticeHistoryList = renderMasterNoticeHistoryList;
 
-// 🌟 [마스터 - 사진 데이터 관리 모듈 (경량 텍스트 테이블 리스트)]
+// [마스터 - Photo Gallery]
 window.openPhotoGalleryModal = openPhotoGalleryModal;
 window.closePhotoGalleryModal = closePhotoGalleryModal;
-window.filterPhotoGallery = filterPhotoGallery;
 window.clearPhotoDateFilter = clearPhotoDateFilter;
+window.filterPhotoGallery = filterPhotoGallery;
 window.sortPhotos = sortPhotos;
+window.renderPhotoGalleryTable = renderPhotoGalleryTable;
 window.changePhotoPage = changePhotoPage;
-window.renderPhotoListTable = renderPhotoListTable;
-window.previewPhotoModal = previewPhotoModal;
+window.openPhotoPreviewModal = openPhotoPreviewModal;
 window.closePhotoPreviewModal = closePhotoPreviewModal;
-window.deletePhotoItem = deletePhotoItem;
+window.deletePhotoCompletion = deletePhotoCompletion;
 
 // [관제 코어]
 window.setDispatchMode = setDispatchMode;
