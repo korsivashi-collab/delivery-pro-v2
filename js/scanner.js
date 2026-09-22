@@ -301,17 +301,17 @@ export function initCameraScan() {
                 let categoryPlaces = (coords && coords.lat && coords.lng) ? await getNearbyPOIs(coords.lat, coords.lng) : [];
                 let combinedPlaces = [...new Set([...addressPlaces, ...categoryPlaces])];
 
-                // [1단계] OCR 판독 텍스트(주소 칸 제외)와 지도 검색 POI 간 50% 핵심 상호 매칭
+                // [1단계] 순서 동일률 50% 이상 핵심 상호 매칭
                 let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
                 finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, combinedPlaces, 50);
 
-                // [2단계] 1단계에서 50% 이상 일치 상호가 없을 경우, 주소지 영역 텍스트와 POI 중복 매칭
+                // [2단계] 주소지 영역 텍스트와 POI 간 중복(교집합) 매칭
                 if (!finalStoreName) {
                     let addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
                     finalStoreName = findOverlappingPOIFromAddress(addressAreaText, combinedPlaces);
                 }
 
-                // [3단계] 2단계까지 매칭되지 않을 경우, 예전 3단계 표 라벨 추출 알고리즘 작동 (황색 명세표 등)
+                // [3단계] 황색 명세표 등 표 라벨 정밀 추출 및 가비지 필터링
                 if (!finalStoreName) {
                     let extracted = extractStoreNameLogic(rawOCRText);
                     if (extracted) {
