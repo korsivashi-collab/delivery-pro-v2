@@ -315,11 +315,46 @@ export async function restoreHistoryItem(timestamp) {
 // 5. 연결 설정 모달 및 TMS/GPS 제어 기능
 // ==========================================
 export function openSettingsModal() {
+    // 설정 모달 오픈 시 기여 현황 카운팅 수치 업데이트
+    updateContributionStats();
     document.getElementById('settings-modal')?.classList.remove('hidden');
 }
 
 export function closeSettingsModal() {
     document.getElementById('settings-modal')?.classList.add('hidden');
+}
+
+// 내 기여 활동 통계 카운트 및 이벤트 프로그레스바 갱신 함수
+function updateContributionStats() {
+    try {
+        // 1. 개인 메모 건수 계산 (로컬스토리지)
+        const personalMemos = JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
+        const personalCount = Object.keys(personalMemos).length;
+
+        // 2. 공용 주차정보 작성 건수 계산 (기기 고유 ID 기준 또는 로컬 백업 기록 등 연동, 여기서는 기기별 기여 기록 또는 임시로 로컬에 기록된 내 공용 메모 카운트 연동)
+        // 사용자가 공용 주차정보를 등록할 때 로컬에 기록된 키 혹은 기기 ID 기반 카운트 연동
+        const myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
+        const parkingCount = myParkingMemos.length;
+
+        // UI 엘리먼트 반영
+        const parkingCountEl = document.getElementById('stat-parking-memo-count');
+        const personalCountEl = document.getElementById('stat-personal-memo-count');
+        const progressTextEl = document.getElementById('stat-event-progress');
+        const progressBarEl = document.getElementById('stat-event-bar');
+
+        if (parkingCountEl) parkingCountEl.innerText = `${parkingCount}건`;
+        if (personalCountEl) personalCountEl.innerText = `${personalCount}건`;
+
+        // 150건 이벤트 프로그레스 계산 (공용 주차정보 150건 기준 또는 합산 기준 - 기획에 맞춰 공용 주차정보 기준 150건)
+        const targetCount = 150;
+        const currentProgress = Math.min(parkingCount, targetCount);
+        const percent = Math.round((currentProgress / targetCount) * 100);
+
+        if (progressTextEl) progressTextEl.innerText = `${currentProgress} / ${targetCount}`;
+        if (progressBarEl) progressBarEl.style.width = `${percent}%`;
+    } catch (e) {
+        console.error("기여 통계 갱신 오류:", e);
+    }
 }
 
 export function toggleTMS(isChecked) {

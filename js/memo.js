@@ -352,6 +352,16 @@ export async function saveCurrentMemo() {
     showLoading("주차정보 등록/수정 중...");
     try {
         await saveMemoToFirestore(currentMemoAddress, getOrCreateDeviceId(), finalMemo);
+        
+        // 공용 주차정보 작성 성공 시 로컬 기여 내역(150건 이벤트용)에 주소 기록 (중복 등록 방지 처리)
+        try {
+            let myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
+            if (!myParkingMemos.includes(currentMemoAddress)) {
+                myParkingMemos.push(currentMemoAddress);
+                localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(myParkingMemos));
+            }
+        } catch (err) {}
+
         hideLoading(); 
         alert("주차 정보가 등록(수정)되었습니다.");
         
