@@ -263,7 +263,7 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 정밀 파이프라인 (주소 칸 일괄 삭제 -> 좌표 POI 70% 매칭 -> 자체 라벨 추출 -> 폴백)
+        // 3. 상호명 정밀 파이프라인 (주소 칸 일괄 삭제 -> 좌표 POI 매칭 -> 자체 추출 -> 대표 상호 폴백)
         let finalStoreName = null;
         let addressPlaces = [];
 
@@ -280,20 +280,47 @@ export function initCameraScan() {
                 // [1단계: 최우선순위] 주소 칸을 날린 스캔 텍스트와 좌표 POI 리스트 70% 대조
                 finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, combinedPlaces, 70);
 
-                // [2단계] 1단계에서 일치하는 상호가 없을 때만 3단계 자체 텍스트 추출 알고리즘 진입
+                // [2단계] 황색 명세표 등 확실한 폼에서의 자체 텍스트 추출 (억지 추출 차단 필터 적용)
                 if (!finalStoreName) {
-                    finalStoreName = extractStoreNameLogic(rawOCRText);
+                    let extracted = extractStoreNameLogic(rawOCRText);
+                    
+                    if (extracted) {
+                        let isGarbage = false;
+                        let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                        let textForRegex = rawOCRText.replace(/\n/g, ' ');
+
+                        // 필터 1: 사람 이름(성명, 받는분 등)을 상호로 잘못 추출한 경우 (예: "김지혁")
+                        let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
+                        if (blockRegex.test(textForRegex)) {
+                            isGarbage = true;
+                        }
+
+                        // 필터 2: n층, B1층 등 층수만 추출된 경우
+                        if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) {
+                            isGarbage = true;
+                        }
+
+                        // 필터 3: 너무 짧거나 숫자로만 이루어진 경우
+                        if (extracted.length < 2 || /^\d+$/.test(extracted)) {
+                            isGarbage = true;
+                        }
+
+                        if (isGarbage) {
+                            // 억지 추출이 의심되므로 결과를 차단하고 자연스럽게 3단계로 폴백
+                            finalStoreName = null;
+                        } else {
+                            // 황색 명세표처럼 확실하게 추출된 상호는 정상 사용 ("가보세식당", "니지라면" 등)
+                            finalStoreName = extracted;
+                        }
+                    }
                 }
 
-                // [3단계] 1, 2단계 모두 실패 시 최상위 대표 상호 폴백
+                // [3단계] 1, 2단계 모두 실패 시 주소지의 1순위 대표 상호 폴백
                 if (!finalStoreName && addressPlaces.length > 0) {
                     finalStoreName = addressPlaces[0];
                 }
             } catch (error) {
                 console.error("상호명 매칭 오류:", error);
-                if (!finalStoreName) {
-                    finalStoreName = extractStoreNameLogic(rawOCRText);
-                }
                 if (!finalStoreName && addressPlaces.length > 0) {
                     finalStoreName = addressPlaces[0];
                 }
