@@ -140,57 +140,43 @@ export async function confirmCompletion(photoUrl = null) {
 }
 
 // ==========================================
-// 6. 배송지 취소 처리 (0초 즉시 삭제 및 백그라운드 동기화)
+// 6. 배송지 취소 처리
 // ==========================================
-export function cancelDestination(id) {
+export async function cancelDestination(id) {
     if (!confirm("이 배송지를 취소하시겠습니까?\n취소된 내역은 '지난배송' 목록에 기록됩니다.")) return;
     
     const destinations = state.getDestinations();
     const item = destinations.find(d => d.id === id);
     if (!item) return;
 
-    // 1. 화면 및 리스트에서 즉시 제거 (지연시간 0초 체감)
-    state.removeDestination(id);
-    state.updateDisplayNumbers();
-    if (typeof window.renderList === 'function') window.renderList();
+    showLoading("취소 내역 기록 중...");
+    try {
+        const realGps = await getDeviceRealGPS();
+        let actualLat = item.lat;
+        let actualLng = item.lng;
+        let isRealGpsCaptured = false;
 
-    // 2. 백그라운드 비동기 처리 (로딩 오버레이 차단 없이 백그라운드 기록)
-    (async () => {
-        try {
-            // 이미 수신되어 캐시 보관 중인 마지막 GPS 위치 우선 활용
-            const lastGps = state.getLastKnownGps();
-            let actualLat = item.lat;
-            let actualLng = item.lng;
-            let isRealGpsCaptured = false;
-
-            if (lastGps && lastGps.lat && lastGps.lng) {
-                actualLat = lastGps.lat;
-                actualLng = lastGps.lng;
-                isRealGpsCaptured = true;
-            }
-
-            const deviceId = getOrCreateDeviceId();
-            const phone = localStorage.getItem('deliveryProUserPhone') || "";
-            const cancelTag = "배송 취소";
-
-            // 로컬 '지난배송' 목록에 즉시 등록
-            archiveCompletedDelivery(item, cancelTag, null, null);
-
-            // Firestore 관제 서버에 취소 내역 비동기 전송
-            const completionDocId = await saveCompletionToFirestore(deviceId, phone, item, cancelTag, actualLat, actualLng, isRealGpsCaptured, null);
-
-            // 서버 등록 성공 시 docId를 로컬 히스토리와 연동 (지난배송에서 복원 시 서버 삭제 처리용)
-            if (completionDocId) {
-                let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-                if (history.length > 0 && history[0].id === item.id) {
-                    history[0].completionDocId = completionDocId;
-                    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
-                }
-            }
-        } catch (e) {
-            console.error("취소 백그라운드 동기화 오류:", e);
+        if (realGps && realGps.lat && realGps.lng) {
+            actualLat = realGps.lat;
+            actualLng = realGps.lng;
+            isRealGpsCaptured = true;
         }
-    })();
+
+        const deviceId = getOrCreateDeviceId();
+        const phone = localStorage.getItem('deliveryProUserPhone') || "";
+        const cancelTag = "배송 취소";
+
+        const completionDocId = await saveCompletionToFirestore(deviceId, phone, item, cancelTag, actualLat, actualLng, isRealGpsCaptured, null);
+        archiveCompletedDelivery(item, cancelTag, completionDocId, null);
+
+        state.removeDestination(id);
+        state.updateDisplayNumbers();
+        if (typeof window.renderList === 'function') window.renderList();
+    } catch (e) {
+        alert("취소 처리 중 오류가 발생했습니다.");
+    } finally {
+        hideLoading();
+    }
 }
 
 // ==========================================
