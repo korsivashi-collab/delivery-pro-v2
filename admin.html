@@ -85,6 +85,15 @@
             </div>
             <button onclick="window.handleSingleKeyLogin()" id="login-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-black rounded-xl text-sm px-5 py-3.5 text-center shadow-lg transition active:scale-95 flex items-center justify-center gap-2"><span>대시보드 접속</span></button>
             <p id="login-msg" class="text-red-500 text-xs mt-3 font-bold min-h-[16px] whitespace-pre-line"></p>
+
+            <!-- 법적 고지 및 약관 링크 (관리자 로그인 화면 하단) -->
+            <div class="mt-5 pt-3 border-t border-gray-100 flex justify-center items-center gap-2 text-[11px] text-gray-400 font-medium">
+                <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
+                <span>·</span>
+                <a href="/privacy.html" target="_blank" class="hover:text-gray-600 underline font-bold text-gray-500 transition">개인정보처리방침</a>
+                <span>·</span>
+                <a href="/policy.html" target="_blank" class="hover:text-gray-600 underline transition">운영정책</a>
+            </div>
         </div>
     </div>
 
@@ -101,7 +110,16 @@
                     <span class="text-[11px] text-gray-400 font-bold mt-0.5 block">라이선스 통제 및 물류 데이터 통합 감사</span>
                 </div>
             </div>
-            <button onclick="window.systemLogout()" class="bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-bold px-4 py-2 rounded-xl transition shadow-inner">로그아웃</button>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 text-xs text-slate-400 font-medium">
+                    <a href="/terms.html" target="_blank" class="hover:text-white underline transition">이용약관</a>
+                    <span>·</span>
+                    <a href="/privacy.html" target="_blank" class="hover:text-white underline font-bold text-slate-300 transition">개인정보</a>
+                    <span>·</span>
+                    <a href="/policy.html" target="_blank" class="hover:text-white underline transition">운영정책</a>
+                </div>
+                <button onclick="window.systemLogout()" class="bg-slate-800 hover:bg-slate-700 text-gray-300 text-xs font-bold px-4 py-2 rounded-xl transition shadow-inner">로그아웃</button>
+            </div>
         </header>
 
         <div class="flex-1 overflow-y-auto p-6 max-w-[1650px] mx-auto w-full hide-scrollbar space-y-5">
@@ -328,6 +346,16 @@
                     <i class="fa-solid fa-bell text-xs text-amber-600"></i>
                     <span id="dispatch-inbox-badge" class="hidden absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] bg-red-500 text-white text-[10px] font-black rounded-full border border-white flex items-center justify-center px-1">0</span>
                 </button>
+
+                <!-- 법적 고지 및 약관 링크 (관제 센터 헤더) -->
+                <div class="flex items-center gap-2 text-[11px] text-gray-400 font-medium px-1">
+                    <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
+                    <span>·</span>
+                    <a href="/privacy.html" target="_blank" class="hover:text-gray-600 underline font-bold text-gray-500 transition">개인정보</a>
+                    <span>·</span>
+                    <a href="/policy.html" target="_blank" class="hover:text-gray-600 underline transition">운영정책</a>
+                </div>
+
                 <button onclick="window.systemLogout()" class="bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold px-3 py-2 rounded-xl transition">로그아웃</button>
             </div>
         </header>
