@@ -138,10 +138,9 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
 }
 
 // ==========================================
-// 🌟 2. 접속 제한 기기 관리 모달 및 CRUD
+// 2. 접속 제한 기기 관리 모달 및 CRUD
 // ==========================================
 
-// 상단 버튼 [접속 제한 등록/해제] 모달 열기
 export function openBlockedDeviceModal() {
     const inputId = document.getElementById('modal-blocked-device-id');
     const inputMemo = document.getElementById('modal-blocked-device-memo');
@@ -152,12 +151,10 @@ export function openBlockedDeviceModal() {
     setTimeout(() => inputId?.focus(), 100);
 }
 
-// 모달 닫기
 export function closeBlockedDeviceModal() {
     document.getElementById('blocked-devices-modal')?.classList.add('hidden');
 }
 
-// 모달 내 제한 기기 목록 렌더링
 export function renderModalBlockedDevices() {
     const tbody = document.getElementById('modal-blocked-device-tbody');
     const badge = document.getElementById('modal-blocked-count-badge');
@@ -191,7 +188,6 @@ export function renderModalBlockedDevices() {
     }).join('');
 }
 
-// 모달 내에서 신규 제한 기기 등록
 export async function addBlockedDeviceFromModal() {
     const inputId = document.getElementById('modal-blocked-device-id');
     const inputMemo = document.getElementById('modal-blocked-device-memo');
@@ -221,7 +217,6 @@ export async function addBlockedDeviceFromModal() {
     }
 }
 
-// 탭 테이블 렌더링
 export function renderBlockedDevicesTable() {
     const tbody = document.getElementById('table-body-blocked');
     const pagEl = document.getElementById('pagination-blocked');
@@ -278,7 +273,6 @@ export function renderBlockedDevicesTable() {
     }
 }
 
-// 탭에서 등록
 export async function addBlockedDevice() {
     const inputEl = document.getElementById('new-blocked-device-id');
     const memoEl = document.getElementById('new-blocked-device-memo');
@@ -308,7 +302,6 @@ export async function addBlockedDevice() {
     }
 }
 
-// 기기 제한 해제 (공통 함수)
 export async function unblockDevice(deviceId) {
     if (!deviceId) return;
     if (!confirm(`[${deviceId}] 기기의 접속 제한을 해제하시겠습니까?\n해제 즉시 해당 기기의 정상 접속이 허용됩니다.`)) return;
@@ -324,25 +317,94 @@ export async function unblockDevice(deviceId) {
 }
 
 // ==========================================
-// 3. 라이선스(계정) 관리 및 모달 CRUD 로직
+// 🌟 3. 라이선스(계정) 관리 및 키워드/대량 생성 CRUD 로직
 // ==========================================
+
+// 키워드 포함 총 8자리(XXXX-XXXX) 키 조합 헬퍼
+function generateCustomLicenseKey(keyword = '') {
+    const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
+    const cleanKw = keyword.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    let fullChars = cleanKw;
+    const needed = 8 - cleanKw.length;
+    for (let i = 0; i < needed; i++) {
+        fullChars += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return `${fullChars.slice(0, 4)}-${fullChars.slice(4, 8)}`;
+}
+
+// 중복 방지 고유 키 발급 헬퍼
+function getUniqueLicenseKey(keyword) {
+    let key;
+    let attempts = 0;
+    do {
+        key = generateCustomLicenseKey(keyword);
+        attempts++;
+    } while (state.allLicenses.some(l => l.key === key) && attempts < 100);
+    return key;
+}
+
 export async function generateNewLicense() {
-    const type = document.getElementById('new-key-type').value;
-    const expireDate = document.getElementById('new-key-expire').value;
-    if (!expireDate) { alert("만료일을 선택해 주세요."); return; }
-    const newKey = generateSecureKey();
+    const type = document.getElementById('new-key-type')?.value || 'regular';
+    const keyword = document.getElementById('new-key-keyword')?.value?.trim() || '';
+    const countInput = document.getElementById('new-key-count');
+    const expireDate = document.getElementById('new-key-expire')?.value;
+    const btn = document.getElementById('btn-generate-license');
+
+    if (!expireDate) { 
+        alert("만료일을 선택해 주세요."); 
+        return; 
+    }
+
+    let count = parseInt(countInput ? countInput.value : '1') || 1;
+    if (count < 1) count = 1;
+    if (count > 50) {
+        alert("한 번에 최대 50개까지만 일괄 생성할 수 있습니다.");
+        count = 50;
+    }
+
     const typeName = (type === 'dispatch') ? '관제 계정' : '일반 계정';
+    const expStr = expireDate.replace(/-/g, '.');
+
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 생성 중...';
+    }
+
     try {
-        await setDoc(doc(db, "licenses", newKey), {
-            key: newKey, type: type, phone: "", 
-            expireDate: expireDate.replace(/-/g, '.'),
-            deviceId: "", status: "active",
-            maxSlots: (type === 'dispatch' ? 20 : 0),
-            isPro: false,
-            createdAt: Date.now()
-        });
-        alert(`[${typeName} 발급 완료]\n키: ${newKey}`);
-    } catch (e) { alert("오류: " + e.message); }
+        const createdKeys = [];
+        for (let i = 0; i < count; i++) {
+            const newKey = getUniqueLicenseKey(keyword);
+            await setDoc(doc(db, "licenses", newKey), {
+                key: newKey,
+                type: type,
+                phone: "",
+                expireDate: expStr,
+                deviceId: "",
+                status: "active",
+                maxSlots: (type === 'dispatch' ? 20 : 0),
+                isPro: false,
+                createdAt: Date.now() + i
+            });
+            createdKeys.push(newKey);
+        }
+
+        document.getElementById('create-account-modal')?.classList.add('hidden');
+        if (document.getElementById('new-key-keyword')) document.getElementById('new-key-keyword').value = '';
+        if (document.getElementById('new-key-count')) document.getElementById('new-key-count').value = '1';
+
+        if (count === 1) {
+            alert(`[${typeName} 발급 완료]\n\n라이선스 키: ${createdKeys[0]}`);
+        } else {
+            alert(`[${typeName} 총 ${count}개 일괄 발급 완료]\n\n발급된 키 목록:\n${createdKeys.join('\n')}`);
+        }
+    } catch (e) {
+        alert("계정 발급 오류: " + e.message);
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="fa-solid fa-check"></i> 계정 발급';
+        }
+    }
 }
 
 export function openEditLicenseModal(key) {
