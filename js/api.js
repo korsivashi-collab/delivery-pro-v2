@@ -54,6 +54,18 @@ async function compressImageToBlob(file, maxDimension = 1280, quality = 0.75) {
     });
 }
 
+// 🌟 [신규 추가] 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증
+export async function checkIfDeviceBlocked(deviceId) {
+    if (!deviceId) return false;
+    try {
+        const docRef = doc(db, "blocked_devices", deviceId);
+        const snap = await getDoc(docRef);
+        return snap.exists();
+    } catch (e) {
+        return false;
+    }
+}
+
 // 1. 배송 완료 사진 업로드
 export async function firebaseUploadDeliveryPhoto(file, deviceId) {
     const blob = await compressImageToBlob(file, 1280, 0.75);
@@ -291,7 +303,8 @@ export async function getBatchMemosFromFirestore(addresses) {
     return allMemosMap;
 }
 
-export async function saveMemoToFirestore(address, deviceId, memoText) {
+// 🌟 [수정] 메모 등록/수정 시 작성자의 phone 번호도 함께 기록
+export async function saveMemoToFirestore(address, deviceId, memoText, phone = "") {
     const now = new Date();
     const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     
@@ -303,6 +316,7 @@ export async function saveMemoToFirestore(address, deviceId, memoText) {
         await updateDoc(doc(db, "memos", firstDoc.id), {
             memo: memoText,
             time: timeStr,
+            phone: phone || firstDoc.data().phone || "",
             updatedAt: now.getTime(),
             reported: false
         });
@@ -311,7 +325,14 @@ export async function saveMemoToFirestore(address, deviceId, memoText) {
         }
     } else {
         await addDoc(collection(db, "memos"), {
-            address, memo: memoText, deviceId, time: timeStr, likes: 0, reported: false, createdAt: now.getTime()
+            address, 
+            memo: memoText, 
+            deviceId, 
+            phone: phone || "",
+            time: timeStr, 
+            likes: 0, 
+            reported: false, 
+            createdAt: now.getTime()
         });
     }
 }
@@ -322,6 +343,68 @@ export async function likeMemoInFirestore(docId) {
 
 export async function reportMemoInFirestore(docId) { 
     await updateDoc(doc(db, "memos", docId), { reported: true }); 
+}
+
+// 🌟 [신규 추가] 전화번호 및 계정 매핑 기반 전체 공용 메모 기여도 서버 동기화 함수
+export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) {
+    const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
+    const myAddresses = new Set();
+
+    // 1. 기존 로컬스토리지 주소 수집
+    try {
+        const localList = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
+        localList.forEach(addr => { if (addr) myAddresses.add(addr); });
+    } catch (e) {}
+
+    try {
+        // 2. 현재 deviceId로 작성된 메모 수집
+        if (deviceId) {
+            const qDev = query(collection(db, "memos"), where("deviceId", "==", deviceId));
+            const snapDev = await getDocs(qDev);
+            snapDev.forEach(docSnap => {
+                const d = docSnap.data();
+                if (d.address) myAddresses.add(d.address);
+            });
+        }
+
+        // 3. 전화번호(phone) 필드로 직접 작성된 메모 수집
+        if (phone) {
+            const qPhone = query(collection(db, "memos"), where("phone", "==", phone));
+            const snapPhone = await getDocs(qPhone);
+            snapPhone.forEach(docSnap => {
+                const d = docSnap.data();
+                if (d.address) myAddresses.add(d.address);
+            });
+        }
+
+        // 4. 본인 전화번호로 발급된 라이선스들에 매핑되었던 모든 과거 deviceId들의 메모까지 완전 역추적 동기화
+        if (cleanPhone) {
+            const licQ = query(collection(db, "licenses"), where("phone", "==", phone));
+            const licSnap = await getDocs(licQ);
+            const userDevIds = new Set();
+            licSnap.forEach(ld => {
+                const dId = ld.data().deviceId;
+                if (dId) userDevIds.add(dId);
+            });
+
+            for (const dId of userDevIds) {
+                if (dId !== deviceId) {
+                    const qOther = query(collection(db, "memos"), where("deviceId", "==", dId));
+                    const snapOther = await getDocs(qOther);
+                    snapOther.forEach(docSnap => {
+                        const d = docSnap.data();
+                        if (d.address) myAddresses.add(d.address);
+                    });
+                }
+            }
+        }
+    } catch (err) {
+        console.error("서버 메모 동기화 오류:", err);
+    }
+
+    const finalArray = Array.from(myAddresses);
+    localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(finalArray));
+    return finalArray.length;
 }
 
 // 8. 배송 경로 및 완료 내역 동기화

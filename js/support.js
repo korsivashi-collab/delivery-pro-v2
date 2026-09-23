@@ -3,7 +3,7 @@
 // [배송 동선 PRO] 보조 기능 전담 모듈 (연결 설정 / 알림함 / 지난 배송 이력)
 // =================================================================
 
-import { deleteCompletionFromFirestore, firebaseSetTmsPermission } from './api.js';
+import { deleteCompletionFromFirestore, firebaseSetTmsPermission, syncMyParkingMemosFromServer } from './api.js';
 
 // 내부 상태 변수
 let currentActiveAlertMsgId = null;
@@ -314,10 +314,24 @@ export async function restoreHistoryItem(timestamp) {
 // ==========================================
 // 5. 연결 설정 모달 및 TMS/GPS 제어 기능
 // ==========================================
-export function openSettingsModal() {
-    // 설정 모달 오픈 시 기여 현황 카운팅 수치 업데이트
+export async function openSettingsModal() {
+    // 1. 현재 로컬 캐시 기준 즉시 화면 렌더링
     updateContributionStats();
     document.getElementById('settings-modal')?.classList.remove('hidden');
+
+    // 2. 🌟 [핵심] 마스터 센터에 등록된 전화번호/기기 기준 서버 데이터 실시간 역추적 동기화
+    const phone = localStorage.getItem('deliveryProUserPhone') || '';
+    const deviceId = localStorage.getItem('deliveryProDeviceId') || '';
+    const key = localStorage.getItem('deliveryProKey') || '';
+
+    if (phone || deviceId) {
+        try {
+            await syncMyParkingMemosFromServer(phone, deviceId, key);
+            updateContributionStats(); // 동기화 완료 후 최신 실제 카운트로 UI 자동 갱신
+        } catch (e) {
+            console.error("서버 기여도 동기화 실패:", e);
+        }
+    }
 }
 
 export function closeSettingsModal() {
@@ -325,14 +339,13 @@ export function closeSettingsModal() {
 }
 
 // 내 기여 활동 통계 카운트 및 이벤트 프로그레스바 갱신 함수
-function updateContributionStats() {
+export function updateContributionStats() {
     try {
         // 1. 개인 메모 건수 계산 (로컬스토리지)
         const personalMemos = JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
         const personalCount = Object.keys(personalMemos).length;
 
-        // 2. 공용 주차정보 작성 건수 계산 (기기 고유 ID 기준 또는 로컬 백업 기록 등 연동, 여기서는 기기별 기여 기록 또는 임시로 로컬에 기록된 내 공용 메모 카운트 연동)
-        // 사용자가 공용 주차정보를 등록할 때 로컬에 기록된 키 혹은 기기 ID 기반 카운트 연동
+        // 2. 공용 주차정보 작성 건수 계산 (서버와 동기화된 목록 기준)
         const myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
         const parkingCount = myParkingMemos.length;
 
@@ -345,7 +358,7 @@ function updateContributionStats() {
         if (parkingCountEl) parkingCountEl.innerText = `${parkingCount}건`;
         if (personalCountEl) personalCountEl.innerText = `${personalCount}건`;
 
-        // 150건 이벤트 프로그레스 계산 (공용 주차정보 150건 기준 또는 합산 기준 - 기획에 맞춰 공용 주차정보 기준 150건)
+        // 150건 이벤트 프로그레스 계산
         const targetCount = 150;
         const currentProgress = Math.min(parkingCount, targetCount);
         const percent = Math.round((currentProgress / targetCount) * 100);

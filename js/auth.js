@@ -10,7 +10,9 @@ import {
     startGpsRequestLister, 
     startDispatchMessageListener, 
     firebaseStartTrial, 
-    firebaseClearDeviceData 
+    firebaseClearDeviceData,
+    checkIfDeviceBlocked,
+    syncMyParkingMemosFromServer
 } from './api.js';
 import { 
     saveMessageToLocalHistory, 
@@ -116,6 +118,11 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     updateExpireBadge(expireDate);
     startLicenseRealtimeWatcher(key);
 
+    // 🌟 [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
+    if (typeof syncMyParkingMemosFromServer === 'function') {
+        syncMyParkingMemosFromServer(phone, deviceId, key);
+    }
+
     if (dispatchMsgWatcherUnsub) dispatchMsgWatcherUnsub();
     dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phone, key, (msg) => {
         saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
@@ -134,6 +141,17 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
 // 7. 자동 로그인 (부팅 시 기존 저장된 키 검증)
 // ==========================================
 export async function checkSavedAuth() {
+    const deviceId = getOrCreateDeviceId();
+
+    // 🌟 [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사 (차단 시 error.html로 즉각 이동)
+    try {
+        const isBlocked = await checkIfDeviceBlocked(deviceId);
+        if (isBlocked) {
+            window.location.replace('error.html');
+            return;
+        }
+    } catch (err) {}
+
     const savedKey = localStorage.getItem('deliveryProKey');
     const savedPhone = localStorage.getItem('deliveryProUserPhone');
     const bootScreen = document.getElementById('boot-screen');
@@ -150,7 +168,6 @@ export async function checkSavedAuth() {
     const cleanDigits = (savedPhone || '').replace(/[^0-9]/g, '');
 
     if (savedKey && cleanDigits.length >= 9) {
-        const deviceId = getOrCreateDeviceId();
         try {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
             if (res.valid) {
@@ -186,6 +203,15 @@ export async function verifyLicense() {
     const msgEl = document.getElementById('auth-message');
     const btn = document.getElementById('verify-btn');
     const deviceId = getOrCreateDeviceId(); 
+
+    // 🌟 [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
+    try {
+        const isBlocked = await checkIfDeviceBlocked(deviceId);
+        if (isBlocked) {
+            window.location.replace('error.html');
+            return;
+        }
+    } catch (err) {}
     
     if (!keyInput) { 
         if (msgEl) msgEl.innerText = "라이선스 키를 입력해 주세요."; 
@@ -261,6 +287,15 @@ export async function startFreeTrial() {
     const msgEl = document.getElementById('trial-error-msg');
     const btn = document.getElementById('trial-submit-btn');
     const deviceId = getOrCreateDeviceId();
+
+    // 🌟 [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
+    try {
+        const isBlocked = await checkIfDeviceBlocked(deviceId);
+        if (isBlocked) {
+            window.location.replace('error.html');
+            return;
+        }
+    } catch (err) {}
     
     const cleanDigits = phoneInput.replace(/[^0-9]/g, '');
     if (!phoneInput || cleanDigits.length < 9 || cleanDigits.length > 13) {
