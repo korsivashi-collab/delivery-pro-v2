@@ -13,7 +13,8 @@ import {
     switchMasterTab, changeMasterTabPagination, renderMasterTables,
     generateNewLicense, openEditLicenseModal, closeEditModal,
     renderModalConnectedDrivers, linkDriverFromModal, unlinkDriverFromModal,
-    saveLicenseEdit, deleteLicense, deleteLicenseFromModal
+    saveLicenseEdit, deleteLicense, deleteLicenseFromModal,
+    renderBlockedDevicesTable, addBlockedDevice, unblockDevice, blockDeviceFromEditModal
 } from "./admin-master-licenses.js";
 
 import {
@@ -246,6 +247,7 @@ window.showDispatchPanel = function() {
 // 3. 실시간 데이터 동기화 (Firestore Snapshots)
 // ==========================================
 window.initMasterDataSync = function() {
+    // 라이선스 실시간 동기화
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -283,6 +285,15 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
+    });
+
+    // 🌟 신규 추가: 접속 제한(블랙리스트) 기기 실시간 동기화
+    onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
+        state.allBlockedDevices = [];
+        snapshot.forEach(docSnap => { state.allBlockedDevices.push({ id: docSnap.id, ...docSnap.data() }); });
+        const countBlockedEl = document.getElementById('count-blocked');
+        if (countBlockedEl) countBlockedEl.innerText = state.allBlockedDevices.length;
+        if (typeof renderBlockedDevicesTable === 'function') renderBlockedDevicesTable();
     });
 
     onSnapshot(collection(db, "memos"), (snapshot) => {
@@ -501,10 +512,14 @@ export async function deletePhotoCompletion(id) {
 // ==========================================
 window.formatNumber = formatNumber;
 
-// [마스터 - Licenses]
+// [마스터 - Licenses & Blocked Devices]
 window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
 window.renderMasterTables = renderMasterTables;
+window.renderBlockedDevicesTable = renderBlockedDevicesTable;
+window.addBlockedDevice = addBlockedDevice;
+window.unblockDevice = unblockDevice;
+window.blockDeviceFromEditModal = blockDeviceFromEditModal;
 window.generateNewLicense = generateNewLicense;
 window.openEditLicenseModal = openEditLicenseModal;
 window.closeEditModal = closeEditModal;

@@ -2,14 +2,14 @@
 
 import { db, generateSecureKey } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
-import { state } from "./admin-state.js";
+import { state, getLocalDateString } from "./admin-state.js";
 import { doc, setDoc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
 // 1. 마스터 탭 및 계정 테이블 렌더링
 // ==========================================
 export function switchMasterTab(tab) {
-    ['regular', 'trial', 'dispatch', 'memos', 'history'].forEach(t => {
+    ['regular', 'trial', 'dispatch', 'memos', 'history', 'blocked'].forEach(t => {
         const btn = document.getElementById(`tab-btn-${t}`);
         const content = document.getElementById(`tab-content-${t}`);
         if (btn && content) {
@@ -23,11 +23,14 @@ export function switchMasterTab(tab) {
         }
     });
     if (tab === 'history' && window.renderAccountHistoryView) window.renderAccountHistoryView();
+    if (tab === 'blocked') renderBlockedDevicesTable();
 }
 
 export function changeMasterTabPagination(tabKey, targetPage) {
+    if (!state.masterPages) state.masterPages = {};
     state.masterPages[tabKey] = targetPage;
     if (tabKey === 'memos' && window.renderMemosTable) window.renderMemosTable(state.allMemos);
+    else if (tabKey === 'blocked') renderBlockedDevicesTable();
     else renderMasterTables();
 }
 
@@ -35,13 +38,16 @@ export function renderMasterTables() {
     const regulars = state.allLicenses.filter(l => l.type === 'regular' || (!l.type && !l.isTrial && !(l.key || '').startsWith('TRIAL-')));
     const trials = state.allLicenses.filter(l => l.type === 'trial' || l.isTrial || (l.key || '').startsWith('TRIAL-'));
     const dispatches = state.allLicenses.filter(l => l.type === 'dispatch');
+    const blockeds = state.allBlockedDevices || [];
 
     const cr = document.getElementById('count-regular');
     const ct = document.getElementById('count-trial');
     const cd = document.getElementById('count-dispatch');
+    const cb = document.getElementById('count-blocked');
     if (cr) cr.innerText = regulars.length;
     if (ct) ct.innerText = trials.length;
     if (cd) cd.innerText = dispatches.length;
+    if (cb) cb.innerText = blockeds.length;
 
     renderPagedTableTab('regular', regulars, 'table-body-regular', 'pagination-regular', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
@@ -98,6 +104,8 @@ export function renderMasterTables() {
             </td>
         </tr>`;
     });
+
+    renderBlockedDevicesTable();
 }
 
 function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
@@ -113,6 +121,7 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
 
     const total = list.length;
     const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
+    if (!state.masterPages) state.masterPages = {};
     let curPage = state.masterPages[tabKey] || 1;
     if (curPage > totalPages) curPage = totalPages;
     if (curPage < 1) curPage = 1;
@@ -128,7 +137,130 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
 }
 
 // ==========================================
-// 2. 라이선스(계정) 관리 및 모달 CRUD 로직
+// 🌟 2. 접속 제한(블랙리스트) 기기 관리 CRUD
+// ==========================================
+export function renderBlockedDevicesTable() {
+    const tbody = document.getElementById('table-body-blocked');
+    const pagEl = document.getElementById('pagination-blocked');
+    const countBadge = document.getElementById('count-blocked');
+    if (!tbody) return;
+
+    const blockeds = state.allBlockedDevices || [];
+    if (countBadge) countBadge.innerText = blockeds.length;
+
+    if (blockeds.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="6" class="py-16 text-center text-gray-400 font-bold text-xs">제한 등록된 기기 고유번호가 없습니다.</td></tr>`;
+        if (pagEl) pagEl.innerHTML = '';
+        return;
+    }
+
+    const total = blockeds.length;
+    const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
+    if (!state.masterPages) state.masterPages = {};
+    let curPage = state.masterPages['blocked'] || 1;
+    if (curPage > totalPages) curPage = totalPages;
+    if (curPage < 1) curPage = 1;
+    state.masterPages['blocked'] = curPage;
+
+    const start = (curPage - 1) * PAGE_SIZE_MASTER;
+    const pagedList = blockeds.slice(start, start + PAGE_SIZE_MASTER);
+
+    tbody.innerHTML = pagedList.map((item, idx) => {
+        let dateDisplay = '-';
+        if (item.createdAt) {
+            const dt = new Date(item.createdAt);
+            dateDisplay = `${getLocalDateString(dt)} ${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`;
+        }
+        return `
+        <tr class="hover:bg-rose-50/50 transition">
+            <td class="py-3.5 px-3 font-bold text-gray-400 text-center">${start + idx + 1}</td>
+            <td class="py-3.5 px-3 font-mono font-black text-rose-600 select-all">${item.deviceId}</td>
+            <td class="py-3.5 px-3 font-bold text-gray-800">${item.memo || '<span class="text-gray-400 font-normal">사유 미입력</span>'}</td>
+            <td class="py-3.5 px-3 text-center text-gray-500 font-mono text-[11px]">${dateDisplay}</td>
+            <td class="py-3.5 px-3 text-center">
+                <span class="inline-flex items-center gap-1 bg-rose-100 text-rose-800 px-2.5 py-0.5 rounded-full text-[10px] font-black border border-rose-200 shadow-2xs">
+                    <i class="fa-solid fa-ban text-[9px]"></i> 물리적 접근 제한
+                </span>
+            </td>
+            <td class="py-3.5 px-3 text-center whitespace-nowrap">
+                <button type="button" onclick="window.unblockDevice('${item.deviceId}')" class="px-3 py-1 bg-white hover:bg-rose-50 text-gray-700 hover:text-rose-700 border border-gray-300 hover:border-rose-300 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">
+                    제한 해제
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+
+    if (pagEl) {
+        pagEl.innerHTML = renderPaginationControls('blocked', curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');
+    }
+}
+
+export async function addBlockedDevice() {
+    const inputEl = document.getElementById('new-blocked-device-id');
+    const memoEl = document.getElementById('new-blocked-device-memo');
+    const devId = inputEl ? inputEl.value.trim() : '';
+    const memo = memoEl ? memoEl.value.trim() : '';
+
+    if (!devId) {
+        alert("접속을 차단할 기기 고유번호(deviceId)를 입력해 주세요.");
+        if (inputEl) inputEl.focus();
+        return;
+    }
+
+    try {
+        await setDoc(doc(db, "blocked_devices", devId), {
+            deviceId: devId,
+            memo: memo || '관리자 직접 제한 등록',
+            createdAt: Date.now()
+        });
+
+        alert(`[접속 제한 등록 완료]\n\n기기 고유번호: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 통신 오류' 화면으로 위장 처리됩니다.`);
+        if (inputEl) inputEl.value = '';
+        if (memoEl) memoEl.value = '';
+    } catch (e) {
+        alert("기기 접속 제한 등록 오류: " + e.message);
+    }
+}
+
+export async function unblockDevice(deviceId) {
+    if (!deviceId) return;
+    if (!confirm(`[${deviceId}] 기기의 접속 제한을 해제하시겠습니까?\n해제 즉시 해당 기기의 정상 접속이 허용됩니다.`)) return;
+
+    try {
+        await deleteDoc(doc(db, "blocked_devices", deviceId));
+        alert("접속 제한이 성공적으로 해제되었습니다.");
+    } catch (e) {
+        alert("제한 해제 오류: " + e.message);
+    }
+}
+
+export async function blockDeviceFromEditModal() {
+    const devId = document.getElementById('edit-device-input')?.value.trim();
+    const key = document.getElementById('edit-key-input')?.value.trim();
+
+    if (!devId) {
+        alert("해당 계정에 등록된 기기 고유번호(deviceId)가 없습니다.\n로그인한 이력이 없는 기기는 차단할 수 없습니다.");
+        return;
+    }
+
+    if (!confirm(`기기 고유번호 [${devId}]를 접속 제한(블랙리스트) 목록에 등록하시겠습니까?\n\n등록 시 해당 기기는 다음 접속부터 서버 통신 오류 화면으로 표시되어 본인이 차단된 줄 모르게 됩니다.`)) {
+        return;
+    }
+
+    try {
+        await setDoc(doc(db, "blocked_devices", devId), {
+            deviceId: devId,
+            memo: `계정 [${key || '미확인'}] 수정창에서 등록`,
+            createdAt: Date.now()
+        });
+        alert(`[${devId}] 기기가 접속 제한 목록에 등록되었습니다.`);
+    } catch (e) {
+        alert("제한 등록 오류: " + e.message);
+    }
+}
+
+// ==========================================
+// 3. 라이선스(계정) 관리 및 모달 CRUD 로직
 // ==========================================
 export async function generateNewLicense() {
     const type = document.getElementById('new-key-type').value;
@@ -337,3 +469,23 @@ export async function deleteLicenseFromModal() {
     closeEditModal();
     await deleteLicense(origKey);
 }
+
+// ==========================================
+// 4. HTML 인라인 바인딩용 Window 객체 매핑
+// ==========================================
+window.switchMasterTab = switchMasterTab;
+window.changeMasterTabPagination = changeMasterTabPagination;
+window.renderMasterTables = renderMasterTables;
+window.renderBlockedDevicesTable = renderBlockedDevicesTable;
+window.addBlockedDevice = addBlockedDevice;
+window.unblockDevice = unblockDevice;
+window.blockDeviceFromEditModal = blockDeviceFromEditModal;
+window.generateNewLicense = generateNewLicense;
+window.openEditLicenseModal = openEditLicenseModal;
+window.closeEditModal = closeEditModal;
+window.renderModalConnectedDrivers = renderModalConnectedDrivers;
+window.linkDriverFromModal = linkDriverFromModal;
+window.unlinkDriverFromModal = unlinkDriverFromModal;
+window.saveLicenseEdit = saveLicenseEdit;
+window.deleteLicense = deleteLicense;
+window.deleteLicenseFromModal = deleteLicenseFromModal;

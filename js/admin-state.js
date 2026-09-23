@@ -5,6 +5,7 @@ export const state = {
     // 1. 공통 상태
     currentUserRole: null,
     allLicenses: [],
+    allBlockedDevices: [], // 🌟 신규 추가: 접속 제한(블랙리스트) 기기 목록
     allMemos: [],
     activeRoutes: {},
     allCompletions: [],
@@ -36,7 +37,7 @@ export const state = {
     allTerritoriesOverlays: [],
 
     // 4. 마스터(Master) 히스토리 및 페이지네이션 상태
-    masterPages: { regular: 1, trial: 1, dispatch: 1, memos: 1 },
+    masterPages: { regular: 1, trial: 1, dispatch: 1, memos: 1, blocked: 1 },
     historySortField: 'originalIndex',
     historySortAsc: true,
     historyAccountTypeFilter: 'ALL',
