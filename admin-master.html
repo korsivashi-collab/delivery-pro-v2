@@ -250,7 +250,7 @@
     <!-- 마스터 전용 팝업 모달 목록 -->
     <!-- ======================================================== -->
 
-    <!-- 접속 제한 등록 및 해제 전용 관리 모달 (상단 버튼 연동) -->
+    <!-- 접속 제한 등록 및 해제 전용 관리 모달 -->
     <div id="blocked-devices-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
             <div class="flex justify-between items-center pb-3 border-b border-gray-100 flex-none mb-3">
@@ -317,13 +317,13 @@
         </div>
     </div>
 
-    <!-- 1. 🌟 신규 계정 생성 모달 (키워드 입력 및 수량 설정 반영) -->
+    <!-- 1. 신규 계정 생성 모달 (한글/영문 키워드 및 대량 발급 최적화) -->
     <div id="create-account-modal" class="hidden fixed inset-0 bg-black/60 z-[700] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
             <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2">
                 <i class="fa-solid fa-user-plus text-blue-600"></i> 신규 계정 생성
             </h3>
-            <p class="text-xs text-gray-500 font-bold mb-4">발급할 계정 유형, 키워드 및 수량을 설정하세요.</p>
+            <p class="text-xs text-gray-500 font-bold mb-4">발급할 계정 유형, 한글/영문 키워드 및 수량을 설정하세요.</p>
             <div class="space-y-3.5 mb-5">
                 <div>
                     <label class="block text-[11px] font-bold text-gray-700 mb-1">발급 계정 유형</label>
@@ -334,8 +334,8 @@
                 </div>
                 <div>
                     <label class="block text-[11px] font-bold text-gray-700 mb-1">키워드 지정 (선택, 최대 7자리)</label>
-                    <input type="text" id="new-key-keyword" maxlength="7" placeholder="예: KSCO (미입력 시 무작위 생성)" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-mono font-bold uppercase rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm">
-                    <p class="text-[10px] text-gray-400 mt-1 font-bold">* 키워드 포함 총 8자리(예: KSCO-XXXX)로 자동 생성됩니다.</p>
+                    <input type="text" id="new-key-keyword" maxlength="7" placeholder="예: 토박이, KSCO (미입력 시 무작위 생성)" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm">
+                    <p class="text-[10px] text-gray-400 mt-1 font-bold">* 한글/영문 키워드 포함 총 8자리(예: 토박이X-XXXX)로 자동 생성됩니다.</p>
                 </div>
                 <div class="grid grid-cols-2 gap-2.5">
                     <div>
