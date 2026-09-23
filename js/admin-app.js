@@ -142,7 +142,6 @@ window.onload = () => {
         }
         showDispatchPanel();
     } else if (isLoginPage) {
-        // 로그인 페이지(admin.html) 진입 시 이미 세션이 있으면 자동 이동
         if (savedRole === 'MASTER') {
             window.location.href = 'admin-master.html';
         } else if (savedRole === 'DISPATCH') {
@@ -165,7 +164,6 @@ window.handleSingleKeyLogin = async function() {
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인증 확인 중...';
 
     try {
-        // 1. 마스터 계정 검증
         let adminSnap = await getDoc(doc(db, "admin", keyInput));
         if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admin", keyInput.toUpperCase()));
         if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admins", keyInput));
@@ -179,7 +177,6 @@ window.handleSingleKeyLogin = async function() {
             return;
         }
 
-        // 2. 관제 계정 검증
         let licRef = doc(db, "licenses", keyInput);
         let licSnap = await getDoc(licRef);
         if (!licSnap.exists()) {
@@ -248,7 +245,9 @@ window.showDispatchPanel = function() {
 // 3. 실시간 데이터 동기화 (Firestore Snapshots)
 // ==========================================
 window.initMasterDataSync = function() {
-    // 라이선스 실시간 동기화
+    const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
+
+    // 1. 라이선스 실시간 동기화
     onSnapshot(collection(db, "licenses"), (snapshot) => {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -273,7 +272,9 @@ window.initMasterDataSync = function() {
         if (typeof renderMasterTables === 'function') renderMasterTables();
         if (typeof populateDriverSelect === 'function') populateDriverSelect();
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
-        if (typeof renderSidebar === 'function') renderSidebar();
+        
+        // 🌟 [오류 차단] 마스터 페이지가 아닐 때(관제 페이지일 때)만 사이드바 렌더링 호출
+        if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         
         const curKey = document.getElementById('edit-orig-key')?.value;
         if (curKey) {
@@ -288,7 +289,7 @@ window.initMasterDataSync = function() {
         }
     });
 
-    // 접속 제한(블랙리스트) 기기 실시간 동기화 (모달 및 탭 동시 갱신)
+    // 2. 🌟 접속 제한(블랙리스트) 기기 실시간 동기화
     onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
         state.allBlockedDevices = [];
         snapshot.forEach(docSnap => { state.allBlockedDevices.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -298,6 +299,7 @@ window.initMasterDataSync = function() {
         if (typeof renderModalBlockedDevices === 'function') renderModalBlockedDevices();
     });
 
+    // 3. 메모 실시간 동기화
     onSnapshot(collection(db, "memos"), (snapshot) => {
         state.allMemos = [];
         snapshot.forEach(docSnap => { state.allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -307,22 +309,24 @@ window.initMasterDataSync = function() {
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
+    // 4. 경로 실시간 동기화
     onSnapshot(collection(db, "routes"), (snapshot) => {
         state.activeRoutes = {};
         snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
-        if (typeof renderSidebar === 'function') renderSidebar();
-        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
+        if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
+        if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
             drawDriverOnMap(state.selectedDeviceId);
         }
         if (typeof populateDriverSelect === 'function') populateDriverSelect();
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
+    // 5. 배송 완료 실시간 동기화
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         state.allCompletions = [];
         snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
-        if (typeof renderSidebar === 'function') renderSidebar();
-        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
+        if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
+        if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
             drawDriverOnMap(state.selectedDeviceId);
         }
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
@@ -331,6 +335,7 @@ window.initMasterDataSync = function() {
         }
     });
 
+    // 6. 메시지 실시간 동기화
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -339,6 +344,7 @@ window.initMasterDataSync = function() {
         if (typeof renderMasterNoticeHistoryList === 'function') renderMasterNoticeHistoryList();
     });
 
+    // 7. 템플릿 실시간 동기화
     onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
         state.allDispatchTemplates = [];
         snapshot.forEach(docSnap => { state.allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -430,7 +436,7 @@ export function renderPhotoGalleryTable() {
         if (photoSortField === 'author') {
             const valA = a.phone || a.deviceId || '';
             const valB = b.phone || b.deviceId || '';
-            return photoSortAsc ? valA.localeCompare(valB) : valB.localeCompare(valA);
+            return photoSortAsc ? valA.localeCompare(valB) : valB.localeCompare(a);
         } else {
             const timeA = a.completedAt || 0;
             const timeB = b.completedAt || 0;
