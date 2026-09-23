@@ -47,15 +47,19 @@
 
         <!-- 2. 마스터 메인 작업 영역 -->
         <div class="flex-1 overflow-y-auto p-6 max-w-[1650px] mx-auto w-full hide-scrollbar space-y-5">
-            <!-- 상단 작업 바: 전체 데이터 추출, 사진 데이터, 계정 생성 -->
+            <!-- 상단 작업 바: 전체 데이터 추출, 접속 제한 등록/해제, 사진 데이터, 계정 생성 -->
             <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex justify-between items-center flex-wrap gap-4">
                 <div>
                     <h3 class="text-sm font-black text-gray-800 flex items-center gap-2"><i class="fa-solid fa-server text-blue-600"></i> 시스템 및 데이터 통합 관리</h3>
-                    <p class="text-[10px] text-gray-500 mt-1 font-bold">마스터 권한의 신규 키 발급, 전체 배송 기록 엑셀 추출 및 배송 완료 사진 목록을 관리합니다.</p>
+                    <p class="text-[10px] text-gray-500 mt-1 font-bold">마스터 권한의 신규 키 발급, 전체 배송 기록 엑셀 추출, 기기 접속 차단/해제 및 사진 목록을 관리합니다.</p>
                 </div>
                 <div class="flex items-center gap-2">
                     <button onclick="window.openExcelExportModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-file-excel"></i> 전체 데이터 추출 (엑셀)
+                    </button>
+                    <!-- 🌟 요청 반영: 전체 데이터 추출 바로 옆에 [접속 제한 등록/해제] 버튼 배치 -->
+                    <button onclick="window.openBlockedDeviceModal()" class="bg-rose-600 hover:bg-rose-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
+                        <i class="fa-solid fa-shield-halved"></i> 접속 제한 등록/해제
                     </button>
                     <button onclick="window.openPhotoGalleryModal()" class="bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-images"></i> 사진 데이터
@@ -74,7 +78,6 @@
                     <button onclick="window.switchMasterTab('dispatch')" id="tab-btn-dispatch" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-building mr-1 text-purple-500"></i> 관제 계정 (<span id="count-dispatch">0</span>)</button>
                     <button onclick="window.switchMasterTab('memos')" id="tab-btn-memos" class="flex-1 min-w-[140px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-square-parking mr-1 text-yellow-500"></i> 주차 메모 DB (<span id="count-memos">0</span>)</button>
                     <button onclick="window.switchMasterTab('history')" id="tab-btn-history" class="flex-1 min-w-[150px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-address-book mr-1 text-indigo-500"></i> 계정/내역 조회</button>
-                    <!-- 🌟 신규 추가: 접속 제한(블랙리스트) 기기 관리 탭 -->
                     <button onclick="window.switchMasterTab('blocked')" id="tab-btn-blocked" class="flex-1 min-w-[150px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-shield-halved mr-1 text-rose-500"></i> 접속 제한 기기 (<span id="count-blocked">0</span>)</button>
                 </div>
 
@@ -187,16 +190,15 @@
                     </div>
                 </div>
 
-                <!-- 🌟 탭 6: 접속 제한(블랙리스트) 기기 관리 뷰 -->
+                <!-- 탭 6: 접속 제한(블랙리스트) 기기 관리 뷰 -->
                 <div id="tab-content-blocked" class="hidden p-5 flex flex-col gap-4">
-                    <!-- 상단 안내 및 기기 등록 바 -->
                     <div class="bg-rose-50/70 border border-rose-200 rounded-2xl p-4 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                         <div>
                             <h4 class="text-xs font-black text-rose-950 flex items-center gap-1.5">
                                 <i class="fa-solid fa-shield-halved text-rose-600"></i> 기기 고유번호(deviceId) 기반 물리적 접속 제한
                             </h4>
                             <p class="text-[11px] text-rose-700 font-bold mt-0.5">
-                                등록된 기기는 접속 시 차단 안내 대신 <b class="text-rose-900 underline">네트워크/서버 통신 오류 화면</b>으로 위장 출력되어 본인이 차단된 사실을 인지하지 못합니다.
+                                등록된 기기는 접속 시 차단 안내 대신 <b class="text-rose-900 underline">서버 연결 오류 화면</b>으로 위장 출력되어 본인이 차단된 사실을 알지 못합니다.
                             </p>
                         </div>
                         <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
@@ -208,7 +210,6 @@
                         </div>
                     </div>
 
-                    <!-- 등록된 차단 기기 목록 테이블 -->
                     <div class="border border-gray-200 rounded-2xl bg-white shadow-xs overflow-hidden flex flex-col min-h-[360px]">
                         <div class="p-3 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
                             <span class="text-xs font-black text-gray-700 flex items-center gap-1.5">
@@ -250,6 +251,73 @@
     <!-- 마스터 전용 팝업 모달 목록 -->
     <!-- ======================================================== -->
 
+    <!-- 🌟 신규 추가: 접속 제한 등록 및 해제 전용 관리 모달 (상단 버튼 연동) -->
+    <div id="blocked-devices-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
+            <div class="flex justify-between items-center pb-3 border-b border-gray-100 flex-none mb-3">
+                <div class="flex items-center gap-2.5">
+                    <div class="w-10 h-10 bg-rose-50 text-rose-600 rounded-xl flex items-center justify-center text-lg shadow-inner">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-base font-black text-gray-900 flex items-center gap-2">
+                            접속 제한 기기 등록 및 해제
+                            <span id="modal-blocked-count-badge" class="bg-rose-100 text-rose-800 text-[10px] font-black px-2 py-0.5 rounded-full border border-rose-200">0대 제한 중</span>
+                        </h3>
+                        <p class="text-[11px] text-gray-400 font-bold">기기 고유번호(deviceId)를 등록하여 접근을 차단하거나, 차단을 즉시 해제합니다.</p>
+                    </div>
+                </div>
+                <button onclick="window.closeBlockedDeviceModal()" class="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-500 flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- 기기 신규 제한 등록 바 -->
+            <div class="bg-rose-50/70 border border-rose-200 rounded-2xl p-3.5 mb-4 flex-none">
+                <span class="text-[11px] font-black text-rose-950 flex items-center gap-1 mb-2">
+                    <i class="fa-solid fa-plus-circle text-rose-600"></i> 신규 기기 접속 제한 등록
+                </span>
+                <div class="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                    <input type="text" id="modal-blocked-device-id" placeholder="기기 고유번호(deviceId) 입력 (예: DEV-xxxx)" class="flex-1 bg-white border border-rose-300 rounded-xl px-3 py-2 text-xs font-mono font-bold outline-none focus:border-rose-600 shadow-sm uppercase min-w-[200px]" onkeyup="if(window.event.keyCode==13){window.addBlockedDeviceFromModal()}">
+                    <input type="text" id="modal-blocked-device-memo" placeholder="메모 / 사유 (선택)" class="w-44 bg-white border border-rose-300 rounded-xl px-3 py-2 text-xs font-bold outline-none focus:border-rose-600 shadow-sm" onkeyup="if(window.event.keyCode==13){window.addBlockedDeviceFromModal()}">
+                    <button type="button" onclick="window.addBlockedDeviceFromModal()" class="bg-rose-600 hover:bg-rose-700 text-white font-black text-xs px-4 py-2 rounded-xl transition shadow-sm active:scale-95 whitespace-nowrap flex items-center gap-1 shrink-0">
+                        <i class="fa-solid fa-ban"></i> 제한 등록
+                    </button>
+                </div>
+            </div>
+
+            <!-- 제한 기기 목록 및 해제 테이블 -->
+            <div class="flex-1 overflow-hidden border border-gray-200 rounded-2xl flex flex-col bg-white">
+                <div class="p-2.5 bg-gray-50 border-b border-gray-200 flex justify-between items-center text-xs font-black text-gray-700">
+                    <span>현재 접속 제한 목록</span>
+                    <span class="text-[10px] text-gray-400 font-normal">* [제한 해제] 클릭 시 즉시 정상 접속 허용</span>
+                </div>
+                <div class="flex-1 overflow-y-auto custom-scrollbar p-1">
+                    <table class="w-full text-left border-collapse text-xs whitespace-nowrap">
+                        <thead class="bg-gray-100 text-gray-600 font-black sticky top-0 z-10 border-b border-gray-200">
+                            <tr>
+                                <th class="py-2.5 px-3 text-center w-12">순번</th>
+                                <th class="py-2.5 px-3">기기 고유번호 (deviceId)</th>
+                                <th class="py-2.5 px-3">사유 / 메모</th>
+                                <th class="py-2.5 px-3 text-center w-24">제한 상태</th>
+                                <th class="py-2.5 px-3 text-center w-20">해제 처리</th>
+                            </tr>
+                        </thead>
+                        <tbody id="modal-blocked-device-tbody" class="divide-y divide-gray-100 font-medium text-gray-700">
+                            <tr><td colspan="5" class="py-12 text-center text-gray-400 font-bold text-xs">등록된 제한 기기가 없습니다.</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="pt-3 border-t border-gray-100 flex justify-end mt-3 flex-none">
+                <button type="button" onclick="window.closeBlockedDeviceModal()" class="bg-gray-900 hover:bg-gray-800 text-white font-bold text-xs px-5 py-2.5 rounded-xl transition">
+                    닫기
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- 1. 신규 계정 생성 모달 -->
     <div id="create-account-modal" class="hidden fixed inset-0 bg-black/60 z-[700] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
@@ -266,7 +334,7 @@
         </div>
     </div>
 
-    <!-- 2. 계정 정보 및 소속 연결 수정 모달 -->
+    <!-- 2. 계정 정보 및 소속 연결 수정 모달 (기기 제한 등록 버튼 완전 제거 완료) -->
     <div id="edit-license-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
         <div id="edit-modal-card" class="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
             <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-blue-600"></i> 계정 정보 및 연결 수정</h3>
@@ -284,8 +352,6 @@
                         <div class="flex gap-1.5">
                             <input type="text" id="edit-device-input" class="flex-1 bg-white border border-gray-300 rounded-xl p-2 text-xs font-mono font-bold outline-none focus:border-blue-500 text-gray-700" placeholder="미등록 상태">
                             <button type="button" onclick="document.getElementById('edit-device-input').value=''" class="px-2.5 py-1 bg-gray-200 hover:bg-gray-300 border border-gray-300 rounded-xl text-[10px] font-bold text-gray-700">초기화</button>
-                            <!-- 🌟 수정 모달에서도 해당 기기를 바로 접속 제한에 추가할 수 있는 버튼 연동 -->
-                            <button type="button" onclick="window.blockDeviceFromEditModal()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl text-[10px] font-black text-rose-700 transition active:scale-95 whitespace-nowrap">접속 제한 등록</button>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
