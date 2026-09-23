@@ -1,439 +1,630 @@
-// js/support.js
+// js/memo.js
+
 // =================================================================
-// [배송 동선 PRO] 보조 기능 전담 모듈 (연결 설정 / 알림함 / 지난 배송 이력)
+// [배송 동선 PRO] 현장 주차 및 건물 정보(공용/개인 메모) 전담 모듈
 // =================================================================
 
-import { deleteCompletionFromFirestore, firebaseSetTmsPermission, syncMyParkingMemosFromServer } from './api.js';
+import { 
+    getMemosFromFirestore, 
+    getBatchMemosFromFirestore, 
+    saveMemoToFirestore, 
+    likeMemoInFirestore, 
+    reportMemoInFirestore,
+    firebaseUploadTempMemoBackup,
+    firebaseGetTempMemoBackup,
+    firebaseDeleteTempMemoBackup
+} from './api.js';
+import { getPureAddress, showLoading, hideLoading } from './utils.js';
+import { state } from './state.js';
+import { getOrCreateDeviceId } from './auth.js';
+import { updateContributionStats } from './support.js';
 
-// 내부 상태 변수
-let currentActiveAlertMsgId = null;
-let pendingTmsState = null;
-let onRestoreDestinationCallback = null;
-let onGpsToggleCallback = null;
-
-// ==========================================
-// 1. 공통 로딩 오버레이 제어
-// ==========================================
-function showLoading(text) { 
-    const elText = document.getElementById('loading-text');
-    const elOverlay = document.getElementById('loading-overlay');
-    if (elText) elText.innerText = text; 
-    if (elOverlay) elOverlay.classList.remove('hidden'); 
-}
-
-function hideLoading() { 
-    const elOverlay = document.getElementById('loading-overlay');
-    if (elOverlay) elOverlay.classList.add('hidden'); 
-}
+let batchMemosCache = {}; 
+let currentMemoAddress = "";
+let selectedHeightText = "";
+let selectedTimeText = "";
 
 // ==========================================
-// 2. 외부 콜백/핸들러 등록 (app.js 연동용)
+// 1. 메모 글자 수 실시간 카운트 리스너 초기화
 // ==========================================
-export function setRestoreDestinationHandler(fn) {
-    onRestoreDestinationCallback = fn;
-}
-
-export function setGpsToggleHandler(fn) {
-    onGpsToggleCallback = fn;
-}
-
-// 카카오 단독 주소 지오코딩 보조 함수 (배송지 복원 시 좌표 보정용)
-async function geocodeAddress(address) {
-    const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
-    let response = await fetch(`https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(address)}`, { 
-        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
-    });
-    let data = await response.json();
-    if (data.documents && data.documents.length > 0) {
-        return { lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x), address_name: data.documents[0].address_name };
-    }
-    response = await fetch(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(address)}`, { 
-        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
-    });
-    data = await response.json();
-    if (data.documents && data.documents.length > 0) {
-        let finalName = data.documents[0].place_name;
-        if(data.documents[0].address_name) finalName += ` (${data.documents[0].address_name})`;
-        return { lat: parseFloat(data.documents[0].y), lng: parseFloat(data.documents[0].x), address_name: finalName };
-    }
-    throw new Error('주소 좌표 변환 실패');
-}
-
-// ==========================================
-// 3. 알림함 및 관제 팝업 관리 기능
-// ==========================================
-export function playBeepSound() {
-    try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain); 
-        gain.connect(ctx.destination);
-        osc.frequency.value = 880; 
-        gain.gain.value = 0.3;
-        osc.start();
-        setTimeout(() => { osc.stop(); }, 250);
-    } catch(e) {}
-}
-
-export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, senderTitle, senderType) {
-    let notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
-    const isMaster = (senderType === 'MASTER' || senderTitle === '운영사 알림');
-    const finalTitle = senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
-
-    if (!notices.some(n => n.msgId === msgId)) {
-        notices.unshift({
-            msgId: msgId, 
-            content: content,
-            dateStr: dateStr || new Date().toISOString().split('T')[0],
-            timeStr: timeStr || '00:00',
-            senderTitle: finalTitle,
-            senderType: senderType || (isMaster ? 'MASTER' : 'DISPATCH'),
-            timestamp: Date.now()
+export function initMemoEvents() {
+    const memoInputEl = document.getElementById('memo-input');
+    if (memoInputEl) {
+        memoInputEl.addEventListener('input', function() {
+            const countEl = document.getElementById('memo-char-count');
+            if (countEl) countEl.innerText = `${this.value.length} / 30`;
         });
-        if (notices.length > 50) notices = notices.slice(0, 50);
-        localStorage.setItem('deliveryPro_notices', JSON.stringify(notices));
-        checkUnreadNotices();
-    }
-}
-
-export function checkUnreadNotices() {
-    const dot = document.getElementById('notice-unread-dot');
-    if (!dot) return;
-    const notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
-    const unread = notices.some(n => !localStorage.getItem(`acked_msg_${n.msgId}`));
-    if (unread) dot.classList.remove('hidden');
-    else dot.classList.add('hidden');
-}
-
-export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, senderType) {
-    currentActiveAlertMsgId = msgId;
-    const isMaster = (senderType === 'MASTER' || senderTitle === '운영사 알림');
-    const title = senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
-
-    const modalBox = document.getElementById('dispatch-alert-box');
-    const iconBox = document.getElementById('dispatch-alert-icon-box');
-    const badge = document.getElementById('dispatch-alert-badge');
-
-    if (isMaster) {
-        if (modalBox) modalBox.className = "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border-2 border-amber-500 text-center";
-        if (iconBox) iconBox.className = "w-14 h-14 bg-amber-50 text-amber-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 shadow-inner animate-bounce";
-        if (badge) { badge.className = "bg-amber-500 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider"; badge.innerText = title; }
-    } else {
-        if (modalBox) modalBox.className = "bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border-2 border-blue-500 text-center";
-        if (iconBox) iconBox.className = "w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 shadow-inner animate-bounce";
-        if (badge) { badge.className = "bg-blue-600 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider"; badge.innerText = title; }
     }
 
-    const contentEl = document.getElementById('dispatch-alert-content');
-    const timeEl = document.getElementById('dispatch-alert-time');
-    const modalEl = document.getElementById('dispatch-alert-modal');
-
-    if (contentEl) contentEl.innerText = content;
-    if (timeEl) timeEl.innerText = `${timeStr || '방금'} 수신`;
-    if (modalEl) modalEl.classList.remove('hidden');
-
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-    playBeepSound();
-    checkUnreadNotices();
-}
-
-export function closeDispatchAlertModal() {
-    if (currentActiveAlertMsgId) {
-        localStorage.setItem(`acked_msg_${currentActiveAlertMsgId}`, "true");
-    }
-    document.getElementById('dispatch-alert-modal')?.classList.add('hidden');
-    checkUnreadNotices();
-}
-
-export function openNoticeHistoryModal() {
-    const container = document.getElementById('notice-history-container');
-    const notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
-    if (!container) return;
-
-    if (notices.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-400 py-20 text-xs font-bold">수신된 알림 내역이 없습니다.</div>`;
-    } else {
-        let html = '';
-        notices.forEach(n => {
-            const isMaster = (n.senderType === 'MASTER' || n.senderTitle === '운영사 알림');
-            const badgeTitle = n.senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
-            const badgeClass = isMaster ? 'bg-amber-500 text-white' : 'bg-blue-600 text-white';
-
-            html += `
-            <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs flex flex-col gap-2">
-                <div class="flex justify-between items-center text-xs">
-                    <span class="${badgeClass} font-black text-[10px] px-2 py-0.5 rounded-md">${badgeTitle}</span>
-                    <span class="text-[11px] font-mono text-gray-400">${n.dateStr} ${n.timeStr}</span>
-                </div>
-                <div class="p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">
-                    ${n.content}
-                </div>
-            </div>`;
+    const personalMemoInputEl = document.getElementById('personal-memo-input');
+    if (personalMemoInputEl) {
+        personalMemoInputEl.addEventListener('input', function() {
+            const countEl = document.getElementById('personal-memo-char-count');
+            if (countEl) countEl.innerText = `${this.value.length} / 30`;
         });
-        container.innerHTML = html;
     }
-    document.getElementById('notice-history-modal')?.classList.remove('hidden');
-}
-
-export function closeNoticeHistoryModal() { 
-    document.getElementById('notice-history-modal')?.classList.add('hidden'); 
-}
-
-export function clearLocalNotices() {
-    if (!confirm("알림 보관함을 모두 비우시겠습니까?")) return;
-    localStorage.removeItem('deliveryPro_notices');
-    openNoticeHistoryModal();
-    checkUnreadNotices();
 }
 
 // ==========================================
-// 4. 지난 배송 이력 관리 기능
+// 2. 전체 배송지 주차 메모 일괄 미리 불러오기 (캐시)
 // ==========================================
-export function cleanOldHistory() {
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-    let sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    history = history.filter(h => h.timestamp > sevenDaysAgo);
-    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
-}
-
-export function openHistoryModal() {
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-    let container = document.getElementById('history-list-container');
-    if (!container) return;
-    if (history.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-400 py-16 text-sm"><p>완료된 배송 이력이 없습니다.</p></div>`;
-    } else {
-        let grouped = {}; 
-        history.forEach(h => { 
-            if (!grouped[h.date]) grouped[h.date] = []; 
-            grouped[h.date].push(h); 
-        });
-        let html = '';
-        for (let date in grouped) {
-            html += `<div class="sticky top-0 bg-white/95 backdrop-blur-sm z-10 py-2 mt-1 mb-2 border-b border-gray-100"><span class="text-[11px] font-black text-gray-600 bg-gray-100 px-2 py-1 rounded-md">${date}</span></div><div class="space-y-2 mb-4">`;
-            let dailyTotal = grouped[date].length;
-            grouped[date].forEach((h, idx) => { 
-                let sequentialNum = dailyTotal - idx;
-                let tagBadge = "";
-                if (h.tag) {
-                    if (h.tag === "배송 취소") {
-                        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
-                    } else {
-                        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
-                    }
-                }
-                let photoBadge = h.photoUrl 
-                    ? `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0 flex items-center gap-0.5 shadow-sm active:bg-blue-100"><i class="fa-solid fa-camera"></i> 사진</a>`
-                    : (h.hasPhoto ? `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0"><i class="fa-solid fa-camera"></i></span>` : "");
-                html += `
-                <div class="bg-gray-50 border border-gray-200 p-2.5 rounded-xl flex justify-between items-center text-xs shadow-sm">
-                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span class="bg-gray-200 text-gray-700 font-bold px-2 py-0.5 rounded-full shrink-0 text-[10px]">${sequentialNum}건</span>
-                        <span class="font-bold text-gray-800 truncate ml-0.5">${h.address}</span>${tagBadge}${photoBadge}
-                    </div>
-                    <div class="flex items-center gap-2 shrink-0 ml-2">
-                        <span class="text-gray-400 text-[9px] font-semibold">${h.time}</span>
-                        <button onclick="restoreHistoryItem(${h.timestamp})" class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1.5 rounded-lg text-[10px] font-bold active:bg-blue-100 shadow-sm transition flex items-center"><i class="fa-solid fa-rotate-left mr-1"></i> 복원</button>
-                    </div>
-                </div>`; 
-            });
-            html += `</div>`;
-        }
-        container.innerHTML = html;
-    }
-    document.getElementById('history-modal')?.classList.remove('hidden');
-}
-
-export function closeHistoryModal() { 
-    document.getElementById('history-modal')?.classList.add('hidden'); 
-}
-
-export function clearAllHistory() { 
-    if (confirm("이력을 모두 삭제하시겠습니까?")) { 
-        localStorage.removeItem('deliveryPro_history'); 
-        openHistoryModal(); 
-    } 
-}
-
-export function archiveCompletedDelivery(item, tag = "", completionDocId = null, photoUrl = null) {
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-    let now = new Date(); 
-    let archivedItem = { ...item }; 
-    history.unshift({ 
-        id: item.id, 
-        address: item.address, 
-        tag: tag, 
-        hasPhoto: !!photoUrl, 
-        photoUrl: photoUrl || "", 
-        completionDocId: completionDocId, 
-        date: now.toLocaleDateString(), 
-        time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
-        timestamp: now.getTime(), 
-        originalData: archivedItem 
-    });
-    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
-}
-
-export async function restoreHistoryItem(timestamp) {
-    if (!confirm("이 배송지를 다시 진행 목록으로 되돌리시겠습니까?")) return;
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-    const idx = history.findIndex(h => h.timestamp === timestamp);
+export async function preloadBatchMemos() {
+    const destinations = state.getDestinations();
+    if (destinations.length === 0) return;
     
-    if (idx > -1) {
-        showLoading("배송지 복원 중...");
-        const targetHistory = history[idx];
+    const addresses = destinations.map(d => getPureAddress(d.address));
+    const uniqueAddrs = [...new Set(addresses)];
+    try { 
+        batchMemosCache = await getBatchMemosFromFirestore(uniqueAddrs); 
+    } catch (e) { 
+        batchMemosCache = {}; 
+    }
+}
 
-        if (targetHistory.completionDocId) {
-            await deleteCompletionFromFirestore(targetHistory.completionDocId);
-        }
+// ==========================================
+// 3. 로컬 개인 메모 관리 헬퍼 (기기 로컬스토리지 전용)
+// ==========================================
+export function getAllPersonalMemos() {
+    try {
+        return JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
+    } catch (e) {
+        return {};
+    }
+}
 
-        let itemToRestore = targetHistory.originalData;
-        if (!itemToRestore) {
-            try {
-                const coords = await geocodeAddress(targetHistory.address);
-                itemToRestore = { id: targetHistory.id || Date.now(), address: targetHistory.address, lat: coords.lat, lng: coords.lng, phone: null };
-            } catch(e) { 
-                itemToRestore = { id: targetHistory.id || Date.now(), address: targetHistory.address, lat: 0, lng: 0, phone: null }; 
-            }
-        }
-        
-        if (itemToRestore) { 
-            history.splice(idx, 1); 
-            localStorage.setItem('deliveryPro_history', JSON.stringify(history)); 
+export function getPersonalMemo(address) {
+    if (!address) return "";
+    const pureAddr = getPureAddress(address);
+    const memos = getAllPersonalMemos();
+    return memos[pureAddr] || "";
+}
+
+// ==========================================
+// 4. 메인 배송 카드 내 메모 미리보기 렌더링
+// ==========================================
+export function renderMemoPreview(dest) {
+    const previewEl = document.getElementById(`memo-preview-${dest.id}`); 
+    const tagsEl = document.getElementById(`memo-tags-${dest.id}`);
+    const personalPreviewEl = document.getElementById(`personal-memo-preview-${dest.id}`);
+    
+    const pureAddr = getPureAddress(dest.address);
+
+    if (previewEl && tagsEl) {
+        const memos = batchMemosCache[pureAddr] || []; 
+        const memoText = memos.length > 0 ? memos[0].memo : null;
+
+        if (memoText) {
+            const tagRegex = /\[(.*?)\]/g; 
+            let tags = []; 
+            let match;
             
-            if (onRestoreDestinationCallback) {
-                await onRestoreDestinationCallback(itemToRestore);
+            while ((match = tagRegex.exec(memoText)) !== null) {
+                let text = match[1]; 
+                text = text.replace('주차장 높이 ', '높이:'); 
+                text = text.replace('무료 회차 시간 ', '회차:'); 
+                tags.push(text);
             }
-            openHistoryModal(); 
+            
+            let rawText = memoText.replace(/\[.*?\]/g, '').trim();
+            
+            if (tags.length > 0) {
+                tagsEl.innerHTML = tags.map(t => `<span class="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0">${t}</span>`).join(''); 
+                tagsEl.classList.remove('hidden');
+            } else { 
+                tagsEl.classList.add('hidden'); 
+                tagsEl.innerHTML = ''; 
+            }
+            
+            if (rawText) { 
+                previewEl.innerHTML = `<i class="fa-solid fa-circle-info text-blue-500 mr-1"></i><span class="font-bold">주차정보:</span> <span class="text-gray-700">${rawText}</span>`; 
+                previewEl.classList.remove('hidden');
+            } else { 
+                previewEl.classList.add('hidden'); 
+            }
+        } else { 
+            tagsEl.classList.add('hidden'); 
+            previewEl.classList.add('hidden'); 
         }
-        hideLoading();
+    }
+
+    if (personalPreviewEl) {
+        const personalMemo = getPersonalMemo(pureAddr);
+        if (personalMemo) {
+            personalPreviewEl.innerHTML = `<i class="fa-solid fa-shield-halved text-emerald-600 mr-1"></i><span class="font-bold text-emerald-800">개인메모:</span> <span class="text-gray-800 font-semibold">${personalMemo}</span>`;
+            personalPreviewEl.classList.remove('hidden');
+        } else {
+            personalPreviewEl.classList.add('hidden');
+            personalPreviewEl.innerHTML = '';
+        }
     }
 }
 
 // ==========================================
-// 5. 연결 설정 모달 및 TMS/GPS 제어 기능
+// 5. 모달 입력 태그 선택 로직
 // ==========================================
-export async function openSettingsModal() {
-    // 1. 현재 로컬 캐시 기준 즉시 화면 렌더링
-    updateContributionStats();
-    document.getElementById('settings-modal')?.classList.remove('hidden');
-
-    // 2. 🌟 [핵심] 마스터 센터에 등록된 전화번호/기기 기준 서버 데이터 실시간 역추적 동기화
-    const phone = localStorage.getItem('deliveryProUserPhone') || '';
-    const deviceId = localStorage.getItem('deliveryProDeviceId') || '';
-    const key = localStorage.getItem('deliveryProKey') || '';
-
-    if (phone || deviceId) {
-        try {
-            await syncMyParkingMemosFromServer(phone, deviceId, key);
-            updateContributionStats(); // 동기화 완료 후 최신 실제 카운트로 UI 자동 갱신
-        } catch (e) {
-            console.error("서버 기여도 동기화 실패:", e);
-        }
+export function selectHeightTag(btn, val) {
+    const isActive = btn.dataset.active === "true";
+    document.querySelectorAll('.height-tag-btn').forEach(b => { 
+        b.dataset.active = "false"; 
+        b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    });
+    if (isActive) { 
+        selectedHeightText = ""; 
+    } else { 
+        btn.dataset.active = "true"; 
+        btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+        btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        selectedHeightText = `[주차장 높이 ${val}]`; 
     }
 }
 
-export function closeSettingsModal() {
-    document.getElementById('settings-modal')?.classList.add('hidden');
+export function selectTimeTag(btn, val) {
+    const isActive = btn.dataset.active === "true";
+    document.querySelectorAll('.time-tag-btn').forEach(b => { 
+        b.dataset.active = "false"; 
+        b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    });
+    if (isActive) { 
+        selectedTimeText = ""; 
+    } else { 
+        btn.dataset.active = "true"; 
+        btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+        btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        selectedTimeText = `[무료 회차 시간 ${val}]`; 
+    }
 }
 
-// 내 기여 활동 통계 카운트 및 이벤트 프로그레스바 갱신 함수
-export function updateContributionStats() {
+export function toggleEtcTag(btn) {
+    const isActive = btn.dataset.active === "true";
+    if (isActive) { 
+        btn.dataset.active = "false"; 
+        btn.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        btn.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    } else { 
+        btn.dataset.active = "true"; 
+        btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+        btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+    }
+}
+
+function resetMemoForm() {
+    document.querySelectorAll('.height-tag-btn, .time-tag-btn, .etc-tag-btn').forEach(b => { 
+        b.dataset.active = "false"; 
+        b.classList.remove('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
+        b.classList.add('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
+    });
+    
+    selectedHeightText = ""; 
+    selectedTimeText = ""; 
+    
+    const memoInput = document.getElementById('memo-input');
+    const countEl = document.getElementById('memo-char-count');
+    if (memoInput) memoInput.value = ""; 
+    if (countEl) countEl.innerText = "0 / 30";
+
+    const personalInput = document.getElementById('personal-memo-input');
+    const personalCount = document.getElementById('personal-memo-char-count');
+    const personalDelBtn = document.getElementById('btn-delete-personal-memo');
+    if (personalInput) personalInput.value = "";
+    if (personalCount) personalCount.innerText = "0 / 30";
+    if (personalDelBtn) personalDelBtn.classList.add('hidden');
+}
+
+// ==========================================
+// 6. 주차 정보 모달 열기 / 닫기
+// ==========================================
+export async function openMemoModal(id) {
+    const destinations = state.getDestinations();
+    const item = destinations.find(d => d.id === id); 
+    if (!item) return; 
+    
+    currentMemoAddress = getPureAddress(item.address);
+    
+    const titleEl = document.getElementById('memo-modal-title');
+    if (titleEl) titleEl.innerText = currentMemoAddress; 
+    resetMemoForm();
+
+    const savedPersonal = getPersonalMemo(currentMemoAddress);
+    const pInput = document.getElementById('personal-memo-input');
+    const pCount = document.getElementById('personal-memo-char-count');
+    const pDelBtn = document.getElementById('btn-delete-personal-memo');
+    if (pInput) pInput.value = savedPersonal;
+    if (pCount) pCount.innerText = `${savedPersonal.length} / 30`;
+    if (pDelBtn) {
+        if (savedPersonal) pDelBtn.classList.remove('hidden');
+        else pDelBtn.classList.add('hidden');
+    }
+    
+    const listContainer = document.getElementById('memo-list-container');
+    if (listContainer) {
+        listContainer.innerHTML = `<div class="flex justify-center items-center py-6 text-gray-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>목록을 불러오는 중...</div>`;
+    }
+    document.getElementById('memo-modal')?.classList.remove('hidden');
+
     try {
-        // 1. 개인 메모 건수 계산 (로컬스토리지)
-        const personalMemos = JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
-        const personalCount = Object.keys(personalMemos).length;
-
-        // 2. 공용 주차정보 작성 건수 계산 (서버와 동기화된 목록 기준)
-        const myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
-        const parkingCount = myParkingMemos.length;
-
-        // UI 엘리먼트 반영
-        const parkingCountEl = document.getElementById('stat-parking-memo-count');
-        const personalCountEl = document.getElementById('stat-personal-memo-count');
-        const progressTextEl = document.getElementById('stat-event-progress');
-        const progressBarEl = document.getElementById('stat-event-bar');
-
-        if (parkingCountEl) parkingCountEl.innerText = `${parkingCount}건`;
-        if (personalCountEl) personalCountEl.innerText = `${personalCount}건`;
-
-        // 150건 이벤트 프로그레스 계산
-        const targetCount = 150;
-        const currentProgress = Math.min(parkingCount, targetCount);
-        const percent = Math.round((currentProgress / targetCount) * 100);
-
-        if (progressTextEl) progressTextEl.innerText = `${currentProgress} / ${targetCount}`;
-        if (progressBarEl) progressBarEl.style.width = `${percent}%`;
-    } catch (e) {
-        console.error("기여 통계 갱신 오류:", e);
-    }
-}
-
-export function toggleTMS(isChecked) {
-    if (!isChecked) {
-        document.getElementById('tms-confirm-modal')?.classList.remove('hidden');
-        pendingTmsState = false;
-    } else {
-        pendingTmsState = true;
-        confirmTMSToggle();
-    }
-}
-
-export function cancelTMSToggle() {
-    const tmsToggle = document.getElementById('tms-toggle');
-    if (tmsToggle) tmsToggle.checked = true;
-    document.getElementById('tms-confirm-modal')?.classList.add('hidden');
-}
-
-export async function confirmTMSToggle() {
-    const key = localStorage.getItem('deliveryProKey');
-    if (!key) return;
-
-    showLoading("TMS 설정 변경 중...");
-    try {
-        await firebaseSetTmsPermission(key, pendingTmsState);
-        document.getElementById('tms-confirm-modal')?.classList.add('hidden');
+        const memos = await getMemosFromFirestore(currentMemoAddress);
+        const myDeviceId = getOrCreateDeviceId();
+        const myPhone = localStorage.getItem('deliveryProUserPhone') || "";
         
-        const descEl = document.getElementById('tms-success-desc');
-        if (descEl) {
-            descEl.innerHTML = pendingTmsState 
-                ? "관제(TMS) 연결이 <b>허용</b>되었습니다.<br>이제 사무실과 데이터가 동기화됩니다." 
-                : "관제(TMS) 연결이 <b>차단</b>되었습니다.<br>기존 연결이 해제되었습니다.";
+        const myMemo = memos.find(m => m.deviceId === myDeviceId || (myPhone && m.phone === myPhone));
+        if (myMemo) {
+            const rawMemo = myMemo.memo || "";
+            const heightMatch = rawMemo.match(/\[주차장 높이 (.*?)\]/);
+            if (heightMatch) {
+                const val = heightMatch[1];
+                document.querySelectorAll('.height-tag-btn').forEach(b => {
+                    if (b.innerText.trim() === val) selectHeightTag(b, val);
+                });
+            }
+
+            const timeMatch = rawMemo.match(/\[무료 회차 시간 (.*?)\]/);
+            if (timeMatch) {
+                const val = timeMatch[1];
+                document.querySelectorAll('.time-tag-btn').forEach(b => {
+                    if (b.innerText.trim() === val) selectTimeTag(b, val);
+                });
+            }
+
+            ['도로변 주차', '지하주차장', '지상주차장'].forEach(tag => {
+                if (rawMemo.includes(`[${tag}]`)) {
+                    document.querySelectorAll('.etc-tag-btn').forEach(b => {
+                        if (b.dataset.val === tag && b.dataset.active !== "true") toggleEtcTag(b);
+                    });
+                }
+            });
+
+            const pureText = rawMemo.replace(/\[.*?\]/g, '').trim();
+            const memoInput = document.getElementById('memo-input');
+            const countEl = document.getElementById('memo-char-count');
+            
+            if (memoInput) memoInput.value = pureText;
+            if (countEl) countEl.innerText = `${pureText.length} / 30`;
         }
-        document.getElementById('tms-success-modal')?.classList.remove('hidden');
-    } catch (e) {
-        alert("상태 변경 중 오류가 발생했습니다: " + e.message);
-        const tmsToggle = document.getElementById('tms-toggle');
-        if (tmsToggle) tmsToggle.checked = !pendingTmsState;
-    } finally {
+
+        if (memos.length > 0) {
+            let html = "";
+            memos.forEach((m, idx) => {
+                let isMyMemo = (m.deviceId === myDeviceId || (myPhone && m.phone === myPhone));
+                let crownHtml = (idx === 0) ? `<i class="fa-solid fa-crown text-yellow-400 mr-1 text-sm drop-shadow-sm"></i> ` : '';
+                let myBadge = isMyMemo ? `<span class="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded ml-1">내가 쓴 정보</span>` : '';
+                
+                html += `
+                <div class="bg-white border ${isMyMemo ? 'border-blue-300 ring-1 ring-blue-200' : 'border-gray-200'} rounded-xl p-3 shadow-sm relative overflow-hidden">
+                    ${idx === 0 ? '<div class="absolute top-0 left-0 w-1 h-full bg-yellow-400"></div>' : ''}
+                    <div class="text-[12px] text-gray-800 font-bold whitespace-pre-line leading-relaxed mb-2 pl-1">${crownHtml}${m.memo} ${myBadge}</div>
+                    <div class="flex justify-between items-center border-t border-gray-100 pt-2 mt-2">
+                        <span class="text-[9px] text-gray-400">${m.time}</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="likeMemo('${m.id}')" class="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1 rounded-lg font-bold border border-blue-100 active:scale-95 transition"><i class="fa-solid fa-thumbs-up mr-0.5"></i> ${m.likes || 0}</button>
+                            <button onclick="reportMemo('${m.id}')" class="text-[10px] text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-500 px-2 py-1 rounded-lg border border-gray-100 active:scale-95 transition">🚨 신고</button>
+                        </div>
+                    </div>
+                </div>`;
+            });
+            if (listContainer) listContainer.innerHTML = html;
+        } else { 
+            if (listContainer) listContainer.innerHTML = `<div class="bg-white border border-gray-200 rounded-xl p-6 text-center shadow-sm"><p class="text-gray-400 text-xs font-bold">등록된 주차정보가 없습니다.<br>첫 번째 정보를 남겨주세요!</p></div>`; 
+        }
+    } catch (e) { 
+        if (listContainer) listContainer.innerHTML = `<div class="text-red-500 text-center text-xs py-4">데이터를 불러오지 못했습니다.</div>`; 
+    }
+}
+
+export function closeMemoModal() { 
+    document.getElementById('memo-modal')?.classList.add('hidden'); 
+}
+
+// ==========================================
+// 7. 공용 주차 메모 저장 / 좋아요 / 신고 액션
+// ==========================================
+export async function saveCurrentMemo() {
+    const rawText = (document.getElementById('memo-input')?.value || '').trim();
+    let tags = [];
+    
+    if (selectedHeightText) tags.push(selectedHeightText); 
+    if (selectedTimeText) tags.push(selectedTimeText);
+    
+    document.querySelectorAll('.etc-tag-btn').forEach(btn => { 
+        if (btn.dataset.active === "true") tags.push(`[${btn.dataset.val}]`); 
+    });
+    
+    const tagString = tags.join(" "); 
+    let finalMemo = "";
+    if (tagString && rawText) {
+        finalMemo = tagString + "\n" + rawText; 
+    } else {
+        finalMemo = (tagString + rawText).trim();
+    }
+
+    if (!finalMemo) { 
+        alert("항목을 선택하거나 내용을 입력해주세요."); 
+        return; 
+    }
+    
+    const sensitiveRegex = /(비번|비밀번호|패스워드|#|\*|\d{4,})/g;
+    if (sensitiveRegex.test(rawText)) { 
+        alert("⚠️ [보안 경고]\n현관 비밀번호 등은 법적 문제로 공유할 수 없습니다.\n비밀번호는 아래 '개인 메모'에 입력해 주세요."); 
+        return; 
+    }
+
+    showLoading("주차정보 등록/수정 중...");
+    try {
+        const myDeviceId = getOrCreateDeviceId();
+        const myPhone = localStorage.getItem('deliveryProUserPhone') || "";
+        
+        await saveMemoToFirestore(currentMemoAddress, myDeviceId, finalMemo, myPhone);
+        
+        try {
+            let myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
+            if (!myParkingMemos.includes(currentMemoAddress)) {
+                myParkingMemos.push(currentMemoAddress);
+                localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(myParkingMemos));
+            }
+            if (typeof updateContributionStats === 'function') {
+                updateContributionStats();
+            }
+        } catch (err) {}
+
+        hideLoading(); 
+        alert("주차 정보가 등록(수정)되었습니다.");
+        
+        const destinations = state.getDestinations();
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress); 
+        if (dest) { 
+            state.saveActiveData(); 
+            if (typeof window.renderList === 'function') window.renderList();
+            openMemoModal(dest.id); 
+        }
+    } catch (e) { 
+        hideLoading(); 
+        alert("통신 오류가 발생했습니다."); 
+    }
+}
+
+export async function likeMemo(docId) {
+    try {
+        await likeMemoInFirestore(docId);
+        const destinations = state.getDestinations();
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
+        if (dest) { 
+            state.saveActiveData(); 
+            if (typeof window.renderList === 'function') window.renderList();
+            openMemoModal(dest.id); 
+        }
+    } catch (e) { 
+        alert("통신 오류가 발생했습니다."); 
+    }
+}
+
+export async function reportMemo(docId) {
+    if (!confirm("이 메모에 부적절한 내용이 있습니까?\n신고하시면 즉시 블라인드 처리됩니다.")) return;
+    
+    showLoading("신고 처리 중...");
+    try {
+        await reportMemoInFirestore(docId);
+        hideLoading(); 
+        alert("신고가 접수되어 블라인드 처리되었습니다."); 
+        
+        const destinations = state.getDestinations();
+        const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
+        if (dest) { 
+            state.saveActiveData(); 
+            if (typeof window.renderList === 'function') window.renderList();
+            openMemoModal(dest.id); 
+        }
+    } catch (e) { 
+        hideLoading(); 
+        alert("통신 오류가 발생했습니다."); 
+    }
+}
+
+// ==========================================
+// 8. 개인 로컬 메모 저장 및 삭제 액션
+// ==========================================
+export function savePersonalMemo() {
+    if (!currentMemoAddress) {
+        alert("배송지 주소 정보를 찾을 수 없습니다.");
+        return;
+    }
+    const inputEl = document.getElementById('personal-memo-input');
+    const memoText = (inputEl?.value || '').trim();
+
+    if (!memoText) {
+        alert("개인 메모 내용을 입력해 주세요.\n(삭제를 원하시면 '삭제' 버튼을 눌러주세요)");
+        return;
+    }
+    if (memoText.length > 30) {
+        alert("개인 메모는 최대 30자까지 입력 가능합니다.");
+        return;
+    }
+
+    const allMemos = getAllPersonalMemos();
+    allMemos[currentMemoAddress] = memoText;
+    localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(allMemos));
+
+    alert("개인 메모가 핸드폰에 안전하게 저장되었습니다.");
+
+    const delBtn = document.getElementById('btn-delete-personal-memo');
+    if (delBtn) delBtn.classList.remove('hidden');
+
+    const destinations = state.getDestinations();
+    const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
+    if (dest) {
+        renderMemoPreview(dest);
+    }
+    if (typeof window.renderList === 'function') {
+        window.renderList();
+    }
+    if (typeof updateContributionStats === 'function') {
+        updateContributionStats();
+    }
+}
+
+export function deletePersonalMemo() {
+    if (!currentMemoAddress) return;
+    if (!confirm("이 주소에 저장된 개인 메모를 삭제하시겠습니까?")) return;
+
+    const allMemos = getAllPersonalMemos();
+    delete allMemos[currentMemoAddress];
+    localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(allMemos));
+
+    const inputEl = document.getElementById('personal-memo-input');
+    const countEl = document.getElementById('personal-memo-char-count');
+    const delBtn = document.getElementById('btn-delete-personal-memo');
+
+    if (inputEl) inputEl.value = "";
+    if (countEl) countEl.innerText = "0 / 30";
+    if (delBtn) delBtn.classList.add('hidden');
+
+    alert("개인 메모가 삭제되었습니다.");
+
+    const destinations = state.getDestinations();
+    const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
+    if (dest) {
+        renderMemoPreview(dest);
+    }
+    if (typeof window.renderList === 'function') {
+        window.renderList();
+    }
+    if (typeof updateContributionStats === 'function') {
+        updateContributionStats();
+    }
+}
+
+// ==========================================
+// 9. 기기단 자체 암호화 / 복호화 유틸리티
+// ==========================================
+function getMemoSecretKey() {
+    const rawKey = localStorage.getItem('deliveryProKey') || 'DEV_KEY';
+    return (rawKey + '_DELIVERY_PRO_ENC_SALT').replace(/[^a-zA-Z0-9_]/g, '');
+}
+
+function encryptPayload(text, secretKey) {
+    const encoded = encodeURIComponent(text);
+    let result = '';
+    for (let i = 0; i < encoded.length; i++) {
+        result += String.fromCharCode(encoded.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
+    }
+    return btoa(result);
+}
+
+function decryptPayload(cipher, secretKey) {
+    const decoded = atob(cipher);
+    let result = '';
+    for (let i = 0; i < decoded.length; i++) {
+        result += String.fromCharCode(decoded.charCodeAt(i) ^ secretKey.charCodeAt(i % secretKey.length));
+    }
+    return decodeURIComponent(result);
+}
+
+// ==========================================
+// 10. 개인 메모 기기변경 임시 백업 및 복구 (3중 안전장치)
+// ==========================================
+
+export async function backupPersonalMemosToCloud() {
+    const rawKey = localStorage.getItem('deliveryProKey');
+    if (!rawKey) {
+        alert("로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.");
+        return;
+    }
+    const cleanKey = rawKey.trim().replace(/[\/\\#?]/g, '_');
+    const allMemos = getAllPersonalMemos();
+    const memoKeys = Object.keys(allMemos);
+    const count = memoKeys.length;
+
+    if (count === 0) {
+        alert("⚠️ 현재 핸드폰에 저장된 개인 메모가 0건입니다.\n기존 메모를 가져오시려면 [복구] 버튼을 눌러주세요.");
+        return;
+    }
+
+    try {
+        showLoading("기존 서버 백업 확인 중...");
+        const existing = await firebaseGetTempMemoBackup(cleanKey);
         hideLoading();
+
+        if (existing && !existing.expired && existing.count > 0) {
+            const ok = confirm(`⚠️ 서버에 기존 백업(${existing.count}건)이 보관되어 있습니다.\n현재 폰의 메모(${count}건)로 덮어쓰시겠습니까?`);
+            if (!ok) return;
+        }
+
+        showLoading("개인 메모 암호화 보관 중...");
+        const secretKey = getMemoSecretKey();
+        const encrypted = encryptPayload(JSON.stringify(allMemos), secretKey);
+
+        await firebaseUploadTempMemoBackup(cleanKey, encrypted, count);
+        hideLoading();
+
+        alert(`✅ 개인 메모 ${count}건이 서버에 암호화 보관되었습니다.\n\n[안내]\n1. 유효시간은 12시간입니다.\n2. 구 핸드폰에서 [로그아웃] 후, 새 핸드폰에서 로그인하여 [개인메모 복구]를 누르시면 됩니다.`);
+    } catch (e) {
+        hideLoading();
+        alert("백업 처리 중 오류가 발생했습니다: " + e.message);
     }
 }
 
-export function toggleGPS(isChecked) {
-    if (onGpsToggleCallback) {
-        onGpsToggleCallback(isChecked);
+export async function restorePersonalMemosFromCloud() {
+    const rawKey = localStorage.getItem('deliveryProKey');
+    if (!rawKey) {
+        alert("로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.");
+        return;
+    }
+    const cleanKey = rawKey.trim().replace(/[\/\\#?]/g, '_');
+
+    try {
+        showLoading("서버 백업 확인 중...");
+        const backup = await firebaseGetTempMemoBackup(cleanKey);
+        hideLoading();
+
+        if (!backup) {
+            alert("서버에 보관된 임시 백업이 없습니다.\n기존 핸드폰에서 먼저 [기기변경 백업]을 실행해 주세요.");
+            return;
+        }
+
+        if (backup.expired) {
+            alert("⚠️ 백업 유효시간(12시간)이 초과되어 데이터가 보안상 자동 파기되었습니다.\n기존 기기에서 다시 백업을 진행해 주세요.");
+            return;
+        }
+
+        const ok = confirm(`서버에서 ${backup.count}건의 암호화 백업을 찾았습니다.\n기존 메모와 병합하여 복구하시겠습니까?`);
+        if (!ok) return;
+
+        showLoading("암호 해독 및 복구 중...");
+        const secretKey = getMemoSecretKey();
+        let restoredObj = {};
+
+        try {
+            const decryptedJson = decryptPayload(backup.payload, secretKey);
+            restoredObj = JSON.parse(decryptedJson);
+        } catch (err) {
+            hideLoading();
+            alert("암호 해독에 실패했습니다. 키 정보가 일치하지 않습니다.");
+            return;
+        }
+
+        const currentMemos = getAllPersonalMemos();
+        const mergedMemos = { ...currentMemos, ...restoredObj };
+        localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(mergedMemos));
+
+        await firebaseDeleteTempMemoBackup(cleanKey);
+        hideLoading();
+
+        const destinations = state.getDestinations();
+        destinations.forEach(d => renderMemoPreview(d));
+        if (typeof window.renderList === 'function') window.renderList();
+        if (typeof updateContributionStats === 'function') updateContributionStats();
+
+        alert(`🎉 개인 메모 복구가 성공적으로 완료되었습니다!\n(총 ${Object.keys(mergedMemos).length}건 반영됨)\n\n보안을 위해 서버의 임시 백업 데이터는 영구 파기되었습니다.`);
+    } catch (e) {
+        hideLoading();
+        alert("복구 처리 중 오류가 발생했습니다: " + e.message);
     }
 }
 
 // ==========================================
-// 6. Window 전역 객체 바인딩 (인라인 HTML 이벤트용)
+// 11. Window 전역 바인딩
 // ==========================================
-window.openSettingsModal = openSettingsModal;
-window.closeSettingsModal = closeSettingsModal;
-window.toggleTMS = toggleTMS;
-window.cancelTMSToggle = cancelTMSToggle;
-window.confirmTMSToggle = confirmTMSToggle;
-window.toggleGPS = toggleGPS;
-
-window.showDispatchAlertPopup = showDispatchAlertPopup;
-window.closeDispatchAlertModal = closeDispatchAlertModal;
-window.openNoticeHistoryModal = openNoticeHistoryModal;
-window.closeNoticeHistoryModal = closeNoticeHistoryModal;
-window.clearLocalNotices = clearLocalNotices;
-
-window.openHistoryModal = openHistoryModal;
-window.closeHistoryModal = closeHistoryModal;
-window.clearAllHistory = clearAllHistory;
-window.restoreHistoryItem = restoreHistoryItem;
+window.savePersonalMemo = savePersonalMemo;
+window.deletePersonalMemo = deletePersonalMemo;
+window.backupPersonalMemosToCloud = backupPersonalMemosToCloud;
+window.restorePersonalMemosFromCloud = restorePersonalMemosFromCloud;
