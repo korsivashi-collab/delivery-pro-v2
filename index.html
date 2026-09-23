@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <title>배송 동선 PRO</title>
+    <title>배송 경로 PRO</title>
     
     <!-- 외부 라이브러리 로드 -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -131,7 +131,7 @@
         <div class="w-full max-w-sm bg-white border border-gray-200 rounded-3xl p-8 shadow-2xl text-center relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
             <i class="fa-solid fa-truck-fast text-5xl text-blue-600 mb-4 mt-2"></i>
-            <h2 class="text-2xl font-black text-gray-900 mb-1 tracking-tight">배송 동선 PRO</h2>
+            <h2 class="text-2xl font-black text-gray-900 mb-1 tracking-tight">배송 경로 PRO</h2>
             <p class="text-xs text-gray-500 mb-6 font-semibold">발급받은 키와 본인 휴대폰 번호를 입력해 주세요.</p>
             
             <div class="space-y-3 mb-5 text-left">
@@ -160,13 +160,11 @@
                 <i class="fa-solid fa-gift"></i> 처음이신가요? 7일 무료 체험
             </button>
 
-            <!-- 법적 고지 및 약관 링크 (인증 화면 하단) -->
-            <div class="mt-4 pt-2.5 border-t border-gray-100 flex justify-center items-center gap-2 text-[11px] text-gray-400 font-medium">
-                <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
-                <span>·</span>
-                <a href="/privacy.html" target="_blank" class="hover:text-gray-600 underline font-bold text-gray-500 transition">개인정보처리방침</a>
-                <span>·</span>
-                <a href="/policy.html" target="_blank" class="hover:text-gray-600 underline transition">운영정책</a>
+            <!-- 스토어 심사용 개인정보처리방침 링크 (인증 화면) -->
+            <div class="mt-4 pt-2 border-t border-gray-100 text-center">
+                <a href="/privacy.html" target="_blank" class="text-[11px] text-gray-400 hover:text-gray-600 underline font-medium transition">
+                    개인정보처리방침
+                </a>
             </div>
         </div>
     </div>
@@ -203,7 +201,7 @@
                 <!-- 상단 타이틀 및 알림함/로그아웃 -->
                 <div class="flex items-center justify-between">
                     <h1 class="text-lg font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink-0">
-                        <i class="fa-solid fa-route text-blue-600 text-base"></i> 배송 동선 PRO
+                        <i class="fa-solid fa-route text-blue-600 text-base"></i> 배송 경로 PRO
                     </h1>
                     
                     <div class="flex items-center gap-1.5 shrink-0">
@@ -256,7 +254,7 @@
             <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px]">
                 <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
-                    <p class="font-medium text-xs">주소지를 스캔하면 동선이 생성됩니다.</p>
+                    <p class="font-medium text-xs">주소지를 스캔하면 경로가 생성됩니다.</p>
                 </li>
             </ul>
         </main>
@@ -270,7 +268,7 @@
                 
                 <div id="swipe-container" class="flex-1 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[52px]">
                     <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[13px] z-0 select-none pointer-events-none tracking-tight">
-                        밀어서 동선 최적화 <i class="fa-solid fa-angles-right ml-1.5 animate-pulse"></i>
+                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1.5 animate-pulse"></i>
                     </div>
                     <div id="swipe-btn" class="absolute left-1 w-[44px] h-[44px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
                         <i class="fa-solid fa-angles-right text-lg"></i>
