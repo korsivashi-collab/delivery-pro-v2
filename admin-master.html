@@ -57,7 +57,6 @@
                     <button onclick="window.openExcelExportModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-file-excel"></i> 전체 데이터 추출 (엑셀)
                     </button>
-                    <!-- 🌟 요청 반영: 전체 데이터 추출 바로 옆에 [접속 제한 등록/해제] 버튼 배치 -->
                     <button onclick="window.openBlockedDeviceModal()" class="bg-rose-600 hover:bg-rose-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-shield-halved"></i> 접속 제한 등록/해제
                     </button>
@@ -251,7 +250,7 @@
     <!-- 마스터 전용 팝업 모달 목록 -->
     <!-- ======================================================== -->
 
-    <!-- 🌟 신규 추가: 접속 제한 등록 및 해제 전용 관리 모달 (상단 버튼 연동) -->
+    <!-- 접속 제한 등록 및 해제 전용 관리 모달 (상단 버튼 연동) -->
     <div id="blocked-devices-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-2xl rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
             <div class="flex justify-between items-center pb-3 border-b border-gray-100 flex-none mb-3">
@@ -318,23 +317,47 @@
         </div>
     </div>
 
-    <!-- 1. 신규 계정 생성 모달 -->
+    <!-- 1. 🌟 신규 계정 생성 모달 (키워드 입력 및 수량 설정 반영) -->
     <div id="create-account-modal" class="hidden fixed inset-0 bg-black/60 z-[700] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative">
-            <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2"><i class="fa-solid fa-user-plus text-blue-600"></i> 신규 계정 생성</h3>
-            <p class="text-xs text-gray-500 font-bold mb-4">발급할 계정 유형과 만료일을 선택해주세요.</p>
-            <div class="space-y-4 mb-6">
-                <div><label class="block text-[11px] font-bold text-gray-700 mb-1">발급 계정 유형</label><select id="new-key-type" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm cursor-pointer"><option value="regular">일반 계정 (정식 기사용)</option><option value="dispatch">관제 계정 (지사/사무실용)</option></select></div>
-                <div><label class="block text-[11px] font-bold text-gray-700 mb-1">사용 유효기간 (만료일)</label><input type="date" id="new-key-expire" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm cursor-pointer"></div>
+            <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2">
+                <i class="fa-solid fa-user-plus text-blue-600"></i> 신규 계정 생성
+            </h3>
+            <p class="text-xs text-gray-500 font-bold mb-4">발급할 계정 유형, 키워드 및 수량을 설정하세요.</p>
+            <div class="space-y-3.5 mb-5">
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-700 mb-1">발급 계정 유형</label>
+                    <select id="new-key-type" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
+                        <option value="regular">일반 계정 (정식 기사용)</option>
+                        <option value="dispatch">관제 계정 (지사/사무실용)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-700 mb-1">키워드 지정 (선택, 최대 7자리)</label>
+                    <input type="text" id="new-key-keyword" maxlength="7" placeholder="예: KSCO (미입력 시 무작위 생성)" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-mono font-bold uppercase rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm">
+                    <p class="text-[10px] text-gray-400 mt-1 font-bold">* 키워드 포함 총 8자리(예: KSCO-XXXX)로 자동 생성됩니다.</p>
+                </div>
+                <div class="grid grid-cols-2 gap-2.5">
+                    <div>
+                        <label class="block text-[11px] font-bold text-gray-700 mb-1">생성 수량 (개)</label>
+                        <input type="number" id="new-key-count" min="1" max="50" value="1" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm text-center">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-gray-700 mb-1">사용 만료일</label>
+                        <input type="date" id="new-key-expire" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm cursor-pointer">
+                    </div>
+                </div>
             </div>
             <div class="flex gap-2">
-                <button onclick="document.getElementById('create-account-modal').classList.add('hidden')" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-xs transition">취소</button>
-                <button onclick="window.generateNewLicense(); document.getElementById('create-account-modal').classList.add('hidden');" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5"><i class="fa-solid fa-check"></i> 계정 발급</button>
+                <button type="button" onclick="document.getElementById('create-account-modal').classList.add('hidden')" class="flex-1 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold py-3 rounded-xl text-xs transition">취소</button>
+                <button type="button" onclick="window.generateNewLicense()" id="btn-generate-license" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-3 rounded-xl text-xs shadow-md transition active:scale-95 flex items-center justify-center gap-1.5">
+                    <i class="fa-solid fa-check"></i> 계정 발급
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- 2. 계정 정보 및 소속 연결 수정 모달 (기기 제한 등록 버튼 완전 제거 완료) -->
+    <!-- 2. 계정 정보 및 소속 연결 수정 모달 -->
     <div id="edit-license-modal" class="hidden fixed inset-0 bg-black/60 z-[600] flex items-center justify-center p-4 backdrop-blur-sm">
         <div id="edit-modal-card" class="bg-white w-full max-w-lg rounded-3xl p-6 shadow-2xl relative max-h-[90vh] flex flex-col">
             <h3 class="text-base font-black text-gray-900 mb-1 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-blue-600"></i> 계정 정보 및 연결 수정</h3>
