@@ -317,18 +317,21 @@ export async function unblockDevice(deviceId) {
 }
 
 // ==========================================
-// 🌟 3. 라이선스(계정) 관리 및 키워드/대량 생성 CRUD 로직
+// 3. 라이선스(계정) 관리 및 키워드/대량 생성 CRUD 로직
 // ==========================================
 
-// 키워드 포함 총 8자리(XXXX-XXXX) 키 조합 헬퍼
+// 🌟 [핵심 수정] 한글(가-힣), 영문, 숫자를 모두 포함하여 총 8자리(XXXX-XXXX) 키 조합 헬퍼
 function generateCustomLicenseKey(keyword = '') {
     const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    const cleanKw = keyword.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+    // 한글(가-힣), 영문, 숫자 허용 (최대 7글자까지 접두어로 사용)
+    const cleanKw = keyword.trim().replace(/[^A-Z0-9가-힣]/gi, '').toUpperCase().slice(0, 7);
     let fullChars = cleanKw;
-    const needed = 8 - cleanKw.length;
+    const needed = Math.max(0, 8 - cleanKw.length);
     for (let i = 0; i < needed; i++) {
         fullChars += chars.charAt(Math.floor(Math.random() * chars.length));
     }
+    // 정확히 8글자로 절삭 후 가운데 하이픈 연결 (XXXX-XXXX 형식)
+    fullChars = fullChars.slice(0, 8);
     return `${fullChars.slice(0, 4)}-${fullChars.slice(4, 8)}`;
 }
 
