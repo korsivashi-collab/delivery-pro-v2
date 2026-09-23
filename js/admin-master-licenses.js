@@ -106,6 +106,7 @@ export function renderMasterTables() {
     });
 
     renderBlockedDevicesTable();
+    renderModalBlockedDevices();
 }
 
 function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
@@ -137,8 +138,90 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
 }
 
 // ==========================================
-// 🌟 2. 접속 제한(블랙리스트) 기기 관리 CRUD
+// 🌟 2. 접속 제한 기기 관리 모달 및 CRUD
 // ==========================================
+
+// 상단 버튼 [접속 제한 등록/해제] 모달 열기
+export function openBlockedDeviceModal() {
+    const inputId = document.getElementById('modal-blocked-device-id');
+    const inputMemo = document.getElementById('modal-blocked-device-memo');
+    if (inputId) inputId.value = '';
+    if (inputMemo) inputMemo.value = '';
+    renderModalBlockedDevices();
+    document.getElementById('blocked-devices-modal')?.classList.remove('hidden');
+    setTimeout(() => inputId?.focus(), 100);
+}
+
+// 모달 닫기
+export function closeBlockedDeviceModal() {
+    document.getElementById('blocked-devices-modal')?.classList.add('hidden');
+}
+
+// 모달 내 제한 기기 목록 렌더링
+export function renderModalBlockedDevices() {
+    const tbody = document.getElementById('modal-blocked-device-tbody');
+    const badge = document.getElementById('modal-blocked-count-badge');
+    if (!tbody) return;
+
+    const blockeds = state.allBlockedDevices || [];
+    if (badge) badge.innerText = `${blockeds.length}대 제한 중`;
+
+    if (blockeds.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="5" class="py-12 text-center text-gray-400 font-bold text-xs">등록된 제한 기기가 없습니다.</td></tr>`;
+        return;
+    }
+
+    tbody.innerHTML = blockeds.map((item, idx) => {
+        return `
+        <tr class="hover:bg-rose-50/50 transition">
+            <td class="py-2.5 px-3 font-bold text-gray-400 text-center">${idx + 1}</td>
+            <td class="py-2.5 px-3 font-mono font-black text-rose-600 select-all">${item.deviceId}</td>
+            <td class="py-2.5 px-3 font-bold text-gray-800">${item.memo || '<span class="text-gray-400 font-normal">-</span>'}</td>
+            <td class="py-2.5 px-3 text-center">
+                <span class="inline-flex items-center gap-1 bg-rose-100 text-rose-800 px-2 py-0.5 rounded-full text-[10px] font-black border border-rose-200 shadow-2xs">
+                    <i class="fa-solid fa-ban text-[9px]"></i> 접속 제한
+                </span>
+            </td>
+            <td class="py-2.5 px-3 text-center whitespace-nowrap">
+                <button type="button" onclick="window.unblockDevice('${item.deviceId}')" class="px-2.5 py-1 bg-white hover:bg-rose-50 text-rose-600 hover:text-rose-700 border border-rose-200 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">
+                    제한 해제
+                </button>
+            </td>
+        </tr>`;
+    }).join('');
+}
+
+// 모달 내에서 신규 제한 기기 등록
+export async function addBlockedDeviceFromModal() {
+    const inputId = document.getElementById('modal-blocked-device-id');
+    const inputMemo = document.getElementById('modal-blocked-device-memo');
+    const devId = inputId ? inputId.value.trim() : '';
+    const memo = inputMemo ? inputMemo.value.trim() : '';
+
+    if (!devId) {
+        alert("접속을 차단할 기기 고유번호(deviceId)를 입력해 주세요.");
+        inputId?.focus();
+        return;
+    }
+
+    try {
+        await setDoc(doc(db, "blocked_devices", devId), {
+            deviceId: devId,
+            memo: memo || '관리자 직접 제한 등록',
+            createdAt: Date.now()
+        });
+
+        alert(`[접속 제한 등록 완료]\n\n기기 고유번호: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
+        if (inputId) inputId.value = '';
+        if (inputMemo) inputMemo.value = '';
+        renderModalBlockedDevices();
+        renderBlockedDevicesTable();
+    } catch (e) {
+        alert("기기 접속 제한 등록 오류: " + e.message);
+    }
+}
+
+// 탭 테이블 렌더링
 export function renderBlockedDevicesTable() {
     const tbody = document.getElementById('table-body-blocked');
     const pagEl = document.getElementById('pagination-blocked');
@@ -195,6 +278,7 @@ export function renderBlockedDevicesTable() {
     }
 }
 
+// 탭에서 등록
 export async function addBlockedDevice() {
     const inputEl = document.getElementById('new-blocked-device-id');
     const memoEl = document.getElementById('new-blocked-device-memo');
@@ -214,14 +298,17 @@ export async function addBlockedDevice() {
             createdAt: Date.now()
         });
 
-        alert(`[접속 제한 등록 완료]\n\n기기 고유번호: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 통신 오류' 화면으로 위장 처리됩니다.`);
+        alert(`[접속 제한 등록 완료]\n\n기기 고유번호: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
         if (inputEl) inputEl.value = '';
         if (memoEl) memoEl.value = '';
+        renderModalBlockedDevices();
+        renderBlockedDevicesTable();
     } catch (e) {
         alert("기기 접속 제한 등록 오류: " + e.message);
     }
 }
 
+// 기기 제한 해제 (공통 함수)
 export async function unblockDevice(deviceId) {
     if (!deviceId) return;
     if (!confirm(`[${deviceId}] 기기의 접속 제한을 해제하시겠습니까?\n해제 즉시 해당 기기의 정상 접속이 허용됩니다.`)) return;
@@ -229,33 +316,10 @@ export async function unblockDevice(deviceId) {
     try {
         await deleteDoc(doc(db, "blocked_devices", deviceId));
         alert("접속 제한이 성공적으로 해제되었습니다.");
+        renderModalBlockedDevices();
+        renderBlockedDevicesTable();
     } catch (e) {
         alert("제한 해제 오류: " + e.message);
-    }
-}
-
-export async function blockDeviceFromEditModal() {
-    const devId = document.getElementById('edit-device-input')?.value.trim();
-    const key = document.getElementById('edit-key-input')?.value.trim();
-
-    if (!devId) {
-        alert("해당 계정에 등록된 기기 고유번호(deviceId)가 없습니다.\n로그인한 이력이 없는 기기는 차단할 수 없습니다.");
-        return;
-    }
-
-    if (!confirm(`기기 고유번호 [${devId}]를 접속 제한(블랙리스트) 목록에 등록하시겠습니까?\n\n등록 시 해당 기기는 다음 접속부터 서버 통신 오류 화면으로 표시되어 본인이 차단된 줄 모르게 됩니다.`)) {
-        return;
-    }
-
-    try {
-        await setDoc(doc(db, "blocked_devices", devId), {
-            deviceId: devId,
-            memo: `계정 [${key || '미확인'}] 수정창에서 등록`,
-            createdAt: Date.now()
-        });
-        alert(`[${devId}] 기기가 접속 제한 목록에 등록되었습니다.`);
-    } catch (e) {
-        alert("제한 등록 오류: " + e.message);
     }
 }
 
@@ -477,9 +541,13 @@ window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
 window.renderMasterTables = renderMasterTables;
 window.renderBlockedDevicesTable = renderBlockedDevicesTable;
+window.openBlockedDeviceModal = openBlockedDeviceModal;
+window.closeBlockedDeviceModal = closeBlockedDeviceModal;
+window.renderModalBlockedDevices = renderModalBlockedDevices;
+window.addBlockedDeviceFromModal = addBlockedDeviceFromModal;
 window.addBlockedDevice = addBlockedDevice;
 window.unblockDevice = unblockDevice;
-window.blockDeviceFromEditModal = blockDeviceFromEditModal;
+
 window.generateNewLicense = generateNewLicense;
 window.openEditLicenseModal = openEditLicenseModal;
 window.closeEditModal = closeEditModal;

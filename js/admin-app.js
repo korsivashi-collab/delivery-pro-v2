@@ -14,7 +14,8 @@ import {
     generateNewLicense, openEditLicenseModal, closeEditModal,
     renderModalConnectedDrivers, linkDriverFromModal, unlinkDriverFromModal,
     saveLicenseEdit, deleteLicense, deleteLicenseFromModal,
-    renderBlockedDevicesTable, addBlockedDevice, unblockDevice, blockDeviceFromEditModal
+    renderBlockedDevicesTable, addBlockedDevice, unblockDevice,
+    openBlockedDeviceModal, closeBlockedDeviceModal, renderModalBlockedDevices, addBlockedDeviceFromModal
 } from "./admin-master-licenses.js";
 
 import {
@@ -287,13 +288,14 @@ window.initMasterDataSync = function() {
         }
     });
 
-    // 🌟 신규 추가: 접속 제한(블랙리스트) 기기 실시간 동기화
+    // 접속 제한(블랙리스트) 기기 실시간 동기화 (모달 및 탭 동시 갱신)
     onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
         state.allBlockedDevices = [];
         snapshot.forEach(docSnap => { state.allBlockedDevices.push({ id: docSnap.id, ...docSnap.data() }); });
         const countBlockedEl = document.getElementById('count-blocked');
         if (countBlockedEl) countBlockedEl.innerText = state.allBlockedDevices.length;
         if (typeof renderBlockedDevicesTable === 'function') renderBlockedDevicesTable();
+        if (typeof renderModalBlockedDevices === 'function') renderModalBlockedDevices();
     });
 
     onSnapshot(collection(db, "memos"), (snapshot) => {
@@ -399,7 +401,6 @@ export function renderPhotoGalleryTable() {
     const searchDriver = (document.getElementById('photo-filter-driver-search')?.value || '').trim().toLowerCase();
     const filterDate = document.getElementById('photo-filter-date')?.value || '';
 
-    // 사진 링크가 있는 완료 건만 추출
     let photoCompletions = state.allCompletions.filter(c => c.photoUrl);
 
     if (searchDriver) {
@@ -517,9 +518,13 @@ window.switchMasterTab = switchMasterTab;
 window.changeMasterTabPagination = changeMasterTabPagination;
 window.renderMasterTables = renderMasterTables;
 window.renderBlockedDevicesTable = renderBlockedDevicesTable;
+window.openBlockedDeviceModal = openBlockedDeviceModal;
+window.closeBlockedDeviceModal = closeBlockedDeviceModal;
+window.renderModalBlockedDevices = renderModalBlockedDevices;
+window.addBlockedDeviceFromModal = addBlockedDeviceFromModal;
 window.addBlockedDevice = addBlockedDevice;
 window.unblockDevice = unblockDevice;
-window.blockDeviceFromEditModal = blockDeviceFromEditModal;
+
 window.generateNewLicense = generateNewLicense;
 window.openEditLicenseModal = openEditLicenseModal;
 window.closeEditModal = closeEditModal;
