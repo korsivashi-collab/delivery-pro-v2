@@ -1,4 +1,8 @@
 // js/api.js
+// =================================================================
+// [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈
+// =================================================================
+
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
 import { getFirestore, collection, addDoc, getDoc, getDocs, onSnapshot, query, where, updateDoc, doc, increment, setDoc, deleteDoc, orderBy } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
@@ -54,7 +58,7 @@ async function compressImageToBlob(file, maxDimension = 1280, quality = 0.75) {
     });
 }
 
-// 🌟 [신규 추가] 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증
+// 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증 (에러 방지용 필수 함수)
 export async function checkIfDeviceBlocked(deviceId) {
     if (!deviceId) return false;
     try {
@@ -266,7 +270,7 @@ export async function firebaseStartTrial(phone, deviceId) {
     return { valid: true, trialKey: trialKey, expireDate: expDateStr, dispatchKey: '' };
 }
 
-// 7. 주차 메모 관련 함수들
+// 7. 주차 및 건물 메모 (공용 메모) 관련 함수들
 export async function getMemosFromFirestore(address) {
     const q = query(collection(db, "memos"), where("address", "==", address));
     const querySnapshot = await getDocs(q);
@@ -303,46 +307,51 @@ export async function getBatchMemosFromFirestore(addresses) {
     return allMemosMap;
 }
 
-// 🌟 [수정] 메모 등록/수정 시 작성자의 phone 번호도 함께 기록
+// 🌟 [수정 완료] 공용 메모 저장/수정 시 전화번호(phone) 기준 중복 덮어쓰기 로직
 export async function saveMemoToFirestore(address, deviceId, memoText, phone = "") {
     const now = new Date();
     const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    
-    const q = query(collection(db, "memos"), where("address", "==", address), where("deviceId", "==", deviceId));
+    const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
+
+    // 복합 색인(Index) 에러 방지를 위해 address로만 쿼리 후 배열에서 전화번호를 대조하여 덮어씁니다.
+    const q = query(collection(db, "memos"), where("address", "==", address));
     const querySnapshot = await getDocs(q);
 
-    if (!querySnapshot.empty) {
-        const firstDoc = querySnapshot.docs[0];
-        await updateDoc(doc(db, "memos", firstDoc.id), {
+    let existingDocs = [];
+    querySnapshot.forEach(docSnap => {
+        const data = docSnap.data();
+        const dataPhone = (data.phone || "").replace(/[^0-9]/g, '');
+        if (data.deviceId === deviceId || (cleanPhone && dataPhone && dataPhone === cleanPhone)) {
+            existingDocs.push({ id: docSnap.id, ...data });
+        }
+    });
+
+    if (existingDocs.length > 0) {
+        const primaryDocId = existingDocs[0].id;
+        await updateDoc(doc(db, "memos", primaryDocId), {
             memo: memoText,
             time: timeStr,
-            phone: phone || firstDoc.data().phone || "",
+            phone: phone || "",
+            deviceId: deviceId,
             updatedAt: now.getTime(),
             reported: false
         });
-        for (let i = 1; i < querySnapshot.docs.length; i++) {
-            await deleteDoc(doc(db, "memos", querySnapshot.docs[i].id));
+        
+        for (let i = 1; i < existingDocs.length; i++) {
+            await deleteDoc(doc(db, "memos", existingDocs[i].id));
         }
     } else {
         await addDoc(collection(db, "memos"), {
-            address, 
-            memo: memoText, 
-            deviceId, 
+            address,
+            memo: memoText,
+            deviceId,
             phone: phone || "",
-            time: timeStr, 
-            likes: 0, 
-            reported: false, 
+            time: timeStr,
+            likes: 0,
+            reported: false,
             createdAt: now.getTime()
         });
     }
-}
-
-export async function likeMemoInFirestore(docId) { 
-    await updateDoc(doc(db, "memos", docId), { likes: increment(1) }); 
-}
-
-export async function reportMemoInFirestore(docId) { 
-    await updateDoc(doc(db, "memos", docId), { reported: true }); 
 }
 
 // 🌟 [신규 추가] 전화번호 및 계정 매핑 기반 전체 공용 메모 기여도 서버 동기화 함수
@@ -350,14 +359,12 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
     const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
     const myAddresses = new Set();
 
-    // 1. 기존 로컬스토리지 주소 수집
     try {
         const localList = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
         localList.forEach(addr => { if (addr) myAddresses.add(addr); });
     } catch (e) {}
 
     try {
-        // 2. 현재 deviceId로 작성된 메모 수집
         if (deviceId) {
             const qDev = query(collection(db, "memos"), where("deviceId", "==", deviceId));
             const snapDev = await getDocs(qDev);
@@ -367,7 +374,6 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
             });
         }
 
-        // 3. 전화번호(phone) 필드로 직접 작성된 메모 수집
         if (phone) {
             const qPhone = query(collection(db, "memos"), where("phone", "==", phone));
             const snapPhone = await getDocs(qPhone);
@@ -377,7 +383,6 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
             });
         }
 
-        // 4. 본인 전화번호로 발급된 라이선스들에 매핑되었던 모든 과거 deviceId들의 메모까지 완전 역추적 동기화
         if (cleanPhone) {
             const licQ = query(collection(db, "licenses"), where("phone", "==", phone));
             const licSnap = await getDocs(licQ);
@@ -405,6 +410,14 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
     const finalArray = Array.from(myAddresses);
     localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(finalArray));
     return finalArray.length;
+}
+
+export async function likeMemoInFirestore(docId) { 
+    await updateDoc(doc(db, "memos", docId), { likes: increment(1) }); 
+}
+
+export async function reportMemoInFirestore(docId) { 
+    await updateDoc(doc(db, "memos", docId), { reported: true }); 
 }
 
 // 8. 배송 경로 및 완료 내역 동기화
@@ -519,7 +532,6 @@ export async function firebaseSetTmsPermission(key, isAllowed) {
 // 10. 개인 메모 기기변경 임시 금고 (12시간 자동 파기 및 암호화 보관)
 // =================================================================
 
-// 10-1. 암호화된 개인 메모 임시 백업 업로드
 export async function firebaseUploadTempMemoBackup(cleanKey, encryptedPayload, count) {
     if (!cleanKey) throw new Error("라이선스 식별자가 올바르지 않습니다.");
     const now = Date.now();
@@ -535,7 +547,6 @@ export async function firebaseUploadTempMemoBackup(cleanKey, encryptedPayload, c
     });
 }
 
-// 10-2. 임시 백업 데이터 조회 및 만료 검사
 export async function firebaseGetTempMemoBackup(cleanKey) {
     if (!cleanKey) return null;
     const docRef = doc(db, "temp_memo_backups", cleanKey);
@@ -561,7 +572,6 @@ export async function firebaseGetTempMemoBackup(cleanKey) {
     };
 }
 
-// 10-3. 복구 완료 후 서버 임시 데이터 즉시 파기
 export async function firebaseDeleteTempMemoBackup(cleanKey) {
     if (!cleanKey) return;
     try {
