@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>페이지를 로드할 수 없습니다</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            -webkit-tap-highlight-color: transparent;
+        }
+        body {
+            background-color: #f8fafc;
+            color: #334155;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            padding: 24px;
+        }
+        .error-card {
+            background: #ffffff;
+            width: 100%;
+            max-width: 420px;
+            padding: 36px 28px;
+            border-radius: 24px;
+            border: 1px solid #e2e8f0;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.05), 0 8px 10px -6px rgba(0, 0, 0, 0.01);
+            text-align: center;
+        }
+        .icon-box {
+            width: 68px;
+            height: 68px;
+            margin: 0 auto 20px;
+            background-color: #f1f5f9;
+            border-radius: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #64748b;
+        }
+        .icon-box svg {
+            width: 34px;
+            height: 34px;
+            stroke-width: 2;
+        }
+        h1 {
+            font-size: 19px;
+            font-weight: 800;
+            color: #0f172a;
+            margin-bottom: 10px;
+            letter-spacing: -0.02em;
+        }
+        p {
+            font-size: 13px;
+            color: #64748b;
+            line-height: 1.6;
+            margin-bottom: 24px;
+            word-break: keep-all;
+        }
+        .tech-box {
+            background-color: #f8fafc;
+            border: 1px solid #edf2f7;
+            border-radius: 12px;
+            padding: 12px;
+            font-size: 11px;
+            color: #94a3b8;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            margin-bottom: 24px;
+            text-align: left;
+            line-height: 1.5;
+        }
+        .retry-btn {
+            width: 100%;
+            background-color: #0f172a;
+            color: #ffffff;
+            border: none;
+            padding: 14px;
+            border-radius: 14px;
+            font-size: 14px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background-color 0.2s, transform 0.1s;
+        }
+        .retry-btn:hover {
+            background-color: #1e293b;
+        }
+        .retry-btn:active {
+            transform: scale(0.98);
+        }
+    </style>
+</head>
+<body>
+    <div class="error-card">
+        <div class="icon-box">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+            </svg>
+        </div>
+        <h1>서버에 연결할 수 없습니다</h1>
+        <p>일시적인 네트워크 지연이 발생했거나 서버 응답 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.</p>
+        
+        <div class="tech-box">
+            <div>STATUS: ERR_CONNECTION_TIMED_OUT</div>
+            <div>CODE: 504_GATEWAY_TIMEOUT</div>
+        </div>
+
+        <button type="button" class="retry-btn" onclick="window.location.href='index.html'">다시 시도</button>
+    </div>
+</body>
+</html>
