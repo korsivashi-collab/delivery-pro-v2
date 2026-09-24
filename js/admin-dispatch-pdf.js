@@ -163,7 +163,7 @@ function parseItemLine(text, itemsArray) {
 }
 
 // ==========================================
-// 4. 주문 정보 파싱 및 특수 주소/상호 규칙 적용 엔진
+// 4. 주문 정보 파싱 및 공급자 완전 차단 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     let storeName = '';
@@ -178,35 +178,44 @@ function parseOrderFromPageLines(lines, pageNum) {
     let buyerSectionLines = [];
     let fullRawTextLines = [];
 
-    lines.forEach(line => {
-        fullRawTextLines.push(line.fullText);
+    // 🌟 1단계: 문서 전체 텍스트에서 상단의 공급자(발송자) 영역을 통째로 무력화(제거)
+    const rawCombinedText = lines.map(l => l.fullText).join('\n');
+    
+    // 공급자 블록 시작부터 '공급받는 자' 또는 '주문번호'가 나오기 전까지의 구간을 공백으로 치환
+    const cleanDocumentText = rawCombinedText.replace(/공급자[\s\S]*?(?=공급받는\s*자|주문번호|No\.|$)/gi, ' ');
+    const cleanLines = cleanDocumentText.split('\n');
 
-        if (/No\.|상품명|단가|수량|규격/i.test(line.fullText)) isItemSection = true;
+    cleanLines.forEach(lineText => {
+        const trimmed = lineText.trim();
+        if (!trimmed) return;
+
+        fullRawTextLines.push(trimmed);
+
+        if (/No\.|상품명|단가|수량|규격/i.test(trimmed)) isItemSection = true;
 
         if (isItemSection) {
-            if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(line.fullText)) {
+            if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(trimmed)) {
                 isItemSection = false;
-            } else if (/^\d+\s+/.test(line.fullText.trim())) {
-                parseItemLine(line.fullText, items);
+            } else if (/^\d+\s+/.test(trimmed)) {
+                parseItemLine(trimmed, items);
             }
         } else {
-            let targetText = (line.rightText && line.rightText.length > 2) ? line.rightText : line.fullText;
-            // 공급자(발송자) 정보 원천 차단
-            if (!/공급자|대표자|윤진유통|사업자등록번호|통신판매/.test(targetText)) {
-                buyerSectionLines.push(targetText);
+            // 공급자 관련 키워드가 포함된 라인은 수취자 분석 라인에서 완전 배제
+            if (!/공급자|대표자|윤진유통|사업자등록번호|통신판매|상호\(법인명\)|건원대로/.test(trimmed)) {
+                buyerSectionLines.push(trimmed);
             }
         }
 
-        if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(line.fullText)) {
-            memo = line.fullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
+        if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(trimmed)) {
+            memo = trimmed.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
         }
-        if (/주문번호|오더번호|발주번호/.test(line.fullText)) {
-            const m = line.fullText.match(/(?:주문번호|오더번호|발주번호)\s*[:|]?\s*([A-Z0-9_\-]+)/i);
+        if (/주문번호|오더번호|발주번호/.test(trimmed)) {
+            const m = trimmed.match(/(?:주문번호|오더번호|발주번호)\s*[:|]?\s*([A-Z0-9_\-]+)/i);
             if (m) orderNo = m[1].trim();
         }
     });
 
-    // 1단계: 수취자 영역에서 상호, 구매자, 전화번호 추출
+    // 2단계: 수취자 영역에서 상호, 구매자, 전화번호 탐색
     buyerSectionLines.forEach(text => {
         if (/(?:배송지명|간판명|매장명|가게명|상호명|상호)/.test(text)) {
             let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호)\s*[:|]?\s*/i, '').trim();
@@ -227,7 +236,6 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
     });
 
-    // 보완 매칭
     const fullBuyerString = buyerSectionLines.join(' ');
     if (!storeName) {
         const m = fullBuyerString.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
@@ -241,22 +249,19 @@ function parseOrderFromPageLines(lines, pageNum) {
     if (!storeName) storeName = senderName || '배송처 미상';
     if (!senderName) senderName = storeName;
 
-    // 🌟 2단계: 상호명 앞의 불필요한 특수기호 및 공백 정제 (예: ") ", ")" 제거)
+    // 상호명 앞 특수기호 정제
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
-    // 🌟 3단계: 특수 주소 파싱 규칙 적용
-    // (서울, 대전, 대구, 부산 등 행정구역 인식 시점부터 주소를 긁어오고, '('가 나타나면 그 뒷부분은 모두 날림)
-    const combinedRawText = fullRawTextLines.join(' ');
+    // 3단계: 주소 추출 (공급자가 완전히 제거된 cleanDocumentText에서 행정구역 탐지)
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
-    const regionMatch = combinedRawText.match(regionRegex);
+    const regionMatch = cleanDocumentText.match(regionRegex);
 
     if (regionMatch) {
         let rawAddr = regionMatch[0];
-        // 불필요한 라벨이나 전화번호 영역 전까지만 컷팅
         rawAddr = rawAddr.split(/(?:연락처|전화|배송지|간판|상호|구매자|No\.|결제)/)[0];
         rawAddr = rawAddr.replace(/\[\d+\]/g, '').trim();
 
-        // 🌟 핵심 규칙: '('가 인식이 되면 '('와 그 뒷부분은 모두 날림
+        // 괄호 '(' 인식이 되면 뒷부분 통째로 삭제
         const parenIdx = rawAddr.indexOf('(');
         if (parenIdx !== -1) {
             rawAddr = rawAddr.slice(0, parenIdx);
