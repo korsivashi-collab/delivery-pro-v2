@@ -349,13 +349,14 @@ function parseOrderFromPageItems(items, viewport, pageNum) {
 }
 
 // ==========================================
-// 🌟 4. 주소 좌표(위/경도) 지오코딩 엔진 (요청 규칙: '(' 감지 시 '(' 포함 뒷부분 완전 삭제)
+// 🌟 5. 지오코딩 엔진 ('(' 문자 및 그 뒷부분 전체 삭제 규칙 적용)
 // ==========================================
 function cleanAddressByOpenParen(addr) {
     if (!addr) return '';
-    let s = addr.replace(/^\[\d+\]\s*/, '').trim(); // 우편번호만 제거
+    let s = addr.replace(/^\[\d+\]\s*/, '').trim(); // 우편번호 제거
     
-    // 🌟 요청 규칙: '(' 문자가 걸리면 '('를 포함한 뒷부분 전체 삭제
+    // 🌟 요청하신 규칙: '(' 문자가 걸리면 '('를 포함하여 그 뒷부분 전체를 삭제
+    // 예: "서울 구로구 공원로6나길 43-2 (구로동) 지하1층" -> "서울 구로구 공원로6나길 43-2"
     const parenIndex = s.indexOf('(');
     if (parenIndex !== -1) {
         s = s.substring(0, parenIndex).trim();
@@ -371,9 +372,7 @@ async function getCoordsFromAddress(address) {
         }
         const geocoder = new window.kakao.maps.services.Geocoder();
 
-        // 🌟 1차 검색: '(' 걸리면 뒷부분을 통째로 삭제한 정제 주소로 직접 검색
-        // 예: "서울 구로구 공원로6나길 43-2 (구로동)..." -> "서울 구로구 공원로6나길 43-2" (도로명+번지수 보존)
-        // 예: "서울 종로구 종로40길 18 (종로5가)..." -> "서울 종로구 종로40길 18" (도로명+번지수 보존)
+        // 🌟 1차 검색: '('를 포함해 뒷부분을 도려낸 깔끔한 도로명+번지수 주소로 검색
         const targetCleanAddr = cleanAddressByOpenParen(address);
 
         geocoder.addressSearch(targetCleanAddr, (res1, stat1) => {
@@ -385,7 +384,7 @@ async function getCoordsFromAddress(address) {
                 return;
             }
 
-            // 2차 검색: 원본 주소로 폴백 시도
+            // 2차 검색: 원본 주소 폴백
             geocoder.addressSearch(address.trim(), (res2, stat2) => {
                 if (stat2 === window.kakao.maps.services.Status.OK && res2[0]) {
                     const fullAddr = (res2[0].road_address && res2[0].road_address.address_name) 
@@ -395,7 +394,7 @@ async function getCoordsFromAddress(address) {
                     return;
                 }
 
-                // 3차 검색: 도로명/지번 기본 패턴만 탐색
+                // 3차 검색: 시/도 ~ 번지수 패턴 추출
                 const basicMatch = targetCleanAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
                 if (basicMatch) {
                     geocoder.addressSearch(basicMatch[0], (res3, stat3) => {
