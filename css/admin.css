@@ -59,19 +59,7 @@
     box-shadow: 0 10px 20px rgba(2, 132, 199, 0.4); 
 }
 
-/* 2. 패널 리사이저 바 (Splitter Bar) 스타일 */
-#dispatch-panel-resizer {
-    cursor: col-resize;
-    user-select: none;
-    touch-action: none;
-}
-#dispatch-panel-resizer:hover div,
-#dispatch-panel-resizer:active div {
-    background-color: #2563eb;
-    transform: scaleY(1.2);
-}
-
-/* 3. 스크롤바 제어 스타일 */
+/* 2. 스크롤바 제어 스타일 */
 .hide-scrollbar::-webkit-scrollbar { 
     display: none; 
 }
@@ -96,7 +84,7 @@
     background: #64748b; 
 }
 
-/* 4. 테이블 및 공통 인터랙션 스타일 */
+/* 3. 테이블 및 공통 인터랙션 스타일 */
 .sortable-th { 
     cursor: pointer; 
     user-select: none; 
@@ -124,7 +112,7 @@
     background-color: #eef2ff; 
 }
 
-/* 5. 애니메이션 효과 */
+/* 4. 애니메이션 효과 */
 @keyframes popIn {
     0% { transform: translate(-50%, -85%) scale(0.9); opacity: 0; }
     100% { transform: translate(-50%, -100%) scale(1); opacity: 1; }
@@ -141,7 +129,7 @@
     animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
 }
 
-/* 6. 주문서 거래명세표(A4 규격) 전용 레이아웃 */
+/* 5. 주문서 거래명세표(A4 규격) 전용 레이아웃 */
 .invoice-container { 
     background-color: white; 
     border: 1px solid #d1d5db; 
@@ -248,7 +236,7 @@
 .inv-text-right { text-align: right; padding-right: 6px !important; }
 .inv-font-bold { font-weight: bold; }
 
-/* 7. 인쇄 모드 최적화 (A4 Portrait) */
+/* 6. 인쇄 모드 최적화 (A4 Portrait) */
 @media print {
     @page { 
         size: A4 portrait; 
