@@ -142,7 +142,7 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 🌟 정확한 주소 완성 및 정제 파싱 엔진
+// 3. 🌟 OCR 방식 정밀 주소 절단 및 추출 파싱 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     const rawFullText = lines.map(l => l.fullText).join('\n');
@@ -196,7 +196,7 @@ function parseOrderFromPageLines(lines, pageNum) {
     if (!order.storeName) order.storeName = order.senderName || '배송처';
     if (!order.senderName) order.senderName = order.storeName;
 
-    // 3. 전화번호 (하이픈 없는 010 번호 포함 정규화)
+    // 3. 전화번호
     const phoneMatch = buyerSectionText.match(/(?<!추가)연락처(?!\/FAX)[:\s|]*([0-9\-]{8,15})/);
     if (phoneMatch) {
         order.phone = formatPhoneNumber(phoneMatch[1]);
@@ -205,28 +205,36 @@ function parseOrderFromPageLines(lines, pageNum) {
         if (allPhones && allPhones.length > 0) order.phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
     }
 
-    // 4. 🌟 주소 정밀 결합 및 정제 (앞부분 누락 및 끝 글자 '는' 완벽 해결)
-    // 시/도부터 시작하여 다음 표 라벨(배송지명/연락처/No) 전까지 추출
-    const addrPattern = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?=(?:배송지명|간판명|연락처|No\.|$))/;
-    const matchedAddr = buyerSectionText.match(addrPattern);
+    // 4. 🌟 주소 정밀 추출 및 불필요한 뒷부분 꼬리표 강력 절단 (OCR 핵심 로직)
+    // 시/도부터 시작하여 주소 본문 매칭
+    const addrStartRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+/i;
+    const match = buyerSectionText.match(addrStartRegex);
 
-    if (matchedAddr) {
-        let fullAddr = matchedAddr[0].trim();
-        // 라벨 찌꺼기 및 파이프(|), 끝에 붙는 '는' 제거
-        fullAddr = fullAddr.replace(/\|/g, ' ')
-                           .replace(/\s+는\b/g, '')
-                           .replace(/[\r\n\t]+/g, ' ')
-                           .replace(/\s{2,}/g, ' ')
-                           .trim();
-        order.address = fullAddr;
-    } else {
-        // 폴백 패턴: '주소' 키워드 뒤부터 추출
-        const addrIndex = buyerSectionText.indexOf('주소');
-        if (addrIndex !== -1) {
-            let sub = buyerSectionText.slice(addrIndex + 2);
-            sub = sub.replace(/^[:\s|\[\d+\]]+/, '');
-            sub = sub.split(/(?:배송지명|간판명|연락처|No\.)/)[0];
-            order.address = sub.replace(/\|/g, ' ').replace(/\s+는\b/g, '').replace(/\s{2,}/g, ' ').trim();
+    if (match) {
+        let rawAddr = match[0];
+
+        // (1) 뒤에 붙어버리는 폼 필드 키워드 이전까지만 1차 절단
+        rawAddr = rawAddr.split(/(?:배송지명|간판명|연락처|추가연락처|No\.|전화|사업자|결제\s*수단)/)[0];
+
+        // (2) 파이프(|), 줄바꿈, 탭 정리
+        rawAddr = rawAddr.replace(/\|/g, ' ').replace(/[\r\n\t]+/g, ' ');
+
+        // (3) '받 주소', '받', '주소' 등 잘못 딸려 들어온 접두어/잡음 청소
+        rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ');
+
+        // (4) 끝부분에 흔히 붙는 단어 및 라벨 잔여물('는', '자', '카페' 등) 절단
+        rawAddr = rawAddr.replace(/\s+(?:는|자|카페|식당|매장)$/g, '');
+
+        // (5) 도로명/지번 패턴 이후 층/호/건물명까지 깔끔하게 확보하고 그 뒤 쓰레기값 완벽 제거
+        // 예: 서울 구로구 공원로6나길 43-2 (구로동) 지하1층
+        // 예: 경기 성남시 분당구 미금일로 75 (구미동) 구구빌딩 103호
+        // 예: 서울 종로구 종로40길 18 (종로 5가) 1층
+        const cleanAddrMatch = rawAddr.match(/^([가-힣0-9\s]+(?:시|도|군|구)[\s\S]+?(?:동|읍|면|로|길|리)\s*[\d\-]+(?:\s*\([가-힣0-9\s,\.\-]+\))?(?:\s*[\w가-힣0-9\s\-]+?(?:층|호|빌딩|타워|센터|단지|차|동))?)/i);
+
+        if (cleanAddrMatch) {
+            order.address = cleanAddrMatch[1].replace(/\s{2,}/g, ' ').trim();
+        } else {
+            order.address = rawAddr.replace(/\s{2,}/g, ' ').trim();
         }
     }
 
