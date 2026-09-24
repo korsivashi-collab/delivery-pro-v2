@@ -183,12 +183,15 @@ export function renderDispatchDriverDetail() {
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
     const btnDriverPrint = document.getElementById('btn-driver-items-print');
+    const btnSendRoutes = document.getElementById('btn-send-routes-to-drivers'); // 🌟 이동된 동선 전송 버튼
     
+    // 🌟 기사 선택 해제 상태일 때 버튼 감추기
     if (!state.selectedDispatchDriverId) {
         if (header) header.classList.remove('hidden'); 
         if (table) table.classList.add('hidden'); 
         if (badge) badge.classList.add('hidden'); 
         if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
+        if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         return;
     }
 
@@ -206,12 +209,14 @@ export function renderDispatchDriverDetail() {
 
     if (assignedItems.length === 0) {
         if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
+        if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
     }
 
-    // 🌟 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 합산 출력 버튼 노출
+    // 🌟 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 합산 출력 버튼 및 전송 버튼 노출
     if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
+    if (btnSendRoutes) btnSendRoutes.classList.remove('hidden');
 
     let html = '';
     assignedItems.forEach((item, idx) => {
@@ -384,27 +389,24 @@ export function runAutoDispatchAlgorithm() {
 // 5. 기사 앱 수동 전송 엔진 (숨은 주문번호 탑재)
 // ==========================================
 export async function sendRoutesToDrivers() {
-    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
-        alert("전송할 배송 데이터가 없습니다.");
+    // 🌟 선택된 기사의 데이터만 전송하도록 조건 수정 (전체 전송 방지)
+    if (!state.selectedDispatchDriverId) {
+        alert("전송할 기사를 좌측 목록에서 먼저 선택해 주세요.");
         return;
     }
 
-    const visibleDrivers = getFilteredVisibleDrivers();
-    const assignedOrders = state.parsedExcelList.filter(o => o.assignedDriver);
+    const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+    if (!targetLic) return;
+    
+    const driverName = targetLic.phone || targetLic.key;
+    const assignedOrders = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
 
     if (assignedOrders.length === 0) {
-        alert("기사에게 배정된 주문이 없습니다. 자동할당을 먼저 실행하거나 기사를 직접 배정해 주세요.");
+        alert(`[${driverName}] 기사님에게 배정된 주문이 없습니다.`);
         return;
     }
 
-    const driverMap = {};
-    assignedOrders.forEach(o => {
-        if (!driverMap[o.assignedDriver]) driverMap[o.assignedDriver] = [];
-        driverMap[o.assignedDriver].push(o);
-    });
-
-    const targetDriverNames = Object.keys(driverMap);
-    if (!confirm(`총 ${targetDriverNames.length}명의 기사에게 ${assignedOrders.length}건의 배송 동선을 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 자동으로 등록됩니다.`)) {
+    if (!confirm(`[${driverName}] 기사님에게 총 ${assignedOrders.length}건의 배송 코스를 전송하시겠습니까?\n\n* 전송 즉시 해당 기사의 스마트폰 앱에 반영됩니다.`)) {
         return;
     }
 
@@ -415,50 +417,41 @@ export async function sendRoutesToDrivers() {
     }
 
     try {
-        let successCount = 0;
-        for (const dName of targetDriverNames) {
-            const matchedLic = visibleDrivers.find(l => (l.phone && l.phone === dName) || l.key === dName || l.deviceId === dName);
-            if (!matchedLic) continue;
+        const devId = targetLic.deviceId || targetLic.key;
 
-            const devId = matchedLic.deviceId || matchedLic.key;
-            const orders = driverMap[dName];
+        const destinations = assignedOrders.map((ord, idx) => ({
+            displayNumber: idx + 1,
+            address: ord.address || '',
+            storeName: ord.storeName || ord.senderName || '',
+            phone: ord.phone || '',
+            lat: ord.lat || null,
+            lng: ord.lng || null,
+            orderNo: ord.orderNo || '', // 숨겨진 주문번호
+            memo: ord.memo || '',
+            items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
+        }));
 
-            const destinations = orders.map((ord, idx) => ({
-                displayNumber: idx + 1,
-                address: ord.address || '',
-                storeName: ord.storeName || ord.senderName || '',
-                phone: ord.phone || '',
-                lat: ord.lat || null,
-                lng: ord.lng || null,
-                orderNo: ord.orderNo || '', // 숨겨진 주문번호
-                memo: ord.memo || '',
-                items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
-            }));
+        await setDoc(doc(db, "routes", devId), {
+            deviceId: devId,
+            phone: targetLic.phone || devId,
+            dispatchKey: targetLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
+            destinations: destinations,
+            updatedAt: Date.now()
+        }, { merge: true });
 
-            await setDoc(doc(db, "routes", devId), {
-                deviceId: devId,
-                phone: matchedLic.phone || devId,
-                dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
-                destinations: destinations,
-                updatedAt: Date.now()
-            }, { merge: true });
-
-            successCount++;
-        }
-
-        alert(`[동선 전송 완료]\n총 ${successCount}명의 기사 스마트폰으로 배송 동선이 전송되었습니다.\n기사님들은 스캔 없이 앱에서 코스를 바로 확인하고 운행할 수 있습니다.`);
+        alert(`[동선 전송 완료]\n해당 기사님의 스마트폰으로 배송 동선이 전송되었습니다.\n기사님은 스캔 없이 앱에서 코스를 바로 확인하고 운행할 수 있습니다.`);
     } catch (e) {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 기사 앱으로 동선 전송';
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-white"></i> 기사 앱으로 동선 전송';
         }
     }
 }
 
 // ==========================================
-// 🌟 6. 선택된 기사 전용 상품 합산 피킹 리스트 (1장 출력)
+// 🌟 6. 심플하고 직관적인 상품 합산 피킹 리스트 (1장 출력)
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -471,14 +464,22 @@ export function printSelectedDriverItemList() {
     const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
 
     if (!assignedItems || assignedItems.length === 0) {
-        alert(`[${driverName}] 기사님에게 배정된 배송 주문 및 상품 데이터가 없습니다.`);
+        alert(`[${driverName}] 기사님에게 배정된 상품 데이터가 없습니다.`);
         return;
     }
 
-    // 선택된 기사의 품목 그룹화 및 수량 합산 로직
+    // 선택된 기사의 품목 그룹화, 수량 합산 및 배송 지역 추출
     const aggregationMap = {};
+    const regions = new Set();
 
     assignedItems.forEach(order => {
+        // 배송 지역(구/시 단위) 추출
+        if (order.address) {
+            const parts = order.address.split(' ').filter(Boolean);
+            if (parts.length >= 2) regions.add(`${parts[0]} ${parts[1]}`);
+        }
+
+        // 아이템 배열이 있을 경우
         if (order.items && order.items.length > 0) {
             order.items.forEach(it => {
                 const name = it.name ? it.name.trim() : '기타 품목';
@@ -487,102 +488,85 @@ export function printSelectedDriverItemList() {
                 const key = `${name}___${unit}`;
 
                 if (!aggregationMap[key]) {
-                    aggregationMap[key] = { name, unit, totalQty: 0, orderCount: 0 };
+                    aggregationMap[key] = { name, unit, totalQty: 0 };
                 }
                 aggregationMap[key].totalQty += qty;
-                aggregationMap[key].orderCount += 1;
             });
-        } else {
-            const name = order.itemName ? order.itemName.trim() : '상품명 미지정';
+        } 
+        // 하위 호환: itemName이 문자열로 있을 경우
+        else if (order.itemName) {
+            const name = order.itemName.trim();
             const unit = order.unit ? order.unit.trim() : '개';
             const qty = parseInt(order.qty, 10) || 1;
             const key = `${name}___${unit}`;
 
             if (!aggregationMap[key]) {
-                aggregationMap[key] = { name, unit, totalQty: 0, orderCount: 0 };
+                aggregationMap[key] = { name, unit, totalQty: 0 };
             }
             aggregationMap[key].totalQty += qty;
-            aggregationMap[key].orderCount += 1;
         }
     });
 
     const aggregatedList = Object.values(aggregationMap).sort((a, b) => b.totalQty - a.totalQty);
-    const totalItemTypes = aggregatedList.length;
-    const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
-    const dateStr = getLocalDateString();
+    
+    // 메타 정보
+    const now = new Date();
+    const dateStr = getLocalDateString(now);
+    const timeStr = now.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+    const regionStr = Array.from(regions).join(', ') || '지역 정보 없음';
 
     let tableRowsHtml = '';
-    aggregatedList.forEach((item, idx) => {
-        tableRowsHtml += `
-        <tr>
-            <td style="text-align: center; font-weight: bold; padding: 6px 4px;">${idx + 1}</td>
-            <td style="text-align: left; font-weight: bold; padding: 6px 8px; font-size: 11px;">${item.name}</td>
-            <td style="text-align: center; padding: 6px 4px;">${item.unit}</td>
-            <td style="text-align: right; font-weight: 900; padding: 6px 8px; font-size: 12px; color: #1e3a8a;">${formatNumber(item.totalQty)}</td>
-            <td style="text-align: center; font-weight: bold; color: #64748b; padding: 6px 4px;">${item.orderCount}곳</td>
-            <td style="text-align: center; padding: 6px 4px;"><span style="display: inline-block; width: 18px; height: 18px; border: 1.5px solid #000; border-radius: 3px;"></span></td>
-        </tr>`;
-    });
+    if (aggregatedList.length === 0) {
+        tableRowsHtml = `<tr><td colspan="3" style="padding: 15px; text-align: center; color: #666;">합산할 상품 내역이 없습니다. (주문서에 상품 정보가 누락됨)</td></tr>`;
+    } else {
+        aggregatedList.forEach((item, idx) => {
+            tableRowsHtml += `
+            <tr style="border-bottom: 1px solid #e5e7eb;">
+                <td style="padding: 10px; text-align: center;">${idx + 1}</td>
+                <td style="padding: 10px; font-weight: bold;">${item.name}</td>
+                <td style="padding: 10px; text-align: center; color: #1d4ed8; font-weight: bold;">${formatNumber(item.totalQty)} <span style="color: #6b7280; font-weight: normal;">${item.unit}</span></td>
+            </tr>`;
+        });
+    }
 
-    const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 기사별 창고 상차 피킹 리스트</title><style>
-        * { box-sizing: border-box; }
-        @media print {
-            @page { size: A4 portrait; margin: 10mm; }
-            body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
-            .print-page { box-shadow: none !important; border: none !important; width: 100% !important; height: auto !important; }
-        }
-        body { font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; margin: 0; padding: 0; color: #1e293b; }
-        .print-page { width: 190mm; margin: 0 auto; padding: 5mm; }
-        .header-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 1px; margin-bottom: 4px; border-bottom: 3px double #000; padding-bottom: 6px; }
-        .meta-info { display: flex; justify-content: space-between; font-size: 11px; font-weight: bold; margin-bottom: 10px; color: #334155; }
-        .summary-box { background-color: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-around; font-size: 11px; font-weight: 900; margin-bottom: 12px; }
-        .summary-box span b { color: #1d4ed8; font-size: 13px; margin-left: 4px; }
-        table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10.5px; }
-        th { background-color: #f1f5f9; border: 1px solid #000; padding: 6px 4px; font-weight: 900; text-align: center; }
-        td { border: 1px solid #000; }
-        .footer-sign { display: flex; justify-content: flex-end; gap: 30px; margin-top: 18px; font-size: 11px; font-weight: bold; }
-        .sign-box { border-bottom: 1px solid #000; width: 90px; display: inline-block; text-align: center; }
+    // 🌟 요청하신 단순하고 깔끔한 출력용 HTML 양식
+    const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>기사별 상품 합산 리스트</title><style>
+        body { font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif; margin: 0; padding: 25px; color: #111827; }
+        .header { margin-bottom: 20px; border-bottom: 3px solid #111827; padding-bottom: 15px; text-align: center;}
+        .header h2 { margin: 0; font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+        .info-grid { display: flex; flex-wrap: wrap; gap: 10px 20px; font-size: 15px; margin-bottom: 25px; padding: 15px; background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px;}
+        .info-item span { font-weight: 900; color: #4b5563; margin-right: 6px; }
+        .info-item.full-width { width: 100%; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { background-color: #f3f4f6; border-bottom: 2px solid #374151; border-top: 2px solid #374151; padding: 12px; text-align: left; font-weight: 900; }
+        th.center { text-align: center; }
     </style></head><body>
-    <div class="print-page">
-        <div class="header-title">[${driverName}] 기사 창고 상차 및 검수용 상품 피킹 리스트</div>
-        <div class="meta-info">
-            <span>담당 기사: <b>${driverName}</b></span>
-            <span>출력일자: ${dateStr}</span>
-            <span>배송 경로 PRO 통합물류시스템</span>
+        <div class="header">
+            <h2>담당 기사 상품 합산 리스트</h2>
         </div>
-        <div class="summary-box">
-            <span>배정 배송처: <b>${assignedItems.length}</b>곳</span>
-            <span>적재 품목 수: <b>${totalItemTypes}</b>종</span>
-            <span>기사 총 상차수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
+        <div class="info-grid">
+            <div class="info-item"><span>배송 일자:</span> ${dateStr}</div>
+            <div class="info-item"><span>출력 시간:</span> ${timeStr}</div>
+            <div class="info-item"><span>담당 기사:</span> <b style="color: #1d4ed8; font-size: 16px;">${driverName}</b></div>
+            <div class="info-item full-width"><span>배송 구역:</span> ${regionStr}</div>
         </div>
         <table>
             <colgroup>
-                <col style="width: 7%;">
-                <col style="width: 48%;">
-                <col style="width: 12%;">
-                <col style="width: 13%;">
-                <col style="width: 10%;">
-                <col style="width: 10%;">
+                <col style="width: 15%;">
+                <col style="width: 55%;">
+                <col style="width: 30%;">
             </colgroup>
             <thead>
                 <tr>
-                    <th>No.</th>
+                    <th class="center">순번</th>
                     <th>상 품 명 (품목 규격)</th>
-                    <th>단위</th>
-                    <th>총 수량</th>
-                    <th>배송처</th>
-                    <th>상차확인</th>
+                    <th class="center">합산 총 수량</th>
                 </tr>
             </thead>
             <tbody>
                 ${tableRowsHtml}
             </tbody>
         </table>
-        <div class="footer-sign">
-            <span>상차 담당자: <span class="sign-box">(서명)</span></span>
-            <span>운행 기사: <span class="sign-box">(서명)</span></span>
-        </div>
-    </div>
     </body></html>`;
 
     const iframe = document.createElement('iframe');
@@ -599,7 +583,7 @@ export function printSelectedDriverItemList() {
             iframe.contentWindow.focus();
             iframe.contentWindow.print();
             setTimeout(() => { document.body.removeChild(iframe); }, 1000);
-        }, 600);
+        }, 500);
     };
 }
 
