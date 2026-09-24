@@ -66,12 +66,11 @@ export async function processSinglePdfFile(file) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
             
-            // Y 좌표 및 X 좌표를 기준으로 텍스트 레이아웃 분리 결합
+            // X, Y 좌표 기반 텍스트 라인 구조화
             const pageLines = groupTextContentByLines(textContent.items);
             const orderData = parseOrderFromPageLines(pageLines, pageNum);
 
             if (orderData && (orderData.address || orderData.storeName || orderData.orderNo)) {
-                // 동일 주문번호 중복 등록 방지
                 if (orderData.orderNo && seenOrderNos.has(orderData.orderNo)) {
                     continue;
                 }
@@ -91,7 +90,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 2. 🌟 공간 인지 기반 텍스트 라인 그룹화 (X, Y 좌표 활용)
+// 2. Y축 정렬 및 공급받는 자(우측) 텍스트 분리
 // ==========================================
 function groupTextContentByLines(items) {
     if (!items || items.length === 0) return [];
@@ -103,7 +102,6 @@ function groupTextContentByLines(items) {
 
         const y = Math.round(item.transform[5]);
         const x = Math.round(item.transform[4]);
-        const width = item.width || (str.length * 5); 
 
         let matchedY = null;
         for (const existingY of lineMap.keys()) {
@@ -117,7 +115,7 @@ function groupTextContentByLines(items) {
         if (!lineMap.has(targetY)) {
             lineMap.set(targetY, []);
         }
-        lineMap.get(targetY).push({ x, endX: x + width, text: str });
+        lineMap.get(targetY).push({ x, text: str });
     });
 
     const sortedYKeys = Array.from(lineMap.keys()).sort((a, b) => b - a);
@@ -125,12 +123,10 @@ function groupTextContentByLines(items) {
 
     sortedYKeys.forEach(yKey => {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
-        
-        // 전체 폭 텍스트 결합 (기존 방식)
         const fullText = lineItems.map(i => i.text).join(' ').trim();
         
-        // 🌟 X좌표 250(중앙)을 기준으로 우측 '공급받는 자' 영역 텍스트만 완벽하게 분리
-        const rightItems = lineItems.filter(i => i.x > 250);
+        // 공급받는 자(우측 열, x > 230) 전용 텍스트
+        const rightItems = lineItems.filter(i => i.x > 230);
         const rightText = rightItems.map(i => i.text).join(' ').trim();
 
         if (fullText) {
@@ -146,20 +142,16 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 🌟 분리된 우측 텍스트 기반 완벽한 수령인 주소 파싱 엔진
+// 3. 🌟 정확한 주소 완성 및 정제 파싱 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
-    // 1. 아이템 파싱용 전체 텍스트 (하단 표 영역 포함)
     const rawFullText = lines.map(l => l.fullText).join('\n');
-    // 중복 복사본 방지
     const cleanText = rawFullText.split(/거래명세표\s*\(공급받는자용\)|거래명세표\s*\(공급받는\s*자용\)/)[0];
 
-    // 2. 🌟 헤더 영역의 우측(공급받는 자) 텍스트만 수집 (공급자 주소와 섞임 100% 방지)
+    // 헤더 영역 우측(수령인) 텍스트만 추출
     let buyerSectionLines = [];
     let isHeaderArea = true;
-    
     lines.forEach(line => {
-        // 테이블 헤더를 만나면 우측 텍스트 수집 중단
         if (line.fullText.includes('No.') && (line.fullText.includes('상품명') || line.fullText.includes('규격'))) {
             isHeaderArea = false;
         }
@@ -167,7 +159,7 @@ function parseOrderFromPageLines(lines, pageNum) {
             buyerSectionLines.push(line.rightText);
         }
     });
-    const buyerSectionText = buyerSectionLines.join('\n');
+    const buyerSectionText = buyerSectionLines.join(' ');
 
     const order = {
         id: Date.now() + Math.random(),
@@ -186,26 +178,26 @@ function parseOrderFromPageLines(lines, pageNum) {
         memo: '',
         lat: null,
         lng: null,
-        items: [] // 다품목 상품 리스트
+        items: []
     };
 
-    // 1. 주문번호 추출
+    // 1. 주문번호
     const orderNoMatch = cleanText.match(/(?:주문\s*번호|오더\s*번호|관리\s*번호|발주\s*번호|No\.)[:\s]*([A-Z0-9_\-]+)/i);
     if (orderNoMatch) order.orderNo = orderNoMatch[1].trim();
     else order.orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
 
-    // 2. 상호(간판명) 및 구매자명 추출 (분리된 우측 텍스트에서만 검색)
-    const storeMatch = buyerSectionText.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[:\s]*([^\n\r]+)/);
-    if (storeMatch) order.storeName = storeMatch[1].split(/연락처|전화|주소/)[0].replace(/[\(\)\[\]]/g, '').trim();
+    // 2. 상호(간판명) 및 구매자명
+    const storeMatch = buyerSectionText.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[:\s|]*([^\n\r연락처|전화|주소]+)/);
+    if (storeMatch) order.storeName = storeMatch[1].replace(/[\(\)\[\]|]/g, '').trim();
 
-    const buyerMatch = buyerSectionText.match(/(?:구매자명|주문자명|수령인|수신자|받는\s*분|고객명)[:\s]*([^\n\r]+)/);
-    if (buyerMatch) order.senderName = buyerMatch[1].split(/주소|연락처|상호/)[0].replace(/[\(\)\[\]]/g, '').trim();
-    
+    const buyerMatch = buyerSectionText.match(/(?:구매자명|주문자명|수령인|수신자|받는\s*분|고객명)[:\s|]*([^\n\r주소|연락처|상호]+)/);
+    if (buyerMatch) order.senderName = buyerMatch[1].replace(/[\(\)\[\]|]/g, '').trim();
+
     if (!order.storeName) order.storeName = order.senderName || '배송처';
     if (!order.senderName) order.senderName = order.storeName;
 
-    // 3. 수령인 전화번호 추출
-    const phoneMatch = buyerSectionText.match(/(?<!추가)연락처(?!\/FAX)[:\s]*([0-9\-]{8,15})/);
+    // 3. 전화번호 (하이픈 없는 010 번호 포함 정규화)
+    const phoneMatch = buyerSectionText.match(/(?<!추가)연락처(?!\/FAX)[:\s|]*([0-9\-]{8,15})/);
     if (phoneMatch) {
         order.phone = formatPhoneNumber(phoneMatch[1]);
     } else {
@@ -213,27 +205,36 @@ function parseOrderFromPageLines(lines, pageNum) {
         if (allPhones && allPhones.length > 0) order.phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
     }
 
-    // 4. 🌟 수령인 주소 정밀 추출 (오인식된 접두사 완벽 제거)
-    const addrMatch = buyerSectionText.match(/주소\s*(?:\[\d+\])?\s*([^\n]+(?:\n[^\n]+)?)/);
-    let addressPart = '';
-    if (addrMatch) {
-        let rawAddr = addrMatch[1].replace(/[\r\n]+/g, ' ').trim();
-        rawAddr = rawAddr.split(/배송지명|간판명|연락처|No\./)[0];
-        addressPart = rawAddr.replace(/^\[\d+\]\s*/, '').trim();
-    } else {
-        const addrRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:동|읍|면|로|길|리)\s*[\d\-]+(?:\s*[가-힣0-9\s,\.\(\)\-]+)?/;
-        const match = buyerSectionText.match(addrRegex);
-        if (match) addressPart = match[0].replace(/[\r\n]+/g, ' ').trim();
-    }
-    
-    // 최종 주소 정제 (앞에 불필요하게 붙은 '받 주소' 등의 찌꺼기 제거)
-    order.address = addressPart.replace(/^(?:받\s*주소|주소|받)[:\s]*/i, '').replace(/\s{2,}/g, ' ').trim();
+    // 4. 🌟 주소 정밀 결합 및 정제 (앞부분 누락 및 끝 글자 '는' 완벽 해결)
+    // 시/도부터 시작하여 다음 표 라벨(배송지명/연락처/No) 전까지 추출
+    const addrPattern = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?=(?:배송지명|간판명|연락처|No\.|$))/;
+    const matchedAddr = buyerSectionText.match(addrPattern);
 
-    // 5. 배송 메모 추출 (전체 텍스트에서 검색)
+    if (matchedAddr) {
+        let fullAddr = matchedAddr[0].trim();
+        // 라벨 찌꺼기 및 파이프(|), 끝에 붙는 '는' 제거
+        fullAddr = fullAddr.replace(/\|/g, ' ')
+                           .replace(/\s+는\b/g, '')
+                           .replace(/[\r\n\t]+/g, ' ')
+                           .replace(/\s{2,}/g, ' ')
+                           .trim();
+        order.address = fullAddr;
+    } else {
+        // 폴백 패턴: '주소' 키워드 뒤부터 추출
+        const addrIndex = buyerSectionText.indexOf('주소');
+        if (addrIndex !== -1) {
+            let sub = buyerSectionText.slice(addrIndex + 2);
+            sub = sub.replace(/^[:\s|\[\d+\]]+/, '');
+            sub = sub.split(/(?:배송지명|간판명|연락처|No\.)/)[0];
+            order.address = sub.replace(/\|/g, ' ').replace(/\s+는\b/g, '').replace(/\s{2,}/g, ' ').trim();
+        }
+    }
+
+    // 5. 배송 메모
     const memoMatch = cleanText.match(/(?:배송\s*요청사항|배송\s*메모|요청사항|전달사항|비고)[:\s]*([^\n\r]+)/);
     if (memoMatch) order.memo = memoMatch[1].trim();
 
-    // 6. 상품 리스트(items) 파싱 (전체 텍스트 기반)
+    // 6. 다품목 상품 리스트 파싱
     const cleanLines = cleanText.split('\n').map(l => l.trim()).filter(l => l);
     let inItemTable = false;
 
@@ -275,7 +276,6 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
     }
 
-    // 대표 품목명 설정
     if (order.items.length > 1) {
         order.qty = order.items.reduce((sum, item) => sum + (item.qty || 1), 0);
         order.itemName = `${order.items[0].name} 외 ${order.items.length - 1}건 (총 ${order.qty}개)`;
