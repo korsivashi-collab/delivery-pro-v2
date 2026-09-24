@@ -535,7 +535,6 @@ export function handleGlobalSearch(query) {
 // 5. PRO 기능 및 기사 연결 팝업 제어
 // ==========================================
 
-// 🌟 관제 상단 PRO 버튼 상태(잠김/열림) UI 업데이트 헬퍼
 export function updateProButtonsUI() {
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
@@ -572,7 +571,6 @@ export function updateProButtonsUI() {
 }
 
 export function handleProFeature(featureName) {
-    // 🌟 [핵심] 마스터 계정이 아니며 관제 계정에 isPro 권한이 부여되지 않은 경우 접근 즉시 차단
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const myLic = state.allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
@@ -689,7 +687,7 @@ export async function confirmLinkDriver() {
 }
 
 // ==========================================
-// 🌟 6. 본사 거점 및 PRO 자동할당 패널 제어
+// 6. 본사 거점 및 PRO 자동할당 패널 제어
 // ==========================================
 export function saveCompanyBaseAddress() {
     const input = document.getElementById('company-base-address').value.trim();
@@ -742,13 +740,13 @@ export function updateCompanyBaseUI(data) {
     }
 }
 
-// 🌟 자동 할당 내부 상태 관리
 export const autoDispatchState = {
     selectedDrivers: new Set(),
     weights: {},
     isInit: false
 };
 
+// 🌟 시야성 및 레이아웃 직관성이 개선된 운행 기사 자동할당 목록 렌더링
 export function renderDispatchDriverList() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -768,23 +766,35 @@ export function renderDispatchDriverList() {
     }
     
     let html = '';
-    drivers.forEach((d, idx) => {
-        const devId = d.deviceId || d.key; const phoneDisplay = d.phone || d.key;
-        const tLat = d.territoryLat || ''; const tLng = d.territoryLng || ''; const tScale = d.territoryScale || ''; const t1 = d.territory1 || ''; const t2 = d.territory2 || '';
+    drivers.forEach((d) => {
+        const devId = d.deviceId || d.key; 
+        const phoneDisplay = d.phone || d.key;
+        const licKey = d.key || '';
+        const tLat = d.territoryLat || ''; 
+        const tLng = d.territoryLng || ''; 
+        const tScale = d.territoryScale || ''; 
+        const t1 = d.territory1 || ''; 
+        const t2 = d.territory2 || '';
         
         let territoryBadge = '';
         if (tLat && tLng) {
             let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
             territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5" onclick="event.stopPropagation()">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-100 hover:bg-indigo-200 text-indigo-800 border border-indigo-200 text-[10px] px-2 py-0.5 rounded font-black transition whitespace-nowrap"><i class="fa-solid fa-map-location-dot"></i> 권역 설정 (${scaleLabel})</button>
-                    <span class="text-[9px] text-gray-500 font-bold truncate max-w-[130px]" title="${t1} ${t2}">${t1} ${t2}</span>
+                <div class="flex flex-col items-end gap-1" onclick="event.stopPropagation()">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded-xl font-black shadow-xs transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fa-solid fa-map-location-dot text-[11px]"></i> 권역 설정 (${scaleLabel})
+                    </button>
+                    <span class="text-[10px] text-gray-500 font-bold truncate max-w-[140px] text-right" title="${t1} ${t2}">
+                        <i class="fa-solid fa-location-dot text-indigo-400 mr-0.5"></i>${t1 || t2 || '설정됨'}
+                    </span>
                 </div>`;
         } else {
             territoryBadge = `
-                <div class="flex flex-col items-end gap-0.5" onclick="event.stopPropagation()">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-gray-100 hover:bg-gray-200 text-gray-600 border border-gray-200 text-[10px] px-2 py-0.5 rounded font-bold transition whitespace-nowrap">권역 설정</button>
-                    <span class="text-[9px] text-gray-400">미설정</span>
+                <div class="flex flex-col items-end gap-1" onclick="event.stopPropagation()">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 text-xs px-3 py-1.5 rounded-xl font-black transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-500 text-[11px]"></i> 권역 미설정
+                    </button>
+                    <span class="text-[10px] text-amber-600 font-bold">권역 설정 필요</span>
                 </div>`;
         }
 
@@ -794,23 +804,28 @@ export function renderDispatchDriverList() {
         const weightText = weight > 0 ? `+${weight}` : weight;
 
         html += `
-        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-1 ring-blue-300 bg-blue-50/40' : 'border-gray-200 hover:border-blue-300'} p-2.5 rounded-xl flex flex-col gap-2 shadow-xs transition mb-2">
-            <div class="flex items-start justify-between">
-                <label class="flex items-center gap-2 cursor-pointer mt-0.5" onclick="event.stopPropagation()">
-                    <input type="checkbox" onchange="window.toggleDispatchDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500">
-                    <span class="font-black text-xs ${isFocus ? 'text-blue-700' : 'text-gray-800'} min-w-0"><i class="fa-solid fa-truck ${isFocus ? 'text-blue-600' : 'text-gray-400'} mr-1 shrink-0"></i><span class="truncate">${phoneDisplay}</span></span>
+        <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-2 ring-blue-300 bg-blue-50/30' : 'border-gray-200 hover:border-blue-400'} p-3 rounded-2xl flex flex-col gap-2.5 shadow-xs transition mb-2.5">
+            <div class="flex items-start justify-between gap-2">
+                <label class="flex items-center gap-2.5 cursor-pointer mt-1 flex-1 min-w-0" onclick="event.stopPropagation()">
+                    <input type="checkbox" onchange="window.toggleDispatchDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0">
+                    <div class="min-w-0">
+                        <span class="font-black text-[13px] ${isFocus ? 'text-blue-700' : 'text-gray-900'} block truncate leading-tight">
+                            <i class="fa-solid fa-truck ${isFocus ? 'text-blue-600' : 'text-gray-400'} mr-1 text-xs"></i>${phoneDisplay}
+                        </span>
+                        <span class="text-[10px] text-gray-400 font-mono block mt-0.5">ID: ${licKey}</span>
+                    </div>
                 </label>
-                <div class="shrink-0 ml-2">${territoryBadge}</div>
+                <div class="shrink-0">${territoryBadge}</div>
             </div>
             
-            <div class="flex items-center justify-between bg-gray-50/80 p-1.5 rounded-lg border border-gray-100" onclick="event.stopPropagation()">
-                <div class="flex items-center gap-1.5 flex-1">
-                    <span class="text-[10px] font-bold text-gray-500 w-12">할당 배점</span>
-                    <div class="flex items-center bg-white border border-gray-200 rounded shadow-sm">
-                        <button onclick="window.adjustDriverWeight('${devId}', -0.5)" class="px-2.5 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-r border-gray-200 transition active:scale-95">-</button>
-                        <span class="w-8 text-center text-[11px] font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
-                        <button onclick="window.adjustDriverWeight('${devId}', 0.5)" class="px-2.5 py-0.5 hover:bg-gray-100 text-gray-600 font-black text-xs border-l border-gray-200 transition active:scale-95">+</button>
-                    </div>
+            <div class="flex items-center justify-between bg-gray-50 p-2 rounded-xl border border-gray-100" onclick="event.stopPropagation()">
+                <span class="text-[11px] font-black text-gray-600 flex items-center gap-1">
+                    <i class="fa-solid fa-scale-balanced text-gray-400 text-xs"></i> 물량 가중치
+                </span>
+                <div class="flex items-center bg-white border border-gray-200 rounded-lg shadow-2xs">
+                    <button onclick="window.adjustDriverWeight('${devId}', -0.5)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-r border-gray-200 transition active:scale-95" title="가중치 감소">-</button>
+                    <span class="w-10 text-center text-xs font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
+                    <button onclick="window.adjustDriverWeight('${devId}', 0.5)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-l border-gray-200 transition active:scale-95" title="가중치 증가">+</button>
                 </div>
             </div>
         </div>`;
@@ -865,7 +880,7 @@ export function renderDispatchDriverDetail() {
     tbody.innerHTML = html;
 }
 
-// 🌟 7. PRO 자동할당 배분 알고리즘 실행 로직
+// 7. PRO 자동할당 배분 알고리즘 실행 로직
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀 데이터가 없습니다."); return;
