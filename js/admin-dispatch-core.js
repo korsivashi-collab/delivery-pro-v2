@@ -880,7 +880,10 @@ export function renderDispatchDriverDetail() {
     tbody.innerHTML = html;
 }
 
-// 7. PRO 자동할당 배분 알고리즘 실행 로직
+// ==========================================
+// 🌟 7. PRO 자동할당 배분 알고리즘 실행 로직
+// (외곽/권역밖 물량 우선 배분 -> 권역내 근접 순차 흡수)
+// ==========================================
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀 데이터가 없습니다."); return;
@@ -905,6 +908,22 @@ export function runAutoDispatchAlgorithm() {
     let totalWeights = 0;
     activeDrivers.forEach(d => { totalWeights += (autoDispatchState.weights[d.deviceId || d.key] || 0); });
 
+    // 하버사인(Haversine) 최단 거리 계산 공식 (km 단위)
+    const getDist = (lat1, lon1, lat2, lon2) => {
+        if (!lat1 || !lon1 || !lat2 || !lon2) return 999999;
+        const R = 6371; 
+        const dLat = (lat2 - lat1) * Math.PI / 180; 
+        const dLon = (lon2 - lon1) * Math.PI / 180;
+        const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + 
+                  Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+                  Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    };
+
+    const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
+    const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
+
+    // 기사별 목표 쿼터 및 권역 정보 구성
     let driverStats = activeDrivers.map(d => {
         const devId = d.deviceId || d.key;
         let w = autoDispatchState.weights[devId] || 0;
@@ -912,13 +931,28 @@ export function runAutoDispatchAlgorithm() {
         let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
         if (exactCap < 0) exactCap = 0;
         
-        const savedTerritorySize = d.territorySize || 100;
+        const sizeRatio = (d.territorySize || 100) / 100;
         
+        // 20% 축소된 2단계 반경(km) 기준
+        let rKm = 2.4; 
+        if (d.territoryScale === 'gu') rKm = 8.0;
+        else if (d.territoryScale === 'si') rKm = 24.0;
+        rKm *= sizeRatio;
+
+        const centerLat = d.territoryLat || (companyBase ? companyBase.lat : null);
+        const centerLng = d.territoryLng || (companyBase ? companyBase.lng : null);
+
         return {
-            devId, phone: d.phone || devId,
-            exactCap, targetCap: Math.floor(exactCap), remainder: exactCap - Math.floor(exactCap),
-            assignedCount: 0, tLat: d.territoryLat || null, tLng: d.territoryLng || null,
-            radiusMultiplier: savedTerritorySize / 100 
+            devId,
+            phone: d.phone || devId,
+            exactCap,
+            targetCap: Math.floor(exactCap),
+            remainder: exactCap - Math.floor(exactCap),
+            assignedCount: 0,
+            tLat: centerLat,
+            tLng: centerLng,
+            radiusKm: (d.territoryLat && d.territoryLng) ? rKm : 0,
+            assignedOuterCoords: [] // 배정된 외곽 물량 좌표 목록
         };
     });
 
@@ -926,39 +960,108 @@ export function runAutoDispatchAlgorithm() {
     let diff = totalOrders - currentSum;
     
     driverStats.sort((a, b) => b.remainder - a.remainder);
-    for(let i=0; i<diff; i++) {
+    for (let i = 0; i < diff; i++) {
         driverStats[i % driverStats.length].targetCap++;
     }
 
-    const getDist = (lat1, lon1, lat2, lon2) => {
-        if(!lat1 || !lon1 || !lat2 || !lon2) return 999999;
-        const R = 6371; const dLat = (lat2 - lat1) * Math.PI / 180; const dLon = (lon2 - lon1) * Math.PI / 180;
-        const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    };
-
-    const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
-    const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
+    // 1단계: 외곽(권역 밖) 주문과 권역 내부 주문 분류
+    const outerOrders = [];
+    const innerOrders = [];
 
     unassignedOrders.forEach(order => {
-        let bestDriver = null; let bestScore = Infinity;
+        if (!order.lat || !order.lng) {
+            innerOrders.push(order);
+            return;
+        }
+
+        // 어느 기사의 권역 반경 안에도 들어가지 못하면 '외곽 물량'으로 판정
+        let insideAny = false;
+        for (const ds of driverStats) {
+            if (ds.radiusKm > 0 && ds.tLat && ds.tLng) {
+                const d = getDist(order.lat, order.lng, ds.tLat, ds.tLng);
+                if (d <= ds.radiusKm) {
+                    insideAny = true;
+                    break;
+                }
+            }
+        }
+
+        if (insideAny) {
+            innerOrders.push(order);
+        } else {
+            // 본사 거점으로부터의 거리 기록
+            const distFromBase = (companyBase && companyBase.lat && companyBase.lng) 
+                ? getDist(order.lat, order.lng, companyBase.lat, companyBase.lng) 
+                : 0;
+            outerOrders.push({ order, distFromBase });
+        }
+    });
+
+    // 🌟 2단계: 외곽 물량 최우선 배분
+    // 본사에서 가장 먼 외곽 물량부터 시작하여 가장 인접한 기사의 권역 경계선에 우선 매칭
+    outerOrders.sort((a, b) => b.distFromBase - a.distFromBase);
+
+    outerOrders.forEach(({ order }) => {
+        let bestDriver = null;
+        let bestDistToBoundary = Infinity;
 
         driverStats.forEach(ds => {
             if (ds.assignedCount >= ds.targetCap) return;
 
             let dist = 999999;
+            if (ds.tLat && ds.tLng) {
+                const distToCenter = getDist(order.lat, order.lng, ds.tLat, ds.tLng);
+                // 기사 권역의 외곽 테두리(경계선)까지의 거리 계산
+                dist = Math.max(0, distToCenter - ds.radiusKm);
+            } else if (companyBase && companyBase.lat && companyBase.lng) {
+                dist = getDist(order.lat, order.lng, companyBase.lat, companyBase.lng);
+            }
+
+            if (dist < bestDistToBoundary) {
+                bestDistToBoundary = dist;
+                bestDriver = ds;
+            }
+        });
+
+        // 쿼터가 남아있는 기사가 없으면 전체 중 가장 근접한 기사 선택
+        if (!bestDriver) {
+            bestDriver = driverStats.reduce((prev, curr) => (prev.assignedCount < curr.assignedCount) ? prev : curr);
+        }
+
+        bestDriver.assignedCount++;
+        order.assignedDriver = bestDriver.phone;
+        if (order.lat && order.lng) {
+            bestDriver.assignedOuterCoords.push({ lat: order.lat, lng: order.lng });
+        }
+    });
+
+    // 🌟 3단계: 권역 내 및 잔여 물량 배정
+    // 외곽 물량을 이미 배정받은 기사는 권역 내에서도 외곽 쪽에 가까운 물량을 우선 흡수
+    innerOrders.forEach(order => {
+        let bestDriver = null;
+        let bestScore = Infinity;
+
+        driverStats.forEach(ds => {
+            if (ds.assignedCount >= ds.targetCap) return;
+
+            let score = 999999;
             if (order.lat && order.lng) {
-                if (ds.tLat && ds.tLng) {
-                    dist = getDist(order.lat, order.lng, ds.tLat, ds.tLng) / ds.radiusMultiplier;
+                // 해당 기사에게 이미 배정된 외곽 물량이 있다면, 그 외곽 물량들과의 평균 거리로 밀착 배정
+                if (ds.assignedOuterCoords.length > 0) {
+                    let sumOuterDist = 0;
+                    ds.assignedOuterCoords.forEach(c => {
+                        sumOuterDist += getDist(order.lat, order.lng, c.lat, c.lng);
+                    });
+                    score = sumOuterDist / ds.assignedOuterCoords.length;
+                } else if (ds.tLat && ds.tLng) {
+                    score = getDist(order.lat, order.lng, ds.tLat, ds.tLng);
                 } else if (companyBase && companyBase.lat && companyBase.lng) {
-                    dist = getDist(order.lat, order.lng, companyBase.lat, companyBase.lng);
-                } else {
-                    dist = 100;
+                    score = getDist(order.lat, order.lng, companyBase.lat, companyBase.lng);
                 }
             }
-            
-            if (dist < bestScore) {
-                bestScore = dist;
+
+            if (score < bestScore) {
+                bestScore = score;
                 bestDriver = ds;
             }
         });
@@ -971,11 +1074,11 @@ export function runAutoDispatchAlgorithm() {
         order.assignedDriver = bestDriver.phone;
     });
 
-    if(window.renderExcelTable) window.renderExcelTable();
-    if(window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
-    alert(`자동 할당 배분이 성공적으로 완료되었습니다.\n(총 ${totalOrders}건의 목적지가 ${activeDrivers.length}명의 선택된 기사에게 분배됨)`);
+    if (window.renderExcelTable) window.renderExcelTable();
+    if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
+    alert(`[자동할당 배분 완료]\n외곽 물량 우선 할당 원칙에 따라 총 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.`);
     
-    if(window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
 }
 
 // ==========================================
