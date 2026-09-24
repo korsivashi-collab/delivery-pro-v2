@@ -3,8 +3,7 @@
 import { db } from "./admin-api.js";
 import { state, todayStr } from "./admin-state.js";
 import { processSinglePdfFile } from "./admin-dispatch-pdf.js";
-import { doc, setDoc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
-import { getFilteredVisibleDrivers } from "./admin-dispatch-core.js"; // 🌟 드라이버 정보 조회를 위해 import 추가
+import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
 // 1. Firebase 엑셀/주문 데이터 연동
@@ -154,6 +153,7 @@ export function initExcelDropZone() {
         fileInput = document.createElement('input'); 
         fileInput.id = 'global-excel-file-input'; 
         fileInput.type = 'file'; 
+        // 🌟 엑셀(.xlsx, .xls, .csv)과 PDF(.pdf) 모두 수용
         fileInput.accept = '.xlsx, .xls, .csv, .pdf'; 
         fileInput.multiple = true; 
         fileInput.style.display = 'none'; 
@@ -192,12 +192,14 @@ export async function handleExcelUpload(e) {
         const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
 
         if (isPdf) {
+            // 🌟 대용량 PDF 분석 실행
             const parsedPdfOrders = await processSinglePdfFile(file);
             if (parsedPdfOrders && parsedPdfOrders.length > 0) {
                 state.parsedExcelList.push(...parsedPdfOrders);
                 newlyAddedList.push(...parsedPdfOrders);
             }
         } else {
+            // 기존 엑셀 파일 파싱 실행
             const parsedExcelOrders = await processSingleExcelFile(file);
             newlyAddedList.push(...parsedExcelOrders);
         }
@@ -281,7 +283,7 @@ async function batchGeocodeExcelList(items) {
 }
 
 // ==========================================
-// 5. 테이블 데이터 삭제 및 🌟 전체 동선 초기화
+// 5. 테이블 데이터 삭제/초기화 기능
 // ==========================================
 export function toggleRowCheckbox(e, idx) {
     if (e && e.target.tagName === 'INPUT') return; 
@@ -299,7 +301,7 @@ export async function deleteExcelRow(idx) {
 export async function deleteSelectedExcelRows() {
     const checkboxes = document.querySelectorAll('.row-checkbox:checked');
     if(checkboxes.length === 0) { 
-        alert("삭제할 주문건을 우측 리스트 체크박스에서 1개 이상 선택해주세요."); 
+        alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); 
         return; 
     }
     if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
@@ -309,41 +311,12 @@ export async function deleteSelectedExcelRows() {
     await autoSaveExcelToFirebase(); 
 }
 
-// 🌟 주문서 데이터와 기사 앱 동선을 함께 완전히 삭제(초기화)하는 함수
 export async function clearAllExcelRows() {
     if(state.parsedExcelList.length === 0) return;
-    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?\n\n🚨 주의: 기사 앱으로 이미 전송된 모든 동선 코스 데이터도 함께 삭제/초기화됩니다!")) return;
-    
-    // 기사앱 동선도 빈 배열로 덮어씌워 강제 초기화
-    const targetDrivers = new Set();
-    state.parsedExcelList.forEach(item => {
-        if (item.assignedDriver) targetDrivers.add(item.assignedDriver);
-    });
-
-    const visibleDrivers = getFilteredVisibleDrivers();
-    
-    for (const dName of targetDrivers) {
-        const matchedLic = visibleDrivers.find(l => (l.phone && l.phone === dName) || l.key === dName || l.deviceId === dName);
-        if (matchedLic) {
-            const devId = matchedLic.deviceId || matchedLic.key;
-            try {
-                // 해당 기사 앱의 코스 목록(destinations)을 빈 값으로 저장하여 화면에서 삭제시킴
-                await setDoc(doc(db, "routes", devId), { destinations: [], updatedAt: Date.now() }, { merge: true });
-            } catch(e) {
-                console.error("동선 초기화 오류:", e);
-            }
-        }
-    }
-
+    if(!confirm("업로드된 모든 주문 리스트를 비우시겠습니까?")) return;
     state.parsedExcelList = []; 
     renderExcelTable(); 
     await autoSaveExcelToFirebase();
-
-    // 화면 갱신 동기화
-    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
-    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
-    
-    alert("모든 주문 내역 및 기사 앱 동선 데이터가 성공적으로 초기화되었습니다.");
 }
 
 // ==========================================
