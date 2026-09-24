@@ -142,7 +142,7 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 번지수 숫자 보존 및 특수기호/라벨 꼬리 절단 엔진
+// 3. 🌟 하이픈(-) 및 번지수 숫자 완전 보존 주소 추출 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     const rawFullText = lines.map(l => l.fullText).join('\n');
@@ -205,39 +205,32 @@ function parseOrderFromPageLines(lines, pageNum) {
         if (allPhones && allPhones.length > 0) order.phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
     }
 
-    // 4. 주소 추출: 행정구역 시작 ~ 번지수/동호수 보존, 라벨/특수기호 발생 시 절단
+    // 4. 🌟 주소 추출: 번지수 하이픈(-) 절대 차단하지 않고 법정동 및 상세층수까지 안전하게 확보
     const addrStartRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+/i;
     const match = buyerSectionText.match(addrStartRegex);
 
     if (match) {
         let rawAddr = match[0];
 
-        // (1) 표의 다음 라벨 키워드가 나오면 그 지점부터 즉시 절단
+        // 표의 다른 항목 키워드가 나오면 절단
         rawAddr = rawAddr.split(/(?:배송지명|간판명|연락처|추가연락처|No\.|전화|사업자|결제\s*수단)/)[0];
+        
+        // 파이프 기기 기준 절단
+        if (rawAddr.includes('|')) rawAddr = rawAddr.split('|')[0];
 
-        // (2) 파이프(|) 기호가 나오면 그 뒤는 표의 경계이므로 절단
-        if (rawAddr.includes('|')) {
-            rawAddr = rawAddr.split('|')[0];
-        }
+        // 잡음 정리 ('받 주소', 우편번호 등)
+        rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\[\d+\]/g, ' ');
 
-        // (3) '받 주소', '받', '주소' 라벨 접두어/잡음 정리
-        rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ');
+        // 🌟 핵심 주소 패턴: 시/도 ~ 도로명/지번 + 번지수(하이픈 숫자 포함) + 법정동 괄호 및 층/호/건물명까지 완벽 보존
+        const safeAddrMatch = rawAddr.match(/((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+?(?:동|읍|면|로|길|리)\s*[\d\-]+(?:\s*\([가-힣0-9\s,\.\-]+\))?(?:\s*[\w가-힣0-9\s\-]+?(?:층|호|빌딩|타워|센터|단지|차|동))?)/i);
 
-        // (4) 우편번호 [08289] 박스 제거
-        rawAddr = rawAddr.replace(/\[\d+\]/g, ' ');
-
-        // (5) 도로명 + 번지수(예: 공원로6나길 43-2, 미금일로 75, 종로40길 18) 및 법정동/상세층수 추출
-        // 패턴: 시/도/군/구 + 로/길/동/읍/면/리 + 번지수(필수: 숫자 또는 숫자-숫자) + 상세주소(선택)
-        const validAddrMatch = rawAddr.match(/((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+?(?:동|읍|면|로|길|리)\s*[\d]+(?:-[\d]+)?(?:\s*\([가-힣0-9\s,\.\-]+\))?(?:\s*[\w가-힣0-9\s\-]+?(?:층|호|빌딩|타워|센터|단지|차|동))?)/i);
-
-        if (validAddrMatch) {
-            order.address = validAddrMatch[1].replace(/\s{2,}/g, ' ').trim();
+        if (safeAddrMatch) {
+            order.address = safeAddrMatch[1].replace(/\s{2,}/g, ' ').trim();
         } else {
-            order.address = rawAddr.replace(/\s{2,}/g, ' ').trim();
+            // 폴백: 만약 상세 건물이 없더라도 번지수(하이픈 포함)까지는 무조건 포함되도록 캡처
+            const basicMatch = rawAddr.match(/((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+?(?:동|읍|면|로|길|리)\s*[\d\-]+)/i);
+            order.address = basicMatch ? basicMatch[1].replace(/\s{2,}/g, ' ').trim() : rawAddr.replace(/\s{2,}/g, ' ').trim();
         }
-
-        // 끝부분에 남은 불필요한 단어('는', '자' 등) 최종 절단
-        order.address = order.address.replace(/\s+(?:는|자)$/g, '').trim();
     }
 
     // 5. 배송 메모
@@ -322,6 +315,7 @@ async function getCoordsFromAddress(address) {
 }
 
 export async function batchGeocodePdfList(items) {
+    $r = document.getElementById('excel-drop-zone');
     const dropZone = document.getElementById('excel-drop-zone');
     const originalDropHtml = dropZone ? dropZone.innerHTML : '';
 
