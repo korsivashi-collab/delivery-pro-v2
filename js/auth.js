@@ -12,7 +12,8 @@ import {
     firebaseStartTrial, 
     firebaseClearDeviceData,
     checkIfDeviceBlocked,
-    syncMyParkingMemosFromServer
+    syncMyParkingMemosFromServer,
+    listenToActiveRoutes
 } from './api.js';
 import { 
     saveMessageToLocalHistory, 
@@ -23,6 +24,18 @@ import { getDeviceRealGPS, startGpsWatcher } from './gps.js';
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
 let gpsRequestWatcherUnsub = null;  
+let activeRoutesWatcherUnsub = null; // 관제 실시간 동선 수신 리스너 구독 해제용 변수
+
+let onRemoteRoutesReceivedCallback = null;
+let onRemoteRoutesClearedCallback = null;
+
+// ==========================================
+// 0. 관제 자동할당 동선 수신 핸들러 등록 (app.js 연동용)
+// ==========================================
+export function setRemoteRoutesHandler(onReceived, onCleared) {
+    onRemoteRoutesReceivedCallback = onReceived;
+    onRemoteRoutesClearedCallback = onCleared;
+}
 
 // ==========================================
 // 1. 기기 고유 식별자(Device ID) 발급 및 조회
@@ -118,11 +131,12 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     updateExpireBadge(expireDate);
     startLicenseRealtimeWatcher(key);
 
-    // 🌟 [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
+    // [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
     if (typeof syncMyParkingMemosFromServer === 'function') {
         syncMyParkingMemosFromServer(phone, deviceId, key);
     }
 
+    // 관제/운영사 메시지 실시간 감시
     if (dispatchMsgWatcherUnsub) dispatchMsgWatcherUnsub();
     dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phone, key, (msg) => {
         saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
@@ -132,8 +146,26 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
         }
     });
 
+    // 관제 GPS 위치 요청 감시
     if (gpsRequestWatcherUnsub) gpsRequestWatcherUnsub();
     gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phone, key, getDeviceRealGPS);
+
+    // 🌟 [핵심 신규] 관제 센터 실시간 자동할당 동선 감시 (routes/{deviceId} 구독)
+    if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
+    activeRoutesWatcherUnsub = listenToActiveRoutes(
+        deviceId, 
+        (destinations, data) => {
+            if (onRemoteRoutesReceivedCallback) {
+                onRemoteRoutesReceivedCallback(destinations, data);
+            }
+        }, 
+        () => {
+            if (onRemoteRoutesClearedCallback) {
+                onRemoteRoutesClearedCallback();
+            }
+        }
+    );
+
     updatePhotoCompButtonState(!!dispatchKey);
 }
 
@@ -143,7 +175,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
 export async function checkSavedAuth() {
     const deviceId = getOrCreateDeviceId();
 
-    // 🌟 [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사 (차단 시 error.html로 즉각 이동)
+    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
     try {
         const isBlocked = await checkIfDeviceBlocked(deviceId);
         if (isBlocked) {
@@ -204,7 +236,7 @@ export async function verifyLicense() {
     const btn = document.getElementById('verify-btn');
     const deviceId = getOrCreateDeviceId(); 
 
-    // 🌟 [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
+    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
     try {
         const isBlocked = await checkIfDeviceBlocked(deviceId);
         if (isBlocked) {
@@ -288,7 +320,7 @@ export async function startFreeTrial() {
     const btn = document.getElementById('trial-submit-btn');
     const deviceId = getOrCreateDeviceId();
 
-    // 🌟 [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
+    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
     try {
         const isBlocked = await checkIfDeviceBlocked(deviceId);
         if (isBlocked) {
@@ -360,6 +392,7 @@ export async function logout() {
     try { if (typeof licenseWatcherUnsub === 'function') { licenseWatcherUnsub(); } } catch(e) {}
     try { if (typeof dispatchMsgWatcherUnsub === 'function') { dispatchMsgWatcherUnsub(); } } catch(e) {}
     try { if (typeof gpsRequestWatcherUnsub === 'function') { gpsRequestWatcherUnsub(); } } catch(e) {}
+    try { if (typeof activeRoutesWatcherUnsub === 'function') { activeRoutesWatcherUnsub(); } } catch(e) {} // 관제 동선 구독 해제
 
     clearAuthStorage();
     window.location.reload();

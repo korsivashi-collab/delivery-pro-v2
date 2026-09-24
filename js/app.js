@@ -18,7 +18,8 @@ import {
     closeTrialModal, 
     startFreeTrial, 
     logout, 
-    getOrCreateDeviceId 
+    getOrCreateDeviceId,
+    setRemoteRoutesHandler
 } from './auth.js';
 
 import { 
@@ -83,6 +84,38 @@ export async function initApp() {
     initCameraScan();
     initPhotoCompletion(); 
     
+    // 🌟 관제 센터 실시간 자동할당 동선 수신 핸들러 등록
+    setRemoteRoutesHandler((newDestinations, routeData) => {
+        if (!newDestinations || !Array.isArray(newDestinations)) return;
+
+        // 관제에서 전송된 배송지 배열 정규화 및 상태 동기화
+        const formattedList = newDestinations.map((d, idx) => ({
+            id: d.id || (Date.now() + idx),
+            displayNumber: d.displayNumber || (idx + 1),
+            address: d.address || "",
+            lat: d.lat || 0,
+            lng: d.lng || 0,
+            phone: d.phone || "",
+            storeName: d.storeName || "",
+            orderNo: d.orderNo || "",
+            memo: d.memo || "",
+            items: d.items || []
+        }));
+
+        state.setDestinations(formattedList);
+        state.updateDisplayNumbers();
+        state.saveActiveData();
+        renderList();
+
+        // 관리자로부터 신규 배송지 할당 시 진동 알림
+        if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+    }, () => {
+        // 관제 센터에서 전체 초기화(삭제)가 진행된 경우
+        state.setDestinations([]);
+        state.saveActiveData();
+        renderList();
+    });
+
     // 지난 배송 복원 콜백 등록
     setRestoreDestinationHandler((itemToRestore) => {
         state.addDestination(itemToRestore);
@@ -328,7 +361,7 @@ export function renderList() {
             listEl.innerHTML = `
                 <li class="text-center text-gray-400 py-12 border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
-                    <p class="font-medium text-xs">주소지를 스캔하면 동선이 생성됩니다.</p>
+                    <p class="font-medium text-xs">주소지를 스캔하거나 관제에서 전송되면 동선이 생성됩니다.</p>
                 </li>`;
         }
         return;
@@ -358,12 +391,32 @@ export function renderList() {
                     <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${match[1]}</span>
                     <span class="block truncate leading-tight">${match[2]}</span>
                 `;
+            } else if (dest.storeName) {
+                displayAddressHTML = `
+                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${dest.storeName}</span>
+                    <span class="block truncate leading-tight">${dest.address}</span>
+                `;
             } else {
                 displayAddressHTML = `<span class="block truncate">${dest.address}</span>`;
             }
 
             const isFirst = index === 0;
             const isLast = index === destinations.length - 1;
+
+            // 관제 전송 주문번호, 요청사항(메모), 적재 품목 뷰 생성
+            let orderBadgeHTML = dest.orderNo ? `<span class="text-[9px] font-mono text-gray-400 font-semibold ml-1">#${dest.orderNo}</span>` : '';
+            
+            let dispatchMemoHTML = dest.memo ? `
+                <div class="bg-amber-50 border border-amber-200 rounded p-1.5 text-[11px] text-amber-900 truncate shadow-2xs mb-1 mt-0.5">
+                    <i class="fa-solid fa-clipboard-list text-amber-600 mr-1 text-[10px]"></i><span class="font-bold">배송요청:</span> ${dest.memo}
+                </div>
+            ` : '';
+
+            let itemsHTML = (dest.items && dest.items.length > 0) ? `
+                <div class="bg-slate-50 border border-slate-200 rounded p-1.5 text-[11px] text-slate-700 truncate shadow-2xs mb-1 mt-0.5">
+                    <i class="fa-solid fa-box text-blue-500 mr-1 text-[10px]"></i><span class="font-bold">품목:</span> ${dest.items.map(it => `${it.name}(${it.qty}${it.unit || ''})`).join(', ')}
+                </div>
+            ` : '';
 
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
@@ -377,9 +430,15 @@ export function renderList() {
                         </button>
                     </div>
                     ${numberBadge}
-                    <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">${displayAddressHTML}</div>
+                    <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">
+                        <div class="flex items-center truncate">${displayAddressHTML} ${orderBadgeHTML}</div>
+                    </div>
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
                 </div>
+                
+                ${dispatchMemoHTML}
+                ${itemsHTML}
+
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-1 mt-1"></div>
                 <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded p-1.5 text-[11px] text-gray-800 border border-gray-100 truncate shadow-sm mb-1 mt-1"></div>
                 <!-- 공용 메모 아랫단에 개인 메모 표시 슬롯 -->

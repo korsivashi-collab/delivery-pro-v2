@@ -191,6 +191,27 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
+// 🌟 [신규 추가] 관제 센터 실시간 자동할당 동선 수신 리스너 (routes/{deviceId} 구독)
+export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared) {
+    if (!deviceId) return null;
+    const routeDocRef = doc(db, "routes", deviceId);
+    return onSnapshot(routeDocRef, (docSnap) => {
+        if (docSnap.exists()) {
+            const data = docSnap.data();
+            if (onRoutesReceived) {
+                onRoutesReceived(data.destinations || [], data);
+            }
+        } else {
+            // 관제에서 전체 초기화(clearAllExcelRows) 등으로 동선 문서가 삭제된 경우
+            if (onRoutesCleared) {
+                onRoutesCleared();
+            }
+        }
+    }, (error) => {
+        console.error("관제 동선 실시간 수신 오류:", error);
+    });
+}
+
 // 5. 관제 메시지 리스너
 export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessageReceived) {
     const cleanPhone = (myPhone || '').replace(/[^0-9]/g, '');
@@ -307,13 +328,11 @@ export async function getBatchMemosFromFirestore(addresses) {
     return allMemosMap;
 }
 
-// 🌟 [수정 완료] 공용 메모 저장/수정 시 전화번호(phone) 기준 중복 덮어쓰기 로직
 export async function saveMemoToFirestore(address, deviceId, memoText, phone = "") {
     const now = new Date();
     const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
     const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
 
-    // 복합 색인(Index) 에러 방지를 위해 address로만 쿼리 후 배열에서 전화번호를 대조하여 덮어씁니다.
     const q = query(collection(db, "memos"), where("address", "==", address));
     const querySnapshot = await getDocs(q);
 
@@ -354,7 +373,6 @@ export async function saveMemoToFirestore(address, deviceId, memoText, phone = "
     }
 }
 
-// 🌟 [신규 추가] 전화번호 및 계정 매핑 기반 전체 공용 메모 기여도 서버 동기화 함수
 export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) {
     const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
     const myAddresses = new Set();
@@ -433,7 +451,11 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
                 address: d.address || "",
                 lat: d.lat || 0,
                 lng: d.lng || 0,
-                phone: d.phone || ""
+                phone: d.phone || "",
+                storeName: d.storeName || "",
+                orderNo: d.orderNo || "",
+                memo: d.memo || "",
+                items: d.items || []
             }))
         });
     } catch (e) { console.error("동선 전송 오류:", e); }
@@ -535,7 +557,7 @@ export async function firebaseSetTmsPermission(key, isAllowed) {
 export async function firebaseUploadTempMemoBackup(cleanKey, encryptedPayload, count) {
     if (!cleanKey) throw new Error("라이선스 식별자가 올바르지 않습니다.");
     const now = Date.now();
-    const expireTime = now + (12 * 60 * 60 * 1000); // 12시간 후 자동 만료 기준 시점
+    const expireTime = now + (12 * 60 * 60 * 1000);
 
     const docRef = doc(db, "temp_memo_backups", cleanKey);
     await setDoc(docRef, {
@@ -557,7 +579,6 @@ export async function firebaseGetTempMemoBackup(cleanKey) {
     const data = docSnap.data();
     const now = Date.now();
 
-    // 12시간이 경과한 데이터는 서버에서 즉시 영구 파기 처리
     if (data.expireAt && now > data.expireAt) {
         try { await deleteDoc(docRef); } catch (e) {}
         return { expired: true };
