@@ -60,7 +60,59 @@ export function updateCompanyBaseUI(data) {
 }
 
 // ==========================================
-// 2. 자동할당 기사 목록 및 가중치 제어
+// 🌟 2. 드래그 리사이저 바 (Splitter Bar) 실시간 조절 엔진
+// ==========================================
+export function initDispatchResizer() {
+    const resizer = document.getElementById('dispatch-panel-resizer');
+    const detailPanel = document.getElementById('dispatch-detail-panel');
+    if (!resizer || !detailPanel) return;
+
+    // 브라우저에 저장된 선호 너비가 있다면 불러와서 적용
+    const savedWidth = localStorage.getItem('deliveryPro_dispatchDetailWidth');
+    if (savedWidth) {
+        detailPanel.style.width = `${savedWidth}px`;
+    }
+
+    if (resizer.dataset.bound === 'true') return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = detailPanel.offsetWidth;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = e.clientX - startX;
+        let newWidth = startWidth + delta;
+        
+        // 최소 300px ~ 최대 750px 안전 범위 제한
+        if (newWidth < 300) newWidth = 300;
+        if (newWidth > 750) newWidth = 750;
+
+        detailPanel.style.width = `${newWidth}px`;
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            localStorage.setItem('deliveryPro_dispatchDetailWidth', detailPanel.offsetWidth);
+        }
+    });
+
+    resizer.dataset.bound = 'true';
+}
+
+// ==========================================
+// 3. 자동할당 기사 목록 및 가중치 제어
 // ==========================================
 export const autoDispatchState = {
     selectedDrivers: new Set(),
@@ -69,6 +121,8 @@ export const autoDispatchState = {
 };
 
 export function renderDispatchDriverList() {
+    initDispatchResizer(); // 모달 렌더링 시 리사이저 초기화 및 저장된 너비 적용
+
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
     if (!listEl || !countEl) return;
@@ -175,7 +229,7 @@ export function selectDispatchDriver(devId) {
 }
 
 // ==========================================
-// 3. 기사별 할당 상세 내역 및 수동 기사 재배정 UI
+// 4. 기사별 할당 상세 내역 및 수동 기사 재배정 UI
 // ==========================================
 export function renderDispatchDriverDetail() {
     const header = document.getElementById('detail-driver-header');
@@ -213,7 +267,7 @@ export function renderDispatchDriverDetail() {
         return;
     }
 
-    // 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 합산 출력 및 앱 전송 버튼 노출
+    // 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 취합 출력 및 앱 전송 버튼 노출
     if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
     if (btnSendRoutes) btnSendRoutes.classList.remove('hidden');
 
@@ -255,7 +309,7 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 4. 자동할당 알고리즘 실행 (외곽 우선 1원칙)
+// 5. 자동할당 알고리즘 실행 (외곽 우선 1원칙)
 // ==========================================
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -378,13 +432,13 @@ export function runAutoDispatchAlgorithm() {
 
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
-    alert(`[자동할당 배분 완료]\n외곽 물량 우선 할당 원칙에 따라 총 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.\n\n내역 검토 후 이상이 없으면 상단의 [기사 앱으로 동선 전송]을 눌러주세요.`);
+    alert(`[자동할당 배분 완료]\n외곽 물량 우선 할당 원칙에 따라 총 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.`);
     
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
 }
 
 // ==========================================
-// 5. 기사 앱 수동 전송 엔진
+// 6. 기사 앱 수동 전송 엔진
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -400,8 +454,6 @@ export async function sendRoutesToDrivers() {
         return;
     }
 
-    // 전체 전송이 아닌, 현재 화면에서 선택된 기사에게만 전송되도록 로직 수정 반영 가능
-    // 단, 기존 로직이 전체 기사 전송이었으므로 이를 유지하면서 선택된 기사들로 필터링
     const driverMap = {};
     assignedOrders.forEach(o => {
         if (!driverMap[o.assignedDriver]) driverMap[o.assignedDriver] = [];
@@ -463,7 +515,7 @@ export async function sendRoutesToDrivers() {
 }
 
 // ==========================================
-// 🌟 6. 선택된 기사 전용 상품 합산 피킹 리스트 (양식 없는 단순 리스트)
+// 7. 선택된 기사 전용 상품 합산 출력 (양식 없는 단순 리스트)
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -480,7 +532,6 @@ export function printSelectedDriverItemList() {
         return;
     }
 
-    // 선택된 기사의 품목 그룹화 및 수량 합산 로직 (양식 없이 단순하게)
     const aggregationMap = {};
 
     assignedItems.forEach(order => {
@@ -510,7 +561,6 @@ export function printSelectedDriverItemList() {
         </div>`;
     }
 
-    // 표 등의 복잡한 양식을 모두 제거하고, 텍스트와 라인 중심의 단순 영수증/메모 스타일 적용
     const simplePrintHtml = `<!DOCTYPE html>
     <html lang="ko">
     <head>
@@ -579,11 +629,12 @@ export function printSelectedDriverItemList() {
 }
 
 // ==========================================
-// 7. 전역 Window 객체 바인딩
+// 8. 전역 Window 객체 바인딩
 // ==========================================
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
+window.initDispatchResizer = initDispatchResizer;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
 window.selectDispatchDriver = selectDispatchDriver;
