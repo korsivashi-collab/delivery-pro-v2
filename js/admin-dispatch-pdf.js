@@ -66,6 +66,7 @@ export async function processSinglePdfFile(file) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
             
+            // 좌표 기반 텍스트 라인화 (좌/우 공간 분리 포함)
             const pageLines = groupTextContentByLines(textContent.items);
             const orderData = parseOrderFromPageLines(pageLines, pageNum);
 
@@ -89,7 +90,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 2. Y축 정렬 및 공급받는 자(우측) 텍스트 분리
+// 2. Y축 정렬 및 X축 기준 좌/우(공급자/수취자) 분리 엔진
 // ==========================================
 function groupTextContentByLines(items) {
     if (!items || items.length === 0) return [];
@@ -104,16 +105,11 @@ function groupTextContentByLines(items) {
 
         let matchedY = null;
         for (const existingY of lineMap.keys()) {
-            if (Math.abs(existingY - y) <= 4) {
-                matchedY = existingY;
-                break;
-            }
+            if (Math.abs(existingY - y) <= 4) matchedY = existingY;
         }
 
         const targetY = matchedY !== null ? matchedY : y;
-        if (!lineMap.has(targetY)) {
-            lineMap.set(targetY, []);
-        }
+        if (!lineMap.has(targetY)) lineMap.set(targetY, []);
         lineMap.get(targetY).push({ x, text: str });
     });
 
@@ -124,16 +120,15 @@ function groupTextContentByLines(items) {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const fullText = lineItems.map(i => i.text).join(' ').trim();
         
-        // 2단 양식(좌측 공급자 / 우측 공급받는자) 분리를 위한 x 좌표 필터링
-        const rightItems = lineItems.filter(i => i.x > 220);
+        // PDF X좌표 230~250을 기준으로 보통 좌측(공급자), 우측(공급받는자)이 나뉨
+        const leftItems = lineItems.filter(i => i.x < 240);
+        const rightItems = lineItems.filter(i => i.x >= 240);
+        
+        const leftText = leftItems.map(i => i.text).join(' ').trim();
         const rightText = rightItems.map(i => i.text).join(' ').trim();
 
         if (fullText) {
-            sortedLines.push({
-                y: yKey,
-                fullText: fullText,
-                rightText: rightText
-            });
+            sortedLines.push({ y: yKey, fullText, leftText, rightText });
         }
     });
 
@@ -141,229 +136,159 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 범용 우선순위 가점(Scoring) 파싱 헬퍼
+// 3. 상품 테이블 전용 파싱 헬퍼
 // ==========================================
-const NEXT_STOP_WORDS = /(?=\s*(?:연락처|전화|휴대폰|핸드폰|주소|배송지\s*주소|사업자|구매자|수령인|수신자|받는\s*분|고객|간판|상호|매장|가게|결제|총\s*상품|배송비|요청사항|비고|메모|No\.|상품명|$))/i;
-
-function cleanExtractedValue(val) {
-    if (!val) return '';
-    return val
-        .replace(/^[|:\-\s]+/, '')
-        .replace(/[|:\-\s]+$/, '')
-        .replace(/\(공급받는자용\)|\(공급자보관용\)|\(보관용\)/gi, '')
-        .trim();
-}
-
-// 🌟 단어 조각 기반 가점 평가 엔진
-function extractByPriorityScoring(text) {
-    const candidateStoreList = [];
-    const candidateBuyerList = [];
-
-    // 정규식: 라벨 키워드 감지 (간판, 배송, 매장, 상호, 가게, 구매자, 고객, 수령, 이름 등)
-    const labelRegex = /(?:([가-힣a-zA-Z0-9\(\)\s]{2,15})[:\s|]+)([\s\S]*?)(?=(?:[가-힣a-zA-Z0-9\(\)\s]{2,15}[:\s|]+)|$)/g;
-
-    let match;
-    while ((match = labelRegex.exec(text)) !== null) {
-        const rawLabel = match[1].trim();
-        let rawVal = match[2];
-
-        // 다음 필드 키워드가 나오면 그 앞까지만 절단
-        const stopIdx = rawVal.search(NEXT_STOP_WORDS);
-        if (stopIdx !== -1) {
-            rawVal = rawVal.substring(0, stopIdx);
-        }
-
-        const cleanVal = cleanExtractedValue(rawVal);
-        if (!cleanVal || cleanVal.length < 2 || cleanVal.length > 35) continue;
-
-        // 주소/전화번호 형태는 상호명 점수에서 배제
-        if (/(?:시|구|동|로|길)\s*\d+/.test(cleanVal) || /^[0-9\-]+$/.test(cleanVal)) continue;
-
-        let storeScore = 0;
-        let buyerScore = 0;
-
-        // 🌟 1. 간판 단어 인식 (+50점)
-        if (rawLabel.includes('간판')) {
-            storeScore += 50;
-        }
-        // 🌟 2. 배송 단어 인식 (+40점) - 주소/메모/비용 제외
-        else if (rawLabel.includes('배송') && !rawLabel.includes('주소') && !rawLabel.includes('메모') && !rawLabel.includes('요청') && !rawLabel.includes('비')) {
-            storeScore += 40;
-        }
-        // 🌟 3. 매장 / 가게 / 점포 단어 인식 (+35점)
-        else if (rawLabel.includes('매장') || rawLabel.includes('가게') || rawLabel.includes('점포')) {
-            storeScore += 35;
-        }
-        // 🌟 4. 상호 / 법인 단어 인식 (+30점)
-        else if (rawLabel.includes('상호') || rawLabel.includes('법인')) {
-            storeScore += 30;
-        }
-
-        // 🌟 5. 구매자 / 수령인 / 이름 단어 인식 (+10 ~ 20점)
-        if (rawLabel.includes('구매자') || rawLabel.includes('주문자')) {
-            buyerScore += 20;
-        } else if (rawLabel.includes('수령') || rawLabel.includes('수신') || rawLabel.includes('받는') || rawLabel.includes('고객')) {
-            buyerScore += 15;
-        } else if (rawLabel.includes('이름') || rawLabel.includes('성명')) {
-            buyerScore += 10;
-        }
-
-        if (storeScore > 0) {
-            candidateStoreList.push({ val: cleanVal, score: storeScore });
-        }
-        if (buyerScore > 0) {
-            candidateBuyerList.push({ val: cleanVal, score: buyerScore });
+function parseItemLine(text, itemsArray) {
+    const rowMatch = text.match(/^(\d+)\s+(.+)/);
+    if (!rowMatch) return;
+    
+    const rest = rowMatch[2];
+    const priceMatch = rest.match(/(\d+)\s+[\d,]+(?:\s+[\d,]+)*$/);
+    
+    if (priceMatch) {
+        const qtyNum = parseInt(priceMatch[1], 10) || 1;
+        const nameStr = rest.slice(0, priceMatch.index).trim();
+        const unitMatch = nameStr.match(/(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
+        const unitStr = unitMatch ? unitMatch[0] : '개';
+        itemsArray.push({ name: nameStr, qty: qtyNum, unit: unitStr });
+    } else {
+        const qtyMatch = rest.match(/(\d+)\s*(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
+        if (qtyMatch) {
+            const qtyNum = parseInt(qtyMatch[1], 10) || 1;
+            const unitStr = qtyMatch[2];
+            const nameStr = rest.replace(qtyMatch[0], '').trim();
+            itemsArray.push({ name: nameStr || rest, qty: qtyNum, unit: unitStr });
+        } else {
+            itemsArray.push({ name: rest, qty: 1, unit: '개' });
         }
     }
-
-    // 가장 높은 점수의 항목 채택
-    candidateStoreList.sort((a, b) => b.score - a.score);
-    candidateBuyerList.sort((a, b) => b.score - a.score);
-
-    const bestStore = candidateStoreList.length > 0 ? candidateStoreList[0].val : '';
-    const bestBuyer = candidateBuyerList.length > 0 ? candidateBuyerList[0].val : '';
-
-    return { storeName: bestStore, senderName: bestBuyer };
 }
 
 // ==========================================
-// 4. 정보 추출 및 주문 객체 파싱 엔진
+// 4. 업계 표준 Line-by-Line 기반 키워드 파싱 엔진 (우선순위 적용)
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
-    const rawFullText = lines.map(l => l.fullText).join('\n');
-    
-    // 🌟 1순위: 공급자 / 발송자 / 판매자 정보 원천 차단 (공급자 블록 전체 제거)
-    let safeText = rawFullText.replace(/(?:공급자|발송자|판매자|보내는\s*분|출하지)[\s\S]*?(?=(?:공급받는\s*자|구매자|수령인|수신자|받는\s*분|배송지|주문자|No\.|상품명|$))/gi, ' ');
+    let storeName = '';
+    let senderName = '';
+    let phone = '';
+    let address = '';
+    let memo = '';
+    let orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
+    let items = [];
 
-    // 2단 문서 우측(공급받는 자 영역) 텍스트 분리
+    let isItemSection = false;
     let buyerSectionLines = [];
-    let isHeaderArea = true;
+
+    // 1단계: 라인(Line) 분류 및 1순위(공급자 정보) 원천 차단
     lines.forEach(line => {
-        if (line.fullText.includes('No.') && (line.fullText.includes('상품명') || line.fullText.includes('규격'))) {
-            isHeaderArea = false;
+        // 상품 테이블 진입 감지
+        if (/No\.|상품명|단가|수량|규격/i.test(line.fullText)) isItemSection = true;
+
+        if (isItemSection) {
+            // 테이블 종료 감지
+            if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(line.fullText)) {
+                isItemSection = false;
+            } else if (/^\d+\s+/.test(line.fullText.trim())) {
+                parseItemLine(line.fullText, items);
+            }
+        } else {
+            // 우측 영역(공급받는 자) 텍스트가 명확히 있으면 우측만 사용, 없으면 전체 라인 사용
+            let targetText = (line.rightText && line.rightText.length > 2) ? line.rightText : line.fullText;
+            
+            // 발송자(공급자)를 뜻하는 키워드가 포함된 줄은 수취자 데이터 공간에서 절대 배제
+            if (!/공급자|대표자|윤진유통|사업자등록번호|통신판매/.test(targetText)) {
+                buyerSectionLines.push(targetText);
+            }
         }
-        if (isHeaderArea && line.rightText) {
-            buyerSectionLines.push(line.rightText);
+
+        // 주문번호 및 메모는 포지션과 무관하게 감지
+        if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(line.fullText)) {
+            memo = line.fullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
+        }
+        if (/주문번호|오더번호|발주번호/.test(line.fullText)) {
+            const m = line.fullText.match(/(?:주문번호|오더번호|발주번호)\s*[:|]?\s*([A-Z0-9_\-]+)/i);
+            if (m) orderNo = m[1].trim();
         }
     });
-    const buyerSectionText = buyerSectionLines.join(' ');
-    const searchTargetText = buyerSectionText.length > 25 ? buyerSectionText : safeText;
 
-    const order = {
+    // 2단계: 수집된 수취자(Buyer) 영역을 한 줄씩 돌며 우선순위 매칭
+    buyerSectionLines.forEach(text => {
+        
+        // [순위 1] 간판명 / 배송지명 / 매장 / 상호 (발견 시 덮어쓰기)
+        if (/(?:배송지명|간판명|매장명|가게명|상호명|상호)/.test(text)) {
+            let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호)\s*[:|]?\s*/i, '').trim();
+            if (val && !/^\d+$/.test(val)) storeName = val; 
+        }
+        
+        // [순위 2] 구매자 / 수령인 / 고객 / 이름 (상호명이 비어있을 때를 대비한 백업)
+        if (!senderName && /(?:구매자명|주문자명|주문자|수령인|수신자|받는\s*분|받는분|고객명)/.test(text)) {
+            let val = text.replace(/.*(?:구매자명|주문자명|주문자|수령인|수신자|받는\s*분|받는분|고객명)\s*[:|]?\s*/i, '').trim();
+            if (val && !/^\d+$/.test(val)) senderName = val;
+        }
+        
+        // [순위 3] 연락처
+        if (!phone && /(?:연락처|전화|휴대폰|핸드폰)/.test(text)) {
+            let m = text.match(/[0-9\-]{9,15}/);
+            if (m) phone = formatPhoneNumber(m[0]);
+        } else if (!phone) {
+            let m = text.match(/01[016789]-?\d{3,4}-?\d{4}/);
+            if (m) phone = formatPhoneNumber(m[0]);
+        }
+        
+        // [순위 4] 주소 (행정구역명으로 시작하는 순수 주소 라인 매칭)
+        if (!address && /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(text)) {
+            if (!/(배송지|연락처|구매자|상호|주문)/.test(text)) {
+                // 우편번호 [00000] 제거 및 괄호(건물명 등) 뒷부분 절단
+                address = text.replace(/\[\d+\]/, '').replace(/^[|:\s]+/, '').split('(')[0].trim();
+            }
+        }
+    });
+
+    // 3단계: 누락분 보완 (줄바꿈이 이상하게 되어 라인이 찢어진 경우를 대비한 보험 로직)
+    const fullBuyerString = buyerSectionLines.join(' ');
+    if (!storeName) {
+        const m = fullBuyerString.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
+        if (m) storeName = m[1].trim();
+    }
+    if (!senderName) {
+        const m = fullBuyerString.match(/(?:구매자명|수령인|받는\s*분)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
+        if (m) senderName = m[1].trim();
+    }
+
+    // 최종 정리: 상호명이 없으면 구매자명을 상호명으로 격상
+    if (!storeName) storeName = senderName || '배송처 미상';
+    if (!senderName) senderName = storeName;
+
+    // 아이템 수량 합산 처리 (외 N품목 배지는 이 itemName을 기반으로 UI에서 출력됨)
+    let qty = 1;
+    let itemName = '';
+    if (items.length > 1) {
+        qty = items.reduce((sum, item) => sum + (item.qty || 1), 0);
+        itemName = `${items[0].name} 외 ${items.length - 1}건`;
+    } else if (items.length === 1) {
+        qty = items[0].qty || 1;
+        itemName = `${items[0].name} (${qty}${items[0].unit})`;
+    }
+
+    return {
         id: Date.now() + Math.random(),
         assignedDriver: null,
-        senderName: '',
-        orderNo: '',
+        senderName,
+        orderNo,
         bizNo: '',
-        address: '',
-        storeName: '',
-        phone: '',
-        itemName: '',
-        unit: '',
-        qty: 1,
+        address,
+        storeName,
+        phone,
+        itemName,
+        unit: items.length > 0 ? items[0].unit : '개',
+        qty,
         price: '',
         total: '',
-        memo: '',
+        memo,
         lat: null,
         lng: null,
-        items: []
+        items
     };
-
-    // 1. 주문번호
-    const orderNoMatch = safeText.match(/(?:주문\s*번호|오더\s*번호|관리\s*번호|발주\s*번호)[:\s|]*([A-Z0-9_\-]+)/i);
-    if (orderNoMatch) order.orderNo = orderNoMatch[1].trim();
-    else order.orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
-
-    // 2. 상호(간판/배송/매장/상호) 및 구매자명 가점 기반 추출
-    const { storeName, senderName } = extractByPriorityScoring(searchTargetText);
-    order.storeName = storeName;
-    order.senderName = senderName;
-
-    // 만약 한쪽만 추출된 경우 보완 매칭
-    if (!order.storeName) order.storeName = order.senderName || '배송처';
-    if (!order.senderName) order.senderName = order.storeName;
-
-    // 3. 연락처 추출 및 포맷팅
-    const phoneMatch = searchTargetText.match(/(?:연락처|전화|휴대폰|핸드폰)[:\s|]*([0-9\-]{8,15})/i) || searchTargetText.match(/01[016789]-?\d{3,4}-?\d{4}/) || searchTargetText.match(/01[016789]\d{7,8}/);
-    if (phoneMatch) {
-        order.phone = formatPhoneNumber(phoneMatch[1] || phoneMatch[0]);
-    }
-
-    // 4. 주소 추출 (행정구역 감지 + 괄호 뒷부분 삭제 규칙 유지)
-    const addrRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r|]*(?=\s*(?:연락처|전화|배송지|간판|상호|No\.|결제|$))/i;
-    const match = searchTargetText.match(addrRegex);
-
-    if (match) {
-        let rawAddr = match[0];
-        // 우편번호 및 라벨 잡음 제거
-        rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\[\d+\]/g, ' ').trim();
-        
-        // 괄호 '(' 인식 시 뒷부분 통째로 삭제
-        const parenIndex = rawAddr.indexOf('(');
-        if (parenIndex !== -1) {
-            rawAddr = rawAddr.slice(0, parenIndex);
-        }
-        order.address = rawAddr.replace(/\s{2,}/g, ' ').trim();
-    }
-
-    // 5. 배송 메모
-    const memoMatch = safeText.match(/(?:배송\s*요청사항|배송요청사항|배송\s*메모|요청사항|전달사항|비고)[:\s|]*([^\n\r]+)/i);
-    if (memoMatch) {
-        order.memo = memoMatch[1].split(/거래명세표|No\.|총\s*주문금액/)[0].trim();
-    }
-
-    // 6. 다품목 상품 리스트 파싱 (표 형식)
-    const cleanLines = safeText.split('\n').map(l => l.trim()).filter(l => l);
-    let inItemTable = false;
-
-    for (const line of cleanLines) {
-        if (line.includes('No.') && (line.includes('상품명') || line.includes('규격'))) {
-            inItemTable = true;
-            continue;
-        }
-
-        if (inItemTable) {
-            if (/결제\s*수단|총\s*상품수량|배송\s*요청사항|총\s*주문금액|배송비/i.test(line)) {
-                inItemTable = false;
-                break;
-            }
-
-            const rowMatch = line.match(/^(\d+)\s+(.+)/);
-            if (rowMatch) {
-                const rest = rowMatch[2];
-                const priceMatch = rest.match(/(\d+)\s+[\d,]+(?:\s+[\d,]+)*$/);
-                
-                if (priceMatch) {
-                    const qtyNum = parseInt(priceMatch[1], 10) || 1;
-                    const nameStr = rest.slice(0, priceMatch.index).trim();
-                    const unitMatch = nameStr.match(/(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
-                    const unitStr = unitMatch ? unitMatch[0] : '개';
-
-                    order.items.push({ name: nameStr, qty: qtyNum, unit: unitStr });
-                } else {
-                    const qtyMatch = rest.match(/(\d+)\s*(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
-                    if (qtyMatch) {
-                        const qtyNum = parseInt(qtyMatch[1], 10) || 1;
-                        const unitStr = qtyMatch[2];
-                        const nameStr = rest.replace(qtyMatch[0], '').trim();
-                        order.items.push({ name: nameStr || rest, qty: qtyNum, unit: unitStr });
-                    } else {
-                        order.items.push({ name: rest, qty: 1, unit: '개' });
-                    }
-                }
-            }
-        }
-    }
-
-    if (order.items.length > 1) {
-        order.qty = order.items.reduce((sum, item) => sum + (item.qty || 1), 0);
-        order.itemName = `${order.items[0].name} 외 ${order.items.length - 1}건 (총 ${order.qty}개)`;
-    } else if (order.items.length === 1) {
-        order.qty = order.items[0].qty || 1;
-        order.itemName = `${order.items[0].name} (${order.qty}${order.items[0].unit})`;
-    }
-
-    return order;
 }
 
 // ==========================================
