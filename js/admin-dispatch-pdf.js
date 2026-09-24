@@ -90,7 +90,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 2. 🌟 X좌표 기반 좌측(공급자) 완전 배제 및 우측(수취자) 추출 엔진
+// 2. Y축 정렬 및 X축 기준 좌(공급자 제외) / 우(수취자) 분리 엔진
 // ==========================================
 function groupTextContentByLines(items) {
     if (!items || items.length === 0) return [];
@@ -119,11 +119,9 @@ function groupTextContentByLines(items) {
     sortedYKeys.forEach(yKey => {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         
-        // 🌟 핵심 방어벽: x < 240 영역(문서 좌측에 위치한 공급자/발송자 정보)은 아예 수집하지 않음
+        // x >= 220 영역만 공급받는 자(수취자) 데이터로 인정 (좌측 공급자 주소 배제)
         const rightItems = lineItems.filter(i => i.x >= 220);
         const rightText = rightItems.map(i => i.text).join(' ').trim();
-        
-        // 주문번호, 상품 테이블 등 중앙/전체 영역에 걸치는 필수 정보용 전체 텍스트
         const fullText = lineItems.map(i => i.text).join(' ').trim();
 
         if (fullText) {
@@ -164,7 +162,7 @@ function parseItemLine(text, itemsArray) {
 }
 
 // ==========================================
-// 4. 주문 정보 파싱 엔진
+// 4. 주문 정보 파싱 및 주소 정제 규칙 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     let storeName = '';
@@ -191,7 +189,6 @@ function parseOrderFromPageLines(lines, pageNum) {
                 parseItemLine(line.fullText, items);
             }
         } else {
-            // 🌟 우측(수취자) 영역에 잡힌 텍스트만 수집 (좌측 공급자 주소 원천 차단)
             if (line.rightText && line.rightText.length > 1) {
                 buyerSectionLines.push(line.rightText);
             }
@@ -206,7 +203,7 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
     });
 
-    // 수취자 영역 탐색
+    // 1단계: 수취자 영역에서 상호 및 연락처 탐색
     buyerSectionLines.forEach(text => {
         if (/(?:배송지명|간판명|매장명|가게명|상호명|상호)/.test(text)) {
             let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호)\s*[:|]?\s*/i, '').trim();
@@ -240,23 +237,34 @@ function parseOrderFromPageLines(lines, pageNum) {
     if (!storeName) storeName = senderName || '배송처 미상';
     if (!senderName) senderName = storeName;
 
-    // 상호명 앞 특수기호 정제
+    // 상호명 앞 특수기호 및 닫는 괄호 정제
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
-    // 주소 추출 (우측 수취자 영역에서만 행정구역 탐지)
+    // 🌟 2단계: 주소 정제 규칙 (행정구역 탐지 ~ '(' 인식 시 뒷부분 즉시 절단)
+    const combinedCandidate = fullBuyerString + ' ' + fullRawTextLines.join(' ');
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
-    const regionMatch = fullBuyerString.match(regionRegex) || fullRawTextLines.join(' ').match(regionRegex);
+    const regionMatch = fullBuyerString.match(regionRegex) || combinedCandidate.match(regionRegex);
 
     if (regionMatch) {
         let rawAddr = regionMatch[0];
-        rawAddr = rawAddr.split(/(?:연락처|전화|배송지|간판|상호|구매자|No\.|결제)/)[0];
-        rawAddr = rawAddr.replace(/\[\d+\]/g, '').trim();
 
-        // 괄호 '(' 인식이 되면 뒷부분 통째로 삭제
+        // 1. '(' 가 인식되면 '(' 와 뒷부분을 모두 날림
         const parenIdx = rawAddr.indexOf('(');
         if (parenIdx !== -1) {
             rawAddr = rawAddr.slice(0, parenIdx);
         }
+
+        // 2. 다른 필드 라벨이 나오기 전까지만 절단
+        rawAddr = rawAddr.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제)/)[0];
+
+        // 3. 우편번호 및 표 헤더 잔해 잡음('받 주소', '받', '주소', '|') 완벽 제거
+        rawAddr = rawAddr.replace(/\[\d+\]/g, ' ')
+                         .replace(/받\s*주소/g, ' ')
+                         .replace(/\b받\b/g, ' ')
+                         .replace(/\b주소\b/g, ' ')
+                         .replace(/\|/g, ' ')
+                         .replace(/[:]/g, ' ')
+                         .trim();
 
         address = rawAddr.replace(/\s{2,}/g, ' ').trim();
     }
@@ -294,7 +302,7 @@ function parseOrderFromPageLines(lines, pageNum) {
 }
 
 // ==========================================
-// 5. 주소 좌표(위/경도) 변환 및 일괄 등록
+// 5. 카카오 주소 정제 및 좌표(위/경도) 변환 (카카오 주소로 최종 치환)
 // ==========================================
 async function getCoordsFromAddress(address) {
     return new Promise((resolve) => {
@@ -309,7 +317,11 @@ async function getCoordsFromAddress(address) {
                 if (result[0].road_address && result[0].road_address.address_name) {
                     fullAddress = result[0].road_address.address_name;
                 }
-                resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x), fullAddress: fullAddress });
+                resolve({ 
+                    lat: parseFloat(result[0].y), 
+                    lng: parseFloat(result[0].x), 
+                    fullAddress: fullAddress 
+                });
             } else { 
                 resolve(null); 
             }
@@ -331,11 +343,15 @@ export async function batchGeocodePdfList(items) {
                 </div>`;
         }
 
-        if (item.address && (!item.lat || !item.lng)) {
+        if (item.address) {
             const coords = await getCoordsFromAddress(item.address);
             if (coords) {
                 item.lat = coords.lat;
                 item.lng = coords.lng;
+                // 🌟 원칙 적용: 카카오에서 인식된 정확한 표준 주소 부분까지만 화면 주소로 치환
+                if (coords.fullAddress) {
+                    item.address = coords.fullAddress;
+                }
             }
             await new Promise(r => setTimeout(r, 40));
         }
