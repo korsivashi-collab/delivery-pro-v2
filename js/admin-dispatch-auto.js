@@ -276,32 +276,16 @@ export function renderDispatchDriverDetail() {
             driverSelectOptions += `<option value="${dName}" ${dName === driverName ? 'selected' : ''}>${dName}</option>`;
         });
 
-        const coordIcon = (item.lat && item.lng) 
-            ? `<i class="fa-solid fa-map-pin text-emerald-500 shrink-0 mt-0.5" title="좌표 확인 완료"></i>` 
-            : `<i class="fa-solid fa-triangle-exclamation text-amber-500 shrink-0 mt-0.5" title="좌표 미확인 주소"></i>`;
-
-        const itemCountBadge = (item.items && item.items.length > 1)
-            ? `<span class="bg-indigo-50 text-indigo-700 text-[9px] font-black px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">외 ${item.items.length - 1}품목</span>`
-            : '';
-
         html += `
-        <tr class="hover:bg-blue-50/50 transition border-b border-gray-100">
+        <tr class="hover:bg-blue-50/50 transition">
             <td class="text-center font-bold text-gray-500 w-12">${item.displayNumber || idx + 1}</td>
-            <td class="font-bold text-gray-800 break-keep leading-snug py-2 px-2">
-                <div class="flex items-start gap-1.5">
-                    ${coordIcon}
-                    <div class="min-w-0 flex-1">
-                        <div class="flex items-center gap-1 flex-wrap mb-0.5">
-                            ${item.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200">${item.storeName}</span>` : ''}
-                            ${itemCountBadge}
-                        </div>
-                        <span class="text-xs text-gray-900 block font-bold">${item.address || '-'}</span>
-                        ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
-                    </div>
-                </div>
+            <td class="font-bold text-gray-800 whitespace-normal break-keep">
+                ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
+                ${item.address || '-'}
+                ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
             </td>
             <td class="text-center w-36" onclick="event.stopPropagation()">
-                <select onchange="window.changeOrderDriver('${item.id}', this.value)" class="w-full bg-white border border-gray-300 hover:border-blue-500 rounded-lg p-1 text-[11px] font-bold text-gray-800 outline-none shadow-2xs cursor-pointer truncate">
+                <select onchange="window.changeOrderDriver('${item.id}', this.value)" class="w-full bg-white border border-gray-300 hover:border-blue-500 rounded-lg p-1 text-[11px] font-bold text-gray-800 outline-none shadow-2xs cursor-pointer">
                     ${driverSelectOptions}
                 </select>
             </td>
@@ -310,7 +294,7 @@ export function renderDispatchDriverDetail() {
     if (tbody) tbody.innerHTML = html;
 }
 
-// 수동 기사 배정 및 변경 함수
+// 🌟 수동 기사 배정 및 변경 함수 (ID 및 orderNo 다중 매칭)
 export function changeOrderDriver(itemId, newDriverPhone) {
     let item = state.parsedExcelList.find(o => String(o.id) === String(itemId) || String(o.orderNo) === String(itemId));
     if (!item && !isNaN(itemId)) {
@@ -326,7 +310,7 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 5. 자동할당 알고리즘 실행 (체크 선택 우선 및 전체 자동 지원)
+// 🌟 5. 체크박스 선택 기반 자동할당 알고리즘 실행 (외곽 우선 1원칙)
 // ==========================================
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -343,22 +327,18 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 체크박스 선택 확인
-    let targetOrders = [];
+    // 🌟 사용자가 우측 전체 현황 체크박스로 선택한 항목들만 할당 대상으로 추출
     const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
-    if (checkedBoxes.length > 0) {
-        const selectedIndices = Array.from(checkedBoxes).map(cb => parseInt(cb.getAttribute('data-idx'), 10));
-        targetOrders = selectedIndices.map(idx => state.parsedExcelList[idx]).filter(Boolean);
-    } else {
-        // 체크가 없으면 미배정된 전체 주문 자동 대상화
-        targetOrders = state.parsedExcelList.filter(o => !o.assignedDriver);
-        if (targetOrders.length === 0) {
-            targetOrders = [...state.parsedExcelList];
-        }
+    if (checkedBoxes.length === 0) {
+        alert("자동할당할 배송지를 우측 [전체 현황]에서 체크박스로 선택해 주세요.\n\n* 전체 할당: 테이블 헤더의 전체 선택 체크박스 체크 후 실행\n* 일부 할당: 배정할 배송지만 체크박스 선택 후 실행");
+        return;
     }
 
+    const selectedIndices = Array.from(checkedBoxes).map(cb => parseInt(cb.getAttribute('data-idx'), 10));
+    const targetOrders = selectedIndices.map(idx => state.parsedExcelList[idx]).filter(Boolean);
+
     if (targetOrders.length === 0) {
-        alert("할당할 수 있는 주문건이 없습니다.");
+        alert("선택된 배송지 데이터가 유효하지 않습니다.");
         return;
     }
 
@@ -469,11 +449,11 @@ export function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료]\n총 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.\n\n내역 검토 후 이상이 없으면 상단의 [기사 앱으로 동선 전송]을 눌러주세요.`);
+    alert(`[자동할당 배분 완료]\n선택하신 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.\n\n내역 검토 후 이상이 없으면 중앙 패널의 [동선 전송] 버튼을 눌러주세요.`);
 }
 
 // ==========================================
-// 6. 기사 앱 수동 전송 엔진
+// 6. 기사 앱 수동 전송 엔진 (전화번호 필드 전달)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -519,7 +499,7 @@ export async function sendRoutesToDrivers() {
                 displayNumber: idx + 1,
                 address: ord.address || '',
                 storeName: ord.storeName || ord.senderName || '',
-                phone: ord.phone || '',
+                phone: ord.phone || '', // 정제된 수령인 전화번호 전달
                 lat: ord.lat || null,
                 lng: ord.lng || null,
                 orderNo: ord.orderNo || '', 
@@ -544,7 +524,7 @@ export async function sendRoutesToDrivers() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 기사 앱으로 동선 전송';
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> 동선 전송';
         }
     }
 }

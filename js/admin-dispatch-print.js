@@ -4,38 +4,6 @@ import { state, getLocalDateString } from "./admin-state.js";
 import { formatNumber } from "./admin-dispatch-core.js";
 
 // ==========================================
-// 0. 전화번호 복원 및 표준화 헬퍼 (010-XXXX-XXXX)
-// ==========================================
-function formatPhoneNumber(val) {
-    if (!val) return '';
-    const s = String(val).split('.')[0].trim();
-    let digits = s.replace(/[^0-9]/g, '');
-    if (!digits) return '';
-
-    if (digits.length === 10 && digits.startsWith('10')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('11')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('16')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('17')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('18')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('19')) digits = '0' + digits;
-
-    if (digits.length === 11 && digits.startsWith('01')) {
-        return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
-    } else if (digits.length === 10) {
-        if (digits.startsWith('02')) {
-            return `${digits.slice(0, 2)}-${digits.slice(2, 6)}-${digits.slice(6)}`;
-        } else {
-            return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
-        }
-    } else if (digits.length === 9 && digits.startsWith('02')) {
-        return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
-    } else if (digits.length === 8) {
-        return `${digits.slice(0, 4)}-${digits.slice(4)}`;
-    }
-    return digits;
-}
-
-// ==========================================
 // 1. 주문서 통합관리 모달 열기 & 데이터 세팅
 // ==========================================
 export function exportToInvoiceModal() {
@@ -48,6 +16,7 @@ export function exportToInvoiceModal() {
             if (state.parsedExcelList[idx]) state.printReadyList.push(state.parsedExcelList[idx]); 
         });
     } else if (state.parsedExcelList && state.parsedExcelList.length > 0) {
+        // 체크된 항목이 없을 경우 전체 주문 목록을 인쇄 대기 목록으로 기본 설정
         state.printReadyList = [...state.parsedExcelList];
     } else {
         alert("주문서로 출력할 주문 데이터가 없습니다. 엑셀이나 PDF를 먼저 업로드해 주세요.");
@@ -72,75 +41,45 @@ export function exportToInvoiceModal() {
 export function previewInvoiceRow(idx) {
     if (!state.printReadyList || !state.printReadyList[idx]) return;
     const item = state.printReadyList[idx];
-    const printArea = document.getElementById('print-area');
-    if (!printArea) return;
 
-    // 공급받는 자(고객) 정보 바인딩
-    printArea.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
-    printArea.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || ''); 
-    printArea.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
-    printArea.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = formatPhoneNumber(item.phone) || item.phone || '');
-    printArea.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
+    document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || ''); 
+    document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
+    document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
+    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
 
-    // 품목 리스트 바인딩 (최대 5행 분할 매핑)
-    const items = (item.items && item.items.length > 0)
-        ? item.items
-        : [{ name: item.itemName || '상품명 미지정', qty: item.qty || 1, unit: item.unit || '개', price: item.price || '', total: item.total || '' }];
+    // 복수 상품(items) 또는 단일 상품 표시
+    let firstItemName = item.itemName || '';
+    let firstItemUnit = item.unit || '개';
+    let firstItemQty = item.qty || 1;
 
-    printArea.querySelectorAll('.invoice-half').forEach(half => {
-        const itemRows = half.querySelectorAll('tbody tr');
-        for (let r = 0; r < 5; r++) {
-            const rowEl = itemRows[r];
-            if (!rowEl) continue;
-
-            const tds = rowEl.querySelectorAll('td');
-            if (r < items.length) {
-                const curItem = items[r];
-                if (r === 4 && items.length > 5) {
-                    // 5행을 초과하는 경우 5행에 "외 N건" 축약
-                    if (tds[0]) tds[0].innerText = '5';
-                    if (tds[1]) tds[1].innerText = `${curItem.name} 외 ${items.length - 5}건`;
-                    if (tds[2]) tds[2].innerText = curItem.unit || '개';
-                    if (tds[3]) tds[3].innerText = formatNumber(curItem.qty || 1);
-                    if (tds[4]) tds[4].innerText = formatNumber(curItem.price) || '';
-                    if (tds[5]) tds[5].innerText = formatNumber(curItem.total) || '';
-                } else {
-                    if (tds[0]) tds[0].innerText = String(r + 1);
-                    if (tds[1]) tds[1].innerText = curItem.name || '';
-                    if (tds[2]) tds[2].innerText = curItem.unit || '개';
-                    if (tds[3]) tds[3].innerText = formatNumber(curItem.qty || 1);
-                    if (tds[4]) tds[4].innerText = formatNumber(curItem.price) || '';
-                    if (tds[5]) tds[5].innerText = formatNumber(curItem.total) || '';
-                }
-            } else {
-                // 빈 행 비우기
-                if (tds[0]) tds[0].innerText = String(r + 1);
-                if (tds[1]) tds[1].innerText = '';
-                if (tds[2]) tds[2].innerText = '';
-                if (tds[3]) tds[3].innerText = '';
-                if (tds[4]) tds[4].innerText = '';
-                if (tds[5]) tds[5].innerText = '';
-            }
+    if (item.items && item.items.length > 0) {
+        firstItemName = item.items[0].name;
+        firstItemUnit = item.items[0].unit || '개';
+        firstItemQty = item.items[0].qty || 1;
+        if (item.items.length > 1) {
+            firstItemName += ` 외 ${item.items.length - 1}건`;
         }
-    });
+    }
 
-    // 결제 수단 자동 감지
+    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = firstItemName);
+    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = firstItemUnit);
+    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(firstItemQty));
+    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    
     let payMethod = ''; 
-    const memoText = item.memo || '';
-    if (memoText.includes('네이버페이')) payMethod = '네이버페이'; 
-    else if (memoText.includes('토스')) payMethod = '토스페이';
-    else if (memoText.includes('무통장')) payMethod = '무통장입금';
-    else if (memoText.includes('카드')) payMethod = '카드결제';
-
-    const totalQty = items.reduce((sum, it) => sum + (parseInt(it.qty, 10) || 1), 0);
-
-    printArea.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    printArea.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = `${formatNumber(totalQty)}개`);
-    printArea.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
-    printArea.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
-    printArea.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
-    printArea.querySelectorAll('span.font-normal.inline-block.w-32').forEach(span => { 
-        span.innerText = item.orderNo || ''; 
+    if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; 
+    else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    
+    document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (firstItemQty ? `${formatNumber(firstItemQty)}개` : ''));
+    document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
+    document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
+    document.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
+    document.querySelectorAll('span.font-normal.inline-block').forEach(span => { 
+        if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; 
     });
 
     syncPreviewData(); 
@@ -155,6 +94,7 @@ function generateInvoiceHTML(item, providerInfo) {
     const template = originalTemplate.cloneNode(true); 
     template.id = ''; 
 
+    // 양식 커스텀: 서식 제목 및 용지 배경색 반영
     const invTitle = providerInfo.formTitle || '주문서';
     const paperBg = providerInfo.paperBg || '#ffeb5c';
 
@@ -179,62 +119,38 @@ function generateInvoiceHTML(item, providerInfo) {
     template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || '');
     template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
-    template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = formatPhoneNumber(item.phone) || item.phone || '');
+    template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
     template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
 
-    // 품목 리스트 바인딩 (최대 5행 분할 매핑)
-    const items = (item.items && item.items.length > 0)
-        ? item.items
-        : [{ name: item.itemName || '상품명 미지정', qty: item.qty || 1, unit: item.unit || '개', price: item.price || '', total: item.total || '' }];
+    // 품목 리스트 바인딩
+    let firstItemName = item.itemName || '';
+    let firstItemUnit = item.unit || '개';
+    let firstItemQty = item.qty || 1;
 
-    template.querySelectorAll('.invoice-half').forEach(half => {
-        const itemRows = half.querySelectorAll('tbody tr');
-        for (let r = 0; r < 5; r++) {
-            const rowEl = itemRows[r];
-            if (!rowEl) continue;
-
-            const tds = rowEl.querySelectorAll('td');
-            if (r < items.length) {
-                const curItem = items[r];
-                if (r === 4 && items.length > 5) {
-                    if (tds[0]) tds[0].innerText = '5';
-                    if (tds[1]) tds[1].innerText = `${curItem.name} 외 ${items.length - 5}건`;
-                    if (tds[2]) tds[2].innerText = curItem.unit || '개';
-                    if (tds[3]) tds[3].innerText = formatNumber(curItem.qty || 1);
-                    if (tds[4]) tds[4].innerText = formatNumber(curItem.price) || '';
-                    if (tds[5]) tds[5].innerText = formatNumber(curItem.total) || '';
-                } else {
-                    if (tds[0]) tds[0].innerText = String(r + 1);
-                    if (tds[1]) tds[1].innerText = curItem.name || '';
-                    if (tds[2]) tds[2].innerText = curItem.unit || '개';
-                    if (tds[3]) tds[3].innerText = formatNumber(curItem.qty || 1);
-                    if (tds[4]) tds[4].innerText = formatNumber(curItem.price) || '';
-                    if (tds[5]) tds[5].innerText = formatNumber(curItem.total) || '';
-                }
-            } else {
-                if (tds[0]) tds[0].innerText = String(r + 1);
-                if (tds[1]) tds[1].innerText = '';
-                if (tds[2]) tds[2].innerText = '';
-                if (tds[3]) tds[3].innerText = '';
-                if (tds[4]) tds[4].innerText = '';
-                if (tds[5]) tds[5].innerText = '';
-            }
+    if (item.items && item.items.length > 0) {
+        firstItemName = item.items[0].name;
+        firstItemUnit = item.items[0].unit || '개';
+        firstItemQty = item.items[0].qty || 1;
+        if (item.items.length > 1) {
+            firstItemName += ` 외 ${item.items.length - 1}건`;
         }
-    });
+    }
+
+    template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = firstItemName);
+    template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = firstItemUnit);
+    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(firstItemQty));
+    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
+    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
 
     let payMethod = ''; 
-    const memoText = item.memo || '';
-    if (memoText.includes('네이버페이')) payMethod = '네이버페이'; 
-    else if (memoText.includes('토스')) payMethod = '토스페이';
-    else if (memoText.includes('무통장')) payMethod = '무통장입금';
-    else if (memoText.includes('카드')) payMethod = '카드결제';
-
-    const totalQty = items.reduce((sum, it) => sum + (parseInt(it.qty, 10) || 1), 0);
-
+    if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; 
+    else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
+    
     template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = `${formatNumber(totalQty)}개`);
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (firstItemQty ? `${formatNumber(firstItemQty)}개` : ''));
     template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
+    template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
     template.querySelectorAll('.prev-total-order-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
 
     template.querySelectorAll('.invoice-table').forEach(table => {
@@ -255,8 +171,8 @@ function generateInvoiceHTML(item, providerInfo) {
     const dateSpan2 = template.querySelector('#prev-date-2'); 
     if (dateSpan2) { dateSpan2.id = ''; dateSpan2.innerText = dateStr; }
 
-    template.querySelectorAll('span.font-normal.inline-block.w-32').forEach(span => { 
-        span.innerText = item.orderNo || ''; 
+    template.querySelectorAll('span.font-normal.inline-block').forEach(span => { 
+        if (span.classList.contains('w-32')) span.innerText = item.orderNo || ''; 
     });
 
     return template.outerHTML;
@@ -284,6 +200,7 @@ export function executeBatchPrint() {
         paperBg: '#ffeb5c'
     };
 
+    // 저장된 활성 폼이 있다면 커스텀 속성 적용
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     if (state.currentSelectedFormIndex !== null && savedForms[state.currentSelectedFormIndex]) {
         const activeForm = savedForms[state.currentSelectedFormIndex];
@@ -324,7 +241,7 @@ export function executeBatchPrint() {
 }
 
 // ==========================================
-// 4. 창고 상차 및 검수용 전체 상품 합산 피킹 리스트
+// 🌟 4. 창고 상차 및 검수용 전체 상품 합산 피킹 리스트 (1장 출력)
 // ==========================================
 export function printAggregatedItemList() {
     const targetOrders = (state.printReadyList && state.printReadyList.length > 0) 
@@ -336,6 +253,7 @@ export function printAggregatedItemList() {
         return;
     }
 
+    // 전체 품목 그룹화 및 수량 합산 로직
     const aggregationMap = {};
 
     targetOrders.forEach(order => {
@@ -448,7 +366,7 @@ export function printAggregatedItemList() {
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; 
     document.body.appendChild(iframe);
 
-    const doc = iframe.contentWindow.document; 
+    const doc = iframe.contentWindow.document;
     doc.open();
     doc.write(pickingHtml);
     doc.close();
@@ -525,6 +443,7 @@ export function loadSavedForms() {
     });
     listEl.innerHTML = html;
 
+    // 초기 로딩 시 기본 서식이 있으면 자동 적용
     if (state.currentSelectedFormIndex === null) {
         const defaultIdx = savedForms.findIndex(f => f.isDefault);
         if (defaultIdx >= 0) applySavedForm(defaultIdx);

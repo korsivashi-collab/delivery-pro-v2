@@ -17,7 +17,7 @@ export function closeExcelExportModal() {
 }
 
 // ==========================================
-// 2. 엑셀 리포트 생성 및 다운로드 (상호명 열 추가 반영)
+// 2. 엑셀 리포트 생성 및 다운로드 (SheetJS 활용)
 // ==========================================
 export function executeExcelExport() {
     const startDateStr = document.getElementById('export-start-date').value;
@@ -53,24 +53,17 @@ export function executeExcelExport() {
 
         if (targetCompletions.length > 0) {
             hasData = true;
-            const excelData = [["순번", "완료 일시", "기사 연락처", "상호명(간판명)", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
+            const excelData = [["순번", "완료 일시", "기사 연락처", "배송지 주소", "고객 번호", "처리 상태", "사진 링크"]];
             
             targetCompletions.forEach((c, idx) => {
                 const dt = new Date(c.completedAt);
                 const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
                 excelData.push([
-                    idx + 1, 
-                    dStr, 
-                    c.phone || '연락처 없음', 
-                    c.storeName || c.senderName || '-', 
-                    c.address || '', 
-                    c.customerPhone || '미등록', 
-                    c.tag || '전달완료', 
-                    c.photoUrl || '사진 없음'
+                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
                 ]);
             });
             const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:20}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:12}, {wch:60}];
             XLSX.utils.book_append_sheet(wb, ws, "배송완료");
         }
     }
@@ -96,21 +89,16 @@ export function executeExcelExport() {
 
         if (pendingList.length > 0) {
             hasData = true;
-            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "상호명(간판명)", "배송지 주소", "처리 상태"]];
+            const excelData = [["순번(코스)", "최종 업데이트", "기사 연락처", "배송지 주소", "처리 상태"]];
             pendingList.forEach((p, idx) => {
                 const dt = new Date(p.updatedAt);
                 const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
                 excelData.push([
-                    p.displayNumber || idx + 1, 
-                    dStr, 
-                    p.driverPhone, 
-                    p.storeName || p.senderName || '-', 
-                    p.address || '', 
-                    '대기(이동중)'
+                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
                 ]);
             });
             const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:20}, {wch:45}, {wch:12}];
+            ws['!cols'] = [{wch:10}, {wch:20}, {wch:15}, {wch:45}, {wch:12}];
             XLSX.utils.book_append_sheet(wb, ws, "대기동선");
         }
     }
@@ -127,24 +115,17 @@ export function executeExcelExport() {
 
         if (targetCanceled.length > 0) {
             hasData = true;
-            const excelData = [["순번", "취소 일시", "기사 연락처", "상호명(간판명)", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
+            const excelData = [["순번", "취소 일시", "기사 연락처", "배송지 주소", "고객 번호", "취소 사유(태그)", "사진 링크"]];
             
             targetCanceled.forEach((c, idx) => {
                 const dt = new Date(c.completedAt);
                 const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
                 excelData.push([
-                    idx + 1, 
-                    dStr, 
-                    c.phone || '연락처 없음', 
-                    c.storeName || c.senderName || '-', 
-                    c.address || '', 
-                    c.customerPhone || '미등록', 
-                    c.tag || '배송취소', 
-                    c.photoUrl || '사진 없음'
+                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '배송취소', c.photoUrl || '사진 없음'
                 ]);
             });
             const ws = XLSX.utils.aoa_to_sheet(excelData);
-            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:20}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
+            ws['!cols'] = [{wch:6}, {wch:20}, {wch:15}, {wch:45}, {wch:15}, {wch:20}, {wch:60}];
             XLSX.utils.book_append_sheet(wb, ws, "배송취소");
         }
     }
