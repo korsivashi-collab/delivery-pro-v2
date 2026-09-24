@@ -94,38 +94,28 @@ function sanitizePhoneNumber(rawVal) {
 }
 
 // ==========================================
-// 0-2. 도로명 주소 및 상호명 정제 헬퍼 (긴 부가설명 절삭)
+// 0-2. 상호명 분리 및 주소 원본 보존 헬퍼 (주소 절삭 금지)
 // ==========================================
 function formatDisplayAddress(rawAddress, storeName = "") {
     let extractedStore = storeName ? String(storeName).trim() : "";
     let cleanAddr = (rawAddress || "").trim();
 
-    // 1. [상호] 패턴 확인 및 추출
+    // 1. [상호] 패턴 확인 및 상호명 분리
     const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
     if (match) {
         if (!extractedStore) extractedStore = match[1].trim();
         cleanAddr = match[2].trim();
     }
 
-    // 2. 도로명/지번 뒤쪽의 과도한 상세 정보(동, 호수, 괄호 등) 정제
-    // 예: "서울 중구 서소문로9길 28 (순화동, 덕수궁롯데캐슬)..." -> "서울 중구 서소문로9길 28 (순화동)"
-    let simplifiedAddr = cleanAddr;
-    const roadRegex = /^([가-힣a-zA-Z0-9\s]+?(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?)/;
-    const rMatch = cleanAddr.match(roadRegex);
-    if (rMatch) {
-        let base = rMatch[1].trim();
-        const restText = cleanAddr.substring(rMatch[0].length);
-        const dongMatch = restText.match(/^\s*\(([가-힣]+동)[^)]*\)/);
-        if (dongMatch) {
-            simplifiedAddr = `${base} (${dongMatch[1]})`;
-        } else {
-            simplifiedAddr = base;
-        }
+    // 2. 주소 앞부분에 상호명이 중복으로 붙은 경우 주소에서 상호명 제거
+    if (extractedStore && cleanAddr.startsWith(extractedStore)) {
+        cleanAddr = cleanAddr.substring(extractedStore.length).trim();
     }
 
+    // 3. Admin에서 정제되어 넘어온 도로명/지번 주소 원본 100% 보존
     return {
         storeName: extractedStore,
-        cleanAddr: simplifiedAddr,
+        cleanAddr: cleanAddr,
         fullAddr: cleanAddr
     };
 }
@@ -282,7 +272,7 @@ export function openStartSelectionModal() {
         const title = fmt.storeName ? `[${fmt.storeName}] ${fmt.cleanAddr}` : fmt.cleanAddr;
         html += `
             <button onclick="selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
-                <span class="font-bold text-gray-800 text-[13px] truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
+                <span class="font-bold text-gray-800 text-[13px] break-keep flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
                 <i class="fa-solid fa-check text-gray-300"></i>
             </button>
         `;
@@ -459,20 +449,20 @@ export function renderList() {
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
-            // 🌟 주소지 정제: 불필요한 긴 부가설명 절삭 및 상호명/도로명 깔끔 분리
+            // 🌟 주소지 표시: 잘림 없이 원본 도로명 주소 전체 표시
             const formatted = formatDisplayAddress(dest.address, dest.storeName);
             let displayAddressHTML = "";
             
             if (formatted.storeName) {
                 displayAddressHTML = `
-                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${formatted.storeName}</span>
-                    <span class="block truncate leading-tight">${formatted.cleanAddr}</span>
+                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none font-bold">🏢 ${formatted.storeName}</span>
+                    <span class="block leading-tight text-gray-800 break-keep font-bold">${formatted.cleanAddr}</span>
                 `;
             } else {
-                displayAddressHTML = `<span class="block truncate">${formatted.cleanAddr}</span>`;
+                displayAddressHTML = `<span class="block leading-tight text-gray-800 break-keep font-bold">${formatted.cleanAddr}</span>`;
             }
 
-            // 네비게이션 앱에 넘겨줄 목적지 명칭 (상호명 우선, 없으면 정제 주소 사용)
+            // 네비게이션 앱 연동 명칭 (상호명 우선, 없으면 주소 전체)
             let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
 
             const isFirst = index === 0;
