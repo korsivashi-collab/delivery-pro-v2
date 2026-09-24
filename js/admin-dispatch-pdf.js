@@ -66,7 +66,6 @@ export async function processSinglePdfFile(file) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
             
-            // X, Y 좌표 기반 텍스트 라인 구조화
             const pageLines = groupTextContentByLines(textContent.items);
             const orderData = parseOrderFromPageLines(pageLines, pageNum);
 
@@ -125,7 +124,6 @@ function groupTextContentByLines(items) {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const fullText = lineItems.map(i => i.text).join(' ').trim();
         
-        // 공급받는 자(우측 열, x > 230) 전용 텍스트
         const rightItems = lineItems.filter(i => i.x > 230);
         const rightText = rightItems.map(i => i.text).join(' ').trim();
 
@@ -142,13 +140,12 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 🌟 행정구역 인식 및 괄호 인식 기준 주소 절단 파싱 엔진
+// 3. 🌟 '괄호(' 인식되면 뒷부분 삭제 규칙 적용 파싱 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     const rawFullText = lines.map(l => l.fullText).join('\n');
     const cleanText = rawFullText.split(/거래명세표\s*\(공급받는자용\)|거래명세표\s*\(공급받는\s*자용\)/)[0];
 
-    // 헤더 영역 우측(수령인) 텍스트만 추출
     let buyerSectionLines = [];
     let isHeaderArea = true;
     lines.forEach(line => {
@@ -205,41 +202,27 @@ function parseOrderFromPageLines(lines, pageNum) {
         if (allPhones && allPhones.length > 0) order.phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
     }
 
-    // 4. 🌟 주소 규칙 적용: 행정구역 인식 후 번지수까지 긁어오되, 괄호 '('나 특수 라벨이 나오면 뒷부분 삭제
+    // 4. 🌟 주소 규칙 적용: 행정구역 인식으로 시작하여 긁어오다 '('가 인식되면 뒷부분 삭제
     const addrStartRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+/i;
     const match = buyerSectionText.match(addrStartRegex);
 
     if (match) {
         let rawAddr = match[0];
 
-        // 표의 다른 항목 키워드나 파이프 기준 1차 절단
+        // 표의 다른 항목 키워드나 파이프 기준 절단
         rawAddr = rawAddr.split(/(?:배송지명|간판명|연락처|추가연락처|No\.|전화|사업자|결제\s*수단)/)[0];
         if (rawAddr.includes('|')) rawAddr = rawAddr.split('|')[0];
 
         // 잡음 정리 ('받 주소', 우편번호 등)
         rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\[\d+\]/g, ' ');
 
-        // 🌟 핵심 주소 추출: 시/도 ~ 도로명/지번 + 번지수 숫자(하이픈 포함)까지 안전하게 캡처
-        // 법정동 괄호('(구로동)', '(구미동)' 등)는 주소에 포함되므로 허용하되, 그 뒤에 나오는 건물명/층수 괄호 전이나 특정 키워드에서 절단
-        const addressBaseMatch = rawAddr.match(/((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+?(?:동|읍|면|로|길|리)\s*[\d\-]+)/i);
-
-        if (addressBaseMatch) {
-            let extracted = addressBaseMatch[1];
-            
-            // 번지수 뒤에 법정동 괄호가 바로 붙어있다면 그것까지는 포함 (예: ... 43-2 (구로동))
-            const remainder = rawAddr.slice(rawAddr.indexOf(extracted) + extracted.length);
-            const dongBracketMatch = remainder.match(/^\s*(\([가-힣\s]+\))/);
-            if (dongBracketMatch) {
-                extracted += ' ' + dongBracketMatch[1];
-            }
-
-            order.address = extracted.replace(/\s{2,}/g, ' ').trim();
-        } else {
-            order.address = rawAddr.replace(/\s{2,}/g, ' ').trim();
+        // 🌟 핵심: 괄호 '('가 인식되면 그 문자와 뒷부분을 통째로 삭제
+        const parenIndex = rawAddr.indexOf('(');
+        if (parenIndex !== -1) {
+            rawAddr = rawAddr.slice(0, parenIndex);
         }
 
-        // 🌟 추가 규칙: 만약 주소 내에 특정 단어나 불필요한 꼬리표가 남아있다면 제거
-        order.address = order.address.replace(/\s+(?:는|자)$/g, '').trim();
+        order.address = rawAddr.replace(/\s{2,}/g, ' ').trim();
     }
 
     // 5. 배송 메모
