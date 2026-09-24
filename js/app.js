@@ -68,6 +68,32 @@ import {
 } from './support.js';
 
 // ==========================================
+// 0. 전화번호 정제 및 포맷팅 보조 함수
+// ==========================================
+function sanitizePhoneNumber(rawVal) {
+    if (!rawVal) return "";
+    let strVal = String(rawVal).trim();
+    let digits = strVal.replace(/[^0-9]/g, '');
+
+    // 숫자가 8자리 미만이거나 단순 "0"인 경우 번호 없음으로 무효 처리
+    if (digits.length < 8 || digits === '0') return "";
+
+    // 11자리 휴대전화 포맷팅 (010-XXXX-XXXX)
+    if (digits.length === 11 && digits.startsWith('010')) {
+        return digits.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+    }
+    // 10자리 번호 포맷팅 (02-XXXX-XXXX 또는 01X-XXX-XXXX)
+    if (digits.length === 10) {
+        if (digits.startsWith('02')) {
+            return digits.replace(/(\d{2})(\d{4})(\d{4})/, '$1-$2-$3');
+        } else {
+            return digits.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+        }
+    }
+    return strVal;
+}
+
+// ==========================================
 // 1. 앱 기동 및 라이프사이클 초기화
 // ==========================================
 export async function initApp() {
@@ -88,19 +114,25 @@ export async function initApp() {
     setRemoteRoutesHandler((newDestinations, routeData) => {
         if (!newDestinations || !Array.isArray(newDestinations)) return;
 
-        // 관제에서 전송된 배송지 데이터 정규화 (주문번호 orderNo는 백그라운드 데이터로 보존)
-        const formattedList = newDestinations.map((d, idx) => ({
-            id: d.id || (Date.now() + idx),
-            displayNumber: d.displayNumber || (idx + 1),
-            address: d.address || "",
-            lat: d.lat || 0,
-            lng: d.lng || 0,
-            phone: d.phone || "",
-            storeName: d.storeName || "",
-            orderNo: d.orderNo || "", // 실시간 추적용 주문번호 데이터 보존
-            memo: d.memo || "",
-            items: d.items || []
-        }));
+        // 관제에서 전송된 배송지 데이터 정규화
+        const formattedList = newDestinations.map((d, idx) => {
+            // 관제단에서 사용 가능한 모든 전화번호 필드명(phone, customerPhone, tel, contact, hp) 흡수
+            const rawPhone = d.phone || d.customerPhone || d.tel || d.contact || d.hp || "";
+            const validPhone = sanitizePhoneNumber(rawPhone);
+
+            return {
+                id: d.id || (Date.now() + idx),
+                displayNumber: d.displayNumber || (idx + 1),
+                address: d.address || "",
+                lat: d.lat || 0,
+                lng: d.lng || 0,
+                phone: validPhone,
+                storeName: d.storeName || "",
+                orderNo: d.orderNo || "", // 실시간 추적용 주문번호 보존
+                memo: d.memo || "",
+                items: d.items || []
+            };
+        });
 
         state.setDestinations(formattedList);
         state.updateDisplayNumbers();
@@ -382,13 +414,14 @@ export function renderList() {
                 `<div class="bg-indigo-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
                 `<div class="bg-blue-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0">${dest.displayNumber}</div>`;
             
-            let customerPhoneStr = dest.phone || ""; 
+            // 🌟 전화번호 정제 (단순 "0"이나 빈값은 완벽히 제거)
+            let customerPhoneStr = sanitizePhoneNumber(dest.phone || ""); 
             let dynamicTextSize = "text-[13px]"; 
             if (customerPhoneStr.length >= 13) dynamicTextSize = "text-[10px]"; 
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
-            // 기존 방식: [상호명] 강조 또는 dest.storeName 강조 후 주소 표시 (배송요청/품목 제외)
+            // 기존 방식: [상호명] 강조 또는 dest.storeName 강조 후 주소 표시
             let displayAddressHTML = dest.address;
             let match = dest.address.match(/^\[(.*?)\]\s*(.*)$/);
             if (match) {
