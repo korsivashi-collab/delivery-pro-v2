@@ -66,7 +66,6 @@ export async function processSinglePdfFile(file) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
             
-            // 좌표 기반 텍스트 라인화 (좌/우 공간 분리 포함)
             const pageLines = groupTextContentByLines(textContent.items);
             const orderData = parseOrderFromPageLines(pageLines, pageNum);
 
@@ -120,7 +119,6 @@ function groupTextContentByLines(items) {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const fullText = lineItems.map(i => i.text).join(' ').trim();
         
-        // PDF X좌표 230~250을 기준으로 보통 좌측(공급자), 우측(공급받는자)이 나뉨
         const leftItems = lineItems.filter(i => i.x < 240);
         const rightItems = lineItems.filter(i => i.x >= 240);
         
@@ -165,7 +163,7 @@ function parseItemLine(text, itemsArray) {
 }
 
 // ==========================================
-// 4. 업계 표준 Line-by-Line 기반 키워드 파싱 엔진 (우선순위 적용)
+// 4. 주문 정보 파싱 및 특수 주소/상호 규칙 적용 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     let storeName = '';
@@ -178,30 +176,27 @@ function parseOrderFromPageLines(lines, pageNum) {
 
     let isItemSection = false;
     let buyerSectionLines = [];
+    let fullRawTextLines = [];
 
-    // 1단계: 라인(Line) 분류 및 1순위(공급자 정보) 원천 차단
     lines.forEach(line => {
-        // 상품 테이블 진입 감지
+        fullRawTextLines.push(line.fullText);
+
         if (/No\.|상품명|단가|수량|규격/i.test(line.fullText)) isItemSection = true;
 
         if (isItemSection) {
-            // 테이블 종료 감지
             if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(line.fullText)) {
                 isItemSection = false;
             } else if (/^\d+\s+/.test(line.fullText.trim())) {
                 parseItemLine(line.fullText, items);
             }
         } else {
-            // 우측 영역(공급받는 자) 텍스트가 명확히 있으면 우측만 사용, 없으면 전체 라인 사용
             let targetText = (line.rightText && line.rightText.length > 2) ? line.rightText : line.fullText;
-            
-            // 발송자(공급자)를 뜻하는 키워드가 포함된 줄은 수취자 데이터 공간에서 절대 배제
+            // 공급자(발송자) 정보 원천 차단
             if (!/공급자|대표자|윤진유통|사업자등록번호|통신판매/.test(targetText)) {
                 buyerSectionLines.push(targetText);
             }
         }
 
-        // 주문번호 및 메모는 포지션과 무관하게 감지
         if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(line.fullText)) {
             memo = line.fullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
         }
@@ -211,22 +206,18 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
     });
 
-    // 2단계: 수집된 수취자(Buyer) 영역을 한 줄씩 돌며 우선순위 매칭
+    // 1단계: 수취자 영역에서 상호, 구매자, 전화번호 추출
     buyerSectionLines.forEach(text => {
-        
-        // [순위 1] 간판명 / 배송지명 / 매장 / 상호 (발견 시 덮어쓰기)
         if (/(?:배송지명|간판명|매장명|가게명|상호명|상호)/.test(text)) {
             let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호)\s*[:|]?\s*/i, '').trim();
             if (val && !/^\d+$/.test(val)) storeName = val; 
         }
         
-        // [순위 2] 구매자 / 수령인 / 고객 / 이름 (상호명이 비어있을 때를 대비한 백업)
         if (!senderName && /(?:구매자명|주문자명|주문자|수령인|수신자|받는\s*분|받는분|고객명)/.test(text)) {
             let val = text.replace(/.*(?:구매자명|주문자명|주문자|수령인|수신자|받는\s*분|받는분|고객명)\s*[:|]?\s*/i, '').trim();
             if (val && !/^\d+$/.test(val)) senderName = val;
         }
         
-        // [순위 3] 연락처
         if (!phone && /(?:연락처|전화|휴대폰|핸드폰)/.test(text)) {
             let m = text.match(/[0-9\-]{9,15}/);
             if (m) phone = formatPhoneNumber(m[0]);
@@ -234,17 +225,9 @@ function parseOrderFromPageLines(lines, pageNum) {
             let m = text.match(/01[016789]-?\d{3,4}-?\d{4}/);
             if (m) phone = formatPhoneNumber(m[0]);
         }
-        
-        // [순위 4] 주소 (행정구역명으로 시작하는 순수 주소 라인 매칭)
-        if (!address && /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(text)) {
-            if (!/(배송지|연락처|구매자|상호|주문)/.test(text)) {
-                // 우편번호 [00000] 제거 및 괄호(건물명 등) 뒷부분 절단
-                address = text.replace(/\[\d+\]/, '').replace(/^[|:\s]+/, '').split('(')[0].trim();
-            }
-        }
     });
 
-    // 3단계: 누락분 보완 (줄바꿈이 이상하게 되어 라인이 찢어진 경우를 대비한 보험 로직)
+    // 보완 매칭
     const fullBuyerString = buyerSectionLines.join(' ');
     if (!storeName) {
         const m = fullBuyerString.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
@@ -255,11 +238,34 @@ function parseOrderFromPageLines(lines, pageNum) {
         if (m) senderName = m[1].trim();
     }
 
-    // 최종 정리: 상호명이 없으면 구매자명을 상호명으로 격상
     if (!storeName) storeName = senderName || '배송처 미상';
     if (!senderName) senderName = storeName;
 
-    // 아이템 수량 합산 처리 (외 N품목 배지는 이 itemName을 기반으로 UI에서 출력됨)
+    // 🌟 2단계: 상호명 앞의 불필요한 특수기호 및 공백 정제 (예: ") ", ")" 제거)
+    storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
+
+    // 🌟 3단계: 특수 주소 파싱 규칙 적용
+    // (서울, 대전, 대구, 부산 등 행정구역 인식 시점부터 주소를 긁어오고, '('가 나타나면 그 뒷부분은 모두 날림)
+    const combinedRawText = fullRawTextLines.join(' ');
+    const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
+    const regionMatch = combinedRawText.match(regionRegex);
+
+    if (regionMatch) {
+        let rawAddr = regionMatch[0];
+        // 불필요한 라벨이나 전화번호 영역 전까지만 컷팅
+        rawAddr = rawAddr.split(/(?:연락처|전화|배송지|간판|상호|구매자|No\.|결제)/)[0];
+        rawAddr = rawAddr.replace(/\[\d+\]/g, '').trim();
+
+        // 🌟 핵심 규칙: '('가 인식이 되면 '('와 그 뒷부분은 모두 날림
+        const parenIdx = rawAddr.indexOf('(');
+        if (parenIdx !== -1) {
+            rawAddr = rawAddr.slice(0, parenIdx);
+        }
+
+        address = rawAddr.replace(/\s{2,}/g, ' ').trim();
+    }
+
+    // 아이템 수량 합산 처리
     let qty = 1;
     let itemName = '';
     if (items.length > 1) {
