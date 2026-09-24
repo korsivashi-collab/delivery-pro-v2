@@ -747,6 +747,7 @@ export const autoDispatchState = {
 };
 
 // 🌟 시야성 및 레이아웃 직관성이 개선된 운행 기사 자동할당 목록 렌더링
+// (체크박스 토글과 카드 클릭 상세보기를 완전 분리하여 오작동 차단)
 export function renderDispatchDriverList() {
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -806,15 +807,16 @@ export function renderDispatchDriverList() {
         html += `
         <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-2 ring-blue-300 bg-blue-50/30' : 'border-gray-200 hover:border-blue-400'} p-3 rounded-2xl flex flex-col gap-2.5 shadow-xs transition mb-2.5">
             <div class="flex items-start justify-between gap-2">
-                <label class="flex items-center gap-2.5 cursor-pointer mt-1 flex-1 min-w-0" onclick="event.stopPropagation()">
-                    <input type="checkbox" onchange="window.toggleDispatchDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0">
-                    <div class="min-w-0">
+                <!-- 🌟 체크박스와 기사 정보 영역 분리: 체크박스만 토글되고, 텍스트/카드 클릭 시 상세 내역 조회만 실행됨 -->
+                <div class="flex items-center gap-2.5 mt-1 flex-1 min-w-0">
+                    <input type="checkbox" onclick="event.stopPropagation()" onchange="window.toggleDispatchDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0">
+                    <div class="min-w-0 select-none">
                         <span class="font-black text-[13px] ${isFocus ? 'text-blue-700' : 'text-gray-900'} block truncate leading-tight">
                             <i class="fa-solid fa-truck ${isFocus ? 'text-blue-600' : 'text-gray-400'} mr-1 text-xs"></i>${phoneDisplay}
                         </span>
                         <span class="text-[10px] text-gray-400 font-mono block mt-0.5">ID: ${licKey}</span>
                     </div>
-                </label>
+                </div>
                 <div class="shrink-0">${territoryBadge}</div>
             </div>
             
