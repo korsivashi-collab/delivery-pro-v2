@@ -28,10 +28,10 @@ export async function getAddressFromCoords(lat, lng) {
 
     if (window.kakao && kakao.maps && kakao.maps.services) {
         try {
-            const geocoder = new kakao.maps.services.Geocoder();
+            const geocoder = new window.kakao.maps.services.Geocoder();
             const addr = await new Promise((resolve) => {
                 geocoder.coord2Address(lng, lat, (result, status) => {
-                    if (status === kakao.maps.services.Status.OK && result.length > 0) {
+                    if (status === window.kakao.maps.services.Status.OK && result.length > 0) {
                         const r = result[0];
                         resolve(r.road_address ? r.road_address.address_name : r.address.address_name);
                     } else {
@@ -45,6 +45,9 @@ export async function getAddressFromCoords(lat, lng) {
     return null;
 }
 
+// ==========================================
+// 🌟 단일 일자 배송 완료 엑셀 다운로드 (상호명 열 추가 반영)
+// ==========================================
 export function downloadDispatchExcel(targetCompletions, selectedDate) {
     if (!targetCompletions || targetCompletions.length === 0) {
         alert(`선택하신 날짜(${selectedDate})에 해당하는 배송 완료 데이터가 없습니다.`);
@@ -52,7 +55,7 @@ export function downloadDispatchExcel(targetCompletions, selectedDate) {
     }
 
     const excelData = [
-        ["순번", "기사 연락처", "배송완료(시간)", "배송지 주소", "고객 전화번호", "완료 메시지", "사진 링크"]
+        ["순번", "기사 연락처", "배송완료(시간)", "상호명(간판명)", "배송지 주소", "고객 전화번호", "완료 메시지", "사진 링크"]
     ];
 
     targetCompletions.forEach((c, idx) => {
@@ -70,6 +73,7 @@ export function downloadDispatchExcel(targetCompletions, selectedDate) {
             idx + 1,
             c.phone || '연락처 없음',
             dateTimeStr,
+            c.storeName || c.senderName || '-',
             c.address || '',
             c.customerPhone || '미등록',
             c.tag || '전달완료',
@@ -78,7 +82,7 @@ export function downloadDispatchExcel(targetCompletions, selectedDate) {
     });
 
     const ws = XLSX.utils.aoa_to_sheet(excelData);
-    ws['!cols'] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 60 }];
+    ws['!cols'] = [{ wch: 6 }, { wch: 15 }, { wch: 20 }, { wch: 20 }, { wch: 45 }, { wch: 15 }, { wch: 15 }, { wch: 60 }];
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "배송완료목록");
     XLSX.writeFile(wb, `배송완료리스트_${selectedDate}.xlsx`);

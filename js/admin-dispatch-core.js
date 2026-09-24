@@ -98,7 +98,8 @@ export function renderDriverListView() {
     `;
 
     if (visibleLicenses.length === 0) {
-        contentEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">연결된 운행 기사가 없습니다. [+ 기사 등록]을 눌러 기사를 추가하세요.</div>`; return;
+        contentEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">연결된 운행 기사가 없습니다. [+ 기사 등록]을 눌러 기사를 추가하세요.</div>`; 
+        return;
     }
 
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
@@ -151,6 +152,7 @@ export function setDispatchDetailTab(tab) {
     if (state.selectedDeviceId) renderDriverDetailView(state.selectedDeviceId);
 }
 
+// 🌟 상세 뷰: 목적지 상호명(간판명) 배지 포함 렌더링
 export function renderDriverDetailView(devId) {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
@@ -227,14 +229,26 @@ export function renderDriverDetailView(devId) {
                 const comp = doneMap[d.address];
                 const isDone = !!comp;
                 const num = d.displayNumber || (idx + 1);
-                let numberBadge = isDone ? `<span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs"><i class="fa-solid fa-check text-[9px]"></i></span>` : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
-                let addressHtml = isDone ? `<span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${d.address}</span>` : `<span class="font-bold text-gray-900 truncate">${d.address}</span>`;
+                const storeBadge = d.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200 mr-1 shrink-0">${d.storeName}</span>` : '';
+                let numberBadge = isDone 
+                    ? `<span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs"><i class="fa-solid fa-check text-[9px]"></i></span>` 
+                    : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
+                
+                let addressHtml = isDone 
+                    ? `<div class="min-w-0 flex-1 truncate"><span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${storeBadge}${d.address}</span></div>` 
+                    : `<div class="min-w-0 flex-1 truncate"><span class="font-bold text-gray-900 truncate">${storeBadge}${d.address}</span></div>`;
+                
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
-                let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
+                let statusBadge = isDone 
+                    ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` 
+                    : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
+                
                 let photoBtn = comp && comp.photoUrl ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
+                
                 html += `
                 <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
-                    <div class="flex items-center gap-2 min-w-0 flex-1">${numberBadge}${addressHtml}</div><div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}${statusBadge}</div>
+                    <div class="flex items-center gap-2 min-w-0 flex-1">${numberBadge}${addressHtml}</div>
+                    <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}${statusBadge}</div>
                 </div>`;
             });
             html += `</div>`;
@@ -245,11 +259,12 @@ export function renderDriverDetailView(devId) {
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
+                const storeBadge = d.storeName ? `<span class="bg-amber-100 text-amber-900 text-[10px] px-1.5 py-0.5 rounded font-black border border-amber-200 mr-1 shrink-0">${d.storeName}</span>` : '';
                 html += `
                 <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                         <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${d.displayNumber || idx + 1}</span>
-                        <span class="font-bold text-gray-900 truncate">${d.address}</span>
+                        <span class="font-bold text-gray-900 truncate">${storeBadge}${d.address}</span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
                         <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shrink-0">배송 대기</span>
@@ -266,9 +281,10 @@ export function renderDriverDetailView(devId) {
             driverDone.forEach((c, idx) => {
                 let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
                 let photoBtn = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
+                const storeBadge = c.storeName ? `<span class="bg-emerald-100 text-emerald-900 text-[10px] px-1.5 py-0.5 rounded font-black border border-emerald-200 mr-1 shrink-0">${c.storeName}</span>` : '';
                 html += `
                 <div onclick="window.focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
-                    <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
+                    <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${storeBadge}${c.address}</span></div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '완료'}]</span></div>
                 </div>`;
             });
@@ -430,7 +446,7 @@ export function setMapPolylineMode(mode) {
 }
 
 // ==========================================
-// 4. 날짜 및 전역 검색 기능
+// 4. 날짜 및 전역 검색 기능 (상호명 검색 강화)
 // ==========================================
 export function changeDispatchDate(days) {
     const picker = document.getElementById('dispatch-date-picker');
@@ -481,29 +497,41 @@ export function handleGlobalSearch(query) {
         const dests = r.destinations || [];
         const p = r.phone || '기사';
         dests.forEach(d => {
-            if (d.address && (d.address.toLowerCase().includes(q) || p.includes(q))) {
-                const addrKey = d.address.trim();
+            const matchAddr = d.address && d.address.toLowerCase().includes(q);
+            const matchStore = d.storeName && d.storeName.toLowerCase().includes(q);
+            const matchOrderNo = d.orderNo && d.orderNo.toLowerCase().includes(q);
+            const matchPhone = (d.phone && d.phone.includes(q)) || p.includes(q);
+
+            if (matchAddr || matchStore || matchOrderNo || matchPhone) {
+                const addrKey = d.address ? d.address.trim() : (d.storeName || '배송처');
                 if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
                 addressGroups[addrKey].push({
-                    type: 'PENDING', address: d.address, dateStr: todayStr, timeStr: '이동/대기 중',
+                    type: 'PENDING', address: d.address, storeName: d.storeName || '', dateStr: todayStr, timeStr: '이동/대기 중',
                     phone: p, devId: devId, lat: d.lat, lng: d.lng, displayNumber: d.displayNumber, timestamp: Date.now()
                 });
             }
         });
     }
+
     state.allCompletions.forEach(c => {
-        if (c.address && (c.address.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)))) {
-            const addrKey = c.address.trim();
+        const matchAddr = c.address && c.address.toLowerCase().includes(q);
+        const matchStore = c.storeName && c.storeName.toLowerCase().includes(q);
+        const matchPhone = c.phone && c.phone.includes(q);
+
+        if (matchAddr || matchStore || matchPhone) {
+            const addrKey = c.address ? c.address.trim() : (c.storeName || '배송처');
             if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
             let dStr = todayStr; let tStr = '';
-            if (c.timeString && c.timeString.includes(' ')) { dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); tStr = c.timeString.split(' ')[1]; } 
-            else if (c.completedAt) { 
+            if (c.timeString && c.timeString.includes(' ')) { 
+                dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); 
+                tStr = c.timeString.split(' ')[1]; 
+            } else if (c.completedAt) { 
                 dStr = getLocalDateString(new Date(c.completedAt)); 
                 const dt = new Date(c.completedAt); 
                 tStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; 
             }
             addressGroups[addrKey].push({
-                type: 'DONE', address: c.address, dateStr: dStr, timeStr: tStr, tag: c.tag || '전달완료',
+                type: 'DONE', address: c.address, storeName: c.storeName || '', dateStr: dStr, timeStr: tStr, tag: c.tag || '전달완료',
                 phone: c.phone || '기사', devId: c.deviceId, lat: c.lat, lng: c.lng, timestamp: c.completedAt || 0
             });
         }
@@ -511,15 +539,27 @@ export function handleGlobalSearch(query) {
 
     const uniqueAddresses = Object.keys(addressGroups);
     if (uniqueAddresses.length === 0) {
-        dropdown.innerHTML = `<div class="p-6 text-center text-xs text-gray-400 font-bold">검색 결과가 없습니다.</div>`; dropdown.classList.remove('hidden'); return;
+        dropdown.innerHTML = `<div class="p-6 text-center text-xs text-gray-400 font-bold">검색 결과가 없습니다.</div>`; 
+        dropdown.classList.remove('hidden'); 
+        return;
     }
+
     let html = '';
     uniqueAddresses.slice(0, 15).forEach((addr) => {
-        const items = addressGroups[addr]; items.sort((a,b) => b.timestamp - a.timestamp);
-        const latest = items[0]; const isToday = (latest.dateStr === todayStr);
+        const items = addressGroups[addr]; 
+        items.sort((a,b) => b.timestamp - a.timestamp);
+        const latest = items[0]; 
+        const isToday = (latest.dateStr === todayStr);
+        const storeBadge = latest.storeName ? `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-1.5 py-0.5 rounded border border-blue-200 mr-1">${latest.storeName}</span>` : '';
+
         html += `
         <div class="border border-gray-200 rounded-2xl p-3 bg-white hover:border-blue-300 transition shadow-xs">
-            <div class="flex justify-between items-center mb-1.5"><span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${latest.address}</span><span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span></div>
+            <div class="flex justify-between items-center mb-1.5">
+                <span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2">
+                    <i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${storeBadge}${latest.address}
+                </span>
+                <span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span>
+            </div>
             <div onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
                 <div class="flex justify-between items-center text-xs">
                     <div class="flex items-center gap-1.5"><span class="text-[10px] font-black px-1.5 py-0.5 rounded ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span><span class="font-bold text-gray-800">${latest.phone}</span></div>
@@ -528,7 +568,8 @@ export function handleGlobalSearch(query) {
             </div>
         </div>`;
     });
-    dropdown.innerHTML = html; dropdown.classList.remove('hidden');
+    dropdown.innerHTML = html; 
+    dropdown.classList.remove('hidden');
 }
 
 // ==========================================

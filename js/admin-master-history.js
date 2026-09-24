@@ -291,10 +291,10 @@ export function renderAccountHistoryView() {
             else if (item.type === 'dispatch') typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200 shadow-xs"><i class="fa-solid fa-building-user text-[10px]"></i> 관제 계정</span>`;
 
             const isChecked = state.historySelectedAccountKeys.has(item.key);
-            let checkRowTd = state.historyNoticeMode
+            let checkRowTd = state.historyNoticeMode 
                 ? `<td class="py-3.5 px-3 text-center bg-amber-50/30 border-r border-amber-100" onclick="event.stopPropagation()">
                     <input type="checkbox" onchange="window.toggleHistoryItemSelection('${item.key}', this.checked)" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500 cursor-pointer">
-                   </td>`
+                   </td>` 
                 : '';
 
             tableHtml += `
@@ -426,11 +426,12 @@ export function renderAccountHistoryView() {
             `;
             rawDests.forEach((dest, idx) => {
                 const isDone = !!doneMap[dest.address];
+                const storeBadge = dest.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200 mr-1.5 shrink-0">${dest.storeName}</span>` : '';
                 html += `
                 <div class="p-3 ${isDone ? 'bg-emerald-50/50 border-emerald-200' : 'bg-white border-gray-200'} border rounded-xl flex items-center justify-between text-xs shadow-xs">
                     <div class="flex items-center gap-2.5 min-w-0 flex-1">
                         <span class="w-5 h-5 ${isDone ? 'bg-emerald-600' : 'bg-blue-600'} text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span>
-                        <span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span>
+                        <div class="min-w-0 flex-1 truncate"><span class="font-bold text-gray-900 truncate leading-snug">${storeBadge}${dest.address}</span></div>
                     </div>
                     <span class="text-[10px] font-black px-2 py-0.5 rounded ${isDone ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-50 text-blue-700 border border-blue-200'} shrink-0 ml-2">${isDone ? '✓ 완료' : '대기'}</span>
                 </div>`;
@@ -463,9 +464,13 @@ export function renderAccountHistoryView() {
                         ${dayList.map((c, cIdx) => {
                             let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
                             let photoBadge = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" class="bg-blue-600 text-white text-[9px] font-black px-2 py-1 rounded shadow-sm hover:bg-blue-700 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진보기</a>` : '';
+                            const storeBadge = c.storeName ? `<span class="bg-emerald-100 text-emerald-900 text-[10px] px-1.5 py-0.5 rounded font-black border border-emerald-200 mr-1.5 shrink-0">${c.storeName}</span>` : '';
                             return `
                             <div class="p-3 bg-white border border-emerald-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
-                                <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${cIdx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${c.address}</span></div>
+                                <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                                    <span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${cIdx + 1}</span>
+                                    <div class="min-w-0 flex-1 truncate"><span class="font-bold text-gray-900 truncate leading-snug">${storeBadge}${c.address}</span></div>
+                                </div>
                                 <div class="flex items-center gap-2 shrink-0 ml-2">${photoBadge}<span class="bg-emerald-600 text-white text-[10px] font-black px-2.5 py-1 rounded-lg shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '전달완료'}]</span></div>
                             </div>`;
                         }).join('')}
@@ -486,9 +491,13 @@ export function renderAccountHistoryView() {
                 <div id="pending-accordion-body" class="hidden p-3 bg-slate-50 border-t border-gray-200 space-y-1.5">
             `;
             remainingDests.forEach((dest, idx) => {
+                const storeBadge = dest.storeName ? `<span class="bg-amber-100 text-amber-900 text-[10px] px-1.5 py-0.5 rounded font-black border border-amber-200 mr-1.5 shrink-0">${dest.storeName}</span>` : '';
                 html += `
                 <div class="p-3 bg-white border border-gray-200 rounded-xl flex items-center justify-between text-xs shadow-xs">
-                    <div class="flex items-center gap-2.5 min-w-0 flex-1"><span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span><span class="font-bold text-gray-900 truncate leading-snug">${dest.address}</span></div>
+                    <div class="flex items-center gap-2.5 min-w-0 flex-1">
+                        <span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${dest.displayNumber || idx + 1}</span>
+                        <div class="min-w-0 flex-1 truncate"><span class="font-bold text-gray-900 truncate leading-snug">${storeBadge}${dest.address}</span></div>
+                    </div>
                     <span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shrink-0 ml-2">배송 대기중</span>
                 </div>`;
             });
@@ -545,7 +554,8 @@ export function renderMasterNoticeHistoryList() {
     const masterSentList = state.allDispatchMessages.filter(m => m.senderKey === 'MASTER' || m.senderType === 'MASTER');
 
     if (masterSentList.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">발송된 운영사 알림 이력이 없습니다.</div>`; return;
+        container.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">발송된 운영사 알림 이력이 없습니다.</div>`; 
+        return;
     }
     let html = '';
     masterSentList.forEach(m => {
@@ -569,14 +579,13 @@ export function renderMasterNoticeHistoryList() {
 }
 
 // ==========================================
-// 🌟 2. 마스터 전용 사진 데이터 관리 모듈 (경량 텍스트 테이블 리스트 & 실시간 기사 검색)
+// 2. 마스터 전용 사진 데이터 관리 모듈
 // ==========================================
 
-let photoSortField = 'time'; // 'time' (완료 일시) 또는 'author' (작성자 기사)
-let photoSortAsc = false;    // 기본 내림차순(최신 완료순)
+let photoSortField = 'time';
+let photoSortAsc = false;
 let photoCurrentPage = 1;
 
-// 🌟 사진 등록 기사 식별 함수
 function getPhotoAuthorDisplay(item) {
     if (item.phone) return item.phone;
     if (item.deviceId && state.allLicenses && state.allLicenses.length > 0) {
@@ -614,7 +623,6 @@ export function clearPhotoDateFilter() {
     filterPhotoGallery();
 }
 
-// 🌟 테이블 헤더 클릭 시 작성자/완료일시 정렬 로직
 export function sortPhotos(field) {
     if (photoSortField === field) {
         photoSortAsc = !photoSortAsc;
@@ -631,14 +639,12 @@ export function changePhotoPage(tabKey, targetPage) {
     renderPhotoListTable();
 }
 
-// 🌟 리소스 최적화: 텍스트 테이블 리스트 렌더링 함수
 export function renderPhotoListTable() {
     const tbody = document.getElementById('photo-list-tbody');
     const countBadgeEl = document.getElementById('photo-total-count-badge');
     const pagEl = document.getElementById('pagination-photos');
     if (!tbody) return;
 
-    // 1. 헤더 화살표 상태 갱신
     const arrowAuthor = document.getElementById('sort-photo-arrow-author');
     const arrowTime = document.getElementById('sort-photo-arrow-time');
 
@@ -656,10 +662,8 @@ export function renderPhotoListTable() {
             : "sortable-th py-3 px-3 text-center text-gray-600 font-black hover:bg-gray-100 transition";
     }
 
-    // 사진 링크가 있는 완료 건만 추출
     let photos = state.allCompletions.filter(c => c.photoUrl && c.photoUrl.trim() !== '' && c.photoUrl !== '사진 없음');
 
-    // 2. 🌟 대규모 기사 환경 지원: 실시간 기사 검색어 필터링 (전화번호, 라이선스 키, 기기ID 매칭)
     const driverSearchQuery = (document.getElementById('photo-filter-driver-search')?.value || '').trim().toLowerCase();
     if (driverSearchQuery) {
         const cleanDigits = driverSearchQuery.replace(/[^0-9]/g, '');
@@ -676,7 +680,6 @@ export function renderPhotoListTable() {
         });
     }
 
-    // 3. 날짜 필터링
     const selectedDate = document.getElementById('photo-filter-date')?.value || '';
     if (selectedDate) {
         photos = photos.filter(c => {
@@ -690,7 +693,6 @@ export function renderPhotoListTable() {
         });
     }
 
-    // 4. 정렬 (작성자 가나다순 또는 완료 일시순)
     photos.sort((a, b) => {
         if (photoSortField === 'author') {
             const authorA = getPhotoAuthorDisplay(a);
@@ -712,7 +714,6 @@ export function renderPhotoListTable() {
         return;
     }
 
-    // 5. 페이지네이션 처리
     const totalPages = Math.ceil(total / PAGE_SIZE_MASTER) || 1;
     if (photoCurrentPage > totalPages) photoCurrentPage = totalPages;
     if (photoCurrentPage < 1) photoCurrentPage = 1;
@@ -727,6 +728,7 @@ export function renderPhotoListTable() {
             const dt = new Date(p.completedAt);
             dateTimeStr = `${getLocalDateString(dt)} ${dt.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
         }
+        const storeBadge = p.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200 mr-1">${p.storeName}</span>` : '';
 
         return `
         <tr class="hover:bg-gray-50 transition">
@@ -737,7 +739,7 @@ export function renderPhotoListTable() {
                 </span>
             </td>
             <td class="py-3 px-3 text-gray-500 font-medium whitespace-nowrap text-center">${dateTimeStr}</td>
-            <td class="py-3 px-3 font-bold text-gray-800 max-w-[320px] truncate" title="${p.address || ''}">${p.address || '-'}</td>
+            <td class="py-3 px-3 font-bold text-gray-800 max-w-[320px] truncate" title="${p.address || ''}">${storeBadge}${p.address || '-'}</td>
             <td class="py-3 px-3 text-center whitespace-nowrap">
                 <span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs">${p.tag || '전달완료'}</span>
             </td>
@@ -758,7 +760,6 @@ export function renderPhotoListTable() {
     }
 }
 
-// 🌟 사진 확인 버튼 클릭 시 단일 이미지 로딩
 export function previewPhotoModal(completionId) {
     const item = state.allCompletions.find(c => c.id === completionId);
     if (!item) return;
@@ -775,7 +776,8 @@ export function previewPhotoModal(completionId) {
     const tagEl = document.getElementById('photo-preview-tag');
     const linkEl = document.getElementById('photo-preview-link');
 
-    if (addrEl) addrEl.innerText = item.address || '주소 정보 없음';
+    const storePrefix = item.storeName ? `[${item.storeName}] ` : '';
+    if (addrEl) addrEl.innerText = `${storePrefix}${item.address || '주소 정보 없음'}`;
     if (subEl) subEl.innerText = `${getPhotoAuthorDisplay(item)} | ${dateTimeStr}`;
     if (imgEl) imgEl.src = item.photoUrl || '';
     if (tagEl) tagEl.innerText = item.tag || '전달완료';

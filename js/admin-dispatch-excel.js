@@ -70,7 +70,7 @@ export async function autoSaveExcelToFirebase() {
 }
 
 // ==========================================
-// 🌟 2. 엑셀/주문 테이블 화면 렌더링 (담당 기사 드롭다운 및 주소 선명화 반영)
+// 2. 엑셀/주문 테이블 화면 렌더링
 // ==========================================
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); 
@@ -84,12 +84,10 @@ export function renderExcelTable() {
         return;
     }
 
-    // 소속 운행 기사 목록 가져오기
     const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : state.allLicenses.filter(l => l.type !== 'dispatch');
 
     let html = '';
     state.parsedExcelList.forEach((item, idx) => {
-        // 담당 기사 변경 드롭다운 생성
         let driverSelectOptions = `<option value="">-- 미배정 --</option>`;
         visibleDrivers.forEach(d => {
             const dName = d.phone || d.key;
@@ -140,7 +138,6 @@ export function renderExcelTable() {
     });
     tbody.innerHTML = html;
     
-    // 전체 선택/해제 체크박스 이벤트 바인딩
     const chkAll = document.getElementById('chk-excel-all');
     if (chkAll) { 
         chkAll.checked = false; 
@@ -153,7 +150,7 @@ export function renderExcelTable() {
 }
 
 // ==========================================
-// 3. 범용 스마트 헤더 자동 매핑 및 주문/배송지별 품목 그룹화 파서
+// 🌟 3. 범용 스마트 헤더 자동 매핑 파서 (공급자 오매칭 원천 차단)
 // ==========================================
 export function processExcelData(jsonData) {
     if (!jsonData || jsonData.length === 0) return [];
@@ -163,21 +160,12 @@ export function processExcelData(jsonData) {
     jsonData.forEach((row, rowIdx) => {
         const keys = Object.keys(row);
 
-        // 1. 전화번호 추출 ('쿠폰', '포인트' 오매칭 철저 차단)
+        // 1. 전화번호 추출 (공급자, 팩스, 쿠폰 오매칭 제외)
         let phoneVal = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (/배송지연락처|수령인연락처|수신자연락처|받는분연락처|수취인연락처|배송지전화|수령인전화|수취인전화/i.test(ck)) {
-                if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
-                    phoneVal = String(row[k]).trim();
-                    break;
-                }
-            }
-        }
-        if (!phoneVal) {
-            for (const k of keys) {
-                const ck = k.replace(/\s+/g, '');
-                if (/구매자연락처|주문자연락처|고객연락처|주문자전화|구매자전화/i.test(ck)) {
+            if (!/공급자|발송자|보내는분|팩스|fax/i.test(ck)) {
+                if (/배송지연락처|수령인연락처|수신자연락처|받는분연락처|수취인연락처|배송지전화|수령인전화|수취인전화/i.test(ck)) {
                     if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                         phoneVal = String(row[k]).trim();
                         break;
@@ -188,7 +176,20 @@ export function processExcelData(jsonData) {
         if (!phoneVal) {
             for (const k of keys) {
                 const ck = k.replace(/\s+/g, '');
-                if (!/쿠폰|금액|할인|포인트|비용|번호$/i.test(ck)) {
+                if (!/공급자|발송자|보내는분|팩스|fax/i.test(ck)) {
+                    if (/구매자연락처|주문자연락처|고객연락처|주문자전화|구매자전화/i.test(ck)) {
+                        if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                            phoneVal = String(row[k]).trim();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        if (!phoneVal) {
+            for (const k of keys) {
+                const ck = k.replace(/\s+/g, '');
+                if (!/공급자|발송자|보내는분|팩스|fax|쿠폰|금액|할인|포인트|비용|번호$/i.test(ck)) {
                     if (/연락처|휴대폰|핸드폰|전화번호|전화|mobile|tel|phone/i.test(ck)) {
                         if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                             phoneVal = String(row[k]).trim();
@@ -200,12 +201,12 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 배송지 주소 추출
+        // 2. 배송지 주소 추출 (공급자 주소, 출고지, 반품지 철저 배제)
         let address = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (!/연락처|전화|명$|코드|번호|쿠폰|금액|출고지/i.test(ck)) {
-                if (/배송지주소|기본주소|배송지(?!(명|간판|연락처|전화|코드))|주소|수령지|배달주소|도로명주소/i.test(ck)) {
+            if (!/공급자|발송자|보내는분|출고지|반품지|사업장|본사|연락처|전화|명$|코드|번호|쿠폰|금액/i.test(ck)) {
+                if (/배송지주소|수령지주소|배송주소|배달주소|수취인주소/i.test(ck)) {
                     if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                         address = String(row[k]).trim();
                         break;
@@ -213,16 +214,44 @@ export function processExcelData(jsonData) {
                 }
             }
         }
+        if (!address) {
+            for (const k of keys) {
+                const ck = k.replace(/\s+/g, '');
+                if (!/공급자|발송자|보내는분|출고지|반품지|사업장|본사|연락처|전화|명$|코드|번호|쿠폰|금액/i.test(ck)) {
+                    if (/도로명주소|기본주소|주소|수령지/i.test(ck)) {
+                        if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                            address = String(row[k]).trim();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
         address = address.replace(/^\[\d+\]\s*/, '').trim();
 
-        // 3. 상호 / 수령처명 추출
+        // 3. 상호 / 수령처명 추출 (배송지명, 간판명 우선 탐색)
         let storeName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (/배송지명|간판명|간판|수령처|상호명|상호|받는분|수령인|수신자|가게명|매장명/i.test(ck)) {
-                if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
-                    storeName = String(row[k]).trim();
-                    break;
+            if (!/공급자|발송자|보내는분|위탁자/i.test(ck)) {
+                if (/배송지명|간판명|간판|매장명|가게명|수령처|수취인상호|배송지상호/i.test(ck)) {
+                    if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                        storeName = String(row[k]).trim();
+                        break;
+                    }
+                }
+            }
+        }
+        if (!storeName) {
+            for (const k of keys) {
+                const ck = k.replace(/\s+/g, '');
+                if (!/공급자|발송자|보내는분|위탁자/i.test(ck)) {
+                    if (/상호명|상호|받는분|수령인|수신자/i.test(ck)) {
+                        if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                            storeName = String(row[k]).trim();
+                            break;
+                        }
+                    }
                 }
             }
         }
@@ -477,20 +506,19 @@ export function processSingleExcelFile(file) {
 }
 
 // ==========================================
-// 🌟 5. 주소 -> 정밀 좌표(위/경도) 3단계 스마트 지오코딩 엔진
+// 🌟 5. 주소 -> 정밀 좌표(위/경도) 3단계 지오코딩 엔진
 // ==========================================
 function cleanAddressForSearch(addr) {
     if (!addr) return '';
-    let clean = addr.replace(/^\[\d+\]\s*/, ''); // 우편번호 제거
-    clean = clean.replace(/\([^)]*\)/g, ' '); // 괄호 제거
-    // 부속 층, 호수, 지하 등 상세 설명 텍스트 제거
+    let clean = addr.replace(/^\[\d+\]\s*/, '');
+    clean = clean.replace(/\([^)]*\)/g, ' ');
     clean = clean.replace(/\s+(지하|지상)?\s*\d+층.*$/i, '');
     clean = clean.replace(/\s+\d+호.*$/i, '');
     clean = clean.replace(/\s+B\d+.*$/i, '');
     return clean.replace(/\s{2,}/g, ' ').trim();
 }
 
-function getCoordsFromAddress(address, storeName = '') {
+function getCoordsFromAddress(address) {
     return new Promise((resolve) => {
         if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
             resolve(null); 
@@ -498,7 +526,7 @@ function getCoordsFromAddress(address, storeName = '') {
         }
         const geocoder = new window.kakao.maps.services.Geocoder();
 
-        // [1차 시도] 원본 주소로 직접 검색
+        // [1차] 원본 주소 검색
         geocoder.addressSearch(address.trim(), (res1, stat1) => {
             if (stat1 === window.kakao.maps.services.Status.OK && res1[0]) {
                 const fullAddr = (res1[0].road_address && res1[0].road_address.address_name) 
@@ -508,7 +536,7 @@ function getCoordsFromAddress(address, storeName = '') {
                 return;
             }
 
-            // [2차 시도] 괄호 및 상세 층/호수를 정제한 주소로 재검색
+            // [2차] 괄호 및 층/호수 정제 주소 검색
             const cleanAddr = cleanAddressForSearch(address);
             if (cleanAddr && cleanAddr !== address.trim()) {
                 geocoder.addressSearch(cleanAddr, (res2, stat2) => {
@@ -520,10 +548,10 @@ function getCoordsFromAddress(address, storeName = '') {
                         return;
                     }
 
-                    // [3차 시도] 기본 도로명+건물번호 패턴만 추출하여 재검색
-                    const basicRoadMatch = cleanAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
-                    if (basicRoadMatch) {
-                        geocoder.addressSearch(basicRoadMatch[0], (res3, stat3) => {
+                    // [3차] 기본 도로명+건물번호 패턴 검색
+                    const basicMatch = cleanAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
+                    if (basicMatch) {
+                        geocoder.addressSearch(basicMatch[0], (res3, stat3) => {
                             if (stat3 === window.kakao.maps.services.Status.OK && res3[0]) {
                                 resolve({ lat: parseFloat(res3[0].y), lng: parseFloat(res3[0].x), fullAddress: res3[0].address_name });
                             } else {
@@ -554,7 +582,7 @@ async function batchGeocodeExcelList(items) {
                 </div>`;
         }
         if (item.address && (!item.lat || !item.lng)) {
-            const coords = await getCoordsFromAddress(item.address, item.storeName);
+            const coords = await getCoordsFromAddress(item.address);
             if (coords) { 
                 item.lat = coords.lat; 
                 item.lng = coords.lng; 
@@ -588,7 +616,7 @@ export async function deleteSelectedExcelRows() {
         return; 
     }
     if(!confirm(`선택하신 ${checkboxes.length}개의 주문건을 삭제하시겠습니까?`)) return;
-    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
+    const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx'), 10));
     state.parsedExcelList = state.parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
     renderExcelTable(); 
     await autoSaveExcelToFirebase(); 
