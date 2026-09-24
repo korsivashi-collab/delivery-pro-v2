@@ -1,5 +1,5 @@
 /* ========================================================
-   배송 동선 PRO - 통합 관리자 센터 공통 스타일 (css/admin.css)
+   배송 경로 PRO - 통합 관리자 센터 공통 스타일 (css/admin.css)
    ======================================================== */
 
 /* 1. 지도 컨테이너 및 카카오맵 오버레이/핀 */
@@ -129,7 +129,7 @@
     animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards; 
 }
 
-/* 5. 거래명세표(A4 인쇄 규격) 전용 레이아웃 */
+/* 5. 주문서 거래명세표(A4 규격) 전용 레이아웃 */
 .invoice-container { 
     background-color: white; 
     border: 1px solid #d1d5db; 
@@ -236,7 +236,7 @@
 .inv-text-right { text-align: right; padding-right: 6px !important; }
 .inv-font-bold { font-weight: bold; }
 
-/* 인쇄 모드 최적화 (A4 Portrait) */
+/* 6. 인쇄 모드 최적화 (A4 Portrait) */
 @media print {
     @page { 
         size: A4 portrait; 
