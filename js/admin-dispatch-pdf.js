@@ -124,7 +124,8 @@ function groupTextContentByLines(items) {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const fullText = lineItems.map(i => i.text).join(' ').trim();
         
-        const rightItems = lineItems.filter(i => i.x > 230);
+        // 2단 양식(좌측 공급자 / 우측 공급받는자) 분리를 위한 x 좌표 필터링
+        const rightItems = lineItems.filter(i => i.x > 220);
         const rightText = rightItems.map(i => i.text).join(' ').trim();
 
         if (fullText) {
@@ -140,12 +141,101 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 🌟 '괄호(' 인식되면 뒷부분 삭제 규칙 적용 파싱 엔진
+// 3. 범용 우선순위 가점(Scoring) 파싱 헬퍼
+// ==========================================
+const NEXT_STOP_WORDS = /(?=\s*(?:연락처|전화|휴대폰|핸드폰|주소|배송지\s*주소|사업자|구매자|수령인|수신자|받는\s*분|고객|간판|상호|매장|가게|결제|총\s*상품|배송비|요청사항|비고|메모|No\.|상품명|$))/i;
+
+function cleanExtractedValue(val) {
+    if (!val) return '';
+    return val
+        .replace(/^[|:\-\s]+/, '')
+        .replace(/[|:\-\s]+$/, '')
+        .replace(/\(공급받는자용\)|\(공급자보관용\)|\(보관용\)/gi, '')
+        .trim();
+}
+
+// 🌟 단어 조각 기반 가점 평가 엔진
+function extractByPriorityScoring(text) {
+    const candidateStoreList = [];
+    const candidateBuyerList = [];
+
+    // 정규식: 라벨 키워드 감지 (간판, 배송, 매장, 상호, 가게, 구매자, 고객, 수령, 이름 등)
+    const labelRegex = /(?:([가-힣a-zA-Z0-9\(\)\s]{2,15})[:\s|]+)([\s\S]*?)(?=(?:[가-힣a-zA-Z0-9\(\)\s]{2,15}[:\s|]+)|$)/g;
+
+    let match;
+    while ((match = labelRegex.exec(text)) !== null) {
+        const rawLabel = match[1].trim();
+        let rawVal = match[2];
+
+        // 다음 필드 키워드가 나오면 그 앞까지만 절단
+        const stopIdx = rawVal.search(NEXT_STOP_WORDS);
+        if (stopIdx !== -1) {
+            rawVal = rawVal.substring(0, stopIdx);
+        }
+
+        const cleanVal = cleanExtractedValue(rawVal);
+        if (!cleanVal || cleanVal.length < 2 || cleanVal.length > 35) continue;
+
+        // 주소/전화번호 형태는 상호명 점수에서 배제
+        if (/(?:시|구|동|로|길)\s*\d+/.test(cleanVal) || /^[0-9\-]+$/.test(cleanVal)) continue;
+
+        let storeScore = 0;
+        let buyerScore = 0;
+
+        // 🌟 1. 간판 단어 인식 (+50점)
+        if (rawLabel.includes('간판')) {
+            storeScore += 50;
+        }
+        // 🌟 2. 배송 단어 인식 (+40점) - 주소/메모/비용 제외
+        else if (rawLabel.includes('배송') && !rawLabel.includes('주소') && !rawLabel.includes('메모') && !rawLabel.includes('요청') && !rawLabel.includes('비')) {
+            storeScore += 40;
+        }
+        // 🌟 3. 매장 / 가게 / 점포 단어 인식 (+35점)
+        else if (rawLabel.includes('매장') || rawLabel.includes('가게') || rawLabel.includes('점포')) {
+            storeScore += 35;
+        }
+        // 🌟 4. 상호 / 법인 단어 인식 (+30점)
+        else if (rawLabel.includes('상호') || rawLabel.includes('법인')) {
+            storeScore += 30;
+        }
+
+        // 🌟 5. 구매자 / 수령인 / 이름 단어 인식 (+10 ~ 20점)
+        if (rawLabel.includes('구매자') || rawLabel.includes('주문자')) {
+            buyerScore += 20;
+        } else if (rawLabel.includes('수령') || rawLabel.includes('수신') || rawLabel.includes('받는') || rawLabel.includes('고객')) {
+            buyerScore += 15;
+        } else if (rawLabel.includes('이름') || rawLabel.includes('성명')) {
+            buyerScore += 10;
+        }
+
+        if (storeScore > 0) {
+            candidateStoreList.push({ val: cleanVal, score: storeScore });
+        }
+        if (buyerScore > 0) {
+            candidateBuyerList.push({ val: cleanVal, score: buyerScore });
+        }
+    }
+
+    // 가장 높은 점수의 항목 채택
+    candidateStoreList.sort((a, b) => b.score - a.score);
+    candidateBuyerList.sort((a, b) => b.score - a.score);
+
+    const bestStore = candidateStoreList.length > 0 ? candidateStoreList[0].val : '';
+    const bestBuyer = candidateBuyerList.length > 0 ? candidateBuyerList[0].val : '';
+
+    return { storeName: bestStore, senderName: bestBuyer };
+}
+
+// ==========================================
+// 4. 정보 추출 및 주문 객체 파싱 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     const rawFullText = lines.map(l => l.fullText).join('\n');
-    const cleanText = rawFullText.split(/거래명세표\s*\(공급받는자용\)|거래명세표\s*\(공급받는\s*자용\)/)[0];
+    
+    // 🌟 1순위: 공급자 / 발송자 / 판매자 정보 원천 차단 (공급자 블록 전체 제거)
+    let safeText = rawFullText.replace(/(?:공급자|발송자|판매자|보내는\s*분|출하지)[\s\S]*?(?=(?:공급받는\s*자|구매자|수령인|수신자|받는\s*분|배송지|주문자|No\.|상품명|$))/gi, ' ');
 
+    // 2단 문서 우측(공급받는 자 영역) 텍스트 분리
     let buyerSectionLines = [];
     let isHeaderArea = true;
     lines.forEach(line => {
@@ -157,6 +247,7 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
     });
     const buyerSectionText = buyerSectionLines.join(' ');
+    const searchTargetText = buyerSectionText.length > 25 ? buyerSectionText : safeText;
 
     const order = {
         id: Date.now() + Math.random(),
@@ -179,58 +270,50 @@ function parseOrderFromPageLines(lines, pageNum) {
     };
 
     // 1. 주문번호
-    const orderNoMatch = cleanText.match(/(?:주문\s*번호|오더\s*번호|관리\s*번호|발주\s*번호|No\.)[:\s]*([A-Z0-9_\-]+)/i);
+    const orderNoMatch = safeText.match(/(?:주문\s*번호|오더\s*번호|관리\s*번호|발주\s*번호)[:\s|]*([A-Z0-9_\-]+)/i);
     if (orderNoMatch) order.orderNo = orderNoMatch[1].trim();
     else order.orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
 
-    // 2. 상호(간판명) 및 구매자명
-    const storeMatch = buyerSectionText.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[:\s|]*([^\n\r연락처|전화|주소]+)/);
-    if (storeMatch) order.storeName = storeMatch[1].replace(/[\(\)\[\]|]/g, '').trim();
+    // 2. 상호(간판/배송/매장/상호) 및 구매자명 가점 기반 추출
+    const { storeName, senderName } = extractByPriorityScoring(searchTargetText);
+    order.storeName = storeName;
+    order.senderName = senderName;
 
-    const buyerMatch = buyerSectionText.match(/(?:구매자명|주문자명|수령인|수신자|받는\s*분|고객명)[:\s|]*([^\n\r주소|연락처|상호]+)/);
-    if (buyerMatch) order.senderName = buyerMatch[1].replace(/[\(\)\[\]|]/g, '').trim();
-
+    // 만약 한쪽만 추출된 경우 보완 매칭
     if (!order.storeName) order.storeName = order.senderName || '배송처';
     if (!order.senderName) order.senderName = order.storeName;
 
-    // 3. 전화번호
-    const phoneMatch = buyerSectionText.match(/(?<!추가)연락처(?!\/FAX)[:\s|]*([0-9\-]{8,15})/);
+    // 3. 연락처 추출 및 포맷팅
+    const phoneMatch = searchTargetText.match(/(?:연락처|전화|휴대폰|핸드폰)[:\s|]*([0-9\-]{8,15})/i) || searchTargetText.match(/01[016789]-?\d{3,4}-?\d{4}/) || searchTargetText.match(/01[016789]\d{7,8}/);
     if (phoneMatch) {
-        order.phone = formatPhoneNumber(phoneMatch[1]);
-    } else {
-        const allPhones = buyerSectionText.match(/01[016789]-?\d{3,4}-?\d{4}/g) || buyerSectionText.match(/01[016789]\d{7,8}/g);
-        if (allPhones && allPhones.length > 0) order.phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
+        order.phone = formatPhoneNumber(phoneMatch[1] || phoneMatch[0]);
     }
 
-    // 4. 🌟 주소 규칙 적용: 행정구역 인식으로 시작하여 긁어오다 '('가 인식되면 뒷부분 삭제
-    const addrStartRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]+/i;
-    const match = buyerSectionText.match(addrStartRegex);
+    // 4. 주소 추출 (행정구역 감지 + 괄호 뒷부분 삭제 규칙 유지)
+    const addrRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r|]*(?=\s*(?:연락처|전화|배송지|간판|상호|No\.|결제|$))/i;
+    const match = searchTargetText.match(addrRegex);
 
     if (match) {
         let rawAddr = match[0];
-
-        // 표의 다른 항목 키워드나 파이프 기준 절단
-        rawAddr = rawAddr.split(/(?:배송지명|간판명|연락처|추가연락처|No\.|전화|사업자|결제\s*수단)/)[0];
-        if (rawAddr.includes('|')) rawAddr = rawAddr.split('|')[0];
-
-        // 잡음 정리 ('받 주소', 우편번호 등)
-        rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\[\d+\]/g, ' ');
-
-        // 🌟 핵심: 괄호 '('가 인식되면 그 문자와 뒷부분을 통째로 삭제
+        // 우편번호 및 라벨 잡음 제거
+        rawAddr = rawAddr.replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\[\d+\]/g, ' ').trim();
+        
+        // 괄호 '(' 인식 시 뒷부분 통째로 삭제
         const parenIndex = rawAddr.indexOf('(');
         if (parenIndex !== -1) {
             rawAddr = rawAddr.slice(0, parenIndex);
         }
-
         order.address = rawAddr.replace(/\s{2,}/g, ' ').trim();
     }
 
     // 5. 배송 메모
-    const memoMatch = cleanText.match(/(?:배송\s*요청사항|배송\s*메모|요청사항|전달사항|비고)[:\s]*([^\n\r]+)/);
-    if (memoMatch) order.memo = memoMatch[1].trim();
+    const memoMatch = safeText.match(/(?:배송\s*요청사항|배송요청사항|배송\s*메모|요청사항|전달사항|비고)[:\s|]*([^\n\r]+)/i);
+    if (memoMatch) {
+        order.memo = memoMatch[1].split(/거래명세표|No\.|총\s*주문금액/)[0].trim();
+    }
 
-    // 6. 다품목 상품 리스트 파싱
-    const cleanLines = cleanText.split('\n').map(l => l.trim()).filter(l => l);
+    // 6. 다품목 상품 리스트 파싱 (표 형식)
+    const cleanLines = safeText.split('\n').map(l => l.trim()).filter(l => l);
     let inItemTable = false;
 
     for (const line of cleanLines) {
@@ -249,6 +332,7 @@ function parseOrderFromPageLines(lines, pageNum) {
             if (rowMatch) {
                 const rest = rowMatch[2];
                 const priceMatch = rest.match(/(\d+)\s+[\d,]+(?:\s+[\d,]+)*$/);
+                
                 if (priceMatch) {
                     const qtyNum = parseInt(priceMatch[1], 10) || 1;
                     const nameStr = rest.slice(0, priceMatch.index).trim();
@@ -283,7 +367,7 @@ function parseOrderFromPageLines(lines, pageNum) {
 }
 
 // ==========================================
-// 4. 주소 좌표(위/경도) 변환 및 일괄 등록
+// 5. 주소 좌표(위/경도) 변환 및 일괄 등록
 // ==========================================
 async function getCoordsFromAddress(address) {
     return new Promise((resolve) => {
@@ -334,7 +418,7 @@ export async function batchGeocodePdfList(items) {
 }
 
 // ==========================================
-// 5. 전역 Window 객체 바인딩
+// 6. 전역 Window 객체 바인딩
 // ==========================================
 window.formatPhoneNumber = formatPhoneNumber;
 window.processSinglePdfFile = processSinglePdfFile;
