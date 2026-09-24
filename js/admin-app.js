@@ -41,11 +41,19 @@ import {
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
     clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch,
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
-    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver,
-    renderDispatchDriverList, selectDispatchDriver, renderDispatchDriverDetail,
-    runAutoDispatchAlgorithm, toggleDispatchDriver, adjustDriverWeight,
-    saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI
+    openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver
 } from "./admin-dispatch-core.js";
+
+import {
+    saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI,
+    renderDispatchDriverList, toggleDispatchDriver, adjustDriverWeight,
+    selectDispatchDriver, renderDispatchDriverDetail, changeOrderDriver,
+    runAutoDispatchAlgorithm, sendRoutesToDrivers
+} from "./admin-dispatch-auto.js";
+
+import {
+    processSinglePdfFile, batchGeocodePdfList
+} from "./admin-dispatch-pdf.js";
 
 import {
     renderMessageSidebar, toggleMessageDriver, toggleAllMessageSelection,
@@ -64,7 +72,8 @@ import {
 
 import {
     exportToInvoiceModal, previewInvoiceRow, syncPreviewData, loadSavedForms,
-    executeBatchPrint, selectFormTemplate, cancelProviderFormEdit, saveProviderForm,
+    executeBatchPrint, printAggregatedItemList, setAsDefaultForm,
+    selectFormTemplate, cancelProviderFormEdit, saveProviderForm,
     deleteSavedForm, updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
     switchInvoiceTab
 } from "./admin-dispatch-print.js";
@@ -273,7 +282,6 @@ window.initMasterDataSync = function() {
         if (typeof populateDriverSelect === 'function') populateDriverSelect();
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
         
-        // 🌟 [오류 차단] 마스터 페이지가 아닐 때(관제 페이지일 때)만 사이드바 렌더링 호출
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         
         const curKey = document.getElementById('edit-orig-key')?.value;
@@ -289,7 +297,7 @@ window.initMasterDataSync = function() {
         }
     });
 
-    // 2. 🌟 접속 제한(블랙리스트) 기기 실시간 동기화
+    // 2. 접속 제한(블랙리스트) 기기 실시간 동기화
     onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
         state.allBlockedDevices = [];
         snapshot.forEach(docSnap => { state.allBlockedDevices.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -603,16 +611,24 @@ window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
 window.closeProInvoiceModal = closeProInvoiceModal;
 window.closePremiumModal = closePremiumModal;
-window.renderDispatchDriverList = renderDispatchDriverList;
-window.selectDispatchDriver = selectDispatchDriver;
-window.renderDispatchDriverDetail = renderDispatchDriverDetail;
-window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.focusMapPosition = focusMapPosition;
-window.toggleDispatchDriver = toggleDispatchDriver;
-window.adjustDriverWeight = adjustDriverWeight;
+
+// [관제 자동할당 및 기사 배포 모듈 (Auto Dispatch)]
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
+window.renderDispatchDriverList = renderDispatchDriverList;
+window.selectDispatchDriver = selectDispatchDriver;
+window.renderDispatchDriverDetail = renderDispatchDriverDetail;
+window.changeOrderDriver = changeOrderDriver;
+window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
+window.sendRoutesToDrivers = sendRoutesToDrivers;
+window.toggleDispatchDriver = toggleDispatchDriver;
+window.adjustDriverWeight = adjustDriverWeight;
+
+// [관제 PDF 파싱 모듈]
+window.processSinglePdfFile = processSinglePdfFile;
+window.batchGeocodePdfList = batchGeocodePdfList;
 
 // [관제 메시지]
 window.renderMessageSidebar = renderMessageSidebar;
@@ -672,6 +688,8 @@ window.previewInvoiceRow = previewInvoiceRow;
 window.syncPreviewData = syncPreviewData;
 window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
+window.printAggregatedItemList = printAggregatedItemList;
+window.setAsDefaultForm = setAsDefaultForm;
 window.selectFormTemplate = selectFormTemplate;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;

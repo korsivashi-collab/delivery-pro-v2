@@ -5,7 +5,7 @@ export const state = {
     // 1. 공통 상태
     currentUserRole: null,
     allLicenses: [],
-    allBlockedDevices: [], // 🌟 신규 추가: 접속 제한(블랙리스트) 기기 목록
+    allBlockedDevices: [], // 접속 제한(블랙리스트) 기기 목록
     allMemos: [],
     activeRoutes: {},
     allCompletions: [],
@@ -20,14 +20,15 @@ export const state = {
     selectedMessageDrivers: new Set(),
     activeDispatchPopupMsgId: null,
 
-    // 3. PRO 기능 전용 상태 (엑셀, 인쇄, 권역 등)
+    // 3. PRO 기능 전용 상태 (엑셀, PDF, 자동할당, 인쇄, 권역 등)
     excelSortAsc: true,
-    parsedExcelList: [],
-    printReadyList: [],
+    parsedExcelList: [],          // 업로드된 엑셀/PDF 주문 통합 리스트
+    printReadyList: [],           // 인쇄 대기 주문 리스트
     selectedDispatchDriverId: null,
     currentSelectedFormIndex: null,
     previewDebounceTimer: null,
     
+    // 권역(Territory) 지도 관련 상태
     territoryMap: null,
     territoryMarker: null,
     territoryCircles: [],
@@ -48,9 +49,12 @@ export const state = {
     historySelectedAccountKeys: new Set(),
 };
 
-// 전역에서 공통으로 사용되는 날짜 포맷 함수
+// 전역에서 공통으로 사용되는 로컬 기준 날짜 포맷 함수 (YYYY-MM-DD)
 export function getLocalDateString(d = new Date()) {
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
 }
 
 export const todayStr = getLocalDateString();
