@@ -72,6 +72,8 @@ export function setDispatchMode(mode, keepSelected = false) {
 }
 
 export function renderSidebar() {
+    updateProButtonsUI();
+
     if (state.dispatchNavState === 'DELIVERY') {
         if (state.selectedDeviceId) renderDriverDetailView(state.selectedDeviceId);
         else renderDriverListView();
@@ -521,7 +523,7 @@ export function handleGlobalSearch(query) {
             <div onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
                 <div class="flex justify-between items-center text-xs">
                     <div class="flex items-center gap-1.5"><span class="text-[10px] font-black px-1.5 py-0.5 rounded ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span><span class="font-bold text-gray-800">${latest.phone}</span></div>
-                    <span class="font-black text-[11px] ${latest.type === 'DONE' ? 'text-emerald-700' : 'text-blue-700'}">${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}] ${latest.timeStr}` : `➔ ${latest.displayNumber || 1}번 이동 대기`}</span>
+                    <span class="font-black text-[11px] ${latest.type === 'DONE' ? 'text-emerald-700' : 'text-blue-700'}">${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}]${latest.timeStr}` : `➔ ${latest.displayNumber || 1}번 이동 대기`}</span>
                 </div>
             </div>
         </div>`;
@@ -532,7 +534,55 @@ export function handleGlobalSearch(query) {
 // ==========================================
 // 5. PRO 기능 및 기사 연결 팝업 제어
 // ==========================================
+
+// 🌟 관제 상단 PRO 버튼 상태(잠김/열림) UI 업데이트 헬퍼
+export function updateProButtonsUI() {
+    const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const myLic = state.allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
+    const isPro = isMaster || (myLic && !!myLic.isPro);
+
+    const btnAuto = document.getElementById('btn-pro-auto-dispatch');
+    const btnInv = document.getElementById('btn-pro-invoice');
+
+    if (btnAuto) {
+        const badge = btnAuto.querySelector('span');
+        if (badge) {
+            if (isPro) {
+                badge.className = "absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
+                badge.innerHTML = "PRO";
+            } else {
+                badge.className = "absolute -top-1.5 -right-1.5 bg-gray-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
+                badge.innerHTML = '<i class="fa-solid fa-lock text-[8px]"></i> PRO';
+            }
+        }
+    }
+    if (btnInv) {
+        const badge = btnInv.querySelector('span');
+        if (badge) {
+            if (isPro) {
+                badge.className = "absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
+                badge.innerHTML = "PRO";
+            } else {
+                badge.className = "absolute -top-1.5 -right-1.5 bg-gray-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
+                badge.innerHTML = '<i class="fa-solid fa-lock text-[8px]"></i> PRO';
+            }
+        }
+    }
+}
+
 export function handleProFeature(featureName) {
+    // 🌟 [핵심] 마스터 계정이 아니며 관제 계정에 isPro 권한이 부여되지 않은 경우 접근 즉시 차단
+    const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const myLic = state.allLicenses.find(l => l.key === dispatchKey || l.id === dispatchKey);
+    const isPro = isMaster || (myLic && !!myLic.isPro);
+
+    if (!isPro) {
+        alert("🔒 [PRO 프리미엄 기능 제한]\n\n해당 기능(자동할당 및 주문서 통합관리)은 PRO 프리미엄 활성화 계정 전용 기능입니다.\n\n사용 권한 부여를 원하실 경우 본사 마스터 관리자에게 문의해 주세요.");
+        return;
+    }
+
     if (featureName === 'AUTO_DISPATCH') {
         const modal = document.getElementById('auto-dispatch-modal');
         if (!modal) { alert("🚨 시스템 안내\n현재 브라우저 화면이 최신 버전이 아닙니다. 새로고침을 진행해주세요."); return; }
@@ -546,7 +596,7 @@ export function handleProFeature(featureName) {
 
     } else if (featureName === 'INVOICE') {
         const modal = document.getElementById('pro-invoice-modal');
-        if (!modal) { alert("🚨 시스템 안내\n인쇄 모듈을 찾을 수 없습니다."); return; }
+        if (!modal) { alert("🚨 시스템 안내\n주문서 통합관리 모듈을 찾을 수 없습니다."); return; }
         modal.classList.remove('hidden');
         
         state.printReadyList = (state.parsedExcelList && state.parsedExcelList.length > 0) ? [...state.parsedExcelList] : [];
@@ -649,7 +699,6 @@ export function saveCompanyBaseAddress() {
         const geocoder = new kakao.maps.services.Geocoder();
         geocoder.addressSearch(input, (result, status) => {
             if (status === kakao.maps.services.Status.OK && result[0]) {
-                // 🌟 오류 복구: 사용자가 입력한 짧은 텍스트 대신 카카오 API가 식별한 '공식 전체 주소'를 우선 사용하도록 복구
                 let fullAddress = result[0].address_name;
                 if (result[0].road_address && result[0].road_address.address_name) {
                     fullAddress = result[0].road_address.address_name;
@@ -922,3 +971,5 @@ window.adjustDriverWeight = adjustDriverWeight;
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
+window.handleProFeature = handleProFeature;
+window.updateProButtonsUI = updateProButtonsUI;
