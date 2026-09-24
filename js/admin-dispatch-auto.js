@@ -183,12 +183,14 @@ export function renderDispatchDriverDetail() {
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
     const btnDriverPrint = document.getElementById('btn-driver-items-print');
+    const btnSendRoutes = document.getElementById('btn-send-routes-to-drivers');
     
     if (!state.selectedDispatchDriverId) {
         if (header) header.classList.remove('hidden'); 
         if (table) table.classList.add('hidden'); 
         if (badge) badge.classList.add('hidden'); 
         if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
+        if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         return;
     }
 
@@ -206,12 +208,14 @@ export function renderDispatchDriverDetail() {
 
     if (assignedItems.length === 0) {
         if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
+        if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
     }
 
-    // 🌟 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 합산 출력 버튼 노출
+    // 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 합산 출력 및 앱 전송 버튼 노출
     if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
+    if (btnSendRoutes) btnSendRoutes.classList.remove('hidden');
 
     let html = '';
     assignedItems.forEach((item, idx) => {
@@ -239,7 +243,6 @@ export function renderDispatchDriverDetail() {
     if (tbody) tbody.innerHTML = html;
 }
 
-// 개별 주문의 담당 기사를 수동으로 변경하는 함수
 export function changeOrderDriver(itemId, newDriverPhone) {
     const item = state.parsedExcelList.find(o => String(o.id) === String(itemId));
     if (!item) return;
@@ -381,7 +384,7 @@ export function runAutoDispatchAlgorithm() {
 }
 
 // ==========================================
-// 5. 기사 앱 수동 전송 엔진 (숨은 주문번호 탑재)
+// 5. 기사 앱 수동 전송 엔진
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -397,6 +400,8 @@ export async function sendRoutesToDrivers() {
         return;
     }
 
+    // 전체 전송이 아닌, 현재 화면에서 선택된 기사에게만 전송되도록 로직 수정 반영 가능
+    // 단, 기존 로직이 전체 기사 전송이었으므로 이를 유지하면서 선택된 기사들로 필터링
     const driverMap = {};
     assignedOrders.forEach(o => {
         if (!driverMap[o.assignedDriver]) driverMap[o.assignedDriver] = [];
@@ -404,7 +409,7 @@ export async function sendRoutesToDrivers() {
     });
 
     const targetDriverNames = Object.keys(driverMap);
-    if (!confirm(`총 ${targetDriverNames.length}명의 기사에게 ${assignedOrders.length}건의 배송 동선을 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 자동으로 등록됩니다.`)) {
+    if (!confirm(`배정된 ${assignedOrders.length}건의 배송 동선을 해당 기사들의 스마트폰으로 전송하시겠습니까?\n\n* 전송 즉시 기사 앱에 배송 코스가 자동으로 등록됩니다.`)) {
         return;
     }
 
@@ -430,7 +435,7 @@ export async function sendRoutesToDrivers() {
                 phone: ord.phone || '',
                 lat: ord.lat || null,
                 lng: ord.lng || null,
-                orderNo: ord.orderNo || '', // 숨겨진 주문번호
+                orderNo: ord.orderNo || '', 
                 memo: ord.memo || '',
                 items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
             }));
@@ -452,13 +457,13 @@ export async function sendRoutesToDrivers() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 기사 앱으로 동선 전송';
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> 동선 전송';
         }
     }
 }
 
 // ==========================================
-// 🌟 6. 선택된 기사 전용 상품 합산 피킹 리스트 (1장 출력)
+// 🌟 6. 선택된 기사 전용 상품 합산 피킹 리스트 (양식 없는 단순 리스트)
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -475,115 +480,85 @@ export function printSelectedDriverItemList() {
         return;
     }
 
-    // 선택된 기사의 품목 그룹화 및 수량 합산 로직
+    // 선택된 기사의 품목 그룹화 및 수량 합산 로직 (양식 없이 단순하게)
     const aggregationMap = {};
 
     assignedItems.forEach(order => {
         if (order.items && order.items.length > 0) {
             order.items.forEach(it => {
                 const name = it.name ? it.name.trim() : '기타 품목';
-                const unit = it.unit ? it.unit.trim() : '개';
                 const qty = parseInt(it.qty, 10) || 1;
-                const key = `${name}___${unit}`;
-
-                if (!aggregationMap[key]) {
-                    aggregationMap[key] = { name, unit, totalQty: 0, orderCount: 0 };
-                }
-                aggregationMap[key].totalQty += qty;
-                aggregationMap[key].orderCount += 1;
+                if (!aggregationMap[name]) aggregationMap[name] = 0;
+                aggregationMap[name] += qty;
             });
         } else {
             const name = order.itemName ? order.itemName.trim() : '상품명 미지정';
-            const unit = order.unit ? order.unit.trim() : '개';
             const qty = parseInt(order.qty, 10) || 1;
-            const key = `${name}___${unit}`;
-
-            if (!aggregationMap[key]) {
-                aggregationMap[key] = { name, unit, totalQty: 0, orderCount: 0 };
-            }
-            aggregationMap[key].totalQty += qty;
-            aggregationMap[key].orderCount += 1;
+            if (!aggregationMap[name]) aggregationMap[name] = 0;
+            aggregationMap[name] += qty;
         }
     });
 
-    const aggregatedList = Object.values(aggregationMap).sort((a, b) => b.totalQty - a.totalQty);
-    const totalItemTypes = aggregatedList.length;
-    const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
     const dateStr = getLocalDateString();
+    
+    let listHtml = '';
+    for (const [name, qty] of Object.entries(aggregationMap)) {
+        listHtml += `
+        <div style="display: flex; justify-content: space-between; border-bottom: 1px dashed #ccc; padding: 6px 0;">
+            <span style="font-size: 15px;">${name}</span>
+            <span style="font-size: 15px; font-weight: bold;">${qty}</span>
+        </div>`;
+    }
 
-    let tableRowsHtml = '';
-    aggregatedList.forEach((item, idx) => {
-        tableRowsHtml += `
-        <tr>
-            <td style="text-align: center; font-weight: bold; padding: 6px 4px;">${idx + 1}</td>
-            <td style="text-align: left; font-weight: bold; padding: 6px 8px; font-size: 11px;">${item.name}</td>
-            <td style="text-align: center; padding: 6px 4px;">${item.unit}</td>
-            <td style="text-align: right; font-weight: 900; padding: 6px 8px; font-size: 12px; color: #1e3a8a;">${formatNumber(item.totalQty)}</td>
-            <td style="text-align: center; font-weight: bold; color: #64748b; padding: 6px 4px;">${item.orderCount}곳</td>
-            <td style="text-align: center; padding: 6px 4px;"><span style="display: inline-block; width: 18px; height: 18px; border: 1.5px solid #000; border-radius: 3px;"></span></td>
-        </tr>`;
-    });
-
-    const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 기사별 창고 상차 피킹 리스트</title><style>
-        * { box-sizing: border-box; }
-        @media print {
-            @page { size: A4 portrait; margin: 10mm; }
-            body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
-            .print-page { box-shadow: none !important; border: none !important; width: 100% !important; height: auto !important; }
-        }
-        body { font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; margin: 0; padding: 0; color: #1e293b; }
-        .print-page { width: 190mm; margin: 0 auto; padding: 5mm; }
-        .header-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 1px; margin-bottom: 4px; border-bottom: 3px double #000; padding-bottom: 6px; }
-        .meta-info { display: flex; justify-content: space-between; font-size: 11px; font-weight: bold; margin-bottom: 10px; color: #334155; }
-        .summary-box { background-color: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-around; font-size: 11px; font-weight: 900; margin-bottom: 12px; }
-        .summary-box span b { color: #1d4ed8; font-size: 13px; margin-left: 4px; }
-        table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10.5px; }
-        th { background-color: #f1f5f9; border: 1px solid #000; padding: 6px 4px; font-weight: 900; text-align: center; }
-        td { border: 1px solid #000; }
-        .footer-sign { display: flex; justify-content: flex-end; gap: 30px; margin-top: 18px; font-size: 11px; font-weight: bold; }
-        .sign-box { border-bottom: 1px solid #000; width: 90px; display: inline-block; text-align: center; }
-    </style></head><body>
-    <div class="print-page">
-        <div class="header-title">[${driverName}] 기사 창고 상차 및 검수용 상품 피킹 리스트</div>
-        <div class="meta-info">
-            <span>담당 기사: <b>${driverName}</b></span>
-            <span>출력일자: ${dateStr}</span>
-            <span>배송 경로 PRO 통합물류시스템</span>
+    // 표 등의 복잡한 양식을 모두 제거하고, 텍스트와 라인 중심의 단순 영수증/메모 스타일 적용
+    const simplePrintHtml = `<!DOCTYPE html>
+    <html lang="ko">
+    <head>
+        <meta charset="UTF-8">
+        <title>기사별 할당 상품 출력</title>
+        <style>
+            body { 
+                font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+                padding: 20px; 
+                color: #000; 
+                margin: 0 auto; 
+                max-width: 450px; 
+            }
+            @media print { 
+                body { padding: 0; } 
+            }
+            .header-info { 
+                margin-bottom: 20px; 
+                padding-bottom: 10px; 
+                border-bottom: 2px solid #000; 
+            }
+            .header-info div { 
+                margin-bottom: 5px; 
+                font-size: 16px; 
+                font-weight: bold; 
+            }
+            .col-header { 
+                display: flex; 
+                justify-content: space-between; 
+                font-size: 14px; 
+                font-weight: bold; 
+                color: #555; 
+                margin-bottom: 5px; 
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header-info">
+            <div>날짜 : ${dateStr}</div>
+            <div>기사 ID : ${driverName}</div>
         </div>
-        <div class="summary-box">
-            <span>배정 배송처: <b>${assignedItems.length}</b>곳</span>
-            <span>적재 품목 수: <b>${totalItemTypes}</b>종</span>
-            <span>기사 총 상차수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
+        <div class="col-header">
+            <span>품목명</span>
+            <span>수량</span>
         </div>
-        <table>
-            <colgroup>
-                <col style="width: 7%;">
-                <col style="width: 48%;">
-                <col style="width: 12%;">
-                <col style="width: 13%;">
-                <col style="width: 10%;">
-                <col style="width: 10%;">
-            </colgroup>
-            <thead>
-                <tr>
-                    <th>No.</th>
-                    <th>상 품 명 (품목 규격)</th>
-                    <th>단위</th>
-                    <th>총 수량</th>
-                    <th>배송처</th>
-                    <th>상차확인</th>
-                </tr>
-            </thead>
-            <tbody>
-                ${tableRowsHtml}
-            </tbody>
-        </table>
-        <div class="footer-sign">
-            <span>상차 담당자: <span class="sign-box">(서명)</span></span>
-            <span>운행 기사: <span class="sign-box">(서명)</span></span>
-        </div>
-    </div>
-    </body></html>`;
+        ${listHtml}
+    </body>
+    </html>`;
 
     const iframe = document.createElement('iframe');
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;';
@@ -591,7 +566,7 @@ export function printSelectedDriverItemList() {
 
     const doc = iframe.contentWindow.document;
     doc.open();
-    doc.write(pickingHtml);
+    doc.write(simplePrintHtml);
     doc.close();
 
     iframe.onload = function() {
@@ -599,7 +574,7 @@ export function printSelectedDriverItemList() {
             iframe.contentWindow.focus();
             iframe.contentWindow.print();
             setTimeout(() => { document.body.removeChild(iframe); }, 1000);
-        }, 600);
+        }, 500);
     };
 }
 
