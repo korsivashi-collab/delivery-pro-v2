@@ -8,7 +8,41 @@ if (window.pdfjsLib) {
 }
 
 // ==========================================
-// 0. 전화번호 표준화 헬퍼 (010-XXXX-XXXX)
+// 0. 로컬 스토리지 기반 주소 캐시(Cache) 관리 엔진
+// ==========================================
+const GEO_CACHE_KEY = 'deliveryPro_geoCache';
+let memoryGeoCache = null;
+
+function getGeoCache() {
+    if (memoryGeoCache !== null) return memoryGeoCache;
+    try {
+        const stored = localStorage.getItem(GEO_CACHE_KEY);
+        memoryGeoCache = stored ? JSON.parse(stored) : {};
+    } catch (e) {
+        memoryGeoCache = {};
+    }
+    return memoryGeoCache;
+}
+
+function saveGeoCache(cache) {
+    try {
+        // 캐시 항목이 3000개를 넘어가면 오래된 순서대로 정리하여 용량 보호
+        const keys = Object.keys(cache);
+        if (keys.length > 3000) {
+            const trimmedCache = {};
+            keys.slice(keys.length - 2000).forEach(k => { trimmedCache[k] = cache[k]; });
+            memoryGeoCache = trimmedCache;
+            localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(trimmedCache));
+            return;
+        }
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+        console.warn("주소 캐시 저장 실패:", e);
+    }
+}
+
+// ==========================================
+// 1. 전화번호 표준화 헬퍼 (010-XXXX-XXXX)
 // ==========================================
 export function formatPhoneNumber(val) {
     if (!val) return '';
@@ -34,7 +68,7 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
-// 1. 단일 PDF 파일 로드 및 페이지별 텍스트 파싱
+// 2. 단일 PDF 파일 로드 및 페이지별 텍스트 파싱
 // ==========================================
 export async function processSinglePdfFile(file) {
     if (!window.pdfjsLib) {
@@ -90,7 +124,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 2. Y축 정렬 및 X축 기준 좌(공급자 제외) / 우(수취자) 분리 엔진
+// 3. Y축 정렬 및 X축 기준 좌(공급자 제외) / 우(수취자) 분리 엔진
 // ==========================================
 function groupTextContentByLines(items) {
     if (!items || items.length === 0) return [];
@@ -133,7 +167,7 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 상품 테이블 전용 파싱 헬퍼
+// 4. 상품 테이블 전용 파싱 헬퍼
 // ==========================================
 function parseItemLine(text, itemsArray) {
     const rowMatch = text.match(/^(\d+)\s+(.+)/);
@@ -162,7 +196,7 @@ function parseItemLine(text, itemsArray) {
 }
 
 // ==========================================
-// 4. 주문 정보 파싱 및 주소 정제 규칙 엔진
+// 5. 주문 정보 파싱 및 주소 정제 규칙 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     let storeName = '';
@@ -240,7 +274,7 @@ function parseOrderFromPageLines(lines, pageNum) {
     // 상호명 앞 특수기호 및 닫는 괄호 정제
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
-    // 🌟 2단계: 주소 정제 규칙 (행정구역 탐지 ~ '(' 인식 시 뒷부분 즉시 절단)
+    // 2단계: 주소 정제 규칙 (행정구역 탐지 ~ '(' 인식 시 뒷부분 즉시 절단)
     const combinedCandidate = fullBuyerString + ' ' + fullRawTextLines.join(' ');
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
     const regionMatch = fullBuyerString.match(regionRegex) || combinedCandidate.match(regionRegex);
@@ -302,26 +336,43 @@ function parseOrderFromPageLines(lines, pageNum) {
 }
 
 // ==========================================
-// 5. 카카오 주소 정제 및 좌표(위/경도) 변환 (카카오 주소로 최종 치환)
+// 6. 주소 좌표(위/경도) 변환 (캐시 우선 확인 시스템)
 // ==========================================
 async function getCoordsFromAddress(address) {
+    if (!address) return null;
+    const cleanKey = address.trim();
+    if (!cleanKey) return null;
+
+    // 🌟 1순위: 로컬 캐시 확인 (기존 변환된 주소면 카카오 API 호출 없이 즉시 반환)
+    const cache = getGeoCache();
+    if (cache[cleanKey]) {
+        return cache[cleanKey];
+    }
+
+    // 🌟 2순위: 캐시에 없는 새로운 주소만 카카오 API 호출
     return new Promise((resolve) => {
-        if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
+        if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
             resolve(null); 
             return; 
         }
         const geocoder = new window.kakao.maps.services.Geocoder();
-        geocoder.addressSearch(address.trim(), (result, status) => {
+        geocoder.addressSearch(cleanKey, (result, status) => {
             if (status === window.kakao.maps.services.Status.OK && result[0]) {
                 let fullAddress = result[0].address_name;
                 if (result[0].road_address && result[0].road_address.address_name) {
                     fullAddress = result[0].road_address.address_name;
                 }
-                resolve({ 
+                const resData = { 
                     lat: parseFloat(result[0].y), 
                     lng: parseFloat(result[0].x), 
                     fullAddress: fullAddress 
-                });
+                };
+
+                // 새로운 변환 결과를 로컬 캐시에 저장하여 영구 재사용
+                cache[cleanKey] = resData;
+                saveGeoCache(cache);
+
+                resolve(resData);
             } else { 
                 resolve(null); 
             }
@@ -332,6 +383,7 @@ async function getCoordsFromAddress(address) {
 export async function batchGeocodePdfList(items) {
     const dropZone = document.getElementById('excel-drop-zone');
     const originalDropHtml = dropZone ? dropZone.innerHTML : '';
+    const cache = getGeoCache();
 
     for (let i = 0; i < items.length; i++) {
         const item = items[i];
@@ -344,16 +396,19 @@ export async function batchGeocodePdfList(items) {
         }
 
         if (item.address) {
+            const isCached = !!cache[item.address.trim()];
             const coords = await getCoordsFromAddress(item.address);
             if (coords) {
                 item.lat = coords.lat;
                 item.lng = coords.lng;
-                // 🌟 원칙 적용: 카카오에서 인식된 정확한 표준 주소 부분까지만 화면 주소로 치환
                 if (coords.fullAddress) {
                     item.address = coords.fullAddress;
                 }
             }
-            await new Promise(r => setTimeout(r, 40));
+            // 캐시에서 가져온 주소는 딜레이 없이 즉시 처리, 신규 API 호출 시에만 40ms 안전 지연
+            if (!isCached) {
+                await new Promise(r => setTimeout(r, 40));
+            }
         }
     }
 
@@ -361,7 +416,7 @@ export async function batchGeocodePdfList(items) {
 }
 
 // ==========================================
-// 6. 전역 Window 객체 바인딩
+// 7. 전역 Window 객체 바인딩
 // ==========================================
 window.formatPhoneNumber = formatPhoneNumber;
 window.processSinglePdfFile = processSinglePdfFile;
