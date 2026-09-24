@@ -48,7 +48,7 @@ import {
     saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI,
     renderDispatchDriverList, toggleDispatchDriver, adjustDriverWeight,
     selectDispatchDriver, renderDispatchDriverDetail, changeOrderDriver,
-    runAutoDispatchAlgorithm, sendRoutesToDrivers
+    runAutoDispatchAlgorithm, sendRoutesToDrivers, printSelectedDriverItemList
 } from "./admin-dispatch-auto.js";
 
 import {
@@ -623,6 +623,7 @@ window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.sendRoutesToDrivers = sendRoutesToDrivers;
+window.printSelectedDriverItemList = printSelectedDriverItemList;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
 

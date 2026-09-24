@@ -1,8 +1,8 @@
 // js/admin-dispatch-auto.js
 
 import { db } from "./admin-api.js";
-import { state } from "./admin-state.js";
-import { getFilteredVisibleDrivers } from "./admin-dispatch-core.js";
+import { state, getLocalDateString } from "./admin-state.js";
+import { getFilteredVisibleDrivers, formatNumber } from "./admin-dispatch-core.js";
 import { doc, setDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
@@ -182,9 +182,14 @@ export function renderDispatchDriverDetail() {
     const table = document.getElementById('detail-driver-table');
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
+    const btnDriverPrint = document.getElementById('btn-driver-items-print');
     
     if (!state.selectedDispatchDriverId) {
-        header.classList.remove('hidden'); table.classList.add('hidden'); badge.classList.add('hidden'); return;
+        if (header) header.classList.remove('hidden'); 
+        if (table) table.classList.add('hidden'); 
+        if (badge) badge.classList.add('hidden'); 
+        if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
+        return;
     }
 
     const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
@@ -192,13 +197,21 @@ export function renderDispatchDriverDetail() {
     const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
     const visibleDrivers = getFilteredVisibleDrivers();
 
-    header.classList.add('hidden'); table.classList.remove('hidden'); badge.classList.remove('hidden');
-    badge.innerText = `총 ${assignedItems.length}건`;
+    if (header) header.classList.add('hidden'); 
+    if (table) table.classList.remove('hidden'); 
+    if (badge) {
+        badge.classList.remove('hidden');
+        badge.innerText = `총 ${assignedItems.length}건`;
+    }
 
     if (assignedItems.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
+        if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
+        if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
     }
+
+    // 🌟 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 합산 출력 버튼 노출
+    if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
 
     let html = '';
     assignedItems.forEach((item, idx) => {
@@ -223,7 +236,7 @@ export function renderDispatchDriverDetail() {
             </td>
         </tr>`; 
     });
-    tbody.innerHTML = html;
+    if (tbody) tbody.innerHTML = html;
 }
 
 // 개별 주문의 담당 기사를 수동으로 변경하는 함수
@@ -368,7 +381,7 @@ export function runAutoDispatchAlgorithm() {
 }
 
 // ==========================================
-// 🌟 5. 기사 앱 수동 전송 엔진 (숨은 주문번호 탑재)
+// 5. 기사 앱 수동 전송 엔진 (숨은 주문번호 탑재)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -410,8 +423,6 @@ export async function sendRoutesToDrivers() {
             const devId = matchedLic.deviceId || matchedLic.key;
             const orders = driverMap[dName];
 
-            // 기사 앱의 코스 목록 구조 생성
-            // (기사 스마트폰 화면에는 상호/주소/전화번호만 보이고, 숨은 orderNo 키를 함께 주입)
             const destinations = orders.map((ord, idx) => ({
                 displayNumber: idx + 1,
                 address: ord.address || '',
@@ -419,7 +430,7 @@ export async function sendRoutesToDrivers() {
                 phone: ord.phone || '',
                 lat: ord.lat || null,
                 lng: ord.lng || null,
-                orderNo: ord.orderNo || '', // 🌟 숨겨진 주문번호 (추후 실시간 추적 연동용)
+                orderNo: ord.orderNo || '', // 숨겨진 주문번호
                 memo: ord.memo || '',
                 items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
             }));
@@ -441,13 +452,159 @@ export async function sendRoutesToDrivers() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-base"></i> 기사 앱으로 동선 전송';
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 기사 앱으로 동선 전송';
         }
     }
 }
 
 // ==========================================
-// 6. 전역 Window 객체 바인딩
+// 🌟 6. 선택된 기사 전용 상품 합산 피킹 리스트 (1장 출력)
+// ==========================================
+export function printSelectedDriverItemList() {
+    if (!state.selectedDispatchDriverId) {
+        alert("출력할 기사를 좌측 목록에서 먼저 선택해 주세요.");
+        return;
+    }
+
+    const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+    const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
+    const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
+
+    if (!assignedItems || assignedItems.length === 0) {
+        alert(`[${driverName}] 기사님에게 배정된 배송 주문 및 상품 데이터가 없습니다.`);
+        return;
+    }
+
+    // 선택된 기사의 품목 그룹화 및 수량 합산 로직
+    const aggregationMap = {};
+
+    assignedItems.forEach(order => {
+        if (order.items && order.items.length > 0) {
+            order.items.forEach(it => {
+                const name = it.name ? it.name.trim() : '기타 품목';
+                const unit = it.unit ? it.unit.trim() : '개';
+                const qty = parseInt(it.qty, 10) || 1;
+                const key = `${name}___${unit}`;
+
+                if (!aggregationMap[key]) {
+                    aggregationMap[key] = { name, unit, totalQty: 0, orderCount: 0 };
+                }
+                aggregationMap[key].totalQty += qty;
+                aggregationMap[key].orderCount += 1;
+            });
+        } else {
+            const name = order.itemName ? order.itemName.trim() : '상품명 미지정';
+            const unit = order.unit ? order.unit.trim() : '개';
+            const qty = parseInt(order.qty, 10) || 1;
+            const key = `${name}___${unit}`;
+
+            if (!aggregationMap[key]) {
+                aggregationMap[key] = { name, unit, totalQty: 0, orderCount: 0 };
+            }
+            aggregationMap[key].totalQty += qty;
+            aggregationMap[key].orderCount += 1;
+        }
+    });
+
+    const aggregatedList = Object.values(aggregationMap).sort((a, b) => b.totalQty - a.totalQty);
+    const totalItemTypes = aggregatedList.length;
+    const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
+    const dateStr = getLocalDateString();
+
+    let tableRowsHtml = '';
+    aggregatedList.forEach((item, idx) => {
+        tableRowsHtml += `
+        <tr>
+            <td style="text-align: center; font-weight: bold; padding: 6px 4px;">${idx + 1}</td>
+            <td style="text-align: left; font-weight: bold; padding: 6px 8px; font-size: 11px;">${item.name}</td>
+            <td style="text-align: center; padding: 6px 4px;">${item.unit}</td>
+            <td style="text-align: right; font-weight: 900; padding: 6px 8px; font-size: 12px; color: #1e3a8a;">${formatNumber(item.totalQty)}</td>
+            <td style="text-align: center; font-weight: bold; color: #64748b; padding: 6px 4px;">${item.orderCount}곳</td>
+            <td style="text-align: center; padding: 6px 4px;"><span style="display: inline-block; width: 18px; height: 18px; border: 1.5px solid #000; border-radius: 3px;"></span></td>
+        </tr>`;
+    });
+
+    const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 기사별 창고 상차 피킹 리스트</title><style>
+        * { box-sizing: border-box; }
+        @media print {
+            @page { size: A4 portrait; margin: 10mm; }
+            body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
+            .print-page { box-shadow: none !important; border: none !important; width: 100% !important; height: auto !important; }
+        }
+        body { font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; margin: 0; padding: 0; color: #1e293b; }
+        .print-page { width: 190mm; margin: 0 auto; padding: 5mm; }
+        .header-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 1px; margin-bottom: 4px; border-bottom: 3px double #000; padding-bottom: 6px; }
+        .meta-info { display: flex; justify-content: space-between; font-size: 11px; font-weight: bold; margin-bottom: 10px; color: #334155; }
+        .summary-box { background-color: #eff6ff; border: 1.5px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-around; font-size: 11px; font-weight: 900; margin-bottom: 12px; }
+        .summary-box span b { color: #1d4ed8; font-size: 13px; margin-left: 4px; }
+        table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10.5px; }
+        th { background-color: #f1f5f9; border: 1px solid #000; padding: 6px 4px; font-weight: 900; text-align: center; }
+        td { border: 1px solid #000; }
+        .footer-sign { display: flex; justify-content: flex-end; gap: 30px; margin-top: 18px; font-size: 11px; font-weight: bold; }
+        .sign-box { border-bottom: 1px solid #000; width: 90px; display: inline-block; text-align: center; }
+    </style></head><body>
+    <div class="print-page">
+        <div class="header-title">[${driverName}] 기사 창고 상차 및 검수용 상품 피킹 리스트</div>
+        <div class="meta-info">
+            <span>담당 기사: <b>${driverName}</b></span>
+            <span>출력일자: ${dateStr}</span>
+            <span>배송 경로 PRO 통합물류시스템</span>
+        </div>
+        <div class="summary-box">
+            <span>배정 배송처: <b>${assignedItems.length}</b>곳</span>
+            <span>적재 품목 수: <b>${totalItemTypes}</b>종</span>
+            <span>기사 총 상차수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
+        </div>
+        <table>
+            <colgroup>
+                <col style="width: 7%;">
+                <col style="width: 48%;">
+                <col style="width: 12%;">
+                <col style="width: 13%;">
+                <col style="width: 10%;">
+                <col style="width: 10%;">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>No.</th>
+                    <th>상 품 명 (품목 규격)</th>
+                    <th>단위</th>
+                    <th>총 수량</th>
+                    <th>배송처</th>
+                    <th>상차확인</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${tableRowsHtml}
+            </tbody>
+        </table>
+        <div class="footer-sign">
+            <span>상차 담당자: <span class="sign-box">(서명)</span></span>
+            <span>운행 기사: <span class="sign-box">(서명)</span></span>
+        </div>
+    </div>
+    </body></html>`;
+
+    const iframe = document.createElement('iframe');
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow.document;
+    doc.open();
+    doc.write(pickingHtml);
+    doc.close();
+
+    iframe.onload = function() {
+        setTimeout(() => {
+            iframe.contentWindow.focus();
+            iframe.contentWindow.print();
+            setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+        }, 600);
+    };
+}
+
+// ==========================================
+// 7. 전역 Window 객체 바인딩
 // ==========================================
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
@@ -459,3 +616,4 @@ window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.sendRoutesToDrivers = sendRoutesToDrivers;
+window.printSelectedDriverItemList = printSelectedDriverItemList;
