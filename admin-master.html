@@ -381,7 +381,22 @@
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">만료일 (YYYY.MM.DD)</label><input type="date" id="edit-expire-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label><select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"><option value="active">정상 운행 (Active)</option><option value="suspended">사용 정지 (Suspended)</option></select></div>
                     </div>
-                    <div id="edit-slots-container" class="hidden"><label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 수 (0=무제한)</label><input type="number" id="edit-slots-input" class="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-black outline-none focus:border-purple-500"></div>
+                    <div id="edit-slots-container" class="hidden">
+                        <label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 수 (0=무제한)</label>
+                        <input type="number" id="edit-slots-input" class="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-black outline-none focus:border-purple-500">
+                    </div>
+                    <!-- PRO 기능 체크박스 (관제 계정일 때만 활성화 됨) -->
+                    <div id="edit-pro-container" class="hidden mt-2">
+                        <label class="flex items-center gap-2.5 bg-amber-50/70 hover:bg-amber-100/70 p-2.5 rounded-xl border border-amber-200 cursor-pointer transition">
+                            <input type="checkbox" id="edit-pro-checkbox" class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500 cursor-pointer">
+                            <div class="flex flex-col">
+                                <span class="text-xs font-black text-amber-900 flex items-center gap-1">
+                                    <i class="fa-solid fa-crown text-amber-500"></i> PRO 프리미엄 기능 활성화
+                                </span>
+                                <span class="text-[10px] text-amber-700 font-bold mt-0.5">자동할당 및 주문서 통합관리 권한 부여</span>
+                            </div>
+                        </label>
+                    </div>
                 </div>
 
                 <div id="edit-dispatch-connected-section" class="hidden flex-col gap-2.5 bg-purple-50/50 p-3.5 rounded-2xl border border-purple-200">
