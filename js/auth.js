@@ -150,7 +150,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     if (gpsRequestWatcherUnsub) gpsRequestWatcherUnsub();
     gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phone, key, getDeviceRealGPS);
 
-    // 🌟 [핵심 신규] 관제 센터 실시간 자동할당 동선 감시 (routes/{deviceId} 구독)
+    // 🌟 관제 센터 실시간 자동할당 동선 감시 (routes/{deviceId} 구독)
     if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
     activeRoutesWatcherUnsub = listenToActiveRoutes(
         deviceId, 
@@ -392,7 +392,7 @@ export async function logout() {
     try { if (typeof licenseWatcherUnsub === 'function') { licenseWatcherUnsub(); } } catch(e) {}
     try { if (typeof dispatchMsgWatcherUnsub === 'function') { dispatchMsgWatcherUnsub(); } } catch(e) {}
     try { if (typeof gpsRequestWatcherUnsub === 'function') { gpsRequestWatcherUnsub(); } } catch(e) {}
-    try { if (typeof activeRoutesWatcherUnsub === 'function') { activeRoutesWatcherUnsub(); } } catch(e) {} // 관제 동선 구독 해제
+    try { if (typeof activeRoutesWatcherUnsub === 'function') { activeRoutesWatcherUnsub(); } } catch(e) {}
 
     clearAuthStorage();
     window.location.reload();

@@ -88,7 +88,7 @@ export async function initApp() {
     setRemoteRoutesHandler((newDestinations, routeData) => {
         if (!newDestinations || !Array.isArray(newDestinations)) return;
 
-        // 관제에서 전송된 배송지 배열 정규화 및 상태 동기화
+        // 관제에서 전송된 배송지 데이터 정규화 (주문번호 orderNo는 백그라운드 데이터로 보존)
         const formattedList = newDestinations.map((d, idx) => ({
             id: d.id || (Date.now() + idx),
             displayNumber: d.displayNumber || (idx + 1),
@@ -97,7 +97,7 @@ export async function initApp() {
             lng: d.lng || 0,
             phone: d.phone || "",
             storeName: d.storeName || "",
-            orderNo: d.orderNo || "",
+            orderNo: d.orderNo || "", // 실시간 추적용 주문번호 데이터 보존
             memo: d.memo || "",
             items: d.items || []
         }));
@@ -372,6 +372,10 @@ export function renderList() {
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
+            // 실시간 추적 고도화용: 주문번호를 화면에 텍스트로 노출하지 않고 엘리먼트 속성에 보관
+            if (dest.orderNo) {
+                li.setAttribute('data-orderno', dest.orderNo);
+            }
             li.className = "bg-white p-2.5 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-1.5";
             
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
@@ -384,6 +388,7 @@ export function renderList() {
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
+            // 기존 방식: [상호명] 강조 또는 dest.storeName 강조 후 주소 표시 (배송요청/품목 제외)
             let displayAddressHTML = dest.address;
             let match = dest.address.match(/^\[(.*?)\]\s*(.*)$/);
             if (match) {
@@ -403,24 +408,9 @@ export function renderList() {
             const isFirst = index === 0;
             const isLast = index === destinations.length - 1;
 
-            // 관제 전송 주문번호, 요청사항(메모), 적재 품목 뷰 생성
-            let orderBadgeHTML = dest.orderNo ? `<span class="text-[9px] font-mono text-gray-400 font-semibold ml-1">#${dest.orderNo}</span>` : '';
-            
-            let dispatchMemoHTML = dest.memo ? `
-                <div class="bg-amber-50 border border-amber-200 rounded p-1.5 text-[11px] text-amber-900 truncate shadow-2xs mb-1 mt-0.5">
-                    <i class="fa-solid fa-clipboard-list text-amber-600 mr-1 text-[10px]"></i><span class="font-bold">배송요청:</span> ${dest.memo}
-                </div>
-            ` : '';
-
-            let itemsHTML = (dest.items && dest.items.length > 0) ? `
-                <div class="bg-slate-50 border border-slate-200 rounded p-1.5 text-[11px] text-slate-700 truncate shadow-2xs mb-1 mt-0.5">
-                    <i class="fa-solid fa-box text-blue-500 mr-1 text-[10px]"></i><span class="font-bold">품목:</span> ${dest.items.map(it => `${it.name}(${it.qty}${it.unit || ''})`).join(', ')}
-                </div>
-            ` : '';
-
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
-                    <!-- 위/아래 수직(상하) 배치 및 오터치 방지 간격(gap-1.5) 확보 -->
+                    <!-- 위/아래 수직 배치 및 간격 확보 -->
                     <div class="flex flex-col items-center justify-center gap-1.5 shrink-0 -ml-1 mr-0.5">
                         <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[18px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
@@ -431,14 +421,11 @@ export function renderList() {
                     </div>
                     ${numberBadge}
                     <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">
-                        <div class="flex items-center truncate">${displayAddressHTML} ${orderBadgeHTML}</div>
+                        ${displayAddressHTML}
                     </div>
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
                 </div>
                 
-                ${dispatchMemoHTML}
-                ${itemsHTML}
-
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-1 mt-1"></div>
                 <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded p-1.5 text-[11px] text-gray-800 border border-gray-100 truncate shadow-sm mb-1 mt-1"></div>
                 <!-- 공용 메모 아랫단에 개인 메모 표시 슬롯 -->

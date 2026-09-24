@@ -58,7 +58,7 @@ async function compressImageToBlob(file, maxDimension = 1280, quality = 0.75) {
     });
 }
 
-// 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증 (에러 방지용 필수 함수)
+// 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증
 export async function checkIfDeviceBlocked(deviceId) {
     if (!deviceId) return false;
     try {
@@ -191,7 +191,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 🌟 [신규 추가] 관제 센터 실시간 자동할당 동선 수신 리스너 (routes/{deviceId} 구독)
+// 🌟 관제 센터 실시간 자동할당 동선 수신 리스너 (routes/{deviceId} 구독)
 export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared) {
     if (!deviceId) return null;
     const routeDocRef = doc(db, "routes", deviceId);
@@ -453,7 +453,7 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
                 lng: d.lng || 0,
                 phone: d.phone || "",
                 storeName: d.storeName || "",
-                orderNo: d.orderNo || "",
+                orderNo: d.orderNo || "", // 추후 실시간 추적용 주문번호 보존
                 memo: d.memo || "",
                 items: d.items || []
             }))
@@ -461,6 +461,7 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
     } catch (e) { console.error("동선 전송 오류:", e); }
 }
 
+// 🌟 [보강 완료] 배송 완료 시 실시간 추적 연동을 위해 orderNo 및 storeName 필드 추가 기록
 export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null) {
     try {
         const now = new Date();
@@ -471,6 +472,8 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             phone: driverPhone || "연락처 미등록",
             customerPhone: item.phone || "",
             address: item.address || "",
+            orderNo: item.orderNo || "", // 🌟 실시간 배송 추적 조회를 위한 핵심 주문번호 필드
+            storeName: item.storeName || "",
             lat: actualLat,
             lng: actualLng,
             isRealGps: !!isReal,
