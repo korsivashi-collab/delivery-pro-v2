@@ -8,7 +8,7 @@ if (window.pdfjsLib) {
 }
 
 // ==========================================
-// 0. 전화번호 복원 및 표준화 헬퍼 (010-XXXX-XXXX)
+// 0. 전화번호 표준화 헬퍼 (010-XXXX-XXXX)
 // ==========================================
 export function formatPhoneNumber(val) {
     if (!val) return '';
@@ -18,10 +18,6 @@ export function formatPhoneNumber(val) {
 
     if (digits.length === 10 && digits.startsWith('10')) digits = '0' + digits;
     else if (digits.length === 9 && digits.startsWith('11')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('16')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('17')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('18')) digits = '0' + digits;
-    else if (digits.length === 9 && digits.startsWith('19')) digits = '0' + digits;
 
     if (digits.length === 11 && digits.startsWith('01')) {
         return `${digits.slice(0, 3)}-${digits.slice(3, 7)}-${digits.slice(7)}`;
@@ -31,8 +27,6 @@ export function formatPhoneNumber(val) {
         } else {
             return `${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
         }
-    } else if (digits.length === 9 && digits.startsWith('02')) {
-        return `${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
     } else if (digits.length === 8) {
         return `${digits.slice(0, 4)}-${digits.slice(4)}`;
     }
@@ -139,12 +133,12 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 주문 정보 및 수령인/다품목 구조화 엔진
+// 3. 🌟 공급자 / 공급받는 자 영역 분리 정밀 파싱 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     const rawFullText = lines.join('\n');
 
-    // 🌟 한 페이지에 2부(공급자용/공급받는자용)가 복사되어 있는 경우 상단 1부만 분리하여 중복 방지
+    // 1페이지 내에 공급자용/공급받는자용 2부가 존재할 경우 상단 1부만 깔끔하게 분리
     const parts = rawFullText.split(/거래명세표\s*\(공급받는자용\)|거래명세표\s*\(공급받는\s*자용\)/);
     const cleanText = parts[0];
 
@@ -165,7 +159,7 @@ function parseOrderFromPageLines(lines, pageNum) {
         memo: '',
         lat: null,
         lng: null,
-        items: [] // 한 주문에 속한 복수 상품 목록
+        items: [] // 다품목 상품 리스트
     };
 
     // 1. 주문번호(orderNo) 추출
@@ -176,71 +170,62 @@ function parseOrderFromPageLines(lines, pageNum) {
         order.orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
     }
 
-    // 2. 수령인 / 간판명 / 상호(storeName) 추출
-    let storeName = '';
-    const storeMatch = cleanText.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[:\s]*([^\n\r]+)/);
+    // 2. 공급받는 자(수령인 및 간판명) 블록 분리 추출
+    let buyerSection = '';
+    const buyerSplit = cleanText.split(/공급받는\s*자/);
+    if (buyerSplit.length > 1) {
+        buyerSection = buyerSplit[1].split(/No\.|상품명|규격/)[0];
+    } else {
+        buyerSection = cleanText;
+    }
+
+    // 상호(간판명) 추출
+    const storeMatch = buyerSection.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[:\s]*([^\n\r]+)/);
     if (storeMatch) {
-        let s = storeMatch[1].trim();
-        s = s.split(/연락처|전화|주소|추가연락처|No\./)[0].trim();
-        storeName = s.replace(/[\(\)\[\]]/g, '').trim();
+        order.storeName = storeMatch[1].split(/연락처|전화|주소/)[0].replace(/[\(\)\[\]]/g, '').trim();
     }
 
-    let buyerName = '';
-    const buyerMatch = cleanText.match(/(?:구매자명|주문자명|수령인|수신자|받는\s*분|고객명)[:\s]*([^\n\r]+)/);
+    // 구매자명 추출
+    const buyerMatch = buyerSection.match(/(?:구매자명|주문자명|수령인|수신자|받는\s*분|고객명)[:\s]*([^\n\r]+)/);
     if (buyerMatch) {
-        let b = buyerMatch[1].trim();
-        b = b.split(/주소|연락처|상호|사업자|추가연락처|No\./)[0].trim();
-        buyerName = b.replace(/[\(\)\[\]]/g, '').trim();
+        order.senderName = buyerMatch[1].split(/주소|연락처|상호/)[0].replace(/[\(\)\[\]]/g, '').trim();
     }
+    if (!order.storeName) order.storeName = order.senderName || '배송처';
+    if (!order.senderName) order.senderName = order.storeName;
 
-    order.storeName = storeName || buyerName || '배송처';
-    order.senderName = buyerName || storeName || '';
-
-    // 3. 🌟 수령인 전화번호 추출 (공급자 전화번호 및 FAX 번호 배제)
-    let rawPhone = '';
-    const phoneMatch = cleanText.match(/(?<!추가)연락처(?!\/FAX)[:\s]*([0-9\-]{8,15})/);
+    // 3. 🌟 수령인 전화번호 정밀 추출 (공급자 번호 제외)
+    const phoneMatch = buyerSection.match(/(?<!추가)연락처(?!\/FAX)[:\s]*([0-9\-]{8,15})/);
     if (phoneMatch) {
-        rawPhone = phoneMatch[1].trim();
+        order.phone = formatPhoneNumber(phoneMatch[1]);
     } else {
-        // 하이픈 없는 번호 포함 전체 번호 중 수령인 영역(마지막 번호) 탐색
-        const allPhones = cleanText.match(/01[016789]-?\d{3,4}-?\d{4}/g) || cleanText.match(/01[016789]\d{7,8}/g);
+        const allPhones = buyerSection.match(/01[016789]-?\d{3,4}-?\d{4}/g) || buyerSection.match(/01[016789]\d{7,8}/g);
         if (allPhones && allPhones.length > 0) {
-            rawPhone = allPhones[allPhones.length - 1];
+            order.phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
         }
     }
-    order.phone = formatPhoneNumber(rawPhone);
 
-    // 4. 🌟 배송지 주소 추출 (공급자 주소와 구분하여 수령인 주소 타겟팅)
-    const addrSplits = cleanText.split(/주소\s*(?:\[\d+\])?\s*/);
-    let addressPart = '';
-
-    if (addrSplits.length >= 3) {
-        // [0]: 헤더, [1]: 공급자 주소, [2]: 수령인 주소
-        let a = addrSplits[2];
-        a = a.split(/연락처|배송지명|간판명|No\.|전화|사업자/)[0];
-        addressPart = a.replace(/[\r\n]+/g, ' ').trim();
-    } else if (addrSplits.length === 2) {
-        let a = addrSplits[1];
-        a = a.split(/연락처|배송지명|간판명|No\.|전화|사업자/)[0];
-        addressPart = a.replace(/[\r\n]+/g, ' ').trim();
+    // 4. 🌟 수령인 주소 정밀 추출 (공급자 주소 간섭 원천 차단)
+    const addrMatch = buyerSection.match(/주소\s*(?:\[\d+\])?\s*([^\n\r]+(?:\n[^\n\r]+)?)/);
+    if (addrMatch) {
+        let rawAddr = addrMatch[1].replace(/[\r\n]+/g, ' ').trim();
+        // 다음 항목 키워드 전까지만 자르기
+        rawAddr = rawAddr.split(/배송지명|간판명|연락처|No\./)[0];
+        order.address = rawAddr.replace(/^\[\d+\]\s*/, '').trim();
     } else {
-        const addrRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:동|읍|면|로|길|리)\s*[\d\-]+(?:\s*[가-힣0-9\s,\.\(\)\-]+)?/g;
-        const addrMatches = cleanText.match(addrRegex);
-        if (addrMatches && addrMatches.length > 0) {
-            addressPart = addrMatches[addrMatches.length - 1].replace(/[\r\n]+/g, ' ').trim();
+        const addrRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:동|읍|면|로|길|리)\s*[\d\-]+(?:\s*[가-힣0-9\s,\.\(\)\-]+)?/;
+        const match = buyerSection.match(addrRegex);
+        if (match) {
+            order.address = match[0].replace(/[\r\n]+/g, ' ').trim();
         }
     }
 
-    // 우편번호 [08289] 형태 제거
-    order.address = addressPart.replace(/^\[\d+\]\s*/, '').trim();
-
-    // 5. 배송 메모 / 요청사항(memo) 추출
+    // 5. 배송 메모 / 요청사항 추출
     const memoMatch = cleanText.match(/(?:배송\s*요청사항|배송\s*메모|요청사항|전달사항|비고)[:\s]*([^\n\r]+)/);
     if (memoMatch) {
         order.memo = memoMatch[1].trim();
     }
 
-    // 6. 🌟 다품목 상품 리스트(items) 정밀 파싱
+    // 6. 다품목 상품 리스트(items) 파싱
     const cleanLines = cleanText.split('\n').map(l => l.trim()).filter(l => l);
     let inItemTable = false;
 
@@ -251,18 +236,14 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
 
         if (inItemTable) {
-            // 주문서 테이블 종료 지점 감지
             if (/결제\s*수단|총\s*상품수량|배송\s*요청사항|총\s*주문금액|배송비/i.test(line)) {
                 inItemTable = false;
                 break;
             }
 
-            // 행 번호(1, 2, 3...)로 시작하는 상품 데이터 행 파싱
             const rowMatch = line.match(/^(\d+)\s+(.+)/);
             if (rowMatch) {
                 const rest = rowMatch[2];
-
-                // 가격 블록 앞의 수량 감지: (\d+)\s+[\d,]+\s+[\d,]+...
                 const priceMatch = rest.match(/(\d+)\s+[\d,]+(?:\s+[\d,]+)*$/);
                 if (priceMatch) {
                     const qtyNum = parseInt(priceMatch[1], 10) || 1;
@@ -270,36 +251,23 @@ function parseOrderFromPageLines(lines, pageNum) {
                     const unitMatch = nameStr.match(/(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
                     const unitStr = unitMatch ? unitMatch[0] : '개';
 
-                    order.items.push({
-                        name: nameStr,
-                        qty: qtyNum,
-                        unit: unitStr
-                    });
+                    order.items.push({ name: nameStr, qty: qtyNum, unit: unitStr });
                 } else {
-                    // 수량 단위 패턴 폴백
                     const qtyMatch = rest.match(/(\d+)\s*(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
                     if (qtyMatch) {
                         const qtyNum = parseInt(qtyMatch[1], 10) || 1;
                         const unitStr = qtyMatch[2];
                         const nameStr = rest.replace(qtyMatch[0], '').trim();
-                        order.items.push({
-                            name: nameStr || rest,
-                            qty: qtyNum,
-                            unit: unitStr
-                        });
+                        order.items.push({ name: nameStr || rest, qty: qtyNum, unit: unitStr });
                     } else {
-                        order.items.push({
-                            name: rest,
-                            qty: 1,
-                            unit: '개'
-                        });
+                        order.items.push({ name: rest, qty: 1, unit: '개' });
                     }
                 }
             }
         }
     }
 
-    // 대표 품목명 및 합산 수량 설정
+    // 대표 품목명 설정
     if (order.items.length > 1) {
         order.qty = order.items.reduce((sum, item) => sum + (item.qty || 1), 0);
         order.itemName = `${order.items[0].name} 외 ${order.items.length - 1}건 (총 ${order.qty}개)`;
