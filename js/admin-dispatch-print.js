@@ -5,12 +5,12 @@ import { state, getLocalDateString } from "./admin-state.js";
 import { formatNumber } from "./admin-dispatch-core.js";
 
 // ==========================================
-// 1. 주문 명세서 출력 모달 열기 & 데이터 세팅
+// 1. 주문서 통합관리 출력 모달 열기 & 데이터 세팅
 // ==========================================
 export function exportToInvoiceModal() {
     const checkboxes = document.querySelectorAll('.row-checkbox:checked');
     if (checkboxes.length === 0) { 
-        alert("명세서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요."); 
+        alert("주문서로 출력할 주문건을 리스트 체크박스에서 1개 이상 선택해주세요."); 
         return; 
     }
     
@@ -30,7 +30,7 @@ export function exportToInvoiceModal() {
 }
 
 // ==========================================
-// 2. 명세서 1건 미리보기 화면 동기화
+// 2. 주문서 1건 미리보기 화면 동기화
 // ==========================================
 export function previewInvoiceRow(idx) {
     if (!state.printReadyList || !state.printReadyList[idx]) return;
@@ -145,7 +145,7 @@ export function executeBatchPrint() {
     document.body.appendChild(iframe);
     
     const doc = iframe.contentWindow.document; doc.open();
-    doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 동선 PRO - 거래명세표 출력</title><style>
+    doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
         * { box-sizing: border-box; } @media print { @page { size: A4 portrait; margin: 0; } body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; } .invoice-half { height: 148mm; page-break-inside: avoid; } }
         body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; } .invoice-container { width: 210mm; height: 297mm; margin: 0 auto; display: flex; flex-direction: column; } .invoice-half { height: 148mm; background-color: #ffeb5c !important; padding: 5mm 8mm; display: flex; flex-direction: column; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; } .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; } .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; } .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; } .double-height { height: 54px !important; } .double-height td { height: 54px !important; } .multi-line-text { white-space: normal !important; line-height: 1.3; } .invoice-table th { font-weight: bold; text-align: center; } .invoice-label { font-weight: bold; text-align: center; white-space: nowrap; } .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; } .text-fit-auto { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .inv-text-center { text-align: center; } .inv-text-left { text-align: left; padding-left: 6px !important; } .inv-text-right { text-align: right; padding-right: 6px !important; } .inv-font-bold { font-weight: bold; }
     </style></head><body>${printContents}</body></html>`);
@@ -156,7 +156,7 @@ export function executeBatchPrint() {
             iframe.contentWindow.focus(); iframe.contentWindow.print();
             setTimeout(() => { 
                 document.body.removeChild(iframe); 
-                if (btn) { btn.disabled = false; btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 명세서 일괄 출력`; } 
+                if (btn) { btn.disabled = false; btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 주문서 일괄 출력`; } 
             }, 1000);
         }, 800); 
     };

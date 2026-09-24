@@ -320,22 +320,18 @@ export async function unblockDevice(deviceId) {
 // 3. 라이선스(계정) 관리 및 키워드/대량 생성 CRUD 로직
 // ==========================================
 
-// 🌟 [핵심 수정] 한글(가-힣), 영문, 숫자를 모두 포함하여 총 8자리(XXXX-XXXX) 키 조합 헬퍼
 function generateCustomLicenseKey(keyword = '') {
     const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    // 한글(가-힣), 영문, 숫자 허용 (최대 7글자까지 접두어로 사용)
     const cleanKw = keyword.trim().replace(/[^A-Z0-9가-힣]/gi, '').toUpperCase().slice(0, 7);
     let fullChars = cleanKw;
     const needed = Math.max(0, 8 - cleanKw.length);
     for (let i = 0; i < needed; i++) {
         fullChars += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    // 정확히 8글자로 절삭 후 가운데 하이픈 연결 (XXXX-XXXX 형식)
     fullChars = fullChars.slice(0, 8);
     return `${fullChars.slice(0, 4)}-${fullChars.slice(4, 8)}`;
 }
 
-// 중복 방지 고유 키 발급 헬퍼
 function getUniqueLicenseKey(keyword) {
     let key;
     let attempts = 0;
@@ -427,17 +423,28 @@ export function openEditLicenseModal(key) {
     document.getElementById('edit-status-select').value = target.status || 'active';
 
     const slotsBox = document.getElementById('edit-slots-container');
+    const proBox = document.getElementById('edit-pro-container'); // 프리미엄 체크박스 컨테이너
     const dispatchSec = document.getElementById('edit-dispatch-connected-section');
 
     if (target.type === 'dispatch') {
+        // 관제 계정일 경우 슬롯과 PRO 설정 노출
         if (slotsBox) slotsBox.classList.remove('hidden');
+        if (proBox) proBox.classList.remove('hidden');
+        
         document.getElementById('edit-slots-input').value = target.maxSlots || 0;
+        
+        // 기존 PRO 상태 반영
+        const proCheck = document.getElementById('edit-pro-checkbox');
+        if (proCheck) proCheck.checked = !!target.isPro;
+
         if (dispatchSec) { dispatchSec.classList.remove('hidden'); dispatchSec.classList.add('flex'); }
         const addInput = document.getElementById('modal-add-driver-input');
         if (addInput) addInput.value = '';
         renderModalConnectedDrivers(target.key);
     } else {
+        // 일반 계정일 경우 숨김 처리
         if (slotsBox) slotsBox.classList.add('hidden');
+        if (proBox) proBox.classList.add('hidden');
         if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
     }
     document.getElementById('edit-license-modal').classList.remove('hidden');
@@ -553,10 +560,16 @@ export async function saveLicenseEdit() {
 
     const expStr = expireDate.replace(/-/g, '.');
     const target = state.allLicenses.find(l => l.key === origKey);
+    
+    // UI에서 설정한 체크박스 값을 통해 isPro 상태 결정
+    const isPro = document.getElementById('edit-pro-checkbox')?.checked || false;
+
     const updatePayload = {
         key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
         dispatchKey: target ? target.dispatchKey || '' : '',
-        maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input')?.value) || 0 : 0
+        maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input')?.value) || 0 : 0,
+        // 관제 계정일 경우에만 프리미엄 여부 저장
+        isPro: type === 'dispatch' ? isPro : false
     };
 
     try {
