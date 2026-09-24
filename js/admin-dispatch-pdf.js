@@ -66,6 +66,7 @@ export async function processSinglePdfFile(file) {
             const page = await pdf.getPage(pageNum);
             const textContent = await page.getTextContent();
             
+            // X좌표 기반 좌/우 공간 분리 파싱
             const pageLines = groupTextContentByLines(textContent.items);
             const orderData = parseOrderFromPageLines(pageLines, pageNum);
 
@@ -89,7 +90,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 2. Y축 정렬 및 X축 기준 좌/우(공급자/수취자) 분리 엔진
+// 2. 🌟 X좌표 기반 좌측(공급자) 완전 배제 및 우측(수취자) 추출 엔진
 // ==========================================
 function groupTextContentByLines(items) {
     if (!items || items.length === 0) return [];
@@ -117,16 +118,16 @@ function groupTextContentByLines(items) {
 
     sortedYKeys.forEach(yKey => {
         const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
-        const fullText = lineItems.map(i => i.text).join(' ').trim();
         
-        const leftItems = lineItems.filter(i => i.x < 240);
-        const rightItems = lineItems.filter(i => i.x >= 240);
-        
-        const leftText = leftItems.map(i => i.text).join(' ').trim();
+        // 🌟 핵심 방어벽: x < 240 영역(문서 좌측에 위치한 공급자/발송자 정보)은 아예 수집하지 않음
+        const rightItems = lineItems.filter(i => i.x >= 220);
         const rightText = rightItems.map(i => i.text).join(' ').trim();
+        
+        // 주문번호, 상품 테이블 등 중앙/전체 영역에 걸치는 필수 정보용 전체 텍스트
+        const fullText = lineItems.map(i => i.text).join(' ').trim();
 
         if (fullText) {
-            sortedLines.push({ y: yKey, fullText, leftText, rightText });
+            sortedLines.push({ y: yKey, fullText, rightText });
         }
     });
 
@@ -163,7 +164,7 @@ function parseItemLine(text, itemsArray) {
 }
 
 // ==========================================
-// 4. 주문 정보 파싱 및 공급자 완전 차단 엔진
+// 4. 주문 정보 파싱 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     let storeName = '';
@@ -178,44 +179,34 @@ function parseOrderFromPageLines(lines, pageNum) {
     let buyerSectionLines = [];
     let fullRawTextLines = [];
 
-    // 🌟 1단계: 문서 전체 텍스트에서 상단의 공급자(발송자) 영역을 통째로 무력화(제거)
-    const rawCombinedText = lines.map(l => l.fullText).join('\n');
-    
-    // 공급자 블록 시작부터 '공급받는 자' 또는 '주문번호'가 나오기 전까지의 구간을 공백으로 치환
-    const cleanDocumentText = rawCombinedText.replace(/공급자[\s\S]*?(?=공급받는\s*자|주문번호|No\.|$)/gi, ' ');
-    const cleanLines = cleanDocumentText.split('\n');
+    lines.forEach(line => {
+        fullRawTextLines.push(line.fullText);
 
-    cleanLines.forEach(lineText => {
-        const trimmed = lineText.trim();
-        if (!trimmed) return;
-
-        fullRawTextLines.push(trimmed);
-
-        if (/No\.|상품명|단가|수량|규격/i.test(trimmed)) isItemSection = true;
+        if (/No\.|상품명|단가|수량|규격/i.test(line.fullText)) isItemSection = true;
 
         if (isItemSection) {
-            if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(trimmed)) {
+            if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(line.fullText)) {
                 isItemSection = false;
-            } else if (/^\d+\s+/.test(trimmed)) {
-                parseItemLine(trimmed, items);
+            } else if (/^\d+\s+/.test(line.fullText.trim())) {
+                parseItemLine(line.fullText, items);
             }
         } else {
-            // 공급자 관련 키워드가 포함된 라인은 수취자 분석 라인에서 완전 배제
-            if (!/공급자|대표자|윤진유통|사업자등록번호|통신판매|상호\(법인명\)|건원대로/.test(trimmed)) {
-                buyerSectionLines.push(trimmed);
+            // 🌟 우측(수취자) 영역에 잡힌 텍스트만 수집 (좌측 공급자 주소 원천 차단)
+            if (line.rightText && line.rightText.length > 1) {
+                buyerSectionLines.push(line.rightText);
             }
         }
 
-        if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(trimmed)) {
-            memo = trimmed.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
+        if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(line.fullText)) {
+            memo = line.fullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
         }
-        if (/주문번호|오더번호|발주번호/.test(trimmed)) {
-            const m = trimmed.match(/(?:주문번호|오더번호|발주번호)\s*[:|]?\s*([A-Z0-9_\-]+)/i);
+        if (/주문번호|오더번호|발주번호/.test(line.fullText)) {
+            const m = line.fullText.match(/(?:주문번호|오더번호|발주번호)\s*[:|]?\s*([A-Z0-9_\-]+)/i);
             if (m) orderNo = m[1].trim();
         }
     });
 
-    // 2단계: 수취자 영역에서 상호, 구매자, 전화번호 탐색
+    // 수취자 영역 탐색
     buyerSectionLines.forEach(text => {
         if (/(?:배송지명|간판명|매장명|가게명|상호명|상호)/.test(text)) {
             let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호)\s*[:|]?\s*/i, '').trim();
@@ -252,9 +243,9 @@ function parseOrderFromPageLines(lines, pageNum) {
     // 상호명 앞 특수기호 정제
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
-    // 3단계: 주소 추출 (공급자가 완전히 제거된 cleanDocumentText에서 행정구역 탐지)
+    // 주소 추출 (우측 수취자 영역에서만 행정구역 탐지)
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
-    const regionMatch = cleanDocumentText.match(regionRegex);
+    const regionMatch = fullBuyerString.match(regionRegex) || fullRawTextLines.join(' ').match(regionRegex);
 
     if (regionMatch) {
         let rawAddr = regionMatch[0];
