@@ -60,14 +60,13 @@ export function updateCompanyBaseUI(data) {
 }
 
 // ==========================================
-// 🌟 2. 드래그 리사이저 바 (Splitter Bar) 실시간 조절 엔진
+// 2. 드래그 리사이저 바 (Splitter Bar) 실시간 조절 엔진
 // ==========================================
 export function initDispatchResizer() {
     const resizer = document.getElementById('dispatch-panel-resizer');
     const detailPanel = document.getElementById('dispatch-detail-panel');
     if (!resizer || !detailPanel) return;
 
-    // 브라우저에 저장된 선호 너비가 있다면 불러와서 적용
     const savedWidth = localStorage.getItem('deliveryPro_dispatchDetailWidth');
     if (savedWidth) {
         detailPanel.style.width = `${savedWidth}px`;
@@ -92,7 +91,6 @@ export function initDispatchResizer() {
         const delta = e.clientX - startX;
         let newWidth = startWidth + delta;
         
-        // 최소 300px ~ 최대 750px 안전 범위 제한
         if (newWidth < 300) newWidth = 300;
         if (newWidth > 750) newWidth = 750;
 
@@ -121,7 +119,7 @@ export const autoDispatchState = {
 };
 
 export function renderDispatchDriverList() {
-    initDispatchResizer(); // 모달 렌더링 시 리사이저 초기화 및 저장된 너비 적용
+    initDispatchResizer();
 
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -267,7 +265,6 @@ export function renderDispatchDriverDetail() {
         return;
     }
 
-    // 선택된 기사에게 배정된 물량이 1건 이상일 때만 상품 취합 출력 및 앱 전송 버튼 노출
     if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
     if (btnSendRoutes) btnSendRoutes.classList.remove('hidden');
 
@@ -285,7 +282,7 @@ export function renderDispatchDriverDetail() {
             <td class="font-bold text-gray-800 whitespace-normal break-keep">
                 ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
                 ${item.address || '-'}
-                ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1"></i>${item.phone}</span>` : ''}
+                ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
             </td>
             <td class="text-center w-36" onclick="event.stopPropagation()">
                 <select onchange="window.changeOrderDriver('${item.id}', this.value)" class="w-full bg-white border border-gray-300 hover:border-blue-500 rounded-lg p-1 text-[11px] font-bold text-gray-800 outline-none shadow-2xs cursor-pointer">
@@ -297,23 +294,28 @@ export function renderDispatchDriverDetail() {
     if (tbody) tbody.innerHTML = html;
 }
 
+// 🌟 수동 기사 배정 및 변경 함수 (ID 및 orderNo 다중 매칭)
 export function changeOrderDriver(itemId, newDriverPhone) {
-    const item = state.parsedExcelList.find(o => String(o.id) === String(itemId));
+    let item = state.parsedExcelList.find(o => String(o.id) === String(itemId) || String(o.orderNo) === String(itemId));
+    if (!item && !isNaN(itemId)) {
+        item = state.parsedExcelList[parseInt(itemId, 10)];
+    }
     if (!item) return;
 
     item.assignedDriver = newDriverPhone || null;
-    renderDispatchDriverDetail();
-    renderDispatchDriverList();
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
 }
 
 // ==========================================
-// 5. 자동할당 알고리즘 실행 (외곽 우선 1원칙)
+// 🌟 5. 체크박스 선택 기반 자동할당 알고리즘 실행 (외곽 우선 1원칙)
 // ==========================================
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
-        alert("할당할 엑셀 데이터가 없습니다."); return;
+        alert("할당할 엑셀/주문 데이터가 없습니다."); 
+        return;
     }
     
     const activeDrivers = getFilteredVisibleDrivers().filter(d => 
@@ -321,15 +323,26 @@ export function runAutoDispatchAlgorithm() {
     );
     
     if (activeDrivers.length === 0) {
-        alert("자동 할당 대상 기사가 없습니다. 목록에서 배정할 기사를 체크해주세요."); return;
+        alert("자동 할당 대상 기사가 없습니다. 좌측 기사 목록에서 배정할 기사를 1명 이상 체크해주세요."); 
+        return;
     }
 
-    const unassignedOrders = state.parsedExcelList.filter(o => !o.assignedDriver);
-    if (unassignedOrders.length === 0) {
-        alert("모든 주문이 이미 기사들에게 할당되었습니다."); return;
+    // 🌟 사용자가 우측 전체 현황 체크박스로 선택한 항목들만 할당 대상으로 추출
+    const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
+    if (checkedBoxes.length === 0) {
+        alert("자동할당할 배송지를 우측 [전체 현황]에서 체크박스로 선택해 주세요.\n\n* 전체 할당: 테이블 헤더의 전체 선택 체크박스 체크 후 실행\n* 일부 할당: 배정할 배송지만 체크박스 선택 후 실행");
+        return;
     }
 
-    const totalOrders = unassignedOrders.length;
+    const selectedIndices = Array.from(checkedBoxes).map(cb => parseInt(cb.getAttribute('data-idx'), 10));
+    const targetOrders = selectedIndices.map(idx => state.parsedExcelList[idx]).filter(Boolean);
+
+    if (targetOrders.length === 0) {
+        alert("선택된 배송지 데이터가 유효하지 않습니다.");
+        return;
+    }
+
+    const totalOrders = targetOrders.length;
     const numDrivers = activeDrivers.length;
     
     let totalWeights = 0;
@@ -379,7 +392,7 @@ export function runAutoDispatchAlgorithm() {
         driverStats[i % driverStats.length].targetCap++;
     }
 
-    const ordersWithDist = unassignedOrders.map(order => {
+    const ordersWithDist = targetOrders.map(order => {
         let distFromBase = 0;
         if (order.lat && order.lng && companyBase && companyBase.lat && companyBase.lng) {
             distFromBase = getDist(order.lat, order.lng, companyBase.lat, companyBase.lng);
@@ -387,6 +400,7 @@ export function runAutoDispatchAlgorithm() {
         return { order, distFromBase };
     });
 
+    // 외곽 물량 우선 정렬
     ordersWithDist.sort((a, b) => b.distFromBase - a.distFromBase);
 
     ordersWithDist.forEach(({ order }) => {
@@ -431,14 +445,15 @@ export function runAutoDispatchAlgorithm() {
     });
 
     if (window.renderExcelTable) window.renderExcelTable();
-    if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
-    alert(`[자동할당 배분 완료]\n외곽 물량 우선 할당 원칙에 따라 총 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.`);
-    
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
+    
+    alert(`[자동할당 배분 완료]\n선택하신 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.\n\n내역 검토 후 이상이 없으면 중앙 패널의 [동선 전송] 버튼을 눌러주세요.`);
 }
 
 // ==========================================
-// 6. 기사 앱 수동 전송 엔진
+// 6. 기사 앱 수동 전송 엔진 (전화번호 필드 전달)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -461,7 +476,7 @@ export async function sendRoutesToDrivers() {
     });
 
     const targetDriverNames = Object.keys(driverMap);
-    if (!confirm(`배정된 ${assignedOrders.length}건의 배송 동선을 해당 기사들의 스마트폰으로 전송하시겠습니까?\n\n* 전송 즉시 기사 앱에 배송 코스가 자동으로 등록됩니다.`)) {
+    if (!confirm(`배정된 ${assignedOrders.length}건의 배송 동선을 해당 기사들의 스마트폰으로 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 등록됩니다.`)) {
         return;
     }
 
@@ -484,7 +499,7 @@ export async function sendRoutesToDrivers() {
                 displayNumber: idx + 1,
                 address: ord.address || '',
                 storeName: ord.storeName || ord.senderName || '',
-                phone: ord.phone || '',
+                phone: ord.phone || '', // 정제된 수령인 전화번호 전달
                 lat: ord.lat || null,
                 lng: ord.lng || null,
                 orderNo: ord.orderNo || '', 
@@ -503,7 +518,7 @@ export async function sendRoutesToDrivers() {
             successCount++;
         }
 
-        alert(`[동선 전송 완료]\n총 ${successCount}명의 기사 스마트폰으로 배송 동선이 전송되었습니다.\n기사님들은 스캔 없이 앱에서 코스를 바로 확인하고 운행할 수 있습니다.`);
+        alert(`[동선 전송 완료]\n총 ${successCount}명의 기사 스마트폰으로 배송 동선이 전송되었습니다.\n기사님들은 앱에서 코스를 바로 확인하고 운행할 수 있습니다.`);
     } catch (e) {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
@@ -515,7 +530,7 @@ export async function sendRoutesToDrivers() {
 }
 
 // ==========================================
-// 7. 선택된 기사 전용 상품 합산 출력 (양식 없는 단순 리스트)
+// 7. 선택된 기사 전용 상품 합산 피킹 리스트 (양식 없는 단순 리스트 출력)
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {

@@ -14,7 +14,6 @@ export function formatPhoneNumber(val) {
     let digits = s.replace(/[^0-9]/g, '');
     if (!digits) return '';
 
-    // 엑셀에서 앞자리 0이 탈락한 10으로 시작하는 번호 복구 (예: 1021219317 -> 01021219317)
     if (digits.length === 10 && digits.startsWith('10')) digits = '0' + digits;
     else if (digits.length === 9 && digits.startsWith('11')) digits = '0' + digits;
     else if (digits.length === 9 && digits.startsWith('16')) digits = '0' + digits;
@@ -71,7 +70,7 @@ export async function autoSaveExcelToFirebase() {
 }
 
 // ==========================================
-// 2. 엑셀/주문 테이블 화면 렌더링
+// 🌟 2. 엑셀/주문 테이블 화면 렌더링 (담당 기사 드롭다운 및 주소 선명화 반영)
 // ==========================================
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); 
@@ -85,34 +84,63 @@ export function renderExcelTable() {
         return;
     }
 
+    // 소속 운행 기사 목록 가져오기
+    const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : state.allLicenses.filter(l => l.type !== 'dispatch');
+
     let html = '';
     state.parsedExcelList.forEach((item, idx) => {
-        const assignedBadge = item.assignedDriver 
-            ? `<span class="bg-blue-100 text-blue-800 text-[10px] px-2 py-0.5 rounded font-black border border-blue-200">${item.assignedDriver}</span>` 
-            : `<span class="bg-gray-100 text-gray-400 text-[10px] px-2 py-0.5 rounded font-bold border border-gray-200">미배정</span>`;
+        // 담당 기사 변경 드롭다운 생성
+        let driverSelectOptions = `<option value="">-- 미배정 --</option>`;
+        visibleDrivers.forEach(d => {
+            const dName = d.phone || d.key;
+            const isSelected = (item.assignedDriver === dName) ? 'selected' : '';
+            driverSelectOptions += `<option value="${dName}" ${isSelected}>${dName}</option>`;
+        });
+
+        const driverSelectHtml = `
+            <select onchange="window.changeOrderDriver('${item.id}', this.value)" class="w-full bg-white border ${item.assignedDriver ? 'border-blue-400 text-blue-700 bg-blue-50/40' : 'border-gray-300 text-gray-500'} hover:border-blue-500 rounded-lg py-1 px-1.5 text-[11px] font-bold outline-none shadow-2xs cursor-pointer truncate">
+                ${driverSelectOptions}
+            </select>
+        `;
+
         const coordIcon = (item.lat && item.lng) 
-            ? `<i class="fa-solid fa-map-pin text-emerald-500 mr-1" title="위치 확인됨"></i>` 
-            : `<i class="fa-solid fa-triangle-exclamation text-amber-400 mr-1" title="좌표 미확인 주소"></i>`;
+            ? `<i class="fa-solid fa-map-pin text-emerald-500 shrink-0 mt-0.5" title="좌표 확인 완료"></i>` 
+            : `<i class="fa-solid fa-triangle-exclamation text-amber-500 shrink-0 mt-0.5" title="좌표 미확인 주소"></i>`;
 
         const itemCountBadge = (item.items && item.items.length > 1)
-            ? `<span class="bg-indigo-50 text-indigo-700 text-[9px] font-black px-1.5 py-0.5 rounded border border-indigo-200 ml-1">외 ${item.items.length - 1}품목</span>`
+            ? `<span class="bg-indigo-50 text-indigo-700 text-[9px] font-black px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">외 ${item.items.length - 1}품목</span>`
             : '';
 
         html += `
-        <tr class="hover:bg-blue-50/50 cursor-pointer transition" onclick="window.toggleRowCheckbox(event, ${idx})">
-            <td class="text-center"><input type="checkbox" class="cursor-pointer row-checkbox" data-idx="${idx}"></td>
-            <td class="text-center font-bold text-gray-500">${idx + 1}</td>
-            <td class="text-center">${assignedBadge}</td>
-            <td class="font-bold text-gray-800 truncate max-w-[300px]" title="${item.address}">
-                ${coordIcon}${item.storeName ? `[${item.storeName}] ` : ''}${item.address || '-'}${itemCountBadge}
+        <tr class="hover:bg-blue-50/40 cursor-pointer transition border-b border-gray-100" onclick="window.toggleRowCheckbox(event, ${idx})">
+            <td class="text-center w-8" onclick="event.stopPropagation()">
+                <input type="checkbox" class="cursor-pointer row-checkbox w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" data-idx="${idx}">
             </td>
-            <td class="text-center" onclick="event.stopPropagation()">
-                <button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
+            <td class="text-center font-bold text-gray-500 w-10">${idx + 1}</td>
+            <td class="text-center w-36" onclick="event.stopPropagation()">
+                ${driverSelectHtml}
+            </td>
+            <td class="font-bold text-gray-800 break-keep leading-snug py-2.5 px-2" title="${item.address || ''}">
+                <div class="flex items-start gap-1.5">
+                    ${coordIcon}
+                    <div class="min-w-0 flex-1">
+                        <div class="flex items-center gap-1 flex-wrap mb-0.5">
+                            ${item.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200">${item.storeName}</span>` : ''}
+                            ${itemCountBadge}
+                        </div>
+                        <span class="text-xs text-gray-900 block font-bold">${item.address || '-'}</span>
+                        ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
+                    </div>
+                </div>
+            </td>
+            <td class="text-center w-12" onclick="event.stopPropagation()">
+                <button onclick="window.deleteExcelRow(${idx})" class="text-red-400 hover:text-red-600 bg-red-50 hover:bg-red-100 rounded px-2 py-1 transition shadow-sm active:scale-95" title="삭제"><i class="fa-solid fa-trash-can text-[10px]"></i></button>
             </td>
         </tr>`;
     });
     tbody.innerHTML = html;
     
+    // 전체 선택/해제 체크박스 이벤트 바인딩
     const chkAll = document.getElementById('chk-excel-all');
     if (chkAll) { 
         chkAll.checked = false; 
@@ -125,7 +153,7 @@ export function renderExcelTable() {
 }
 
 // ==========================================
-// 🌟 3. 범용 스마트 헤더 자동 매핑 및 주문/배송지별 품목 그룹화 파서
+// 3. 범용 스마트 헤더 자동 매핑 및 주문/배송지별 품목 그룹화 파서
 // ==========================================
 export function processExcelData(jsonData) {
     if (!jsonData || jsonData.length === 0) return [];
@@ -135,8 +163,7 @@ export function processExcelData(jsonData) {
     jsonData.forEach((row, rowIdx) => {
         const keys = Object.keys(row);
 
-        // 1. 전화번호 추출 (우선순위: 배송지/수령인 연락처 > 구매자/주문자 연락처 > 일반 연락처)
-        // * '쿠폰', '포인트', '금액' 등 '폰' 단어 오매칭 철저 배제
+        // 1. 전화번호 추출 ('쿠폰', '포인트' 오매칭 철저 차단)
         let phoneVal = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -173,7 +200,7 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 배송지 주소 추출 ('배송지연락처', '출고지', '우편번호' 등 제외)
+        // 2. 배송지 주소 추출
         let address = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -186,7 +213,6 @@ export function processExcelData(jsonData) {
                 }
             }
         }
-        // 주소 앞단의 우편번호 [08289] 형태 제거
         address = address.replace(/^\[\d+\]\s*/, '').trim();
 
         // 3. 상호 / 수령처명 추출
@@ -213,7 +239,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 5. 주문번호 / 관리번호 추출 ('상품주문번호'보다 '주문번호' 우선 매칭)
+        // 5. 주문번호 추출
         let orderNo = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -245,7 +271,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 7. 배송 메모 / 출입문 비밀번호
+        // 7. 배송 메모
         let memo = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -257,7 +283,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 8. 품목명 ('가격', '금액' 컬럼 제외)
+        // 8. 품목명
         let itemName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -293,7 +319,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 11. 단가 및 총 결제금액
+        // 11. 단가 및 결제금액
         let price = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -310,10 +336,8 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 유효 배송지 행이 아니면 건너뜀
         if (!address && !storeName && !itemName) return;
 
-        // 🌟 고유 주문키: 주문번호 기준, 없을 경우 주소+상호 기준 그룹화
         const orderKey = orderNo || `${address}___${storeName}`;
         const itemObj = { 
             name: itemName || '상품명 미지정', 
@@ -322,14 +346,11 @@ export function processExcelData(jsonData) {
         };
 
         if (orderMap[orderKey]) {
-            // 동일 주문/배송지: 품목 목록에 추가 및 총 수량 누적
             orderMap[orderKey].items.push(itemObj);
             orderMap[orderKey].qty += qty;
-            // 누락된 정보 보강
             if (!orderMap[orderKey].phone && phone) orderMap[orderKey].phone = phone;
             if (!orderMap[orderKey].memo && memo) orderMap[orderKey].memo = memo;
         } else {
-            // 신규 주문/배송지 생성
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
                 assignedDriver: null,
@@ -352,7 +373,6 @@ export function processExcelData(jsonData) {
         }
     });
 
-    // 대표 품목명 및 수량 표기 갱신
     const groupedList = Object.values(orderMap);
     groupedList.forEach(order => {
         if (order.items.length > 1) {
@@ -367,7 +387,7 @@ export function processExcelData(jsonData) {
 }
 
 // ==========================================
-// 4. 통합 드롭존 초기화 및 파일 업로드 처리
+// 4. 통합 드롭존 초기화 및 업로드 처리
 // ==========================================
 export function initExcelDropZone() {
     const dropZone = document.getElementById('excel-drop-zone');
@@ -432,7 +452,7 @@ export async function handleExcelUpload(e) {
         await batchGeocodeExcelList(newlyAddedList); 
         renderExcelTable(); 
         await autoSaveExcelToFirebase(); 
-        alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지(다품목 취합 완료)가 좌표 분석과 함께 성공적으로 등록되었습니다.`);
+        alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지 데이터가 좌표 분석과 함께 성공적으로 등록되었습니다.`);
     } else { 
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); 
     }
@@ -446,7 +466,6 @@ export function processSingleExcelFile(file) {
             try {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
-                // 🌟 raw: false 적용으로 엑셀 앞자리 0 탈락 및 지수 변환 방지
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: false });
                 resolve(processExcelData(json));
             } catch(err) { 
@@ -458,24 +477,65 @@ export function processSingleExcelFile(file) {
 }
 
 // ==========================================
-// 5. 주소 -> 좌표 (위/경도) 변환
+// 🌟 5. 주소 -> 정밀 좌표(위/경도) 3단계 스마트 지오코딩 엔진
 // ==========================================
-function getCoordsFromAddress(address) {
+function cleanAddressForSearch(addr) {
+    if (!addr) return '';
+    let clean = addr.replace(/^\[\d+\]\s*/, ''); // 우편번호 제거
+    clean = clean.replace(/\([^)]*\)/g, ' '); // 괄호 제거
+    // 부속 층, 호수, 지하 등 상세 설명 텍스트 제거
+    clean = clean.replace(/\s+(지하|지상)?\s*\d+층.*$/i, '');
+    clean = clean.replace(/\s+\d+호.*$/i, '');
+    clean = clean.replace(/\s+B\d+.*$/i, '');
+    return clean.replace(/\s{2,}/g, ' ').trim();
+}
+
+function getCoordsFromAddress(address, storeName = '') {
     return new Promise((resolve) => {
         if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
             resolve(null); 
             return; 
         }
-        const geocoder = new kakao.maps.services.Geocoder();
-        geocoder.addressSearch(address.trim(), (result, status) => {
-            if (status === kakao.maps.services.Status.OK && result[0]) {
-                let fullAddress = result[0].address_name;
-                if (result[0].road_address && result[0].road_address.address_name) {
-                    fullAddress = result[0].road_address.address_name;
-                }
-                resolve({ lat: parseFloat(result[0].y), lng: parseFloat(result[0].x), fullAddress: fullAddress });
-            } else { 
-                resolve(null); 
+        const geocoder = new window.kakao.maps.services.Geocoder();
+
+        // [1차 시도] 원본 주소로 직접 검색
+        geocoder.addressSearch(address.trim(), (res1, stat1) => {
+            if (stat1 === window.kakao.maps.services.Status.OK && res1[0]) {
+                const fullAddr = (res1[0].road_address && res1[0].road_address.address_name) 
+                    ? res1[0].road_address.address_name 
+                    : res1[0].address_name;
+                resolve({ lat: parseFloat(res1[0].y), lng: parseFloat(res1[0].x), fullAddress: fullAddr });
+                return;
+            }
+
+            // [2차 시도] 괄호 및 상세 층/호수를 정제한 주소로 재검색
+            const cleanAddr = cleanAddressForSearch(address);
+            if (cleanAddr && cleanAddr !== address.trim()) {
+                geocoder.addressSearch(cleanAddr, (res2, stat2) => {
+                    if (stat2 === window.kakao.maps.services.Status.OK && res2[0]) {
+                        const fullAddr = (res2[0].road_address && res2[0].road_address.address_name) 
+                            ? res2[0].road_address.address_name 
+                            : res2[0].address_name;
+                        resolve({ lat: parseFloat(res2[0].y), lng: parseFloat(res2[0].x), fullAddress: fullAddr });
+                        return;
+                    }
+
+                    // [3차 시도] 기본 도로명+건물번호 패턴만 추출하여 재검색
+                    const basicRoadMatch = cleanAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
+                    if (basicRoadMatch) {
+                        geocoder.addressSearch(basicRoadMatch[0], (res3, stat3) => {
+                            if (stat3 === window.kakao.maps.services.Status.OK && res3[0]) {
+                                resolve({ lat: parseFloat(res3[0].y), lng: parseFloat(res3[0].x), fullAddress: res3[0].address_name });
+                            } else {
+                                resolve(null);
+                            }
+                        });
+                    } else {
+                        resolve(null);
+                    }
+                });
+            } else {
+                resolve(null);
             }
         });
     });
@@ -490,11 +550,11 @@ async function batchGeocodeExcelList(items) {
             dropZone.innerHTML = `
                 <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
                     <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                    <span>배송지 좌표 분석 중... (${i + 1} / ${items.length})</span>
+                    <span>배송지 좌표 정밀 분석 중... (${i + 1} / ${items.length})</span>
                 </div>`;
         }
         if (item.address && (!item.lat || !item.lng)) {
-            const coords = await getCoordsFromAddress(item.address);
+            const coords = await getCoordsFromAddress(item.address, item.storeName);
             if (coords) { 
                 item.lat = coords.lat; 
                 item.lng = coords.lng; 
@@ -506,7 +566,7 @@ async function batchGeocodeExcelList(items) {
 }
 
 // ==========================================
-// 6. 테이블 데이터 삭제/초기화 기능 (기사 동선 삭제 포함)
+// 6. 테이블 데이터 삭제/초기화 기능
 // ==========================================
 export function toggleRowCheckbox(e, idx) {
     if (e && e.target.tagName === 'INPUT') return; 
@@ -538,12 +598,10 @@ export async function clearAllExcelRows() {
     if(state.parsedExcelList.length === 0) return;
     if(!confirm("업로드된 모든 주문 리스트와 기사 앱으로 전송된 배송 동선을 모두 완전히 초기화하시겠습니까?")) return;
     
-    // 1. 관제 화면의 엑셀 리스트 비우기
     state.parsedExcelList = []; 
     renderExcelTable(); 
     await autoSaveExcelToFirebase();
 
-    // 2. Firebase 'routes' 컬렉션에서 기사들에게 전송된 동선 삭제
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
     
