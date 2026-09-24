@@ -68,7 +68,7 @@ import {
 } from './support.js';
 
 // ==========================================
-// 0. 전화번호 정제 및 포맷팅 보조 함수
+// 0-1. 전화번호 정제 및 포맷팅 보조 함수
 // ==========================================
 function sanitizePhoneNumber(rawVal) {
     if (!rawVal) return "";
@@ -94,6 +94,43 @@ function sanitizePhoneNumber(rawVal) {
 }
 
 // ==========================================
+// 0-2. 도로명 주소 및 상호명 정제 헬퍼 (긴 부가설명 절삭)
+// ==========================================
+function formatDisplayAddress(rawAddress, storeName = "") {
+    let extractedStore = storeName ? String(storeName).trim() : "";
+    let cleanAddr = (rawAddress || "").trim();
+
+    // 1. [상호] 패턴 확인 및 추출
+    const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
+    if (match) {
+        if (!extractedStore) extractedStore = match[1].trim();
+        cleanAddr = match[2].trim();
+    }
+
+    // 2. 도로명/지번 뒤쪽의 과도한 상세 정보(동, 호수, 괄호 등) 정제
+    // 예: "서울 중구 서소문로9길 28 (순화동, 덕수궁롯데캐슬)..." -> "서울 중구 서소문로9길 28 (순화동)"
+    let simplifiedAddr = cleanAddr;
+    const roadRegex = /^([가-힣a-zA-Z0-9\s]+?(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?)/;
+    const rMatch = cleanAddr.match(roadRegex);
+    if (rMatch) {
+        let base = rMatch[1].trim();
+        const restText = cleanAddr.substring(rMatch[0].length);
+        const dongMatch = restText.match(/^\s*\(([가-힣]+동)[^)]*\)/);
+        if (dongMatch) {
+            simplifiedAddr = `${base} (${dongMatch[1]})`;
+        } else {
+            simplifiedAddr = base;
+        }
+    }
+
+    return {
+        storeName: extractedStore,
+        cleanAddr: simplifiedAddr,
+        fullAddr: cleanAddr
+    };
+}
+
+// ==========================================
 // 1. 앱 기동 및 라이프사이클 초기화
 // ==========================================
 export async function initApp() {
@@ -110,13 +147,12 @@ export async function initApp() {
     initCameraScan();
     initPhotoCompletion(); 
     
-    // 🌟 관제 센터 실시간 자동할당 동선 수신 핸들러 등록
+    // 관제 센터 실시간 자동할당 동선 수신 핸들러 등록
     setRemoteRoutesHandler((newDestinations, routeData) => {
         if (!newDestinations || !Array.isArray(newDestinations)) return;
 
         // 관제에서 전송된 배송지 데이터 정규화
         const formattedList = newDestinations.map((d, idx) => {
-            // 관제단에서 사용 가능한 모든 전화번호 필드명(phone, customerPhone, tel, contact, hp) 흡수
             const rawPhone = d.phone || d.customerPhone || d.tel || d.contact || d.hp || "";
             const validPhone = sanitizePhoneNumber(rawPhone);
 
@@ -242,9 +278,11 @@ export function openStartSelectionModal() {
     
     let html = '';
     destinations.forEach(d => {
+        const fmt = formatDisplayAddress(d.address, d.storeName);
+        const title = fmt.storeName ? `[${fmt.storeName}] ${fmt.cleanAddr}` : fmt.cleanAddr;
         html += `
             <button onclick="selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
-                <span class="font-bold text-gray-800 text-[13px] truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${d.address}</span>
+                <span class="font-bold text-gray-800 text-[13px] truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
                 <i class="fa-solid fa-check text-gray-300"></i>
             </button>
         `;
@@ -414,29 +452,28 @@ export function renderList() {
                 `<div class="bg-indigo-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
                 `<div class="bg-blue-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0">${dest.displayNumber}</div>`;
             
-            // 🌟 전화번호 정제 (단순 "0"이나 빈값은 완벽히 제거)
+            // 전화번호 정제
             let customerPhoneStr = sanitizePhoneNumber(dest.phone || ""); 
             let dynamicTextSize = "text-[13px]"; 
             if (customerPhoneStr.length >= 13) dynamicTextSize = "text-[10px]"; 
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
-            // 기존 방식: [상호명] 강조 또는 dest.storeName 강조 후 주소 표시
-            let displayAddressHTML = dest.address;
-            let match = dest.address.match(/^\[(.*?)\]\s*(.*)$/);
-            if (match) {
+            // 🌟 주소지 정제: 불필요한 긴 부가설명 절삭 및 상호명/도로명 깔끔 분리
+            const formatted = formatDisplayAddress(dest.address, dest.storeName);
+            let displayAddressHTML = "";
+            
+            if (formatted.storeName) {
                 displayAddressHTML = `
-                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${match[1]}</span>
-                    <span class="block truncate leading-tight">${match[2]}</span>
-                `;
-            } else if (dest.storeName) {
-                displayAddressHTML = `
-                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${dest.storeName}</span>
-                    <span class="block truncate leading-tight">${dest.address}</span>
+                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none">🏢 ${formatted.storeName}</span>
+                    <span class="block truncate leading-tight">${formatted.cleanAddr}</span>
                 `;
             } else {
-                displayAddressHTML = `<span class="block truncate">${dest.address}</span>`;
+                displayAddressHTML = `<span class="block truncate">${formatted.cleanAddr}</span>`;
             }
+
+            // 네비게이션 앱에 넘겨줄 목적지 명칭 (상호명 우선, 없으면 정제 주소 사용)
+            let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
 
             const isFirst = index === 0;
             const isLast = index === destinations.length - 1;
@@ -476,8 +513,8 @@ export function renderList() {
                             <span class="text-[11px] font-black text-gray-500 w-10 text-center leading-tight">길찾기</span>
                             <div class="w-px h-5 bg-gray-300"></div>
                             <div class="flex-1 grid grid-cols-2 gap-1.5 h-full">
-                                <button onclick="openTmap(${dest.lat}, ${dest.lng}, '${dest.address}')" class="bg-black text-white text-[11px] font-bold rounded-md active:opacity-80 flex items-center justify-center gap-1 shadow-sm h-full"><i class="fa-solid fa-map-location-dot text-[10px]"></i> 티맵</button>
-                                <button onclick="openKakaoNaviDirect(${dest.lat}, ${dest.lng}, '${dest.address}')" class="bg-[#FEE500] text-black text-[11px] font-bold rounded-md border border-yellow-400 active:bg-yellow-400 flex items-center justify-center gap-1 shadow-sm h-full"><i class="fa-solid fa-location-arrow text-[10px]"></i> 카카오</button>
+                                <button onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-black text-white text-[11px] font-bold rounded-md active:opacity-80 flex items-center justify-center gap-1 shadow-sm h-full"><i class="fa-solid fa-map-location-dot text-[10px]"></i> 티맵</button>
+                                <button onclick="openKakaoNaviDirect(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#FEE500] text-black text-[11px] font-bold rounded-md border border-yellow-400 active:bg-yellow-400 flex items-center justify-center gap-1 shadow-sm h-full"><i class="fa-solid fa-location-arrow text-[10px]"></i> 카카오</button>
                             </div>
                         </div>
                         <button onclick="cancelDestination(${dest.id})" class="w-[50px] shrink-0 bg-red-50 text-red-500 border border-red-200 rounded-lg shadow-sm flex items-center justify-center active:bg-red-100 transition"><i class="fa-solid fa-trash-can text-[15px]"></i></button>
