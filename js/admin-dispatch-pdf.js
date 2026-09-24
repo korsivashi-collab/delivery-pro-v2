@@ -133,7 +133,7 @@ function groupTextContentByLines(items) {
 }
 
 // ==========================================
-// 3. 🌟 공급자 / 공급받는 자 영역 분리 정밀 파싱 엔진
+// 3. 🌟 공급자 / 공급받는 자 영역 분리 및 주소 오인식 완벽 차단 엔진
 // ==========================================
 function parseOrderFromPageLines(lines, pageNum) {
     const rawFullText = lines.join('\n');
@@ -170,11 +170,11 @@ function parseOrderFromPageLines(lines, pageNum) {
         order.orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
     }
 
-    // 2. 공급받는 자(수령인 및 간판명) 블록 분리 추출
+    // 2. 🌟 공급받는 자 영역(buyerSection) 정밀 분리 (공급자 정보 완벽 배제)
     let buyerSection = '';
     const buyerSplit = cleanText.split(/공급받는\s*자/);
     if (buyerSplit.length > 1) {
-        buyerSection = buyerSplit[1].split(/No\.|상품명|규격/)[0];
+        buyerSection = buyerSplit[buyerSplit.length - 1].split(/(?:No\.|상품명|규격\(단위\)|거래명세표)/)[0];
     } else {
         buyerSection = cleanText;
     }
@@ -193,7 +193,7 @@ function parseOrderFromPageLines(lines, pageNum) {
     if (!order.storeName) order.storeName = order.senderName || '배송처';
     if (!order.senderName) order.senderName = order.storeName;
 
-    // 3. 🌟 수령인 전화번호 정밀 추출 (공급자 번호 제외)
+    // 3. 수령인 전화번호 정밀 추출
     const phoneMatch = buyerSection.match(/(?<!추가)연락처(?!\/FAX)[:\s]*([0-9\-]{8,15})/);
     if (phoneMatch) {
         order.phone = formatPhoneNumber(phoneMatch[1]);
@@ -204,20 +204,30 @@ function parseOrderFromPageLines(lines, pageNum) {
         }
     }
 
-    // 4. 🌟 수령인 주소 정밀 추출 (공급자 주소 간섭 원천 차단)
-    const addrMatch = buyerSection.match(/주소\s*(?:\[\d+\])?\s*([^\n\r]+(?:\n[^\n\r]+)?)/);
-    if (addrMatch) {
-        let rawAddr = addrMatch[1].replace(/[\r\n]+/g, ' ').trim();
+    // 4. 🌟 '받 주소' 오인식 및 공급자 주소 혼선 방지 수령인 주소 정제 추출
+    let addressPart = '';
+    const addrIndex = buyerSection.indexOf('주소');
+    if (addrIndex !== -1) {
+        let subStr = buyerSection.slice(addrIndex + 2).trim();
+        // 콜론이나 파이프 기기 제거
+        subStr = subStr.replace(/^[:\s|]+/, '');
         // 다음 항목 키워드 전까지만 자르기
-        rawAddr = rawAddr.split(/배송지명|간판명|연락처|No\./)[0];
-        order.address = rawAddr.replace(/^\[\d+\]\s*/, '').trim();
+        subStr = subStr.split(/배송지명|간판명|연락처|No\.|전화|사업자/)[0];
+        addressPart = subStr.replace(/[\r\n]+/g, ' ').trim();
     } else {
         const addrRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:동|읍|면|로|길|리)\s*[\d\-]+(?:\s*[가-힣0-9\s,\.\(\)\-]+)?/;
         const match = buyerSection.match(addrRegex);
         if (match) {
-            order.address = match[0].replace(/[\r\n]+/g, ' ').trim();
+            addressPart = match[0].replace(/[\r\n]+/g, ' ').trim();
         }
     }
+
+    // 오인식된 불필요 접두사('받', '주소' 등) 및 우편번호 박스 정제
+    order.address = addressPart
+        .replace(/^(?:받\s*주소|주소|받)[:\s]*/i, '')
+        .replace(/^\[\d+\]\s*/, '')
+        .replace(/\s{2,}/g, ' ')
+        .trim();
 
     // 5. 배송 메모 / 요청사항 추출
     const memoMatch = cleanText.match(/(?:배송\s*요청사항|배송\s*메모|요청사항|전달사항|비고)[:\s]*([^\n\r]+)/);
