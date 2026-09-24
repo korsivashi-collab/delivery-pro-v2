@@ -57,7 +57,7 @@
             <div class="flex-1 max-w-md relative min-w-[220px]">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
-                    <input type="text" id="global-search-input" oninput="window.handleGlobalSearch(this.value)" placeholder="상호명, 주소, 동·호수, 연락처 검색..." class="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
+                    <input type="text" id="global-search-input" oninput="window.handleGlobalSearch(this.value)" placeholder="주소, 동·호수, 연락처 검색..." class="w-full pl-9 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
                     <button onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden absolute right-3 text-gray-400 hover:text-gray-600 text-xs">
                         <i class="fa-solid fa-circle-xmark"></i>
                     </button>
@@ -187,52 +187,36 @@
 
     <!-- 1. PRO 배송 자동할당 모달 -->
     <div id="auto-dispatch-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col overflow-hidden">
-        <!-- 상단 헤더 바 -->
-        <header class="bg-white border-b border-gray-200 px-5 py-3 flex items-center justify-between shadow-xs flex-none gap-3 overflow-x-auto hide-scrollbar">
-            <!-- 1구역: 타이틀 -->
-            <div class="flex items-center gap-2.5 shrink-0">
-                <div class="w-10 h-10 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-xl flex items-center justify-center text-lg shadow-sm">
-                    <i class="fa-solid fa-route animate-pulse"></i>
-                </div>
-                <div>
-                    <h2 class="text-base font-black text-gray-900 flex items-center gap-1.5 tracking-tight leading-none">
-                        배송 자동할당 <span class="bg-amber-100 text-amber-800 text-[9px] font-black px-1.5 py-0.5 rounded border border-amber-300">PRO</span>
-                    </h2>
-                    <p class="text-[10px] text-gray-400 font-bold mt-0.5">기사별 권역 물량 배분 및 동선 전송</p>
-                </div>
+        <header class="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between shadow-sm flex-none gap-4">
+            <div class="flex items-center gap-3 flex-none w-[230px] shrink-0">
+                <div class="w-11 h-11 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-xl flex items-center justify-center text-xl shadow-md"><i class="fa-solid fa-route animate-pulse"></i></div>
+                <div><h2 class="text-lg font-black text-gray-900 flex items-center gap-1.5 tracking-tight leading-none">배송 자동할당 <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-300">PRO</span></h2><p class="text-[10px] text-gray-400 font-bold mt-1">기사 권역별 물량 배분 및 전송</p></div>
             </div>
 
-            <!-- 2구역: 본사 거점 설정 바 -->
-            <div class="flex-1 min-w-[280px] max-w-[460px] bg-slate-50 px-3 py-1.5 rounded-xl border border-gray-200 flex items-center gap-2 shadow-inner">
-                <span class="text-xs font-black text-gray-700 whitespace-nowrap shrink-0">
-                    <i class="fa-solid fa-building text-blue-600 mr-1"></i>거점
-                </span>
-                <input type="text" id="company-base-address" placeholder="본사 전체 주소 입력" class="w-40 bg-white border border-gray-300 rounded-lg text-xs px-2 py-1.5 font-bold outline-none focus:border-blue-500 transition shadow-2xs shrink-0">
+            <!-- 본사 거점 설정 바 (🌟 3번: 저장된 거점 주소가 즉시 보이도록 hidden 해제 및 정돈) -->
+            <div class="flex-1 bg-slate-50 px-3.5 py-2 rounded-2xl border border-gray-200 flex items-center gap-2 shadow-inner min-w-[320px] max-w-[500px]">
+                <span class="text-xs font-black text-gray-700 whitespace-nowrap shrink-0"><i class="fa-solid fa-building text-blue-600 mr-1"></i>본사 거점</span>
+                <input type="text" id="company-base-address" placeholder="전체 주소 입력" class="w-44 bg-white border border-gray-300 rounded-lg text-xs p-1.5 font-bold outline-none focus:border-blue-500 transition shadow-2xs shrink-0">
                 <button type="button" id="btn-save-company-base" onclick="window.saveCompanyBaseAddress()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-2xs active:scale-95 whitespace-nowrap transition shrink-0">저장</button>
-                <div class="flex-1 text-xs font-bold text-blue-700 truncate leading-tight px-1" id="saved-base-address-text" title="저장된 거점 주소">저장된 거점이 없습니다.</div>
-                <button id="btn-clear-company-base" onclick="window.clearCompanyBaseAddress()" class="hidden text-red-500 hover:text-red-700 text-[10px] font-bold pr-1 whitespace-nowrap transition shrink-0"><i class="fa-solid fa-rotate-left"></i></button>
+                <div class="flex-1 text-xs font-bold text-blue-700 truncate leading-tight px-1 min-w-[120px]" id="saved-base-address-text" title="저장된 거점 주소">저장된 거점이 없습니다.</div>
+                <button id="btn-clear-company-base" onclick="window.clearCompanyBaseAddress()" class="hidden text-red-500 hover:text-red-700 text-[11px] font-bold pr-1 whitespace-nowrap transition shrink-0" title="거점 초기화"><i class="fa-solid fa-rotate-left"></i></button>
             </div>
 
-            <!-- 3구역: 주문서 드롭존 (엑셀/PDF) -->
-            <div id="excel-drop-zone" class="w-[240px] shrink-0 bg-indigo-50/60 border-2 border-dashed border-indigo-400 hover:border-indigo-600 hover:bg-indigo-50 rounded-xl p-2 flex items-center justify-center text-center transition cursor-pointer shadow-2xs">
-                <div class="flex items-center gap-2.5">
-                    <div class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-lg flex items-center justify-center text-base shadow-2xs shrink-0">
-                        <i class="fa-solid fa-file-import"></i>
-                    </div>
-                    <div class="text-left min-w-0">
-                        <h4 class="font-black text-gray-800 text-xs truncate">주문서 업로드 (엑셀/PDF)</h4>
-                        <p class="text-[9px] text-gray-500 font-bold truncate">클릭 또는 파일 끌어놓기</p>
+            <!-- 🌟 2번: 주문서 업로드 구역 및 작업 버튼군을 우측으로 배치 -->
+            <div class="flex items-center gap-3 flex-none shrink-0 ml-auto">
+                <!-- 엑셀/PDF 드롭존 (우측 정렬 및 충분한 크기 확보) -->
+                <div id="excel-drop-zone" class="w-[280px] bg-indigo-50/60 border-2 border-dashed border-indigo-400 hover:border-indigo-600 hover:bg-indigo-50 rounded-xl p-2 flex items-center justify-center text-center transition cursor-pointer shadow-2xs shrink-0">
+                    <div class="flex items-center gap-2.5">
+                        <div class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-lg flex items-center justify-center text-base shadow-2xs shrink-0"><i class="fa-solid fa-file-import"></i></div>
+                        <div class="text-left min-w-0">
+                            <h4 class="font-black text-gray-800 text-xs truncate">주문서 업로드 (엑셀/PDF)</h4>
+                            <p class="text-[9px] text-gray-500 font-bold truncate">클릭 또는 파일 끌어놓기</p>
+                        </div>
                     </div>
                 </div>
-            </div>
 
-            <!-- 4구역: 작업 실행 버튼 군 -->
-            <div class="flex items-center gap-2 shrink-0">
                 <button type="button" id="btn-run-auto-dispatch" onclick="window.runAutoDispatchAlgorithm()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-robot text-sm"></i> 자동할당 실행
-                </button>
-                <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="검토 완료된 배송 코스를 기사 스마트폰 앱으로 직접 전송합니다">
-                    <i class="fa-solid fa-paper-plane text-sm"></i> 기사 앱으로 동선 전송
                 </button>
                 <button type="button" id="btn-export-to-invoice" onclick="window.exportToInvoiceModal()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow-2xs active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-file-export text-xs"></i> 주문서 통합관리
@@ -244,44 +228,40 @@
             </div>
         </header>
 
-        <!-- 🌟 본문 3단 레이아웃 (드래그 조절바 & 패널 유연 확장 적용) -->
-        <div class="flex-1 flex gap-2 overflow-hidden p-3 bg-slate-100">
-            <!-- 1단 (좌측): 운행 기사 권역 목록 (320px 고정) -->
+        <!-- 🌟 본문 영역 (1번: 리사이저 바로 좌우 사이즈 조절 가능 구조) -->
+        <div class="flex-1 flex gap-3 overflow-hidden p-3 bg-slate-100" id="dispatch-auto-main-container">
+            <!-- 1단 (좌측): 기사 권역 목록 (320px 고정) -->
             <div class="w-[320px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
                 <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex flex-col gap-2 shadow-2xs z-10">
                     <div class="flex justify-between items-center">
-                        <span class="text-[11px] font-black text-gray-700 flex items-center gap-1">
-                            <i class="fa-solid fa-users text-blue-500"></i> 운행 기사 권역 설정
-                        </span>
+                        <span class="text-[11px] font-black text-gray-700"><i class="fa-solid fa-users text-blue-500 mr-1"></i> 운행 기사 권역 설정</span>
                         <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-black shadow-2xs" id="dispatch-driver-count">0명</span>
                     </div>
                     <button type="button" onclick="window.openAllTerritoriesMap()" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-1.5 text-[11px] font-black transition shadow-2xs active:scale-95 flex items-center justify-center gap-1.5">
                         <i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기
                     </button>
                 </div>
-                <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-2.5 custom-scrollbar space-y-2">
-                    <div class="text-center text-gray-400 py-10 text-[10px] font-bold">데이터 로딩중...</div>
-                </div>
+                <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-2.5 custom-scrollbar space-y-2"><div class="text-center text-gray-400 py-10 text-[10px] font-bold">데이터 로딩중...</div></div>
             </div>
 
-            <!-- 2단 (중앙): 기사별 할당 상세 내역 (가변 폭: dispatch-detail-panel) -->
-            <div id="dispatch-detail-panel" class="w-[460px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
-                <div class="bg-blue-50 border-b border-blue-100 p-2.5 px-3 flex justify-between items-center z-10 shrink-0">
-                    <div class="flex items-center gap-2">
-                        <span class="font-black text-blue-900 text-xs flex items-center gap-1.5">
-                            <i class="fa-solid fa-user-check text-blue-600"></i> 기사별 할당 상세 내역
-                        </span>
+            <!-- 2단 (중앙): 기사별 할당 상세 내역 (리사이징 대응 ID: dispatch-detail-panel) -->
+            <div id="dispatch-detail-panel" class="w-[420px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
+                <div class="bg-blue-50 border-b border-blue-100 p-2.5 px-3 flex justify-between items-center z-10 flex-wrap gap-2 shrink-0">
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-black text-blue-900 text-xs flex items-center gap-1.5"><i class="fa-solid fa-user-check text-blue-600"></i> 기사별 상세 내역</span>
                         <span id="detail-driver-count-badge" class="bg-blue-600 text-white text-[10px] font-black px-2 py-0.5 rounded-full shadow-2xs hidden">총 0건</span>
                     </div>
-                    <div class="flex items-center gap-1.5">
-                        <button type="button" id="btn-driver-items-print" onclick="window.printSelectedDriverItemList()" class="hidden px-2.5 py-1 bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 rounded-lg text-[11px] font-black shadow-2xs transition active:scale-95 flex items-center gap-1" title="현재 선택된 기사에게 배정된 모든 상품을 집계하여 1장으로 출력합니다">
-                            <i class="fa-solid fa-boxes-packing text-blue-600"></i> 기사 상품 합산 출력
+                    <!-- 상품 취합 출력 & 동선 전송 버튼 배치 -->
+                    <div class="flex items-center gap-1.5 ml-auto">
+                        <button type="button" id="btn-driver-items-print" onclick="window.printSelectedDriverItemList()" class="hidden px-2.5 py-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 rounded-lg text-[11px] font-black shadow-2xs transition active:scale-95 flex items-center gap-1 shrink-0" title="선택된 기사 배정 상품 합산 출력">
+                            <i class="fa-solid fa-box-open text-blue-600"></i> 상품 취합 출력
+                        </button>
+                        <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="hidden px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black rounded-lg transition shadow-2xs active:scale-95 flex items-center gap-1 whitespace-nowrap" title="선택된 기사에게 배송 동선 전송">
+                            <i class="fa-solid fa-paper-plane"></i> 동선 전송
                         </button>
                     </div>
                 </div>
-                <div id="detail-driver-header" class="p-4 border-b border-gray-100 bg-white">
-                    <p class="text-xs text-gray-400 font-bold text-center">좌측 목록에서 기사를 선택하면 배정된 상세 내역이 표시됩니다.</p>
-                </div>
+                <div id="detail-driver-header" class="p-4 border-b border-gray-100 bg-white"><p class="text-xs text-gray-400 font-bold text-center">좌측 목록에서 기사를 선택하면 배정된 상세 내역이 표시됩니다.</p></div>
                 <div class="flex-1 overflow-auto custom-scrollbar bg-slate-50">
                     <table class="w-full text-left border-collapse text-[11px] whitespace-nowrap excel-table hidden" id="detail-driver-table">
                         <thead class="bg-white sticky top-0 z-10 shadow-2xs border-b">
@@ -296,13 +276,13 @@
                 </div>
             </div>
 
-            <!-- 🌟 패널 폭 조절 리사이저 바 (Splitter Bar) -->
-            <div id="dispatch-panel-resizer" class="w-1.5 hover:w-2 bg-transparent hover:bg-blue-400/50 cursor-col-resize flex items-center justify-center transition-all shrink-0 select-none group" title="좌우로 드래그하여 패널 폭 조절">
-                <div class="w-0.5 h-8 bg-gray-300 group-hover:bg-blue-600 rounded-full transition"></div>
+            <!-- 🌟 1번: 마우스 드래그 리사이저 바 (Splitter Bar) -->
+            <div id="dispatch-panel-resizer" class="w-2.5 hover:w-3 bg-slate-200 hover:bg-blue-500 cursor-col-resize transition-all shrink-0 rounded-full my-1 flex items-center justify-center group select-none shadow-2xs" title="좌우로 드래그하여 상세 내역과 전체 현황의 너비를 조절하세요">
+                <div class="w-0.5 h-8 bg-gray-400 group-hover:bg-white rounded-full transition"></div>
             </div>
 
-            <!-- 3단 (우측): 전체 배송지 현황 (flex-1 유연 확장) -->
-            <div class="flex-1 min-w-[380px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden">
+            <!-- 3단 (우측): 전체 배송지 현황 (리사이징 대응 ID: dispatch-total-panel) -->
+            <div id="dispatch-total-panel" class="flex-1 min-w-[380px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden">
                 <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex justify-between items-center z-10 shrink-0">
                     <div class="flex items-center gap-2">
                         <span class="px-2 py-1 bg-white border border-gray-200 rounded-md text-gray-800 font-black text-xs flex items-center gap-1 shadow-2xs">
@@ -312,7 +292,7 @@
                     </div>
                     <div class="flex gap-1 items-center">
                         <button onclick="window.deleteSelectedExcelRows()" class="px-2 py-1 bg-red-50 text-red-600 font-bold text-[10px] rounded border border-red-200 hover:bg-red-100 transition">선택 삭제</button>
-                        <button onclick="window.clearAllExcelRows()" class="px-2 py-1 bg-gray-100 text-gray-600 font-bold text-[10px] rounded border border-gray-200 hover:bg-gray-200 transition">초기화</button>
+                        <button onclick="window.clearAllExcelRows()" class="px-2 py-1 bg-gray-100 text-gray-600 font-bold text-[10px] rounded border border-gray-200 hover:bg-gray-200 transition" title="업로드된 데이터와 기사 전송 동선을 전체 초기화합니다.">초기화</button>
                     </div>
                 </div>
                 <div class="flex-1 overflow-auto custom-scrollbar bg-white">
@@ -321,8 +301,8 @@
                             <tr class="border-b border-gray-200 text-gray-700">
                                 <th class="font-black text-center w-8"><input type="checkbox" id="chk-excel-all" class="cursor-pointer"></th>
                                 <th class="font-black text-center w-10">순번</th>
-                                <th class="font-black text-center text-blue-700 w-36"><i class="fa-solid fa-truck-fast"></i> 담당 기사</th>
-                                <th class="font-black">배송 목적지 (상호명 및 주소)</th>
+                                <th class="font-black text-center text-blue-700 w-24"><i class="fa-solid fa-truck-fast"></i> 담당 기사</th>
+                                <th class="font-black">배송 목적지 (주소)</th>
                                 <th class="font-black text-center w-12">관리</th>
                             </tr>
                         </thead>
@@ -343,57 +323,58 @@
                 <button onclick="window.closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
             </div>
             
-            <div class="mb-4 bg-blue-50 p-4 rounded-2xl border border-blue-100 flex-none flex flex-col gap-3 shadow-inner">
-                <div class="flex justify-between items-center flex-wrap gap-2">
-                    <div>
-                        <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-base ml-1">010-0000-0000</span></p>
-                        <p class="text-xs font-bold text-blue-700">지도에 핀을 찍어 권역 중심을 지정하세요. <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.</p>
-                    </div>
-                    <div class="flex flex-wrap items-center gap-3">
-                        <div class="bg-white p-1.5 rounded-xl border border-blue-200 shadow-sm flex gap-1.5">
-                            <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-4 py-2 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
-                            <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
-                            <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-4 py-2 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+            <div class="flex flex-1 overflow-hidden gap-5">
+                <!-- 좌측: 정보 및 제어 패널 -->
+                <div class="w-[360px] flex flex-col gap-4 flex-none overflow-y-auto hide-scrollbar">
+                    <div class="bg-blue-50 p-4 rounded-2xl border border-blue-100 shadow-inner flex flex-col gap-3">
+                        <div>
+                            <p class="text-sm font-black text-blue-900 mb-1">대상 기사: <span id="territory-target-phone" class="text-blue-600 text-lg ml-1">010-0000-0000</span></p>
+                            <p class="text-[11px] font-bold text-blue-700 mt-2 leading-relaxed">
+                                우측 지도에 핀을 이동하여 권역 중심을 지정하세요.<br>
+                                <b class="text-red-500">타 기사의 영역(회색)</b>과 겹치지 않게 주의하세요.
+                            </p>
                         </div>
-                        
-                        <div class="bg-white p-1.5 rounded-xl border border-emerald-300 shadow-sm flex items-center gap-2">
-                            <span class="text-xs font-black text-emerald-700 pl-2"><i class="fa-solid fa-expand"></i> 반경 크기 조절</span>
-                            <div class="flex items-center gap-1 bg-gray-50 rounded-lg p-0.5 border border-gray-200">
-                                <button type="button" onclick="if(window.adjustModalTerritorySize) window.adjustModalTerritorySize(-10)" class="w-7 h-7 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100 font-black text-sm transition active:scale-95">-</button>
-                                <span id="modal-territory-size-display" class="text-xs font-black text-emerald-600 w-12 text-center">100%</span>
-                                <button type="button" onclick="if(window.adjustModalTerritorySize) window.adjustModalTerritorySize(10)" class="w-7 h-7 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100 font-black text-sm transition active:scale-95">+</button>
+                        <div class="bg-white p-3 rounded-xl border border-emerald-300 shadow-sm flex flex-col gap-2 mt-1">
+                            <span class="text-xs font-black text-emerald-700 pl-1"><i class="fa-solid fa-expand"></i> 반경 크기 조절</span>
+                            <div class="flex items-center justify-between bg-gray-50 rounded-lg p-1.5 border border-gray-200">
+                                <button type="button" onclick="if(window.adjustModalTerritorySize) window.adjustModalTerritorySize(-10)" class="w-10 h-8 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100 font-black text-lg transition active:scale-95">-</button>
+                                <span id="modal-territory-size-display" class="text-sm font-black text-emerald-600 w-16 text-center">100%</span>
+                                <button type="button" onclick="if(window.adjustModalTerritorySize) window.adjustModalTerritorySize(10)" class="w-10 h-8 flex items-center justify-center bg-white rounded shadow-sm text-gray-600 hover:bg-gray-100 font-black text-lg transition active:scale-95">+</button>
                             </div>
                         </div>
                     </div>
-                </div>
-                <div class="bg-white px-4 py-3 rounded-xl border border-blue-200 flex items-center gap-3 shadow-sm">
-                    <span class="text-xs font-black text-gray-700 whitespace-nowrap border-r border-gray-200 pr-3">지정된 기준 주소</span>
-                    <span id="territory-selected-address" class="text-sm font-black text-blue-600 truncate"><i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요</span>
-                </div>
-            </div>
 
-            <div class="mb-3 flex justify-between items-center flex-none gap-3">
-                <div class="flex-1 relative flex items-center max-w-md">
-                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-sm"></i>
-                    <input type="text" id="territory-address-search" placeholder="권역 중심으로 지정할 주소 검색..." class="w-full bg-white border border-gray-300 rounded-xl pl-10 pr-16 py-2 text-xs font-bold outline-none focus:border-blue-500 shadow-sm" onkeyup="if(window.event.keyCode==13){window.searchTerritoryAddress()}">
-                    <button type="button" onclick="window.searchTerritoryAddress()" class="absolute right-1.5 bg-blue-600 hover:bg-blue-700 text-white text-[10px] font-black px-3.5 py-1.5 rounded-lg transition active:scale-95 shadow-sm">검색</button>
-                </div>
-                
-                <div class="shrink-0 flex items-center">
-                    <button type="button" id="btn-territory-pin" onclick="if(window.toggleTerritoryPinMode) window.toggleTerritoryPinMode()" class="px-4 py-2 rounded-xl bg-white hover:bg-gray-50 text-gray-700 border border-gray-300 flex items-center justify-center gap-2 shadow-sm transition active:scale-95 font-black text-sm" title="핀 이동 모드 켜기/끄기">
-                        <i class="fa-solid fa-map-pin text-gray-400"></i> 핀 이동 OFF
-                    </button>
-                    <input type="hidden" id="territory-pin-toggle-state" value="false">
-                </div>
-            </div>
+                    <div class="bg-white px-4 py-4 rounded-xl border border-blue-200 flex flex-col gap-2.5 shadow-sm">
+                        <span class="text-xs font-black text-gray-700"><i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지정된 기준 주소</span>
+                        <span id="territory-selected-address" class="text-sm font-black text-blue-600 leading-snug break-keep"><i class="fa-solid fa-location-dot text-red-500 mr-1"></i> 지도에 핀을 찍어주세요</span>
+                    </div>
 
-            <input type="hidden" id="territory-target-devid"><input type="hidden" id="input-territory-1"><input type="hidden" id="input-territory-2"><input type="hidden" id="input-territory-lat"><input type="hidden" id="input-territory-lng"><input type="hidden" id="input-territory-scale" value="dong">
-            <div id="territory-map-container" class="flex-1 w-full bg-gray-200 rounded-2xl overflow-hidden relative shadow-inner border border-gray-300"></div>
+                    <div class="relative flex items-center mt-1">
+                        <i class="fa-solid fa-magnifying-glass absolute left-4 text-gray-400 text-sm"></i>
+                        <input type="text" id="territory-address-search" placeholder="주소 검색으로 지도 이동..." class="w-full bg-white border border-gray-300 rounded-xl pl-11 pr-16 py-3.5 text-xs font-bold outline-none focus:border-blue-500 shadow-sm transition" onkeyup="if(window.event.keyCode==13){window.searchTerritoryAddress()}">
+                        <button type="button" onclick="window.searchTerritoryAddress()" class="absolute right-2 bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-black px-4 py-2 rounded-lg transition active:scale-95 shadow-sm">검색</button>
+                    </div>
 
-            <div class="mt-4 flex-none">
-                <button type="button" onclick="window.saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2">
-                    <i class="fa-solid fa-save"></i> 이 위치와 반경으로 권역 저장하기
-                </button>
+                    <div class="mt-auto pt-4">
+                        <button type="button" onclick="window.saveDriverTerritory()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-xl text-sm shadow-md transition active:scale-95 flex items-center justify-center gap-2">
+                            <i class="fa-solid fa-save text-lg"></i> 이 위치와 반경으로 권역 저장하기
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 우측: 지도 패널 -->
+                <div class="flex-1 relative rounded-2xl overflow-hidden shadow-inner border border-gray-300 bg-gray-200 flex flex-col">
+                    <input type="hidden" id="territory-target-devid"><input type="hidden" id="input-territory-1"><input type="hidden" id="input-territory-2"><input type="hidden" id="input-territory-lat"><input type="hidden" id="input-territory-lng"><input type="hidden" id="input-territory-scale" value="dong">
+                    
+                    <!-- 지도 내 동/구/시 오버레이 버튼 -->
+                    <div class="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-sm p-1.5 rounded-xl border border-gray-200 shadow-lg flex gap-1.5">
+                        <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-5 py-2.5 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">동/읍/면 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-5 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">구/군 단위</button>
+                        <button type="button" onclick="window.setTerritoryScale('si')" id="btn-scale-si" class="px-5 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">시/도 단위</button>
+                    </div>
+
+                    <div id="territory-map-container" class="w-full h-full flex-1"></div>
+                </div>
             </div>
         </div>
     </div>
@@ -422,7 +403,7 @@
                     <p class="text-xs text-gray-500 font-bold">배송 자동할당 창에서 전송된 최종 리스트를 주문서 규격에 맞춰 일괄 출력합니다.</p>
                 </div>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-4">
                 <div class="bg-indigo-50 border border-indigo-200 px-3 py-1.5 rounded-lg text-xs font-black text-indigo-800 flex items-center gap-1.5 shadow-sm">
                     <i class="fa-solid fa-list-check"></i> 출력 대기: <span id="print-ready-count" class="text-indigo-600 text-sm">0</span>건
                 </div>
@@ -448,7 +429,7 @@
                                 <colgroup><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"><col style="width: 4%;"><col style="width: 17%;"><col style="width: 29%;"></colgroup>
                                 <tr><td rowspan="5" class="invoice-label writing-mode-vertical">공급자</td><td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-prov-regno text-fit-auto"></td><td rowspan="5" class="invoice-label writing-mode-vertical">공급받는 자</td><td class="invoice-label">사업자등록번호</td><td class="inv-text-center inv-font-bold prev-cust-regno text-fit-auto"></td></tr>
                                 <tr><td class="invoice-label">상호(법인명)</td><td class="inv-text-left prev-prov-name text-fit-auto"></td><td class="invoice-label">구 매 자 명</td><td class="inv-text-left prev-cust-name text-fit-auto"></td></tr>
-                               <tr class="double-height"><td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td><td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td></tr>
+                                <tr class="double-height"><td class="invoice-label">주 소</td><td class="inv-text-left prev-prov-addr text-fit-auto multi-line-text"></td><td class="invoice-label">주 소</td><td class="inv-text-left prev-cust-addr text-fit-auto multi-line-text"></td></tr>
                                 <tr><td class="invoice-label">연락처/FAX</td><td class="inv-text-left prev-prov-tel text-fit-auto"></td><td class="invoice-label">배송지명(간판명)</td><td class="inv-text-left prev-cust-store text-fit-auto"></td></tr>
                                 <tr><td class="invoice-label">추 가 연 락 처</td><td class="inv-text-left prev-prov-add-tel text-fit-auto"></td><td class="invoice-label">연 락 처</td><td class="inv-text-left prev-cust-tel text-fit-auto"></td></tr>
                             </table>
@@ -642,7 +623,7 @@
         </div>
     </div>
 
-    <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
+    <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->a
     <script type="module" src="./js/admin-app.js"></script>
 </body>
 </html>
