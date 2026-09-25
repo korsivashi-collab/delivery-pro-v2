@@ -203,6 +203,7 @@ function parseOrderFromPageLines(lines, pageNum) {
     let senderName = '';
     let phone = '';
     let address = '';
+    let fullAddress = '';
     let memo = '';
     let orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
     let items = [];
@@ -274,7 +275,7 @@ function parseOrderFromPageLines(lines, pageNum) {
     // 상호명 앞 특수기호 및 닫는 괄호 정제
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
-    // 2단계: 주소 정제 규칙 (행정구역 탐지 ~ '(' 인식 시 뒷부분 즉시 절단)
+    // 2단계: 주소 추출 및 원본/정제 분리
     const combinedCandidate = fullBuyerString + ' ' + fullRawTextLines.join(' ');
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
     const regionMatch = fullBuyerString.match(regionRegex) || combinedCandidate.match(regionRegex);
@@ -282,16 +283,8 @@ function parseOrderFromPageLines(lines, pageNum) {
     if (regionMatch) {
         let rawAddr = regionMatch[0];
 
-        // 1. '(' 가 인식되면 '(' 와 뒷부분을 모두 날림
-        const parenIdx = rawAddr.indexOf('(');
-        if (parenIdx !== -1) {
-            rawAddr = rawAddr.slice(0, parenIdx);
-        }
-
-        // 2. 다른 필드 라벨이 나오기 전까지만 절단
+        // 필드 라벨 및 우편번호/잡음 정리
         rawAddr = rawAddr.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제)/)[0];
-
-        // 3. 우편번호 및 표 헤더 잔해 잡음('받 주소', '받', '주소', '|') 완벽 제거
         rawAddr = rawAddr.replace(/\[\d+\]/g, ' ')
                          .replace(/받\s*주소/g, ' ')
                          .replace(/\b받\b/g, ' ')
@@ -300,7 +293,17 @@ function parseOrderFromPageLines(lines, pageNum) {
                          .replace(/[:]/g, ' ')
                          .trim();
 
-        address = rawAddr.replace(/\s{2,}/g, ' ').trim();
+        // 🌟 원본 전체 주소 보존 (층, 호수, 괄호 등 인쇄용 상세정보 유지)
+        fullAddress = rawAddr.replace(/\s{2,}/g, ' ').trim();
+
+        // 🌟 내비/관제용 정제 주소: '(' 가 인식되면 뒷부분 절삭
+        let cleanAddr = fullAddress;
+        const parenIdx = cleanAddr.indexOf('(');
+        if (parenIdx !== -1) {
+            cleanAddr = cleanAddr.slice(0, parenIdx);
+        }
+
+        address = cleanAddr.replace(/\s{2,}/g, ' ').trim();
     }
 
     // 아이템 수량 합산 처리
@@ -320,7 +323,8 @@ function parseOrderFromPageLines(lines, pageNum) {
         senderName,
         orderNo,
         bizNo: '',
-        address,
+        address, // 내비/관제 목록 표시용 정제 주소
+        fullAddress: fullAddress || address, // 🌟 주문서 인쇄용 원본 상세 주소 (층수, 호수 보존)
         storeName,
         phone,
         itemName,
@@ -343,13 +347,11 @@ async function getCoordsFromAddress(address) {
     const cleanKey = address.trim();
     if (!cleanKey) return null;
 
-    // 🌟 1순위: 로컬 캐시 확인 (기존 변환된 주소면 카카오 API 호출 없이 즉시 반환)
     const cache = getGeoCache();
     if (cache[cleanKey]) {
         return cache[cleanKey];
     }
 
-    // 🌟 2순위: 캐시에 없는 새로운 주소만 카카오 API 호출
     return new Promise((resolve) => {
         if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
             resolve(null); 
@@ -368,7 +370,6 @@ async function getCoordsFromAddress(address) {
                     fullAddress: fullAddress 
                 };
 
-                // 새로운 변환 결과를 로컬 캐시에 저장하여 영구 재사용
                 cache[cleanKey] = resData;
                 saveGeoCache(cache);
 
@@ -396,6 +397,9 @@ export async function batchGeocodePdfList(items) {
         }
 
         if (item.address) {
+            // 🌟 fullAddress가 유실되지 않도록 보존
+            if (!item.fullAddress) item.fullAddress = item.address;
+
             const isCached = !!cache[item.address.trim()];
             const coords = await getCoordsFromAddress(item.address);
             if (coords) {
@@ -405,7 +409,6 @@ export async function batchGeocodePdfList(items) {
                     item.address = coords.fullAddress;
                 }
             }
-            // 캐시에서 가져온 주소는 딜레이 없이 즉시 처리, 신규 API 호출 시에만 40ms 안전 지연
             if (!isCached) {
                 await new Promise(r => setTimeout(r, 40));
             }
