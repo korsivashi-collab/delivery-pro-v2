@@ -84,10 +84,10 @@ import {
     sortPrintList
 } from "./admin-dispatch-print.js";
 
-// 🌟 신규 분리된 서식 에디터/빌더 모듈 가져오기
+// 🌟 서식 빌더 모듈 (삭제된 행 추가/삭제 import 제거 완료)
 import {
     parsePdfToEditableDocument, renderEditableDocument,
-    addDocTableRow, deleteDocTableRow, saveCurrentDocumentTemplate
+    saveCurrentDocumentTemplate
 } from "./admin-dispatch-template.js";
 
 import {
@@ -718,7 +718,6 @@ window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
-window.populateSenderFilterDropdown = populateSenderFilterDropdown;
 window.filterBySender = filterBySender;
 window.openPickingDriverModal = openPickingDriverModal;
 window.closePickingDriverModal = closePickingDriverModal;
@@ -731,8 +730,6 @@ window.sortPrintList = sortPrintList;
 // 🌟 [관제 신규 서식 빌더/에디터(Template)]
 window.parsePdfToEditableDocument = parsePdfToEditableDocument;
 window.renderEditableDocument = renderEditableDocument;
-window.addDocTableRow = addDocTableRow;
-window.deleteDocTableRow = deleteDocTableRow;
 window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 
 // [관제 데이터 추출(Export)]
