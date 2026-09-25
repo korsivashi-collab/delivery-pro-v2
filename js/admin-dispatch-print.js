@@ -47,39 +47,87 @@ export function previewInvoiceRow(idx) {
     document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
     document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
     
-    // 🌟 원본 전체 주소(fullAddress) 우선 표기 (층, 호수, 괄호 등 상세정보 온전 보존)
+    // 🌟 원본 전체 주소(fullAddress) 표기
     const displayAddr = item.fullAddress || item.address || '';
     document.querySelectorAll('.prev-cust-addr').forEach(el => {
         el.innerText = displayAddr;
         el.title = displayAddr;
     });
 
-    // 복수 상품(items) 또는 단일 상품 표시
-    let firstItemName = item.itemName || '';
-    let firstItemUnit = item.unit || '개';
-    let firstItemQty = item.qty || 1;
+    // 🌟 복수 상품을 5줄 테이블에 각각 전개하여 표시
+    const tbodyEls = document.querySelectorAll('.invoice-table tbody');
+    tbodyEls.forEach(tbody => {
+        // 품목 전개 대상이 되는 tbody (th가 없는 본문 테이블)
+        if (!tbody.querySelector('th')) {
+            const rows = tbody.querySelectorAll('tr.empty-row');
+            
+            // 먼저 모든 줄 초기화
+            rows.forEach((tr, rIdx) => {
+                const tds = tr.querySelectorAll('td');
+                if (tds.length >= 6) {
+                    tds[0].innerText = rIdx + 1; // No.
+                    tds[1].innerText = ''; // 상품명
+                    tds[2].innerText = ''; // 규격(단위)
+                    tds[3].innerText = ''; // 수량
+                    tds[4].innerText = ''; // 단가
+                    tds[5].innerText = ''; // 총액
+                }
+            });
 
-    if (item.items && item.items.length > 0) {
-        firstItemName = item.items[0].name;
-        firstItemUnit = item.items[0].unit || '개';
-        firstItemQty = item.items[0].qty || 1;
-        if (item.items.length > 1) {
-            firstItemName += ` 외 ${item.items.length - 1}건`;
+            // 상품 내역 기입
+            if (item.items && item.items.length > 0) {
+                item.items.forEach((it, i) => {
+                    if (i < 4) {
+                        // 1~4번 줄은 그대로 기입
+                        const tds = rows[i].querySelectorAll('td');
+                        tds[1].innerText = it.name || '';
+                        tds[2].innerText = it.unit || '개';
+                        tds[3].innerText = formatNumber(it.qty) || '1';
+                        tds[4].innerText = formatNumber(it.price) || '';
+                        tds[5].innerText = formatNumber(it.total) || '';
+                    } else if (i === 4) {
+                        // 5번째 줄에 5번째 아이템 기입
+                        const tds = rows[4].querySelectorAll('td');
+                        if (item.items.length === 5) {
+                            tds[1].innerText = it.name || '';
+                            tds[2].innerText = it.unit || '개';
+                            tds[3].innerText = formatNumber(it.qty) || '1';
+                            tds[4].innerText = formatNumber(it.price) || '';
+                            tds[5].innerText = formatNumber(it.total) || '';
+                        } else {
+                            // 상품이 6개 이상일 경우 5번째 줄에 요약 처리
+                            let remainQty = 0;
+                            let remainTotal = 0;
+                            for (let j = 4; j < item.items.length; j++) {
+                                remainQty += parseInt(item.items[j].qty, 10) || 1;
+                                remainTotal += parseInt(String(item.items[j].total).replace(/[^0-9]/g, ''), 10) || 0;
+                            }
+                            tds[1].innerText = `${it.name} 외 ${item.items.length - 5}건`;
+                            tds[2].innerText = '묶음';
+                            tds[3].innerText = formatNumber(remainQty);
+                            tds[4].innerText = '';
+                            tds[5].innerText = formatNumber(remainTotal);
+                        }
+                    }
+                });
+            } else {
+                // items 배열이 없는 예외 처리 시 기존 1줄 표기
+                const tds = rows[0].querySelectorAll('td');
+                tds[1].innerText = item.itemName || '';
+                tds[2].innerText = item.unit || '개';
+                tds[3].innerText = formatNumber(item.qty) || '1';
+                tds[4].innerText = formatNumber(item.price) || '';
+                tds[5].innerText = formatNumber(item.total) || '';
+            }
         }
-    }
-
-    document.querySelectorAll('.prev-item-name').forEach(el => el.innerText = firstItemName);
-    document.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = firstItemUnit);
-    document.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(firstItemQty));
-    document.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
-    document.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    });
     
     let payMethod = ''; 
     if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; 
     else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
     
     document.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (firstItemQty ? `${formatNumber(firstItemQty)}개` : ''));
+    document.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? `${formatNumber(item.qty)}개` : ''));
     document.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     document.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
     document.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
@@ -100,7 +148,6 @@ function generateInvoiceHTML(item, providerInfo) {
     const template = originalTemplate.cloneNode(true); 
     template.id = ''; 
 
-    // 양식 커스텀: 서식 제목 및 용지 배경색 반영
     const invTitle = providerInfo.formTitle || '주문서';
     const paperBg = providerInfo.paperBg || '#ffeb5c';
 
@@ -114,51 +161,89 @@ function generateInvoiceHTML(item, providerInfo) {
         el.style.backgroundColor = paperBg;
     });
 
-    // 공급자 정보 바인딩
     template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
     template.querySelectorAll('.prev-prov-name').forEach(el => el.innerText = providerInfo.name);
     template.querySelectorAll('.prev-prov-addr').forEach(el => el.innerText = providerInfo.addr);
     template.querySelectorAll('.prev-prov-tel').forEach(el => el.innerText = providerInfo.tel);
     template.querySelectorAll('.prev-prov-add-tel').forEach(el => el.innerText = providerInfo.addTel);
 
-    // 공급받는 자(고객) 정보 바인딩
     template.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || '');
     template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
     template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
     
-    // 🌟 A4 인쇄 시에도 원본 전체 주소(fullAddress) 반영 (층수, 호수 온전하게 출력)
     const printAddr = item.fullAddress || item.address || '';
     template.querySelectorAll('.prev-cust-addr').forEach(el => {
         el.innerText = printAddr;
     });
 
-    // 품목 리스트 바인딩
-    let firstItemName = item.itemName || '';
-    let firstItemUnit = item.unit || '개';
-    let firstItemQty = item.qty || 1;
+    // 🌟 인쇄 문서 생성 시에도 5줄 상품 테이블 개별 전개
+    const tbodyEls = template.querySelectorAll('.invoice-table tbody');
+    tbodyEls.forEach(tbody => {
+        if (!tbody.querySelector('th')) {
+            const rows = tbody.querySelectorAll('tr.empty-row');
+            
+            rows.forEach((tr, rIdx) => {
+                const tds = tr.querySelectorAll('td');
+                if (tds.length >= 6) {
+                    tds[0].innerText = rIdx + 1;
+                    tds[1].innerText = '';
+                    tds[2].innerText = '';
+                    tds[3].innerText = '';
+                    tds[4].innerText = '';
+                    tds[5].innerText = '';
+                }
+            });
 
-    if (item.items && item.items.length > 0) {
-        firstItemName = item.items[0].name;
-        firstItemUnit = item.items[0].unit || '개';
-        firstItemQty = item.items[0].qty || 1;
-        if (item.items.length > 1) {
-            firstItemName += ` 외 ${item.items.length - 1}건`;
+            if (item.items && item.items.length > 0) {
+                item.items.forEach((it, i) => {
+                    if (i < 4) {
+                        const tds = rows[i].querySelectorAll('td');
+                        tds[1].innerText = it.name || '';
+                        tds[2].innerText = it.unit || '개';
+                        tds[3].innerText = formatNumber(it.qty) || '1';
+                        tds[4].innerText = formatNumber(it.price) || '';
+                        tds[5].innerText = formatNumber(it.total) || '';
+                    } else if (i === 4) {
+                        const tds = rows[4].querySelectorAll('td');
+                        if (item.items.length === 5) {
+                            tds[1].innerText = it.name || '';
+                            tds[2].innerText = it.unit || '개';
+                            tds[3].innerText = formatNumber(it.qty) || '1';
+                            tds[4].innerText = formatNumber(it.price) || '';
+                            tds[5].innerText = formatNumber(it.total) || '';
+                        } else {
+                            let remainQty = 0;
+                            let remainTotal = 0;
+                            for (let j = 4; j < item.items.length; j++) {
+                                remainQty += parseInt(item.items[j].qty, 10) || 1;
+                                remainTotal += parseInt(String(item.items[j].total).replace(/[^0-9]/g, ''), 10) || 0;
+                            }
+                            tds[1].innerText = `${it.name} 외 ${item.items.length - 5}건`;
+                            tds[2].innerText = '묶음';
+                            tds[3].innerText = formatNumber(remainQty);
+                            tds[4].innerText = '';
+                            tds[5].innerText = formatNumber(remainTotal);
+                        }
+                    }
+                });
+            } else {
+                const tds = rows[0].querySelectorAll('td');
+                tds[1].innerText = item.itemName || '';
+                tds[2].innerText = item.unit || '개';
+                tds[3].innerText = formatNumber(item.qty) || '1';
+                tds[4].innerText = formatNumber(item.price) || '';
+                tds[5].innerText = formatNumber(item.total) || '';
+            }
         }
-    }
-
-    template.querySelectorAll('.prev-item-name').forEach(el => el.innerText = firstItemName);
-    template.querySelectorAll('.prev-item-unit').forEach(el => el.innerText = firstItemUnit);
-    template.querySelectorAll('.prev-item-qty').forEach(el => el.innerText = formatNumber(firstItemQty));
-    template.querySelectorAll('.prev-item-price').forEach(el => el.innerText = formatNumber(item.price) || '');
-    template.querySelectorAll('.prev-item-total').forEach(el => el.innerText = formatNumber(item.total) || '');
+    });
 
     let payMethod = ''; 
     if (item.memo && item.memo.includes('네이버페이')) payMethod = '네이버페이'; 
     else if (item.memo && item.memo.includes('카드')) payMethod = '카드결제';
     
     template.querySelectorAll('.prev-pay-method').forEach(el => el.innerText = payMethod);
-    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (firstItemQty ? `${formatNumber(firstItemQty)}개` : ''));
+    template.querySelectorAll('.prev-total-qty').forEach(el => el.innerText = (item.qty ? `${formatNumber(item.qty)}개` : ''));
     template.querySelectorAll('.prev-cust-memo').forEach(el => el.innerText = item.memo || '');
     template.querySelectorAll('.prev-shipping-fee').forEach(el => el.innerText = '0원');
     template.querySelectorAll('.prev-item-total-amt').forEach(el => el.innerText = (item.total ? `${formatNumber(item.total)}원` : ''));
@@ -264,7 +349,6 @@ export function printAggregatedItemList() {
         return;
     }
 
-    // 전체 품목 그룹화 및 수량 합산 로직
     const aggregationMap = {};
 
     targetOrders.forEach(order => {

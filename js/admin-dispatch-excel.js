@@ -244,7 +244,7 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 🌟 배송지 주소 원본 추출 및 cleanAddress 적용
+        // 2. 배송지 주소 원본 추출 및 cleanAddress 적용
         let rawAddress = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -258,9 +258,7 @@ export function processExcelData(jsonData) {
             }
         }
         
-        // 정제된 깔끔한 주소 (내비/관제용)
         const address = cleanAddress(rawAddress);
-        // 원본 전체 주소 (명세서 인쇄용: 층, 호수, 괄호 등 보존)
         const fullAddress = rawAddress || address;
 
         // 3. 상호 / 수령처명 추출
@@ -386,16 +384,32 @@ export function processExcelData(jsonData) {
 
         if (!address && !storeName && !itemName) return;
 
+        // 🌟 단가 및 총액 숫자형 변환 (누적 계산용)
+        let numPrice = parseInt(String(price).replace(/[^0-9]/g, ''), 10) || 0;
+        let numTotal = parseInt(String(total).replace(/[^0-9]/g, ''), 10) || 0;
+        
+        // 총액이 없고 단가와 수량이 있으면 자동 계산
+        if (!numTotal && numPrice && qty) {
+            numTotal = numPrice * qty;
+        }
+
         const orderKey = orderNo || `${address}___${storeName}`;
         const itemObj = { 
             name: itemName || '상품명 미지정', 
             qty: qty, 
-            unit: unit || '개' 
+            unit: unit || '개',
+            price: numPrice || price, // 🌟 개별 아이템 가격 보존
+            total: numTotal || total  // 🌟 개별 아이템 총액 보존
         };
 
         if (orderMap[orderKey]) {
             orderMap[orderKey].items.push(itemObj);
             orderMap[orderKey].qty += qty;
+            
+            // 🌟 주문 전체 합계 금액 누적 갱신
+            let currentGrandTotal = parseInt(String(orderMap[orderKey].total).replace(/[^0-9]/g, ''), 10) || 0;
+            orderMap[orderKey].total = String(currentGrandTotal + numTotal);
+
             if (!orderMap[orderKey].phone && phone) orderMap[orderKey].phone = phone;
             if (!orderMap[orderKey].memo && memo) orderMap[orderKey].memo = memo;
             if (!orderMap[orderKey].fullAddress && fullAddress) orderMap[orderKey].fullAddress = fullAddress;
@@ -407,14 +421,14 @@ export function processExcelData(jsonData) {
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
                 bizNo: bizNo,
                 address: address, // 정제 주소 (내비/관제용)
-                fullAddress: fullAddress, // 🌟 명세서 인쇄용 원본 전체 주소
+                fullAddress: fullAddress, // 명세서 인쇄용 원본 전체 주소
                 storeName: storeName || senderName || '배송처',
                 phone: phone,
                 itemName: itemName,
                 unit: unit || '개',
                 qty: qty,
-                price: price,
-                total: total,
+                price: numPrice || price,
+                total: numTotal ? String(numTotal) : total, // 🌟 초기 합계 설정
                 memo: memo,
                 lat: null,
                 lng: null,
