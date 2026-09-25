@@ -38,6 +38,36 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
+// 🌟 0-1. 주소 앞/뒤 군더더기 및 상세 층/호수 정밀 절삭 헬퍼
+// ==========================================
+export function cleanAddress(rawAddr) {
+    if (!rawAddr || typeof rawAddr !== 'string') return '';
+    let addr = rawAddr.trim().replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ');
+
+    // 1. 앞부분 잡동사니 제거 (시/도 명칭 시작점 감지)
+    const provinceRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별|광역|자치)?(?:시|도)?/;
+    const startIdx = addr.search(provinceRegex);
+    if (startIdx > 0) {
+        addr = addr.substring(startIdx).trim();
+    }
+
+    // 2. 도로명/지번 번지수 + 선택적 법정동 (동/리/가) 이후의 상세 텍스트(건물명, 상호, 층수, 호수 등) 절삭
+    // 패턴 1: 시/도 ~ 번지수 + (단일 법정동)
+    const matchWithDong = addr.match(/^((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+)\s*(\([가-힣0-9]+(?:동\vert{}리\vert{}가)\))/);
+    if (matchWithDong && matchWithDong[1]) {
+        return `${matchWithDong[1].trim()} ${matchWithDong[2].trim()}`.trim();
+    }
+
+    // 패턴 2: 괄호 없이 번지수까지만 추출 (뒤의 복잡한 괄호 및 층/호수 일체 절삭)
+    const matchBase = addr.match(/^((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+)/);
+    if (matchBase && matchBase[1]) {
+        return matchBase[1].trim();
+    }
+
+    return addr;
+}
+
+// ==========================================
 // 1. Firebase 엑셀/주문 데이터 연동
 // ==========================================
 export async function loadExcelFromFirebase() {
@@ -70,7 +100,7 @@ export async function autoSaveExcelToFirebase() {
 }
 
 // ==========================================
-// 🌟 2. 엑셀/주문 테이블 화면 렌더링 (담당 기사 드롭다운 및 주소 선명화 반영)
+// 2. 엑셀/주문 테이블 화면 렌더링
 // ==========================================
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); 
@@ -84,12 +114,10 @@ export function renderExcelTable() {
         return;
     }
 
-    // 소속 운행 기사 목록 가져오기
     const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : state.allLicenses.filter(l => l.type !== 'dispatch');
 
     let html = '';
     state.parsedExcelList.forEach((item, idx) => {
-        // 담당 기사 변경 드롭다운 생성
         let driverSelectOptions = `<option value="">-- 미배정 --</option>`;
         visibleDrivers.forEach(d => {
             const dName = d.phone || d.key;
@@ -140,7 +168,6 @@ export function renderExcelTable() {
     });
     tbody.innerHTML = html;
     
-    // 전체 선택/해제 체크박스 이벤트 바인딩
     const chkAll = document.getElementById('chk-excel-all');
     if (chkAll) { 
         chkAll.checked = false; 
@@ -163,7 +190,7 @@ export function processExcelData(jsonData) {
     jsonData.forEach((row, rowIdx) => {
         const keys = Object.keys(row);
 
-        // 1. 전화번호 추출 ('쿠폰', '포인트' 오매칭 철저 차단)
+        // 1. 전화번호 추출
         let phoneVal = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -200,7 +227,7 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 배송지 주소 추출
+        // 2. 배송지 주소 추출 및 정밀 절삭
         let address = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -213,7 +240,8 @@ export function processExcelData(jsonData) {
                 }
             }
         }
-        address = address.replace(/^\[\d+\]\s*/, '').trim();
+        // 🌟 앞/뒤 군더더기 자동 절삭 적용
+        address = cleanAddress(address.replace(/^\[\d+\]\s*/, '').trim());
 
         // 3. 상호 / 수령처명 추출
         let storeName = '';
@@ -438,6 +466,10 @@ export async function handleExcelUpload(e) {
         if (isPdf) {
             const parsedPdfOrders = await processSinglePdfFile(file);
             if (parsedPdfOrders && parsedPdfOrders.length > 0) {
+                // PDF 주문 주소도 cleanAddress로 한 번 더 확실하게 정제
+                parsedPdfOrders.forEach(ord => {
+                    if (ord.address) ord.address = cleanAddress(ord.address);
+                });
                 state.parsedExcelList.push(...parsedPdfOrders);
                 newlyAddedList.push(...parsedPdfOrders);
             }
@@ -477,13 +509,12 @@ export function processSingleExcelFile(file) {
 }
 
 // ==========================================
-// 🌟 5. 주소 -> 정밀 좌표(위/경도) 3단계 스마트 지오코딩 엔진
+// 5. 주소 -> 정밀 좌표(위/경도) 3단계 스마트 지오코딩 엔진
 // ==========================================
 function cleanAddressForSearch(addr) {
     if (!addr) return '';
-    let clean = addr.replace(/^\[\d+\]\s*/, ''); // 우편번호 제거
-    clean = clean.replace(/\([^)]*\)/g, ' '); // 괄호 제거
-    // 부속 층, 호수, 지하 등 상세 설명 텍스트 제거
+    let clean = addr.replace(/^\[\d+\]\s*/, '');
+    clean = clean.replace(/\([^)]*\)/g, ' ');
     clean = clean.replace(/\s+(지하|지상)?\s*\d+층.*$/i, '');
     clean = clean.replace(/\s+\d+호.*$/i, '');
     clean = clean.replace(/\s+B\d+.*$/i, '');
@@ -492,14 +523,15 @@ function cleanAddressForSearch(addr) {
 
 function getCoordsFromAddress(address, storeName = '') {
     return new Promise((resolve) => {
-        if (!address || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
+        const targetAddr = cleanAddress(address);
+        if (!targetAddr || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
             resolve(null); 
             return; 
         }
         const geocoder = new window.kakao.maps.services.Geocoder();
 
-        // [1차 시도] 원본 주소로 직접 검색
-        geocoder.addressSearch(address.trim(), (res1, stat1) => {
+        // [1차 시도] cleanAddress로 정리된 주소로 검색
+        geocoder.addressSearch(targetAddr.trim(), (res1, stat1) => {
             if (stat1 === window.kakao.maps.services.Status.OK && res1[0]) {
                 const fullAddr = (res1[0].road_address && res1[0].road_address.address_name) 
                     ? res1[0].road_address.address_name 
@@ -508,9 +540,9 @@ function getCoordsFromAddress(address, storeName = '') {
                 return;
             }
 
-            // [2차 시도] 괄호 및 상세 층/호수를 정제한 주소로 재검색
-            const cleanAddr = cleanAddressForSearch(address);
-            if (cleanAddr && cleanAddr !== address.trim()) {
+            // [2차 시도] 괄호까지 완전히 제거한 주소로 재검색
+            const cleanAddr = cleanAddressForSearch(targetAddr);
+            if (cleanAddr && cleanAddr !== targetAddr.trim()) {
                 geocoder.addressSearch(cleanAddr, (res2, stat2) => {
                     if (stat2 === window.kakao.maps.services.Status.OK && res2[0]) {
                         const fullAddr = (res2[0].road_address && res2[0].road_address.address_name) 
@@ -554,10 +586,15 @@ async function batchGeocodeExcelList(items) {
                 </div>`;
         }
         if (item.address && (!item.lat || !item.lng)) {
+            item.address = cleanAddress(item.address);
             const coords = await getCoordsFromAddress(item.address, item.storeName);
             if (coords) { 
                 item.lat = coords.lat; 
                 item.lng = coords.lng; 
+                // 🌟 카카오 공식 표준 도로명 주소로 동기화하여 내비게이션 검색 100% 호환
+                if (coords.fullAddress) {
+                    item.address = coords.fullAddress;
+                }
             }
             await new Promise(r => setTimeout(r, 45));
         }
@@ -630,6 +667,7 @@ export async function clearAllExcelRows() {
 // 7. 전역 Window 객체 바인딩
 // ==========================================
 window.formatPhoneNumber = formatPhoneNumber;
+window.cleanAddress = cleanAddress;
 window.loadExcelFromFirebase = loadExcelFromFirebase;
 window.autoSaveExcelToFirebase = autoSaveExcelToFirebase;
 window.renderExcelTable = renderExcelTable;
