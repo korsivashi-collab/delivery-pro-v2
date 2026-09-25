@@ -261,11 +261,11 @@ export function processExcelData(jsonData) {
         const address = cleanAddress(rawAddress);
         const fullAddress = rawAddress || address;
 
-        // 3. 상호 / 수령처명 추출
+        // 3. 🌟 상호 / 수령처명 (받으시는 분) 정밀 추출
         let storeName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (/배송지명|간판명|간판|수령처|상호명|상호|받는분|수령인|수신자|가게명|매장명/i.test(ck)) {
+            if (/배송지명|간판명|간판|수령처|상호명|상호|받는분|수령인|수신자|수취인|가게명|매장명/i.test(ck)) {
                 if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                     storeName = String(row[k]).trim();
                     break;
@@ -273,11 +273,11 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 4. 발송자 / 구매자명 추출
+        // 4. 🌟 발송자 / 구매자명 (발송회사, 위탁처 등) 정밀 추출
         let senderName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (/구매자명|주문자명|보내는분|발송자|발주자|주문자|구매자/i.test(ck)) {
+            if (/발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는분|보내는사람|구매자명|주문자명|발주자|주문자|구매자/i.test(ck)) {
                 if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                     senderName = String(row[k]).trim();
                     break;
@@ -384,7 +384,7 @@ export function processExcelData(jsonData) {
 
         if (!address && !storeName && !itemName) return;
 
-        // 🌟 단가 및 총액 숫자형 변환 (누적 계산용)
+        // 단가 및 총액 숫자형 변환 (누적 계산용)
         let numPrice = parseInt(String(price).replace(/[^0-9]/g, ''), 10) || 0;
         let numTotal = parseInt(String(total).replace(/[^0-9]/g, ''), 10) || 0;
         
@@ -398,15 +398,15 @@ export function processExcelData(jsonData) {
             name: itemName || '상품명 미지정', 
             qty: qty, 
             unit: unit || '개',
-            price: numPrice || price, // 🌟 개별 아이템 가격 보존
-            total: numTotal || total  // 🌟 개별 아이템 총액 보존
+            price: numPrice || price, 
+            total: numTotal || total  
         };
 
         if (orderMap[orderKey]) {
             orderMap[orderKey].items.push(itemObj);
             orderMap[orderKey].qty += qty;
             
-            // 🌟 주문 전체 합계 금액 누적 갱신
+            // 주문 전체 합계 금액 누적 갱신
             let currentGrandTotal = parseInt(String(orderMap[orderKey].total).replace(/[^0-9]/g, ''), 10) || 0;
             orderMap[orderKey].total = String(currentGrandTotal + numTotal);
 
@@ -417,7 +417,7 @@ export function processExcelData(jsonData) {
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
                 assignedDriver: null,
-                senderName: senderName,
+                senderName: senderName || '발송처 미상',
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
                 bizNo: bizNo,
                 address: address, // 정제 주소 (내비/관제용)
@@ -428,7 +428,7 @@ export function processExcelData(jsonData) {
                 unit: unit || '개',
                 qty: qty,
                 price: numPrice || price,
-                total: numTotal ? String(numTotal) : total, // 🌟 초기 합계 설정
+                total: numTotal ? String(numTotal) : total, 
                 memo: memo,
                 lat: null,
                 lng: null,

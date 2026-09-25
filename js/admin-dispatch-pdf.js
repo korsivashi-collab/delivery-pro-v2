@@ -240,13 +240,15 @@ function parseOrderFromPageLines(lines, pageNum) {
 
     // 1단계: 수취자 영역에서 상호 및 연락처 탐색
     buyerSectionLines.forEach(text => {
-        if (/(?:배송지명|간판명|매장명|가게명|상호명|상호)/.test(text)) {
-            let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호)\s*[:|]?\s*/i, '').trim();
+        // 🌟 수령처 (받으시는 분, 배송지)
+        if (/(?:배송지명|간판명|매장명|가게명|상호명|상호|수령인|수신자|수취인|받는\s*분|받는분)/.test(text)) {
+            let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호|수령인|수신자|수취인|받는\s*분|받는분)\s*[:|]?\s*/i, '').trim();
             if (val && !/^\d+$/.test(val)) storeName = val; 
         }
         
-        if (!senderName && /(?:구매자명|주문자명|주문자|수령인|수신자|받는\s*분|받는분|고객명)/.test(text)) {
-            let val = text.replace(/.*(?:구매자명|주문자명|주문자|수령인|수신자|받는\s*분|받는분|고객명)\s*[:|]?\s*/i, '').trim();
+        // 🌟 발송자 (보내는 분, 판매처, 주문자)
+        if (!senderName && /(?:발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는\s*분|보내는분|보내는사람|구매자명|주문자명|주문자|발주자|구매자|고객명)/.test(text)) {
+            let val = text.replace(/.*(?:발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는\s*분|보내는분|보내는사람|구매자명|주문자명|주문자|발주자|구매자|고객명)\s*[:|]?\s*/i, '').trim();
             if (val && !/^\d+$/.test(val)) senderName = val;
         }
         
@@ -261,11 +263,11 @@ function parseOrderFromPageLines(lines, pageNum) {
 
     const fullBuyerString = buyerSectionLines.join(' ');
     if (!storeName) {
-        const m = fullBuyerString.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
+        const m = fullBuyerString.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호|수령인|받는\s*분)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
         if (m) storeName = m[1].trim();
     }
     if (!senderName) {
-        const m = fullBuyerString.match(/(?:구매자명|수령인|받는\s*분)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
+        const m = fullBuyerString.match(/(?:구매자명|주문자명|보내는\s*분|판매처|발송자)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
         if (m) senderName = m[1].trim();
     }
 

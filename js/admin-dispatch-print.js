@@ -4,6 +4,7 @@ import { state, getLocalDateString } from "./admin-state.js";
 import { formatNumber } from "./admin-dispatch-core.js";
 
 let invoiceSearchKeyword = '';
+let currentInvoiceSort = 'default'; // 정렬 상태 변수 추가
 
 // ==========================================
 // 1. 주문서 통합관리 모달 열기 & 초기화
@@ -33,8 +34,14 @@ export function exportToInvoiceModal() {
 
     state.currentPreviewInvoiceIndex = 0;
     invoiceSearchKeyword = '';
+    currentInvoiceSort = 'default'; // 모달 열때 정렬 초기화
+    
     const searchInput = document.getElementById('invoice-search-input');
     if (searchInput) searchInput.value = '';
+    const sortSelect = document.getElementById('invoice-sort-select');
+    if (sortSelect) sortSelect.value = 'default';
+
+    toggleFormVisibility(false); // 초기 로드 시 기본 폼 숨기기
 
     initTemplatePdfDropZone();
     loadSavedForms(); 
@@ -43,25 +50,59 @@ export function exportToInvoiceModal() {
     syncPreviewData();
 }
 
+// 🌟 폼 가시성 토글 헬퍼 함수
+function toggleFormVisibility(isVisible) {
+    const printArea = document.getElementById('print-area');
+    const placeholder = document.getElementById('preview-placeholder');
+    if (printArea && placeholder) {
+        if (isVisible) {
+            printArea.classList.remove('opacity-0', 'pointer-events-none');
+            placeholder.classList.add('opacity-0', 'pointer-events-none');
+        } else {
+            printArea.classList.add('opacity-0', 'pointer-events-none');
+            placeholder.classList.remove('opacity-0', 'pointer-events-none');
+        }
+    }
+}
+
 // ==========================================
-// 2. 좌측 인쇄 대상 리스트 렌더링 및 선택 제어 (발송자 정보 보존)
+// 2. 좌측 인쇄 대상 리스트 렌더링, 정렬 및 선택 제어
 // ==========================================
 function getFilteredPrintOrders() {
     if (!state.printReadyList) return [];
-    if (!invoiceSearchKeyword) return state.printReadyList;
+    let list = [...state.printReadyList];
 
-    return state.printReadyList.filter(item => {
-        const sName = (item.senderName || '').toLowerCase();
-        const store = (item.storeName || '').toLowerCase();
-        const addr = (item.address || item.fullAddress || '').toLowerCase();
-        const phone = (item.phone || '').toLowerCase();
-        const orderNo = (item.orderNo || '').toLowerCase();
-        return sName.includes(invoiceSearchKeyword) || 
-               store.includes(invoiceSearchKeyword) || 
-               addr.includes(invoiceSearchKeyword) || 
-               phone.includes(invoiceSearchKeyword) ||
-               orderNo.includes(invoiceSearchKeyword);
-    });
+    // 1단계: 검색 필터링
+    if (invoiceSearchKeyword) {
+        list = list.filter(item => {
+            const sName = (item.senderName || '').toLowerCase();
+            const store = (item.storeName || '').toLowerCase();
+            const addr = (item.address || item.fullAddress || '').toLowerCase();
+            const phone = (item.phone || '').toLowerCase();
+            const orderNo = (item.orderNo || '').toLowerCase();
+            return sName.includes(invoiceSearchKeyword) || 
+                   store.includes(invoiceSearchKeyword) || 
+                   addr.includes(invoiceSearchKeyword) || 
+                   phone.includes(invoiceSearchKeyword) ||
+                   orderNo.includes(invoiceSearchKeyword);
+        });
+    }
+
+    // 🌟 2단계: 정렬 처리
+    if (currentInvoiceSort === 'sender') {
+        list.sort((a, b) => (a.senderName || '').localeCompare(b.senderName || ''));
+    } else if (currentInvoiceSort === 'recipient') {
+        list.sort((a, b) => (a.storeName || '').localeCompare(b.storeName || ''));
+    } else if (currentInvoiceSort === 'address') {
+        list.sort((a, b) => (a.address || '').localeCompare(b.address || ''));
+    }
+
+    return list;
+}
+
+export function sortInvoicePrintList(sortType) {
+    currentInvoiceSort = sortType;
+    renderInvoiceOrderList();
 }
 
 export function filterInvoicePrintList(query) {
@@ -170,6 +211,11 @@ export function previewInvoiceRow(idx) {
         labelEl.innerText = `#${idx + 1} ${sName}${item.storeName || item.address || ''}`;
     }
 
+    // 🌟 담당 기사 마킹 추가
+    document.querySelectorAll('.prev-assigned-driver').forEach(el => {
+        el.innerText = item.assignedDriver ? item.assignedDriver : '미배정';
+    });
+
     document.querySelectorAll('.prev-cust-regno').forEach(el => el.innerText = item.bizNo || '');
     document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || ''); 
     document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
@@ -181,7 +227,6 @@ export function previewInvoiceRow(idx) {
         el.title = displayAddr;
     });
 
-    // 복수 상품 5줄 테이블 전개
     const tbodyEls = document.querySelectorAll('.invoice-table tbody');
     tbodyEls.forEach(tbody => {
         if (!tbody.querySelector('th')) {
@@ -268,6 +313,9 @@ function generateInvoiceHTML(item, providerInfo) {
     if (!originalTemplate) return '';
     const template = originalTemplate.cloneNode(true); 
     template.id = ''; 
+    
+    // 강제 노출 클래스 적용 (인쇄 시 투명도 무시)
+    template.classList.remove('opacity-0', 'pointer-events-none');
 
     const invTitle = providerInfo.formTitle || '주문서';
     const paperBg = providerInfo.paperBg || '#ffeb5c';
@@ -280,6 +328,11 @@ function generateInvoiceHTML(item, providerInfo) {
 
     template.querySelectorAll('.invoice-half').forEach(el => {
         el.style.backgroundColor = paperBg;
+    });
+
+    // 🌟 담당 기사 마킹 추가
+    template.querySelectorAll('.prev-assigned-driver').forEach(el => {
+        el.innerText = item.assignedDriver ? item.assignedDriver : '미배정';
     });
 
     template.querySelectorAll('.prev-prov-regno').forEach(el => el.innerText = providerInfo.regno);
@@ -406,6 +459,13 @@ export function executeBatchPrint() {
         return;
     }
 
+    // 기본 양식이 비어있을 경우 인쇄 방지 로직 보강
+    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    if (savedForms.length === 0 && (!document.getElementById('input-prov-name') || !document.getElementById('input-prov-name').value.trim())) {
+        alert("저장된 양식이 없습니다. 우측에서 공급자 양식을 먼저 생성/저장하거나 PDF를 업로드 해주세요.");
+        return;
+    }
+
     const btn1 = document.getElementById('btn-batch-print');
     const btn2 = document.getElementById('btn-batch-print-top');
     [btn1, btn2].forEach(btn => {
@@ -426,7 +486,6 @@ export function executeBatchPrint() {
         paperBg: '#ffeb5c'
     };
 
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     if (state.currentSelectedFormIndex !== null && savedForms[state.currentSelectedFormIndex]) {
         const activeForm = savedForms[state.currentSelectedFormIndex];
         if (activeForm.formTitle) providerInfo.formTitle = activeForm.formTitle;
@@ -445,8 +504,8 @@ export function executeBatchPrint() {
     const doc = iframe.contentWindow.document; 
     doc.open();
     doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
-        * { box-sizing: border-box; } @media print { @page { size: A4 portrait; margin: 0; } body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; } .invoice-half { height: 148mm; page-break-inside: avoid; } }
-        body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; } .invoice-container { width: 210mm; height: 297mm; margin: 0 auto; display: flex; flex-direction: column; } .invoice-half { height: 148mm; padding: 5mm 8mm; display: flex; flex-direction: column; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; } .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; } .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; } .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; } .double-height { height: 54px !important; } .double-height td { height: 54px !important; } .multi-line-text { white-space: normal !important; line-height: 1.3; } .invoice-table th { font-weight: bold; text-align: center; } .invoice-label { font-weight: bold; text-align: center; white-space: nowrap; } .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; } .text-fit-auto { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .inv-text-center { text-align: center; } .inv-text-left { text-align: left; padding-left: 6px !important; } .inv-text-right { text-align: right; padding-right: 6px !important; } .inv-font-bold { font-weight: bold; }
+        * { box-sizing: border-box; } @media print { @page { size: A4 portrait; margin: 0; } body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } .invoice-container { box-shadow: none !important; border: none !important; margin: 0 !important; page-break-after: always; width: 210mm; height: 297mm; opacity: 1 !important; pointer-events: auto !important; } .invoice-half { height: 148mm; page-break-inside: avoid; } }
+        body { background: white; margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; } .invoice-container { width: 210mm; height: 297mm; margin: 0 auto; display: flex; flex-direction: column; opacity: 1 !important; } .invoice-half { height: 148mm; padding: 5mm 8mm; display: flex; flex-direction: column; -webkit-print-color-adjust: exact; print-color-adjust: exact; } .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 0; } .invoice-title { text-align: center; font-size: 21px; font-weight: 900; letter-spacing: 6px; text-decoration: underline; margin-bottom: 5px; } .invoice-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed; } .invoice-table th, .invoice-table td { border: 1px solid #000; padding: 2px 5px; height: 27px; vertical-align: middle; overflow: hidden; word-break: break-all; } .double-height { height: 54px !important; } .double-height td { height: 54px !important; } .multi-line-text { white-space: normal !important; line-height: 1.3; } .invoice-table th { font-weight: bold; text-align: center; } .invoice-label { font-weight: bold; text-align: center; white-space: nowrap; } .writing-mode-vertical { writing-mode: vertical-rl; text-orientation: upright; text-align: center; letter-spacing: 3px; } .text-fit-auto { font-size: 9.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .inv-text-center { text-align: center; } .inv-text-left { text-align: left; padding-left: 6px !important; } .inv-text-right { text-align: right; padding-right: 6px !important; } .inv-font-bold { font-weight: bold; }
     </style></head><body>${printContents}</body></html>`);
     doc.close();
 
@@ -468,15 +527,95 @@ export function executeBatchPrint() {
 }
 
 // ==========================================
-// 5. 창고 상차 및 검수용 전체 상품 합산 피킹 리스트
+// 5. 🌟 창고 상차 피킹 리스트 및 기사 선택 모달
 // ==========================================
-export function printAggregatedItemList() {
-    const selectedOrders = (state.printReadyList && state.printReadyList.length > 0)
-        ? state.printReadyList.filter(item => item._selected !== false)
-        : state.parsedExcelList;
 
-    if (!selectedOrders || selectedOrders.length === 0) {
-        alert("집계할 배송 주문 데이터가 없습니다.");
+export const pickingModalState = {
+    selectedDrivers: new Set()
+};
+
+export function openPickingDriverModal() {
+    pickingModalState.selectedDrivers.clear();
+    const drivers = state.parsedExcelList.map(o => o.assignedDriver).filter(Boolean);
+    const uniqueDrivers = [...new Set(drivers)];
+
+    // 초기에는 전체 기사 선택
+    uniqueDrivers.forEach(d => pickingModalState.selectedDrivers.add(d));
+
+    const modal = document.getElementById('picking-driver-modal');
+    if (modal) modal.classList.remove('hidden');
+
+    renderPickingDriverList(uniqueDrivers);
+}
+
+export function closePickingDriverModal() {
+    const modal = document.getElementById('picking-driver-modal');
+    if (modal) modal.classList.add('hidden');
+}
+
+export function toggleAllPickingDrivers(isChecked) {
+    const drivers = state.parsedExcelList.map(o => o.assignedDriver).filter(Boolean);
+    const uniqueDrivers = [...new Set(drivers)];
+
+    if (isChecked) {
+        uniqueDrivers.forEach(d => pickingModalState.selectedDrivers.add(d));
+    } else {
+        pickingModalState.selectedDrivers.clear();
+    }
+    renderPickingDriverList(uniqueDrivers);
+}
+
+export function togglePickingDriver(driver) {
+    if (pickingModalState.selectedDrivers.has(driver)) {
+        pickingModalState.selectedDrivers.delete(driver);
+    } else {
+        pickingModalState.selectedDrivers.add(driver);
+    }
+    const drivers = [...new Set(state.parsedExcelList.map(o => o.assignedDriver).filter(Boolean))];
+    renderPickingDriverList(drivers);
+}
+
+export function renderPickingDriverList(uniqueDrivers) {
+    const listEl = document.getElementById('picking-driver-list');
+    if (!listEl) return;
+
+    if (uniqueDrivers.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-xs font-bold">배정된 기사가 없습니다. 자동할당을 먼저 진행하세요.</div>`;
+        return;
+    }
+
+    let html = '';
+    uniqueDrivers.forEach(d => {
+        const isChecked = pickingModalState.selectedDrivers.has(d);
+        html += `
+        <label class="flex items-center justify-between p-3 bg-white border ${isChecked ? 'border-blue-500 bg-blue-50/40 ring-1 ring-blue-300' : 'border-gray-200 hover:bg-gray-50'} rounded-xl cursor-pointer transition shadow-xs">
+            <div class="flex items-center gap-3">
+                <input type="checkbox" onchange="window.togglePickingDriver('${d}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                <span class="font-black text-sm text-gray-900 block leading-tight"><i class="fa-solid fa-truck text-blue-500 mr-1.5 text-xs"></i>${d}</span>
+            </div>
+            <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${isChecked ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}">${isChecked ? '선택됨' : '제외'}</span>
+        </label>`;
+    });
+    listEl.innerHTML = html;
+
+    const chkAll = document.getElementById('chk-picking-all');
+    if (chkAll) {
+        chkAll.checked = (pickingModalState.selectedDrivers.size === uniqueDrivers.length && uniqueDrivers.length > 0);
+    }
+}
+
+export function executePickingListPrint() {
+    if (pickingModalState.selectedDrivers.size === 0) {
+        alert("출력할 기사를 1명 이상 선택해 주세요.");
+        return;
+    }
+
+    const selectedOrders = state.parsedExcelList.filter(item => 
+        item.assignedDriver && pickingModalState.selectedDrivers.has(item.assignedDriver)
+    );
+
+    if (selectedOrders.length === 0) {
+        alert("선택된 기사에게 배정된 상품이 없습니다.");
         return;
     }
 
@@ -548,10 +687,10 @@ export function printAggregatedItemList() {
         .sign-box { border-bottom: 1px solid #000; width: 90px; display: inline-block; text-align: center; }
     </style></head><body>
     <div class="print-page">
-        <div class="header-title">창고 상차 및 검수용 전체 상품 합산 피킹 리스트</div>
+        <div class="header-title">창고 상차 및 검수용 상품 피킹 리스트</div>
         <div class="meta-info">
             <span>출력일자: ${dateStr}</span>
-            <span>배송 경로 PRO 통합물류시스템</span>
+            <span>지정된 기사: ${pickingModalState.selectedDrivers.size}명 배정 물량 분</span>
         </div>
         <div class="summary-box">
             <span>총 배송처: <b>${selectedOrders.length}</b>곳</span>
@@ -602,9 +741,11 @@ export function printAggregatedItemList() {
             iframe.contentWindow.focus();
             iframe.contentWindow.print();
             setTimeout(() => { document.body.removeChild(iframe); }, 1000);
+            closePickingDriverModal();
         }, 600);
     };
 }
+
 
 // ==========================================
 // 6. 기본 양식제작용 PDF 드롭존 초기화 및 1페이지 자동인식
@@ -723,6 +864,8 @@ export async function handleTemplatePdfFile(file) {
         }
 
         syncPreviewData();
+        toggleFormVisibility(true); // 성공적으로 읽으면 양식 표시
+
         alert(`[PDF 양식 인식 완료]\n\n업로드된 PDF의 1페이지에서 공급자 양식 정보를 추출했습니다.\n우측 공급자 정보 확인/수정란에서 내용을 검토 후 [폼 저장]을 눌러 기본 양식으로 등록해 주세요.`);
     } catch (e) {
         console.error("PDF 양식 파싱 오류:", e);
@@ -843,6 +986,8 @@ export function applySavedForm(idx) {
     if (telInput) telInput.value = form.tel || '';
     if (addTelInput) addTelInput.value = form.addTel || '';
 
+    toggleFormVisibility(true); // 폼 선택 시 양식 보이기
+
     loadSavedForms(); 
     syncPreviewData();
 }
@@ -909,6 +1054,8 @@ export function cancelProviderFormEdit() {
         accordion.classList.remove('flex'); 
     }
     
+    toggleFormVisibility(false); // 초기화 시 폼 숨기기
+
     loadSavedForms(); 
     syncPreviewData();
 }
@@ -917,6 +1064,7 @@ export function cancelProviderFormEdit() {
 // 8. 전역 Window 객체 바인딩
 // ==========================================
 window.exportToInvoiceModal = exportToInvoiceModal;
+window.sortInvoicePrintList = sortInvoicePrintList; // 정렬 함수
 window.filterInvoicePrintList = filterInvoicePrintList;
 window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
 window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
@@ -925,7 +1073,6 @@ window.previewInvoiceRow = previewInvoiceRow;
 window.syncPreviewData = syncPreviewData;
 window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
-window.printAggregatedItemList = printAggregatedItemList;
 window.initTemplatePdfDropZone = initTemplatePdfDropZone;
 window.handleTemplatePdfFile = handleTemplatePdfFile;
 window.setAsDefaultForm = setAsDefaultForm;
@@ -936,3 +1083,9 @@ window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
+// 피킹 리스트 관련 전역 바인딩
+window.openPickingDriverModal = openPickingDriverModal;
+window.closePickingDriverModal = closePickingDriverModal;
+window.toggleAllPickingDrivers = toggleAllPickingDrivers;
+window.togglePickingDriver = togglePickingDriver;
+window.executePickingListPrint = executePickingListPrint;
