@@ -85,7 +85,7 @@ export function renderSidebar() {
 }
 
 // ==========================================
-// 🌟 2. 배송 관리 모드 - 기사 목록 및 상세 뷰 (라이선스 키 기반 계정 100% 인식 패치)
+// 2. 배송 관리 모드 - 기사 목록 및 상세 뷰
 // ==========================================
 export function renderDriverListView() {
     const headerEl = document.getElementById('sidebar-header');
@@ -110,7 +110,6 @@ export function renderDriverListView() {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         
-        // 🌟 핵심 수정: deviceId뿐만 아니라 라이선스 키(lic.key)로 저장된 동선 데이터도 완벽하게 조회
         const routeData = state.activeRoutes[devId] || 
                           (lic.deviceId ? state.activeRoutes[lic.deviceId] : null) || 
                           (lic.key ? state.activeRoutes[lic.key] : null) || 
@@ -123,7 +122,6 @@ export function renderDriverListView() {
         }
         const rawDests = driverRoute ? driverRoute.destinations || [] : [];
 
-        // 완료 건 매칭도 deviceId, key, phone 3가지를 모두 대조
         const driverDone = state.allCompletions.filter(c => {
             const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || 
                                (c.deviceId === lic.key) || 
@@ -177,7 +175,6 @@ export function renderDriverDetailView(devId) {
     const contentEl = document.getElementById('sidebar-content');
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
     
-    // 🌟 상세 뷰에서도 라이선스 키와 deviceId를 상호 보완하여 동선 데이터 조회
     const driver = state.activeRoutes[devId] || 
                    (matchedLic?.deviceId ? state.activeRoutes[matchedLic.deviceId] : null) || 
                    (matchedLic?.key ? state.activeRoutes[matchedLic.key] : null) || 
@@ -631,18 +628,13 @@ export function handleProFeature(featureName) {
         }
 
     } else if (featureName === 'INVOICE') {
-        const modal = document.getElementById('pro-invoice-modal');
-        if (!modal) { alert("🚨 시스템 안내\n주문서 통합관리 모듈을 찾을 수 없습니다."); return; }
-        modal.classList.remove('hidden');
-        
-        state.printReadyList = (state.parsedExcelList && state.parsedExcelList.length > 0) ? [...state.parsedExcelList] : [];
-        const countEl = document.getElementById('print-ready-count');
-        if (countEl) countEl.innerText = state.printReadyList.length;
-        
-        if (window.loadSavedForms) window.loadSavedForms(); 
-        if (state.printReadyList.length > 0) {
-            if (window.previewInvoiceRow) window.previewInvoiceRow(0); 
-            if (window.syncPreviewData) window.syncPreviewData(); 
+        // 🌟 주문서 통합관리 모달 열기: 3단 레이아웃 및 인쇄리스트, PDF 드롭존을 완벽하게 초기화
+        if (window.exportToInvoiceModal) {
+            window.exportToInvoiceModal();
+        } else {
+            const modal = document.getElementById('pro-invoice-modal');
+            if (!modal) { alert("🚨 시스템 안내\n주문서 통합관리 모듈을 찾을 수 없습니다."); return; }
+            modal.classList.remove('hidden');
         }
     }
 }

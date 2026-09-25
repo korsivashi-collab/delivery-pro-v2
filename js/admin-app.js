@@ -74,9 +74,10 @@ import {
 import {
     exportToInvoiceModal, previewInvoiceRow, syncPreviewData, loadSavedForms,
     executeBatchPrint, printAggregatedItemList, setAsDefaultForm,
-    selectFormTemplate, cancelProviderFormEdit, saveProviderForm,
-    deleteSavedForm, updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
-    switchInvoiceTab
+    cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
+    updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
+    filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
+    renderInvoiceOrderList, initTemplatePdfDropZone, handleTemplatePdfFile
 } from "./admin-dispatch-print.js";
 
 import {
@@ -120,6 +121,7 @@ window.onload = () => {
     // 모듈 초기화 (해당 요소가 있는 페이지에서만 실행)
     if (document.getElementById('pro-invoice-modal') && typeof loadSavedForms === 'function') loadSavedForms();
     if (document.getElementById('excel-drop-zone') && typeof initExcelDropZone === 'function') initExcelDropZone(); 
+    if (document.getElementById('template-pdf-dropzone') && typeof initTemplatePdfDropZone === 'function') initTemplatePdfDropZone();
 
     // 모니터링 전용 URL 파라미터 (?monitor=KEY) 감지
     const urlParams = new URLSearchParams(window.location.search);
@@ -625,7 +627,7 @@ window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.revertAutoDispatch = revertAutoDispatch;
 window.initDispatchResizer = initDispatchResizer;
-window.toggleAllDispatchDrivers = toggleAllDispatchDrivers; // 🌟 [전체선택] 토글 바인딩
+window.toggleAllDispatchDrivers = toggleAllDispatchDrivers;
 window.sendRoutesToDrivers = sendRoutesToDrivers;
 window.printSelectedDriverItemList = printSelectedDriverItemList;
 window.toggleDispatchDriver = toggleDispatchDriver;
@@ -689,13 +691,18 @@ window.clearAllExcelRows = clearAllExcelRows;
 
 // [관제 인쇄(Print)]
 window.exportToInvoiceModal = exportToInvoiceModal;
+window.filterInvoicePrintList = filterInvoicePrintList;
+window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
+window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
+window.renderInvoiceOrderList = renderInvoiceOrderList;
 window.previewInvoiceRow = previewInvoiceRow;
 window.syncPreviewData = syncPreviewData;
 window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
 window.printAggregatedItemList = printAggregatedItemList;
+window.initTemplatePdfDropZone = initTemplatePdfDropZone;
+window.handleTemplatePdfFile = handleTemplatePdfFile;
 window.setAsDefaultForm = setAsDefaultForm;
-window.selectFormTemplate = selectFormTemplate;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
 window.deleteSavedForm = deleteSavedForm;
@@ -703,7 +710,6 @@ window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
-window.switchInvoiceTab = switchInvoiceTab;
 
 // [관제 데이터 추출(Export)]
 window.openExcelExportModal = openExcelExportModal;
