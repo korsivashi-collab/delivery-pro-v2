@@ -38,33 +38,47 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
-// 🌟 0-1. 주소 앞/뒤 군더더기 및 상세 층/호수 정밀 절삭 헬퍼
+// 🌟 0-1. PDF 파서와 100% 동일한 주소 정밀 절삭 엔진
 // ==========================================
 export function cleanAddress(rawAddr) {
     if (!rawAddr || typeof rawAddr !== 'string') return '';
-    let addr = rawAddr.trim().replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ');
+    let str = String(rawAddr).trim().replace(/[\r\n]+/g, ' ');
 
-    // 1. 앞부분 잡동사니 제거 (시/도 명칭 시작점 감지)
-    const provinceRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별|광역|자치)?(?:시|도)?/;
-    const startIdx = addr.search(provinceRegex);
-    if (startIdx > 0) {
-        addr = addr.substring(startIdx).trim();
+    // 1. 행정구역(시/도) 시작점 감지 (앞단에 붙은 상호, 호수, 불필요한 메모 제거)
+    const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
+    const regionMatch = str.match(regionRegex);
+    if (!regionMatch) return str;
+
+    let addr = regionMatch[0];
+
+    // 2. 🌟 핵심: '(' 가 인식되면 '(' 와 뒷부분 전체를 즉시 모두 날림 (pdf.js 규칙 이식)
+    const parenIdx = addr.indexOf('(');
+    if (parenIdx !== -1) {
+        addr = addr.slice(0, parenIdx);
     }
 
-    // 2. 도로명/지번 번지수 + 선택적 법정동 (동/리/가) 이후의 상세 텍스트(건물명, 상호, 층수, 호수 등) 절삭
-    // 패턴 1: 시/도 ~ 번지수 + (단일 법정동)
-    const matchWithDong = addr.match(/^((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+)\s*(\([가-힣0-9]+(?:동\vert{}리\vert{}가)\))/);
-    if (matchWithDong && matchWithDong[1]) {
-        return `${matchWithDong[1].trim()} ${matchWithDong[2].trim()}`.trim();
+    // 3. 다른 필드 라벨이 나오기 전까지만 절단
+    addr = addr.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제)/)[0];
+
+    // 4. 우편번호 및 잔여 잡음 문자 정리
+    addr = addr.replace(/\[\d+\]/g, ' ')
+               .replace(/받\s*주소/g, ' ')
+               .replace(/\b받\b/g, ' ')
+               .replace(/\b주소\b/g, ' ')
+               .replace(/\|/g, ' ')
+               .replace(/[:]/g, ' ')
+               .trim();
+
+    // 5. '(' 가 없는 주소인 경우 도로명/지번 번지수 이후 상세 텍스트(층, 호, 건물명 등) 절삭
+    const roadMatch = addr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+/);
+    if (roadMatch) {
+        const rest = addr.slice(roadMatch[0].length).trim();
+        if (rest && (rest.includes('층') || rest.includes('호') || rest.includes('타워') || rest.includes('빌딩') || rest.includes('센터') || rest.includes('상가') || rest.length > 10)) {
+            addr = roadMatch[0].trim();
+        }
     }
 
-    // 패턴 2: 괄호 없이 번지수까지만 추출 (뒤의 복잡한 괄호 및 층/호수 일체 절삭)
-    const matchBase = addr.match(/^((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+)/);
-    if (matchBase && matchBase[1]) {
-        return matchBase[1].trim();
-    }
-
-    return addr;
+    return addr.replace(/\s{2,}/g, ' ').trim();
 }
 
 // ==========================================
@@ -227,7 +241,7 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 배송지 주소 추출 및 정밀 절삭
+        // 2. 배송지 주소 추출 및 cleanAddress 적용
         let address = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -240,8 +254,8 @@ export function processExcelData(jsonData) {
                 }
             }
         }
-        // 🌟 앞/뒤 군더더기 자동 절삭 적용
-        address = cleanAddress(address.replace(/^\[\d+\]\s*/, '').trim());
+        // 🌟 PDF와 동일한 정밀 절삭 엔진 통과
+        address = cleanAddress(address);
 
         // 3. 상호 / 수령처명 추출
         let storeName = '';
@@ -466,7 +480,6 @@ export async function handleExcelUpload(e) {
         if (isPdf) {
             const parsedPdfOrders = await processSinglePdfFile(file);
             if (parsedPdfOrders && parsedPdfOrders.length > 0) {
-                // PDF 주문 주소도 cleanAddress로 한 번 더 확실하게 정제
                 parsedPdfOrders.forEach(ord => {
                     if (ord.address) ord.address = cleanAddress(ord.address);
                 });
@@ -484,7 +497,7 @@ export async function handleExcelUpload(e) {
         await batchGeocodeExcelList(newlyAddedList); 
         renderExcelTable(); 
         await autoSaveExcelToFirebase(); 
-        alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지 데이터가 좌표 분석과 함께 성공적으로 등록되었습니다.`);
+        alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지 데이터가 등록되었습니다.`);
     } else { 
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); 
     }
@@ -509,19 +522,9 @@ export function processSingleExcelFile(file) {
 }
 
 // ==========================================
-// 5. 주소 -> 정밀 좌표(위/경도) 3단계 스마트 지오코딩 엔진
+// 5. 주소 -> 정밀 좌표(위/경도) 지오코딩 엔진
 // ==========================================
-function cleanAddressForSearch(addr) {
-    if (!addr) return '';
-    let clean = addr.replace(/^\[\d+\]\s*/, '');
-    clean = clean.replace(/\([^)]*\)/g, ' ');
-    clean = clean.replace(/\s+(지하|지상)?\s*\d+층.*$/i, '');
-    clean = clean.replace(/\s+\d+호.*$/i, '');
-    clean = clean.replace(/\s+B\d+.*$/i, '');
-    return clean.replace(/\s{2,}/g, ' ').trim();
-}
-
-function getCoordsFromAddress(address, storeName = '') {
+function getCoordsFromAddress(address) {
     return new Promise((resolve) => {
         const targetAddr = cleanAddress(address);
         if (!targetAddr || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
@@ -530,44 +533,27 @@ function getCoordsFromAddress(address, storeName = '') {
         }
         const geocoder = new window.kakao.maps.services.Geocoder();
 
-        // [1차 시도] cleanAddress로 정리된 주소로 검색
+        // 1차: cleanAddress로 정제된 깔끔한 주소로 검색
         geocoder.addressSearch(targetAddr.trim(), (res1, stat1) => {
             if (stat1 === window.kakao.maps.services.Status.OK && res1[0]) {
                 const fullAddr = (res1[0].road_address && res1[0].road_address.address_name) 
                     ? res1[0].road_address.address_name 
                     : res1[0].address_name;
                 resolve({ lat: parseFloat(res1[0].y), lng: parseFloat(res1[0].x), fullAddress: fullAddr });
-                return;
-            }
-
-            // [2차 시도] 괄호까지 완전히 제거한 주소로 재검색
-            const cleanAddr = cleanAddressForSearch(targetAddr);
-            if (cleanAddr && cleanAddr !== targetAddr.trim()) {
-                geocoder.addressSearch(cleanAddr, (res2, stat2) => {
-                    if (stat2 === window.kakao.maps.services.Status.OK && res2[0]) {
-                        const fullAddr = (res2[0].road_address && res2[0].road_address.address_name) 
-                            ? res2[0].road_address.address_name 
-                            : res2[0].address_name;
-                        resolve({ lat: parseFloat(res2[0].y), lng: parseFloat(res2[0].x), fullAddress: fullAddr });
-                        return;
-                    }
-
-                    // [3차 시도] 기본 도로명+건물번호 패턴만 추출하여 재검색
-                    const basicRoadMatch = cleanAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
-                    if (basicRoadMatch) {
-                        geocoder.addressSearch(basicRoadMatch[0], (res3, stat3) => {
-                            if (stat3 === window.kakao.maps.services.Status.OK && res3[0]) {
-                                resolve({ lat: parseFloat(res3[0].y), lng: parseFloat(res3[0].x), fullAddress: res3[0].address_name });
-                            } else {
-                                resolve(null);
-                            }
-                        });
-                    } else {
-                        resolve(null);
-                    }
-                });
             } else {
-                resolve(null);
+                // 2차: 도로명+번지수 기본 패턴만으로 재검색
+                const basicMatch = targetAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
+                if (basicMatch) {
+                    geocoder.addressSearch(basicMatch[0], (res2, stat2) => {
+                        if (stat2 === window.kakao.maps.services.Status.OK && res2[0]) {
+                            resolve({ lat: parseFloat(res2[0].y), lng: parseFloat(res2[0].x), fullAddress: res2[0].address_name });
+                        } else {
+                            resolve(null);
+                        }
+                    });
+                } else {
+                    resolve(null);
+                }
             }
         });
     });
@@ -582,21 +568,20 @@ async function batchGeocodeExcelList(items) {
             dropZone.innerHTML = `
                 <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
                     <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                    <span>배송지 좌표 정밀 분석 중... (${i + 1} / ${items.length})</span>
+                    <span>배송지 좌표 분석 중... (${i + 1} / ${items.length})</span>
                 </div>`;
         }
         if (item.address && (!item.lat || !item.lng)) {
             item.address = cleanAddress(item.address);
-            const coords = await getCoordsFromAddress(item.address, item.storeName);
+            const coords = await getCoordsFromAddress(item.address);
             if (coords) { 
                 item.lat = coords.lat; 
                 item.lng = coords.lng; 
-                // 🌟 카카오 공식 표준 도로명 주소로 동기화하여 내비게이션 검색 100% 호환
                 if (coords.fullAddress) {
                     item.address = coords.fullAddress;
                 }
             }
-            await new Promise(r => setTimeout(r, 45));
+            await new Promise(r => setTimeout(r, 40));
         }
     }
     if (dropZone) dropZone.innerHTML = originalDropHtml;

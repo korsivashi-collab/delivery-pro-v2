@@ -85,7 +85,7 @@ export function renderSidebar() {
 }
 
 // ==========================================
-// 2. 배송 관리 모드 - 기사 목록 및 상세 뷰
+// 🌟 2. 배송 관리 모드 - 기사 목록 및 상세 뷰 (라이선스 키 기반 계정 100% 인식 패치)
 // ==========================================
 export function renderDriverListView() {
     const headerEl = document.getElementById('sidebar-header');
@@ -110,7 +110,12 @@ export function renderDriverListView() {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         
-        const routeData = (lic.deviceId && state.activeRoutes[lic.deviceId]) ? state.activeRoutes[lic.deviceId] : null;
+        // 🌟 핵심 수정: deviceId뿐만 아니라 라이선스 키(lic.key)로 저장된 동선 데이터도 완벽하게 조회
+        const routeData = state.activeRoutes[devId] || 
+                          (lic.deviceId ? state.activeRoutes[lic.deviceId] : null) || 
+                          (lic.key ? state.activeRoutes[lic.key] : null) || 
+                          null;
+
         let driverRoute = null;
         if (routeData && routeData.updatedAt) {
             const routeDateStr = getLocalDateString(new Date(routeData.updatedAt));
@@ -118,14 +123,19 @@ export function renderDriverListView() {
         }
         const rawDests = driverRoute ? driverRoute.destinations || [] : [];
 
+        // 완료 건 매칭도 deviceId, key, phone 3가지를 모두 대조
         const driverDone = state.allCompletions.filter(c => {
-            const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || (lic.phone && c.phone === lic.phone);
+            const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || 
+                               (c.deviceId === lic.key) || 
+                               (c.deviceId === devId) ||
+                               (lic.phone && c.phone === lic.phone);
             const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
                                 (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
             return matchesDev && matchesDate;
         });
 
-        const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
+        const doneMap = {}; 
+        driverDone.forEach(c => { doneMap[c.address] = c; });
         const remainingDests = rawDests.filter(d => !doneMap[d.address]);
         
         const pendingCount = isToday ? remainingDests.length : 0;
@@ -136,11 +146,22 @@ export function renderDriverListView() {
         html += `
         <div onclick="window.selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
             <div class="flex justify-between items-center mb-1.5">
-                <span class="font-black text-sm text-gray-900 tracking-tight flex items-center gap-1.5"><i class="fa-solid fa-phone text-blue-500 text-xs"></i>${phone}<span class="text-[10px] text-gray-400 font-mono font-normal">[${lic.key}]</span></span>
-                <div class="flex items-center gap-1.5"><span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span><button onclick="event.stopPropagation(); window.removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button></div>
+                <span class="font-black text-sm text-gray-900 tracking-tight flex items-center gap-1.5">
+                    <i class="fa-solid fa-phone text-blue-500 text-xs"></i>${phone}
+                    <span class="text-[10px] text-gray-400 font-mono font-normal">[${lic.key}]</span>
+                </span>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span>
+                    <button onclick="event.stopPropagation(); window.removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button>
+                </div>
             </div>
-            <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden"><div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: ${rate}%"></div></div>
-            <div class="flex justify-between text-[11px] font-bold text-gray-600"><span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span><span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span></div>
+            <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden">
+                <div class="bg-blue-600 h-1.5 rounded-full transition-all duration-500" style="width: ${rate}%"></div>
+            </div>
+            <div class="flex justify-between text-[11px] font-bold text-gray-600">
+                <span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span>
+                <span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span>
+            </div>
         </div>`;
     });
     contentEl.innerHTML = html;
@@ -155,8 +176,14 @@ export function renderDriverDetailView(devId) {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = state.activeRoutes[devId] || null;
-    const phone = driver?.phone || matchedLic?.phone || '기사';
+    
+    // 🌟 상세 뷰에서도 라이선스 키와 deviceId를 상호 보완하여 동선 데이터 조회
+    const driver = state.activeRoutes[devId] || 
+                   (matchedLic?.deviceId ? state.activeRoutes[matchedLic.deviceId] : null) || 
+                   (matchedLic?.key ? state.activeRoutes[matchedLic.key] : null) || 
+                   null;
+                   
+    const phone = driver?.phone || matchedLic?.phone || matchedLic?.key || '기사';
 
     headerEl.innerHTML = `
         <div class="flex items-center justify-between w-full">
@@ -177,7 +204,10 @@ export function renderDriverDetailView(devId) {
     const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
 
     const driverDone = state.allCompletions.filter(c => {
-        const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
+        const matchesDev = (c.deviceId === devId) || 
+                           (matchedLic && c.deviceId === matchedLic.deviceId) || 
+                           (matchedLic && c.deviceId === matchedLic.key) || 
+                           (matchedLic && c.phone === matchedLic.phone);
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
                             (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
         return matchesDev && matchesDate;
@@ -301,7 +331,11 @@ export async function removeOrUnlinkDriver(devId, key) {
 export function drawDriverOnMap(devId) {
     forceClearMap(); 
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = state.activeRoutes[devId] || null;
+    const driver = state.activeRoutes[devId] || 
+                   (matchedLic?.deviceId ? state.activeRoutes[matchedLic.deviceId] : null) || 
+                   (matchedLic?.key ? state.activeRoutes[matchedLic.key] : null) || 
+                   null;
+
     if (!map) return;
 
     const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
@@ -318,7 +352,10 @@ export function drawDriverOnMap(devId) {
     const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
 
     const completions = state.allCompletions.filter(c => {
-        const matchesDev = (c.deviceId === devId || (matchedLic && c.phone === matchedLic.phone));
+        const matchesDev = (c.deviceId === devId) || 
+                           (matchedLic && c.deviceId === matchedLic.deviceId) || 
+                           (matchedLic && c.deviceId === matchedLic.key) || 
+                           (matchedLic && c.phone === matchedLic.phone);
         const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
                             (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
         return matchesDev && matchesDate;

@@ -3,7 +3,7 @@
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber } from "./admin-dispatch-core.js";
-import { doc, setDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
 // 1. 본사 거점 설정 및 UI 동기화
@@ -110,7 +110,7 @@ export function initDispatchResizer() {
 }
 
 // ==========================================
-// 3. 자동할당 기사 목록 및 가중치 제어
+// 🌟 3. 자동할당 기사 목록 및 가중치 / 전체선택 제어
 // ==========================================
 export const autoDispatchState = {
     selectedDrivers: new Set(),
@@ -118,11 +118,23 @@ export const autoDispatchState = {
     isInit: false
 };
 
+// 상단 전체선택 토글 핸들러
+export function toggleAllDispatchDrivers(isChecked) {
+    const drivers = getFilteredVisibleDrivers();
+    if (isChecked) {
+        drivers.forEach(d => autoDispatchState.selectedDrivers.add(d.deviceId || d.key));
+    } else {
+        autoDispatchState.selectedDrivers.clear();
+    }
+    renderDispatchDriverList();
+}
+
 export function renderDispatchDriverList() {
     initDispatchResizer();
 
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
+    const chkAll = document.getElementById('chk-dispatch-drivers-all');
     if (!listEl || !countEl) return;
     
     const drivers = getFilteredVisibleDrivers();
@@ -134,6 +146,11 @@ export function renderDispatchDriverList() {
 
     countEl.innerText = `${autoDispatchState.selectedDrivers.size} / ${drivers.length}명`;
     
+    // 전체선택 체크박스 상태 동기화
+    if (chkAll) {
+        chkAll.checked = (drivers.length > 0 && autoDispatchState.selectedDrivers.size === drivers.length);
+    }
+
     if (drivers.length === 0) {
         listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`; 
         return;
@@ -309,26 +326,18 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 🌟 5. 할당 초기화 및 자동할당 실행 엔진
+// 5. 할당 초기화
 // ==========================================
-
 export async function revertAutoDispatch() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("초기화할 배송 데이터가 없습니다.");
         return;
     }
 
-    const assignedOrders = state.parsedExcelList.filter(o => o.assignedDriver);
-    if (assignedOrders.length === 0) {
-        alert("이미 모든 주문이 미배정 상태입니다.");
+    if (!confirm("기사들에게 배정된 모든 할당 내역을 초기화하시겠습니까?\n\n* 관제 엑셀 데이터는 유지되며, 기사 스마트폰(앱)에 전송된 배송 동선도 함께 완전 초기화됩니다.")) {
         return;
     }
 
-    if (!confirm("기사들에게 배정된 모든 할당 내역을 초기화(미배정) 하시겠습니까?\n\n* 주문 데이터는 삭제되지 않으며 기사 할당 정보만 초기화됩니다.")) {
-        return;
-    }
-
-    // 모든 항목의 assignedDriver를 null로 되돌림
     state.parsedExcelList.forEach(item => {
         item.assignedDriver = null;
     });
@@ -338,9 +347,25 @@ export async function revertAutoDispatch() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) await window.autoSaveExcelToFirebase();
 
-    alert("모든 할당 내역이 초기화되었습니다.");
+    const visibleDrivers = getFilteredVisibleDrivers();
+    let clearedDriverCount = 0;
+
+    for (const d of visibleDrivers) {
+        const devId = d.deviceId || d.key;
+        try {
+            await deleteDoc(doc(db, "routes", devId));
+            clearedDriverCount++;
+        } catch (e) {
+            console.error(`기사(${devId}) 동선 초기화 실패:`, e);
+        }
+    }
+
+    alert(`[할당 초기화 완료]\n관제 엑셀 배정이 미배정으로 초기화되었으며,\n운행 기사(${clearedDriverCount}명) 스마트폰 앱의 동선도 즉시 초기화되었습니다.`);
 }
 
+// ==========================================
+// 6. 자동할당 알고리즘 실행 (체크된 기사 대상)
+// ==========================================
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀/주문 데이터가 없습니다."); 
@@ -476,11 +501,11 @@ export function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료]\n선택하신 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.\n\n내역 검토 후 이상이 없으면 중앙 패널의 [동선 전송] 버튼을 눌러주세요.`);
+    alert(`[자동할당 배분 완료]\n선택하신 ${totalOrders}건이 ${activeDrivers.length}명의 기사에게 성공적으로 배분되었습니다.\n\n내역 검토 후 이상이 없으면 [동선 전송] 버튼을 눌러주세요.`);
 }
 
 // ==========================================
-// 🌟 6. 기사 앱 수동 전송 엔진 (전체 일괄 & 개별 선택 지원)
+// 🌟 7. 토글(체크박스) 선택 기반 직관적 동선 전송 엔진
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -489,49 +514,46 @@ export async function sendRoutesToDrivers() {
     }
 
     const visibleDrivers = getFilteredVisibleDrivers();
-    const assignedOrders = state.parsedExcelList.filter(o => o.assignedDriver);
 
-    if (assignedOrders.length === 0) {
-        alert("기사에게 배정된 주문이 없습니다. 자동할당을 먼저 실행하거나 기사를 직접 배정해 주세요.");
+    // 1. 좌측 기사 목록에서 체크박스(토글)가 켜져 있는 기사들만 추출
+    const selectedDriverList = visibleDrivers.filter(d => 
+        autoDispatchState.selectedDrivers.has(d.deviceId || d.key)
+    );
+
+    if (selectedDriverList.length === 0) {
+        alert("동선을 전송할 기사를 좌측 목록에서 1명 이상 체크(선택)해 주세요.\n(상단의 [전체선택] 토글을 이용해 전원 선택도 가능합니다.)");
         return;
     }
 
-    let targetOrders = [];
-    let targetDriverNames = [];
-
-    // 기사가 개별 선택되어 있는 경우 (선택/일괄 여부를 팝업으로 물어봄)
-    if (state.selectedDispatchDriverId) {
-        const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
-        const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
-        
-        const isBatch = confirm(`[동선 전송 옵션 선택]\n\n현재 [${driverName}] 기사님의 상세 내역을 보고 계십니다.\n\n[확인] : "전체 기사"에게 모두 일괄 전송합니다.\n[취소] : "현재 선택된 기사"에게만 개별 전송합니다.`);
-        
-        if (isBatch) {
-            targetOrders = assignedOrders;
-            if (!confirm(`배정된 총 ${targetOrders.length}건의 배송 동선을 전체 기사들에게 일괄 전송하시겠습니까?`)) return;
-        } else {
-            targetOrders = assignedOrders.filter(o => o.assignedDriver === driverName);
-            if (targetOrders.length === 0) {
-                alert(`[${driverName}] 기사님에게 배정된 주문이 없습니다.`);
-                return;
-            }
-            if (!confirm(`[${driverName}] 기사님에게 배정된 ${targetOrders.length}건의 배송 동선만 전송하시겠습니까?`)) return;
-        }
-    } else {
-        targetOrders = assignedOrders;
-        const uniqueDrivers = new Set(targetOrders.map(o => o.assignedDriver));
-        if (!confirm(`총 ${uniqueDrivers.size}명의 기사에게 ${targetOrders.length}건의 배송 동선을 일괄 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 등록됩니다.`)) {
-            return;
-        }
-    }
-
+    // 2. 체크된 기사님들 중 실제로 배정된 주문이 있는지 매칭
     const driverMap = {};
-    targetOrders.forEach(o => {
-        if (!driverMap[o.assignedDriver]) driverMap[o.assignedDriver] = [];
-        driverMap[o.assignedDriver].push(o);
+    selectedDriverList.forEach(d => {
+        const dName = d.phone || d.key;
+        const dKey = d.key;
+        const devId = d.deviceId || d.key;
+
+        // 전화번호, 라이선스 키, deviceId 매칭을 모두 포괄하여 주문 추출
+        const orders = state.parsedExcelList.filter(o => 
+            o.assignedDriver && (o.assignedDriver === dName || o.assignedDriver === dKey || o.assignedDriver === devId)
+        );
+
+        if (orders.length > 0) {
+            driverMap[devId] = { driver: d, orders };
+        }
     });
 
-    targetDriverNames = Object.keys(driverMap);
+    const sendTargetDevIds = Object.keys(driverMap);
+    if (sendTargetDevIds.length === 0) {
+        alert("체크된 기사님들 중 현재 배정된 주문이 있는 기사가 없습니다.\n자동할당을 먼저 실행하거나 기사를 배정해 주세요.");
+        return;
+    }
+
+    const totalOrdersToSend = sendTargetDevIds.reduce((sum, id) => sum + driverMap[id].orders.length, 0);
+
+    // 3. 직관적인 단일 확인 팝업 (예/아니오 선택 불필요)
+    if (!confirm(`체크된 기사 총 ${sendTargetDevIds.length}명에게 ${totalOrdersToSend}건의 배송 동선을 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 실시간으로 등록됩니다.`)) {
+        return;
+    }
 
     const btn = document.getElementById('btn-send-routes-to-drivers');
     if (btn) {
@@ -541,12 +563,8 @@ export async function sendRoutesToDrivers() {
 
     try {
         let successCount = 0;
-        for (const dName of targetDriverNames) {
-            const matchedLic = visibleDrivers.find(l => (l.phone && l.phone === dName) || l.key === dName || l.deviceId === dName);
-            if (!matchedLic) continue;
-
-            const devId = matchedLic.deviceId || matchedLic.key;
-            const orders = driverMap[dName];
+        for (const devId of sendTargetDevIds) {
+            const { driver: matchedLic, orders } = driverMap[devId];
 
             const destinations = orders.map((ord, idx) => ({
                 displayNumber: idx + 1,
@@ -571,7 +589,7 @@ export async function sendRoutesToDrivers() {
             successCount++;
         }
 
-        alert(`[동선 전송 완료]\n총 ${successCount}명의 기사 스마트폰으로 배송 동선이 성공적으로 전송되었습니다.`);
+        alert(`[동선 전송 완료]\n체크된 기사 총 ${successCount}명의 스마트폰으로 배송 동선이 성공적으로 전송되었습니다.`);
     } catch (e) {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
@@ -583,7 +601,7 @@ export async function sendRoutesToDrivers() {
 }
 
 // ==========================================
-// 7. 선택된 기사 전용 상품 합산 피킹 리스트 (양식 없는 단순 리스트 출력)
+// 8. 선택된 기사 전용 상품 합산 피킹 리스트
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -697,18 +715,19 @@ export function printSelectedDriverItemList() {
 }
 
 // ==========================================
-// 8. 전역 Window 객체 바인딩
+// 9. 전역 Window 객체 바인딩
 // ==========================================
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
 window.initDispatchResizer = initDispatchResizer;
+window.toggleAllDispatchDrivers = toggleAllDispatchDrivers; // 🌟 전체선택 토글 바인딩
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
 window.selectDispatchDriver = selectDispatchDriver;
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
-window.revertAutoDispatch = revertAutoDispatch; // 🌟 추가된 초기화 함수 바인딩
+window.revertAutoDispatch = revertAutoDispatch;
 window.sendRoutesToDrivers = sendRoutesToDrivers;
 window.printSelectedDriverItemList = printSelectedDriverItemList;
