@@ -400,14 +400,14 @@
         </div>
     </div>
 
-    <!-- 🌟 4. 주문서 통합관리 및 인쇄 모달 (전면 개편: 좌측 엑셀형식 표 리스트 및 발송사별 필터, 중앙 PDF 양식 캔버스 뷰어, 우측 PDF 양식 업로드) -->
+    <!-- 🌟 4. 주문서 통합관리 및 인쇄 모달 (전면 개편: 좌측 엑셀형 표 목록 및 화주사 필터, 중앙 워드형 서식 에디터 뷰어, 우측 PDF 양식 업로드 및 공급자 정보) -->
     <div id="pro-invoice-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col overflow-hidden">
         <header class="bg-white border-b border-gray-200 px-6 py-3.5 flex justify-between items-center shadow-sm flex-none">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 bg-slate-800 text-white rounded-xl flex items-center justify-center text-xl shadow-md"><i class="fa-solid fa-print"></i></div>
                 <div>
                     <h2 class="text-base font-black text-gray-900 flex items-center gap-2">주문서 통합관리 <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-300">PRO</span></h2>
-                    <p class="text-xs text-gray-500 font-bold">인쇄할 주문을 선택하고, 우측에서 주문서 양식 PDF를 업로드하여 일괄 출력합니다.</p>
+                    <p class="text-xs text-gray-500 font-bold">인쇄할 주문을 선택하고, 우측에서 양식 PDF를 업로드하여 웹 서식으로 편집 후 일괄 출력합니다.</p>
                 </div>
             </div>
             <div class="flex items-center gap-3">
@@ -456,29 +456,27 @@
                 </div>
             </div>
 
-            <!-- 🌟 2단 (중앙): PDF 양식 캔버스 미리보기 뷰어 -->
+            <!-- 🌟 2단 (중앙): 워드형 서식 직접 편집 & 미리보기 영역 -->
             <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden min-w-[500px]">
                 <div class="bg-gray-100 border-b border-gray-200 p-2.5 px-4 flex justify-between items-center relative z-10 shadow-sm">
                     <span class="text-xs font-black text-gray-700 flex items-center gap-1.5">
-                        <i class="fa-solid fa-eye text-indigo-600"></i> 주문서 양식 미리보기 (PDF 캔버스 뷰어)
+                        <i class="fa-solid fa-file-pen text-indigo-600"></i> 주문서 양식 직접 편집 (워드형 서식 에디터)
                     </span>
                     <span id="preview-target-order-label" class="text-[11px] font-bold text-indigo-800 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-lg truncate max-w-xs">미리보기 선택 대기중</span>
                 </div>
-                <div id="inv-view-preview" class="flex-1 overflow-auto bg-gray-300 p-8 flex flex-col items-center justify-center relative custom-scrollbar">
-                    <!-- PDF 미등록 시 안내 플레이스홀더 -->
-                    <div id="preview-placeholder" class="text-center py-24 text-gray-500 font-bold text-xs bg-white w-full h-full flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-300 shadow-inner">
-                        <i class="fa-solid fa-file-pdf text-4xl text-gray-300 mb-2"></i>
+                <div id="inv-view-preview" class="flex-1 overflow-auto bg-gray-300 p-6 flex flex-col items-center custom-scrollbar relative">
+                    <!-- 서식 미등록 시 기본 안내 플레이스홀더 -->
+                    <div id="preview-placeholder" class="text-center py-24 text-gray-500 font-bold text-xs bg-white w-full max-w-[210mm] flex flex-col items-center justify-center rounded-2xl border-2 border-dashed border-gray-300 shadow-inner my-auto">
+                        <i class="fa-solid fa-file-lines text-4xl text-gray-300 mb-2"></i>
                         <p class="text-sm font-black text-gray-700">등록된 주문서 문서 양식이 없습니다.</p>
-                        <p class="text-xs text-gray-400 mt-1">우측에서 양식용 PDF 파일을 업로드하거나 저장된 양식을 선택해 주세요.</p>
+                        <p class="text-xs text-gray-400 mt-1">우측에서 양식용 PDF 파일을 업로드하거나 저장된 서식을 선택해 주세요.</p>
                     </div>
-                    <!-- PDF 캔버스 렌더링 영역 -->
-                    <div id="print-area" class="hidden relative shadow-2xl bg-white rounded-lg overflow-hidden">
-                        <canvas id="pdf-template-canvas" class="max-w-full block"></canvas>
-                    </div>
+                    <!-- 워드형 에디터가 마운트되는 컨테이너 -->
+                    <div id="doc-editor-wrapper" class="w-full flex flex-col items-center gap-3"></div>
                 </div>
             </div>
 
-            <!-- 🌟 3단 (우측): PDF 양식 등록 드롭존 및 기본 공급자 양식 설정 -->
+            <!-- 🌟 3단 (우측): PDF 양식 등록 드롭존 및 서류 양식 관리 -->
             <div class="w-[340px] flex flex-col gap-3 flex-none overflow-hidden">
                 <!-- 1) 양식제작용 PDF 업로드 영역 -->
                 <div class="bg-white border border-gray-200 rounded-2xl p-3 shadow-xs flex flex-col gap-2 shrink-0">
@@ -489,7 +487,7 @@
                         <input type="file" id="template-pdf-file-input" accept=".pdf" class="hidden">
                         <i class="fa-solid fa-cloud-arrow-up text-2xl text-red-400 group-hover:text-red-600 mb-1 transition"></i>
                         <p class="text-xs font-black text-gray-800">양식용 PDF 파일 끌어놓기</p>
-                        <p class="text-[10px] text-gray-500 font-bold mt-0.5">업로드 시 첫 페이지를 주문서 문서 양식으로 자동 변환합니다.</p>
+                        <p class="text-[10px] text-gray-500 font-bold mt-0.5">업로드 시 첫 페이지를 편집 가능한 웹 문서 서식으로 자동 변환합니다.</p>
                     </div>
                 </div>
 
@@ -501,24 +499,21 @@
                     <div id="saved-forms-list" class="flex-1 overflow-y-auto p-2 custom-scrollbar space-y-1.5 bg-slate-50/50"></div>
                 </div>
 
-                <!-- 3) 공급자 정보 확인 및 수정 아코디언 -->
+                <!-- 3) 공급자 정보 확인 및 서식 저장 아코디언 -->
                 <div class="bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col flex-none overflow-hidden">
                     <div onclick="document.getElementById('form-setup-accordion').classList.toggle('hidden')" class="bg-indigo-50 border-b border-indigo-100 p-2.5 px-3 flex justify-between items-center cursor-pointer hover:bg-indigo-100 transition select-none">
-                        <span class="text-xs font-black text-indigo-900 flex items-center gap-1.5"><i class="fa-solid fa-pen-to-square text-indigo-600"></i> 공급자 정보 확인 / 수정</span>
+                        <span class="text-xs font-black text-indigo-900 flex items-center gap-1.5"><i class="fa-solid fa-pen-to-square text-indigo-600"></i> 양식 정보 확인 / 서식 저장</span>
                         <i class="fa-solid fa-chevron-up text-indigo-600 text-xs"></i>
                     </div>
                     <div id="form-setup-accordion" class="hidden flex-col p-3 space-y-2.5 custom-scrollbar overflow-y-auto max-h-[260px] bg-white">
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">양식 폼 제목</label><input type="text" id="input-form-title" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-lg p-2 text-xs font-black text-indigo-900 outline-none"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">양식 서식 제목</label><input type="text" id="input-form-title" class="w-full bg-indigo-50/50 border border-indigo-200 rounded-lg p-2 text-xs font-black text-indigo-900 outline-none" placeholder="예: 거래명세표 기본 양식"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">사업자등록번호</label><input type="text" id="input-prov-regno" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">상호(법인명)</label><input type="text" id="input-prov-name" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">주소</label><input type="text" id="input-prov-addr" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500"></div>
-                        <div class="grid grid-cols-2 gap-2">
-                            <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">연락처/FAX</label><input type="text" id="input-prov-tel" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500"></div>
-                            <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">추가연락처</label><input type="text" id="input-prov-add-tel" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500"></div>
-                        </div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-0.5">연락처/TEL</label><input type="text" id="input-prov-tel" class="w-full bg-white border border-gray-300 rounded-lg p-2 text-xs font-bold outline-none focus:border-indigo-500"></div>
                         <div class="flex gap-1.5 pt-1">
                             <button type="button" onclick="window.cancelProviderFormEdit()" class="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 text-xs font-black py-2 rounded-lg transition active:scale-95">초기화</button>
-                            <button type="button" onclick="window.saveProviderForm()" class="flex-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 폼 저장</button>
+                            <button type="button" onclick="window.saveCurrentDocumentTemplate()" class="flex-1 bg-slate-900 hover:bg-slate-800 text-white text-xs font-black py-2 rounded-lg transition shadow-sm active:scale-95 flex items-center justify-center gap-1"><i class="fa-solid fa-save"></i> 양식 저장</button>
                         </div>
                     </div>
                 </div>
@@ -533,7 +528,7 @@
         </div>
     </div>
 
-    <!-- 🌟 9. 창고 상차 피킹 리스트 기사 선택 모달 -->
+    <!-- 9. 창고 상차 피킹 리스트 기사 선택 모달 -->
     <div id="picking-driver-modal" class="hidden fixed inset-0 bg-black/60 z-[500] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
         <div class="bg-white w-full max-w-md rounded-3xl p-6 shadow-2xl relative flex flex-col max-h-[85vh]">
             <div class="flex justify-between items-center pb-3 border-b border-gray-100 mb-3 flex-none">
