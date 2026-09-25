@@ -214,7 +214,6 @@
                     </div>
                 </div>
 
-                <!-- 🌟 할당 초기화 버튼 추가 영역 -->
                 <button type="button" id="btn-revert-auto-dispatch" onclick="window.revertAutoDispatch()" class="bg-white hover:bg-red-50 text-gray-700 hover:text-red-600 border border-gray-300 hover:border-red-300 text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="모든 주문의 기사 배정을 초기화합니다">
                     <i class="fa-solid fa-rotate-left text-sm"></i> 할당 초기화
                 </button>
@@ -233,16 +232,23 @@
 
         <!-- 본문 3단 레이아웃 -->
         <div class="flex-1 flex gap-3 overflow-hidden p-3 bg-slate-100" id="dispatch-auto-main-container">
-            <!-- 1단 (좌측): 기사 권역 목록 -->
-            <div class="w-[320px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
+            <!-- 🌟 1단 (좌측): 기사 권역 목록 (360px로 확장 및 전체선택 토글 바 추가) -->
+            <div class="w-[360px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
                 <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex flex-col gap-2 shadow-2xs z-10">
                     <div class="flex justify-between items-center">
                         <span class="text-[11px] font-black text-gray-700"><i class="fa-solid fa-users text-blue-500 mr-1"></i> 운행 기사 권역 설정</span>
                         <span class="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-black shadow-2xs" id="dispatch-driver-count">0명</span>
                     </div>
-                    <button type="button" onclick="window.openAllTerritoriesMap()" class="w-full bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-1.5 text-[11px] font-black transition shadow-2xs active:scale-95 flex items-center justify-center gap-1.5">
-                        <i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기
-                    </button>
+                    <!-- 🌟 지도보기 버튼과 전체선택 토글을 나란히 배치 -->
+                    <div class="flex items-center gap-1.5">
+                        <button type="button" onclick="window.openAllTerritoriesMap()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white rounded-lg py-1.5 text-[11px] font-black transition shadow-2xs active:scale-95 flex items-center justify-center gap-1 whitespace-nowrap">
+                            <i class="fa-solid fa-map"></i> 전체 설정 현황 지도보기
+                        </button>
+                        <label class="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-gray-300 hover:border-blue-400 rounded-lg cursor-pointer transition shadow-2xs shrink-0 select-none" title="목록의 모든 기사를 한 번에 선택하거나 해제합니다">
+                            <input type="checkbox" id="chk-dispatch-drivers-all" onchange="window.toggleAllDispatchDrivers(this.checked)" class="w-3.5 h-3.5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                            <span class="text-[11px] font-black text-gray-700 whitespace-nowrap">전체선택</span>
+                        </label>
+                    </div>
                 </div>
                 <div id="dispatch-driver-list" class="flex-1 overflow-y-auto p-2.5 custom-scrollbar space-y-2"><div class="text-center text-gray-400 py-10 text-[10px] font-bold">데이터 로딩중...</div></div>
             </div>
@@ -258,7 +264,8 @@
                         <button type="button" id="btn-driver-items-print" onclick="window.printSelectedDriverItemList()" class="hidden px-2.5 py-1.5 bg-white hover:bg-blue-50 text-blue-700 border border-blue-300 rounded-lg text-[11px] font-black shadow-2xs transition active:scale-95 flex items-center gap-1 shrink-0" title="선택된 기사 배정 상품 합산 출력">
                             <i class="fa-solid fa-box-open text-blue-600"></i> 상품 취합 출력
                         </button>
-                        <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="hidden px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black rounded-lg transition shadow-2xs active:scale-95 flex items-center gap-1 whitespace-nowrap" title="선택된 기사에게 배송 동선 전송">
+                        <!-- 🌟 체크(토글)된 기사들에게 일괄 전송 버튼 -->
+                        <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="hidden px-2.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white text-[11px] font-black rounded-lg transition shadow-2xs active:scale-95 flex items-center gap-1 whitespace-nowrap" title="좌측 목록에서 체크(토글)된 기사들에게 배송 동선을 전송합니다">
                             <i class="fa-solid fa-paper-plane"></i> 동선 전송
                         </button>
                     </div>
