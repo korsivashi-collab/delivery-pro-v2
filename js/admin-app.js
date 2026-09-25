@@ -73,11 +73,13 @@ import {
 
 import {
     exportToInvoiceModal, previewInvoiceRow, syncPreviewData, loadSavedForms,
-    executeBatchPrint, printAggregatedItemList, setAsDefaultForm,
+    executeBatchPrint, setAsDefaultForm,
     cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
     updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
     filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
-    renderInvoiceOrderList, initTemplatePdfDropZone, handleTemplatePdfFile
+    renderInvoiceOrderList, initTemplatePdfDropZone, handleTemplatePdfFile,
+    sortInvoicePrintList, openPickingDriverModal, closePickingDriverModal,
+    toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint
 } from "./admin-dispatch-print.js";
 
 import {
@@ -699,7 +701,6 @@ window.previewInvoiceRow = previewInvoiceRow;
 window.syncPreviewData = syncPreviewData;
 window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
-window.printAggregatedItemList = printAggregatedItemList;
 window.initTemplatePdfDropZone = initTemplatePdfDropZone;
 window.handleTemplatePdfFile = handleTemplatePdfFile;
 window.setAsDefaultForm = setAsDefaultForm;
@@ -710,6 +711,12 @@ window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
+window.sortInvoicePrintList = sortInvoicePrintList;
+window.openPickingDriverModal = openPickingDriverModal;
+window.closePickingDriverModal = closePickingDriverModal;
+window.toggleAllPickingDrivers = toggleAllPickingDrivers;
+window.togglePickingDriver = togglePickingDriver;
+window.executePickingListPrint = executePickingListPrint;
 
 // [관제 데이터 추출(Export)]
 window.openExcelExportModal = openExcelExportModal;
