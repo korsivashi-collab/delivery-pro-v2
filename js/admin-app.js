@@ -80,7 +80,8 @@ import {
     renderInvoiceOrderList, initTemplatePdfDropZone, handleTemplatePdfFile,
     populateSenderFilterDropdown, filterBySender,
     openPickingDriverModal, closePickingDriverModal,
-    toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint
+    toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint,
+    sortPrintList
 } from "./admin-dispatch-print.js";
 
 import {
@@ -720,6 +721,7 @@ window.toggleAllPickingDrivers = toggleAllPickingDrivers;
 window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
+window.sortPrintList = sortPrintList;
 
 // [관제 데이터 추출(Export)]
 window.openExcelExportModal = openExcelExportModal;

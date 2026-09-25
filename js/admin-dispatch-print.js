@@ -7,6 +7,18 @@ let invoiceSearchKeyword = '';
 let currentSenderFilter = 'ALL';
 let currentTemplateCanvasData = null;
 
+// 🌟 좌측 인쇄 리스트 정렬 상태 변수
+let printListSortField = 'originalIdx'; // 'originalIdx', 'senderName', 'storeName', 'address'
+let printListSortAsc = true;
+
+// 🌟 PDF 양식 직접 지우개(화이트) 상태 변수
+let isEraserActive = false;
+let eraserSize = 30; // 기본 중간 크기 (px)
+let isDrawing = false;
+let canvasUndoStack = [];
+let lastMouseX = 0;
+let lastMouseY = 0;
+
 // ==========================================
 // 1. 주문서 통합관리 모달 열기 & 초기화
 // ==========================================
@@ -36,6 +48,8 @@ export function exportToInvoiceModal() {
     state.currentPreviewInvoiceIndex = 0;
     invoiceSearchKeyword = '';
     currentSenderFilter = 'ALL';
+    printListSortField = 'originalIdx';
+    printListSortAsc = true;
 
     const searchInput = document.getElementById('invoice-search-input');
     if (searchInput) searchInput.value = '';
@@ -45,6 +59,7 @@ export function exportToInvoiceModal() {
     loadSavedForms(); 
     renderInvoiceOrderList();
     previewInvoiceRow(0); 
+    initCanvasEraserEvents();
 }
 
 export function populateSenderFilterDropdown() {
@@ -72,7 +87,7 @@ export function filterBySender(senderName) {
 }
 
 // ==========================================
-// 2. 좌측 인쇄 대상 리스트 (발송회사별 분류 및 간소화 표시)
+// 2. 좌측 인쇄 대상 리스트 (엑셀 형식 표 & 정렬)
 // ==========================================
 function getFilteredPrintOrders() {
     if (!state.printReadyList) return [];
@@ -95,11 +110,46 @@ function getFilteredPrintOrders() {
         });
     }
 
+    // 정렬 규칙 적용
+    list.sort((a, b) => {
+        let valA = '';
+        let valB = '';
+
+        if (printListSortField === 'senderName') {
+            valA = (a.senderName || '').toLowerCase();
+            valB = (b.senderName || '').toLowerCase();
+        } else if (printListSortField === 'storeName') {
+            valA = (a.storeName || '').toLowerCase();
+            valB = (b.storeName || '').toLowerCase();
+        } else if (printListSortField === 'address') {
+            valA = (a.address || a.fullAddress || '').toLowerCase();
+            valB = (b.address || b.fullAddress || '').toLowerCase();
+        } else {
+            valA = state.printReadyList.indexOf(a);
+            valB = state.printReadyList.indexOf(b);
+            return printListSortAsc ? (valA - valB) : (valB - valA);
+        }
+
+        if (valA < valB) return printListSortAsc ? -1 : 1;
+        if (valA > valB) return printListSortAsc ? 1 : -1;
+        return 0;
+    });
+
     return list;
 }
 
 export function filterInvoicePrintList(query) {
     invoiceSearchKeyword = (query || '').trim().toLowerCase();
+    renderInvoiceOrderList();
+}
+
+export function sortPrintList(field) {
+    if (printListSortField === field) {
+        printListSortAsc = !printListSortAsc;
+    } else {
+        printListSortField = field;
+        printListSortAsc = true;
+    }
     renderInvoiceOrderList();
 }
 
@@ -111,7 +161,7 @@ export function updateInvoiceCountBadge() {
     const selected = filtered.filter(it => it._selected !== false).length;
     badge.innerText = `선택 ${selected} / ${total}건`;
 
-    const chkAll = document.getElementById('chk-invoice-all');
+    const chkAll = document.getElementById('chk-invoice-all-table');
     if (chkAll) {
         chkAll.checked = (total > 0 && selected === total);
     }
@@ -142,49 +192,54 @@ export function renderInvoiceOrderList() {
     const filtered = getFilteredPrintOrders();
     updateInvoiceCountBadge();
 
+    const getArrow = (field) => {
+        if (printListSortField !== field) return ' ↕';
+        return printListSortAsc ? ' ▲' : ' ▼';
+    };
+
     if (!filtered || filtered.length === 0) {
         listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">조건에 일치하는 주문이 없습니다.</div>`;
         return;
     }
 
-    let html = '';
+    let tableHtml = `
+    <div class="overflow-x-auto custom-scrollbar">
+        <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table">
+            <thead>
+                <tr class="bg-gray-100 text-gray-700 font-black border-b border-gray-200">
+                    <th class="py-2.5 px-2 text-center w-8"><input type="checkbox" id="chk-invoice-all-table" onchange="window.toggleAllInvoiceSelection(this.checked)" class="cursor-pointer"></th>
+                    <th class="py-2.5 px-2 text-center w-10">No.</th>
+                    <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('senderName')">발송자(화주)${getArrow('senderName')}</th>
+                    <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('storeName')">상호(간판명)${getArrow('storeName')}</th>
+                    <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('address')">배송지 주소${getArrow('address')}</th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200 bg-white font-medium text-gray-800">
+    `;
+
     filtered.forEach((item) => {
         const originalIdx = state.printReadyList.indexOf(item);
         const isCurrent = (state.currentPreviewInvoiceIndex === originalIdx);
         const isChecked = (item._selected !== false);
 
-        const senderDisplay = item.senderName || '발송회사 미지정';
-        const storeDisplay = item.storeName || '받는분 미지정';
-        const driverBadge = item.assignedDriver 
-            ? `<span class="bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black px-1.5 py-0.5 rounded shrink-0"><i class="fa-solid fa-truck text-[9px] mr-1"></i>${item.assignedDriver}</span>`
-            : `<span class="bg-gray-100 text-gray-400 text-[10px] font-bold px-1.5 py-0.5 rounded shrink-0">기사 미배정</span>`;
+        const senderDisplay = item.senderName || '-';
+        const storeDisplay = item.storeName || '-';
+        const addressDisplay = item.address || item.fullAddress || '-';
 
-        html += `
-        <div onclick="window.previewInvoiceRow(${originalIdx})" class="p-3 rounded-2xl border ${isCurrent ? 'bg-indigo-50/80 border-indigo-500 ring-2 ring-indigo-300' : 'bg-white border-gray-200 hover:border-indigo-300'} transition cursor-pointer shadow-xs flex items-start gap-2.5 select-none">
-            <div class="pt-1" onclick="event.stopPropagation()">
-                <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked)" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer">
-            </div>
-            <div class="flex-1 min-w-0 space-y-1">
-                <div class="flex items-center justify-between gap-1 flex-wrap">
-                    <span class="text-[10px] font-mono font-black text-gray-400">#${originalIdx + 1}</span>
-                    ${driverBadge}
-                </div>
-                <div class="flex items-center gap-1.5 text-xs truncate">
-                    <span class="bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black px-1.5 py-0.5 rounded shrink-0">발송</span>
-                    <span class="font-black text-gray-900 truncate" title="${senderDisplay}">${senderDisplay}</span>
-                </div>
-                <div class="flex items-center gap-1.5 text-xs truncate">
-                    <span class="bg-indigo-100 text-indigo-900 border border-indigo-300 text-[10px] font-black px-1.5 py-0.5 rounded shrink-0">받는분</span>
-                    <span class="font-bold text-gray-800 truncate" title="${storeDisplay}">${storeDisplay}</span>
-                </div>
-                <div class="text-[11px] font-medium text-gray-500 truncate pt-0.5 border-t border-gray-100" title="${item.address || ''}">
-                    <i class="fa-solid fa-location-dot text-red-500 text-[10px] mr-1"></i>${item.address || '주소 정보 없음'}
-                </div>
-            </div>
-        </div>`;
+        tableHtml += `
+        <tr onclick="window.previewInvoiceRow(${originalIdx})" class="hover:bg-indigo-50/60 cursor-pointer transition ${isCurrent ? 'bg-indigo-50/80 ring-1 ring-indigo-400 font-bold' : ''}">
+            <td class="text-center py-2 px-2" onclick="event.stopPropagation()">
+                <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked)" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer row-checkbox" data-idx="${originalIdx}">
+            </td>
+            <td class="text-center py-2 px-2 font-mono text-gray-400 font-bold">${originalIdx + 1}</td>
+            <td class="py-2 px-3 font-black text-amber-900 truncate max-w-[100px]" title="${senderDisplay}">${senderDisplay}</td>
+            <td class="py-2 px-3 font-bold text-indigo-900 truncate max-w-[110px]" title="${storeDisplay}">${storeDisplay}</td>
+            <td class="py-2 px-3 text-gray-900 truncate max-w-[180px]" title="${addressDisplay}">${addressDisplay}</td>
+        </tr>`;
     });
 
-    listEl.innerHTML = html;
+    tableHtml += `</tbody></table></div>`;
+    listEl.innerHTML = tableHtml;
 }
 
 // ==========================================
@@ -206,8 +261,153 @@ export function previewInvoiceRow(idx) {
 }
 
 // ==========================================
-// 4. PDF 양식 캔버스 렌더링 및 저장 로직
+// 🌟 4. PDF 양식 캔버스 지우개(수정액) 엔진 & PDF 렌더링
 // ==========================================
+function getCanvasMousePos(canvas, evt) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (evt.clientX - rect.left) * scaleX,
+        y: (evt.clientY - rect.top) * scaleY
+    };
+}
+
+function pushUndoState() {
+    const canvas = document.getElementById('pdf-template-canvas');
+    if (!canvas) return;
+    if (canvasUndoStack.length >= 12) canvasUndoStack.shift();
+    const ctx = canvas.getContext('2d');
+    canvasUndoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
+}
+
+export function undoCanvasEraser() {
+    const canvas = document.getElementById('pdf-template-canvas');
+    if (!canvas || canvasUndoStack.length === 0) {
+        alert("되돌릴 작업 내역이 없습니다.");
+        return;
+    }
+    const ctx = canvas.getContext('2d');
+    const prevState = canvasUndoStack.pop();
+    ctx.putImageData(prevState, 0, 0);
+    currentTemplateCanvasData = canvas.toDataURL('image/jpeg', 0.85);
+}
+
+export function toggleEraserMode(forceState) {
+    if (forceState !== undefined) isEraserActive = forceState;
+    else isEraserActive = !isEraserActive;
+
+    const btn = document.getElementById('btn-toggle-eraser');
+    const txt = document.getElementById('eraser-mode-text');
+    const canvas = document.getElementById('pdf-template-canvas');
+
+    if (isEraserActive) {
+        if (btn) {
+            btn.className = "px-3 py-1.5 rounded-lg text-xs font-black bg-rose-600 text-white shadow-sm transition flex items-center gap-1.5 active:scale-95";
+        }
+        if (txt) txt.innerText = "지우개(화이트) 활성화 중";
+        if (canvas) canvas.style.cursor = 'crosshair';
+    } else {
+        if (btn) {
+            btn.className = "px-3 py-1.5 rounded-lg text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 transition flex items-center gap-1.5 active:scale-95";
+        }
+        if (txt) txt.innerText = "지우개(화이트) 켜기";
+        if (canvas) canvas.style.cursor = 'default';
+    }
+}
+
+export function setEraserSize(size) {
+    eraserSize = size;
+    document.querySelectorAll('.eraser-sz-btn').forEach(btn => {
+        const sz = parseInt(btn.getAttribute('data-sz'), 10);
+        if (sz === size) {
+            btn.className = "eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-black bg-indigo-600 text-white shadow-2xs";
+        } else {
+            btn.className = "eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-bold text-gray-600 hover:bg-white";
+        }
+    });
+}
+
+export function ensureEraserToolbar() {
+    let tb = document.getElementById('canvas-eraser-toolbar');
+    const printArea = document.getElementById('print-area');
+    if (!printArea) return;
+
+    if (!tb) {
+        tb = document.createElement('div');
+        tb.id = 'canvas-eraser-toolbar';
+        tb.className = 'flex items-center gap-2.5 bg-white/95 backdrop-blur-sm p-2.5 rounded-2xl shadow-md border border-gray-300 mb-3 sticky top-0 z-30 select-none flex-wrap';
+        tb.innerHTML = `
+            <button type="button" id="btn-toggle-eraser" onclick="window.toggleEraserMode()" class="px-3 py-1.5 rounded-lg text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 transition flex items-center gap-1.5 active:scale-95">
+                <i class="fa-solid fa-eraser text-indigo-600"></i> <span id="eraser-mode-text">지우개(화이트) 켜기</span>
+            </button>
+            <div class="flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-lg p-1">
+                <span class="text-[10px] font-bold text-gray-500 px-1">굵기:</span>
+                <button type="button" onclick="window.setEraserSize(15)" class="eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-bold text-gray-600 hover:bg-white" data-sz="15">소</button>
+                <button type="button" onclick="window.setEraserSize(30)" class="eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-black bg-indigo-600 text-white shadow-2xs" data-sz="30">중</button>
+                <button type="button" onclick="window.setEraserSize(55)" class="eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-bold text-gray-600 hover:bg-white" data-sz="55">대</button>
+            </div>
+            <button type="button" onclick="window.undoCanvasEraser()" class="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-100 border border-gray-200 transition shadow-2xs active:scale-95 flex items-center gap-1" title="실행 취소">
+                <i class="fa-solid fa-rotate-left"></i> 되돌리기
+            </button>
+            <span class="text-[10px] text-indigo-700 font-bold ml-auto bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100">
+                <i class="fa-solid fa-circle-info mr-1"></i>기존 내용(받는분, 날짜, 금액 등)을 마우스로 문질러 지운 후 [폼 저장]을 누르세요.
+            </span>
+        `;
+        printArea.parentNode.insertBefore(tb, printArea);
+    }
+}
+
+function initCanvasEraserEvents() {
+    const canvas = document.getElementById('pdf-template-canvas');
+    if (!canvas || canvas.dataset.eraserBound === 'true') return;
+
+    canvas.addEventListener('mousedown', (e) => {
+        if (!isEraserActive) return;
+        pushUndoState();
+        isDrawing = true;
+        const pos = getCanvasMousePos(canvas, e);
+        lastMouseX = pos.x;
+        lastMouseY = pos.y;
+
+        const ctx = canvas.getContext('2d');
+        ctx.beginPath();
+        ctx.fillStyle = '#ffffff';
+        ctx.arc(pos.x, pos.y, eraserSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+    });
+
+    canvas.addEventListener('mousemove', (e) => {
+        if (!isDrawing || !isEraserActive) return;
+        const pos = getCanvasMousePos(canvas, e);
+        const ctx = canvas.getContext('2d');
+
+        ctx.beginPath();
+        ctx.strokeStyle = '#ffffff';
+        ctx.lineWidth = eraserSize;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.moveTo(lastMouseX, lastMouseY);
+        ctx.lineTo(pos.x, pos.y);
+        ctx.stroke();
+
+        lastMouseX = pos.x;
+        lastMouseY = pos.y;
+    });
+
+    const stopDrawing = () => {
+        if (isDrawing) {
+            isDrawing = false;
+            currentTemplateCanvasData = canvas.toDataURL('image/jpeg', 0.85);
+        }
+    };
+
+    canvas.addEventListener('mouseup', stopDrawing);
+    canvas.addEventListener('mouseleave', stopDrawing);
+
+    canvas.dataset.eraserBound = 'true';
+}
+
 async function renderPdfDocumentToCanvas(pdfDoc) {
     const canvas = document.getElementById('pdf-template-canvas');
     const printArea = document.getElementById('print-area');
@@ -224,9 +424,14 @@ async function renderPdfDocumentToCanvas(pdfDoc) {
         await page.render({ canvasContext: context, viewport }).promise;
 
         currentTemplateCanvasData = canvas.toDataURL('image/jpeg', 0.85);
+        canvasUndoStack = [];
 
         if (placeholder) placeholder.classList.add('hidden');
         printArea.classList.remove('hidden');
+
+        ensureEraserToolbar();
+        initCanvasEraserEvents();
+        toggleEraserMode(true); // PDF 로드 시 바로 지울 수 있도록 지우개 모드 켜기
     } catch (e) {
         console.error("PDF 캔버스 렌더링 실패:", e);
         alert("PDF 양식을 화면에 렌더링하는 중 오류가 발생했습니다: " + e.message);
@@ -331,7 +536,7 @@ export async function handleTemplatePdfFile(file) {
             accordion.classList.add('flex');
         }
 
-        alert(`[PDF 양식 인식 완료]\n\n업로드된 PDF 파일의 첫 페이지를 주문서 문서 양식으로 중앙에 로드했습니다.\n우측 [폼 저장]을 누르면 이 양식이 저장 목록에 등록됩니다.`);
+        alert(`[PDF 양식 인식 완료]\n\n업로드된 PDF 파일의 첫 페이지를 문서 양식으로 중앙에 로드했습니다.\n\n불필요한 글자나 이전 주문 내역을 마우스로 지우신 후, 우측 [폼 저장]을 눌러 기본 양식으로 등록해 주세요.`);
     } catch (e) {
         console.error("PDF 파싱 오류:", e);
         alert("PDF 파일 양식 분석 중 오류가 발생했습니다: " + e.message);
@@ -442,6 +647,10 @@ export async function applySavedForm(idx) {
                 ctx.drawImage(img, 0, 0);
                 if (placeholder) placeholder.classList.add('hidden');
                 printArea.classList.remove('hidden');
+
+                ensureEraserToolbar();
+                initCanvasEraserEvents();
+                toggleEraserMode(false);
             };
             img.src = form.canvasData;
         }
@@ -489,6 +698,7 @@ export function saveProviderForm() {
     
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     alert(`[${title}] 양식 폼이 성공적으로 저장 목록에 기록되었습니다.`);
+    toggleEraserMode(false);
     loadSavedForms();
 }
 
@@ -506,6 +716,7 @@ export function deleteSavedForm(idx) {
 export function cancelProviderFormEdit() {
     state.currentSelectedFormIndex = null;
     currentTemplateCanvasData = null;
+    canvasUndoStack = [];
 
     ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
         const el = document.getElementById(id);
@@ -514,9 +725,12 @@ export function cancelProviderFormEdit() {
     
     const printArea = document.getElementById('print-area');
     const placeholder = document.getElementById('preview-placeholder');
+    const tb = document.getElementById('canvas-eraser-toolbar');
     if (printArea) printArea.classList.add('hidden');
     if (placeholder) placeholder.classList.remove('hidden');
+    if (tb) tb.remove();
 
+    toggleEraserMode(false);
     loadSavedForms(); 
 }
 
@@ -555,13 +769,28 @@ export function executeBatchPrint() {
     let printPagesHtml = '';
     selectedOrders.forEach((item, idx) => {
         const driverName = item.assignedDriver ? item.assignedDriver : '미배정';
+        const sender = item.senderName || '화주사 미지정';
+        const store = item.storeName || '-';
+        const addr = item.address || item.fullAddress || '';
+        const phone = item.phone || '';
+        const orderNo = item.orderNo || '';
+        const itemsSummary = item.itemName || (item.items && item.items.length > 0 ? `${item.items[0].name} (총 ${item.qty}개)` : '');
+
         printPagesHtml += `
         <div class="print-page-wrapper">
             <div class="driver-marking-bar">
-                <span>[배송순번 #${idx + 1}]</span>
-                <span><b>담당기사:</b> ${driverName}</span>
-                <span><b>받는분:</b> ${item.storeName || '-'}</span>
-                <span><b>주소:</b> ${item.address || ''}</span>
+                <div class="bar-row bar-top">
+                    <span class="bar-badge">#${idx + 1}</span>
+                    <span class="bar-driver"><b>담당기사:</b> ${driverName}</span>
+                    <span class="bar-sender"><b>발송(화주):</b> ${sender}</span>
+                    <span class="bar-orderno"><b>주문번호:</b> ${orderNo}</span>
+                </div>
+                <div class="bar-row bar-bottom">
+                    <span class="bar-store"><b>받는분:</b> ${store}</span>
+                    <span class="bar-phone"><b>연락처:</b> ${phone}</span>
+                    <span class="bar-addr"><b>배송주소:</b> ${addr}</span>
+                </div>
+                ${itemsSummary ? `<div class="bar-row bar-items"><b>배송품목:</b> ${itemsSummary}</div>` : ''}
             </div>
             <img src="${currentTemplateCanvasData}" class="pdf-template-img" alt="주문서 양식">
         </div>`;
@@ -578,13 +807,18 @@ export function executeBatchPrint() {
         @media print { 
             @page { size: A4 portrait; margin: 0; } 
             body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } 
-            .print-page-wrapper { page-break-after: always; width: 210mm; height: 297mm; padding: 10mm; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
+            .print-page-wrapper { page-break-after: always; width: 210mm; height: 297mm; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
             .print-page-wrapper:last-child { page-break-after: auto; }
         }
-        body { margin: 0; padding: 0; font-family: 'Malgun Gothic', sans-serif; background: white; }
-        .print-page-wrapper { width: 210mm; height: 297mm; margin: 0 auto; padding: 10mm; display: flex; flex-direction: column; align-items: center; }
-        .driver-marking-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 900; background: #f8fafc; border: 1.5px solid #000; padding: 6px 12px; margin-bottom: 8px; border-radius: 4px; }
-        .pdf-template-img { width: 100%; max-height: 260mm; object-fit: contain; }
+        body { margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; color: #000; }
+        .print-page-wrapper { width: 210mm; height: 297mm; margin: 0 auto; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; }
+        .driver-marking-bar { width: 100%; font-size: 11px; background: #f8fafc; border: 2px solid #000; padding: 6px 10px; margin-bottom: 6px; border-radius: 4px; display: flex; flex-direction: column; gap: 3px; }
+        .bar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; }
+        .bar-badge { font-weight: 900; background: #000; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
+        .bar-driver b, .bar-sender b, .bar-orderno b, .bar-store b, .bar-phone b, .bar-addr b, .bar-items b { color: #1e3a8a; }
+        .bar-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48%; }
+        .bar-items { font-size: 10.5px; border-top: 1px dashed #cbd5e1; padding-top: 2px; margin-top: 1px; color: #334155; }
+        .pdf-template-img { width: 100%; max-height: 255mm; object-fit: contain; }
     </style></head><body>${printPagesHtml}</body></html>`);
     doc.close();
 
@@ -850,7 +1084,7 @@ export function executePickingListPrint() {
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; 
     document.body.appendChild(iframe);
 
-    const doc = iframe.contentWindow.document;
+    const doc = iframe.contentWindow.document; 
     doc.open();
     doc.write(pickingHtml);
     doc.close();
@@ -896,3 +1130,9 @@ window.toggleAllPickingDrivers = toggleAllPickingDrivers;
 window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
+window.sortPrintList = sortPrintList;
+
+// 지우개 툴바 제어 함수 바인딩
+window.toggleEraserMode = toggleEraserMode;
+window.setEraserSize = setEraserSize;
+window.undoCanvasEraser = undoCanvasEraser;
