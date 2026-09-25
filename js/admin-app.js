@@ -78,7 +78,8 @@ import {
     updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
     filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
     renderInvoiceOrderList, initTemplatePdfDropZone, handleTemplatePdfFile,
-    sortInvoicePrintList, openPickingDriverModal, closePickingDriverModal,
+    populateSenderFilterDropdown, filterBySender,
+    openPickingDriverModal, closePickingDriverModal,
     toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint
 } from "./admin-dispatch-print.js";
 
@@ -711,12 +712,14 @@ window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
-window.sortInvoicePrintList = sortInvoicePrintList;
+window.populateSenderFilterDropdown = populateSenderFilterDropdown;
+window.filterBySender = filterBySender;
 window.openPickingDriverModal = openPickingDriverModal;
 window.closePickingDriverModal = closePickingDriverModal;
 window.toggleAllPickingDrivers = toggleAllPickingDrivers;
 window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
+window.printAggregatedItemList = openPickingDriverModal;
 
 // [관제 데이터 추출(Export)]
 window.openExcelExportModal = openExcelExportModal;
