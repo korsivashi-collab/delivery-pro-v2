@@ -46,7 +46,13 @@ export function previewInvoiceRow(idx) {
     document.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || ''); 
     document.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
     document.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
-    document.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    
+    // 🌟 원본 전체 주소(fullAddress) 우선 표기 (층, 호수, 괄호 등 상세정보 온전 보존)
+    const displayAddr = item.fullAddress || item.address || '';
+    document.querySelectorAll('.prev-cust-addr').forEach(el => {
+        el.innerText = displayAddr;
+        el.title = displayAddr;
+    });
 
     // 복수 상품(items) 또는 단일 상품 표시
     let firstItemName = item.itemName || '';
@@ -120,7 +126,12 @@ function generateInvoiceHTML(item, providerInfo) {
     template.querySelectorAll('.prev-cust-name').forEach(el => el.innerText = item.senderName || item.storeName || '');
     template.querySelectorAll('.prev-cust-store').forEach(el => el.innerText = item.storeName || item.senderName || '');
     template.querySelectorAll('.prev-cust-tel').forEach(el => el.innerText = item.phone || '');
-    template.querySelectorAll('.prev-cust-addr').forEach(el => el.innerText = item.address || '');
+    
+    // 🌟 A4 인쇄 시에도 원본 전체 주소(fullAddress) 반영 (층수, 호수 온전하게 출력)
+    const printAddr = item.fullAddress || item.address || '';
+    template.querySelectorAll('.prev-cust-addr').forEach(el => {
+        el.innerText = printAddr;
+    });
 
     // 품목 리스트 바인딩
     let firstItemName = item.itemName || '';

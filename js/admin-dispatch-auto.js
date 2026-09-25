@@ -293,10 +293,13 @@ export function renderDispatchDriverDetail() {
             driverSelectOptions += `<option value="${dName}" ${dName === driverName ? 'selected' : ''}>${dName}</option>`;
         });
 
+        // 🌟 title 속성에 원본 전체 주소(fullAddress)를 적용하여 마우스 오버 시 상세 층/호수 확인 가능
+        const tooltipAddress = item.fullAddress || item.address || '';
+
         html += `
         <tr class="hover:bg-blue-50/50 transition">
             <td class="text-center font-bold text-gray-500 w-12">${item.displayNumber || idx + 1}</td>
-            <td class="font-bold text-gray-800 whitespace-normal break-keep">
+            <td class="font-bold text-gray-800 whitespace-normal break-keep" title="${tooltipAddress}">
                 ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
                 ${item.address || '-'}
                 ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
@@ -566,9 +569,11 @@ export async function sendRoutesToDrivers() {
         for (const devId of sendTargetDevIds) {
             const { driver: matchedLic, orders } = driverMap[devId];
 
+            // 🌟 fullAddress를 목적지 객체에 포함하여 기사 앱으로 원본 상세 주소(층, 호수 등)를 온전히 전송
             const destinations = orders.map((ord, idx) => ({
                 displayNumber: idx + 1,
                 address: ord.address || '',
+                fullAddress: ord.fullAddress || ord.address || '',
                 storeName: ord.storeName || ord.senderName || '',
                 phone: ord.phone || '', 
                 lat: ord.lat || null,
@@ -721,7 +726,7 @@ window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
 window.initDispatchResizer = initDispatchResizer;
-window.toggleAllDispatchDrivers = toggleAllDispatchDrivers; // 🌟 전체선택 토글 바인딩
+window.toggleAllDispatchDrivers = toggleAllDispatchDrivers;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
 window.selectDispatchDriver = selectDispatchDriver;

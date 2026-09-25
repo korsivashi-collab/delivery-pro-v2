@@ -153,6 +153,9 @@ export function renderExcelTable() {
             ? `<span class="bg-indigo-50 text-indigo-700 text-[9px] font-black px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">외 ${item.items.length - 1}품목</span>`
             : '';
 
+        // 🌟 title 속성에 원본 전체 주소(fullAddress)를 바인딩하여 마우스 오버 시 상세 확인 가능
+        const tooltipAddress = item.fullAddress || item.address || '';
+
         html += `
         <tr class="hover:bg-blue-50/40 cursor-pointer transition border-b border-gray-100" onclick="window.toggleRowCheckbox(event, ${idx})">
             <td class="text-center w-8" onclick="event.stopPropagation()">
@@ -162,7 +165,7 @@ export function renderExcelTable() {
             <td class="text-center w-36" onclick="event.stopPropagation()">
                 ${driverSelectHtml}
             </td>
-            <td class="font-bold text-gray-800 break-keep leading-snug py-2.5 px-2" title="${item.address || ''}">
+            <td class="font-bold text-gray-800 break-keep leading-snug py-2.5 px-2" title="${tooltipAddress}">
                 <div class="flex items-start gap-1.5">
                     ${coordIcon}
                     <div class="min-w-0 flex-1">
@@ -241,21 +244,24 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 배송지 주소 추출 및 cleanAddress 적용
-        let address = '';
+        // 2. 🌟 배송지 주소 원본 추출 및 cleanAddress 적용
+        let rawAddress = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
             if (!/연락처|전화|명$|코드|번호|쿠폰|금액|출고지/i.test(ck)) {
                 if (/배송지주소|기본주소|배송지(?!(명|간판|연락처|전화|코드))|주소|수령지|배달주소|도로명주소/i.test(ck)) {
                     if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
-                        address = String(row[k]).trim();
+                        rawAddress = String(row[k]).trim();
                         break;
                     }
                 }
             }
         }
-        // 🌟 PDF와 동일한 정밀 절삭 엔진 통과
-        address = cleanAddress(address);
+        
+        // 정제된 깔끔한 주소 (내비/관제용)
+        const address = cleanAddress(rawAddress);
+        // 원본 전체 주소 (명세서 인쇄용: 층, 호수, 괄호 등 보존)
+        const fullAddress = rawAddress || address;
 
         // 3. 상호 / 수령처명 추출
         let storeName = '';
@@ -392,6 +398,7 @@ export function processExcelData(jsonData) {
             orderMap[orderKey].qty += qty;
             if (!orderMap[orderKey].phone && phone) orderMap[orderKey].phone = phone;
             if (!orderMap[orderKey].memo && memo) orderMap[orderKey].memo = memo;
+            if (!orderMap[orderKey].fullAddress && fullAddress) orderMap[orderKey].fullAddress = fullAddress;
         } else {
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
@@ -399,7 +406,8 @@ export function processExcelData(jsonData) {
                 senderName: senderName,
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
                 bizNo: bizNo,
-                address: address,
+                address: address, // 정제 주소 (내비/관제용)
+                fullAddress: fullAddress, // 🌟 명세서 인쇄용 원본 전체 주소
                 storeName: storeName || senderName || '배송처',
                 phone: phone,
                 itemName: itemName,
@@ -481,6 +489,9 @@ export async function handleExcelUpload(e) {
             const parsedPdfOrders = await processSinglePdfFile(file);
             if (parsedPdfOrders && parsedPdfOrders.length > 0) {
                 parsedPdfOrders.forEach(ord => {
+                    if (!ord.fullAddress && ord.address) {
+                        ord.fullAddress = ord.address; // 원본 주소 보존
+                    }
                     if (ord.address) ord.address = cleanAddress(ord.address);
                 });
                 state.parsedExcelList.push(...parsedPdfOrders);
@@ -572,6 +583,7 @@ async function batchGeocodeExcelList(items) {
                 </div>`;
         }
         if (item.address && (!item.lat || !item.lng)) {
+            if (!item.fullAddress) item.fullAddress = item.address;
             item.address = cleanAddress(item.address);
             const coords = await getCoordsFromAddress(item.address);
             if (coords) { 
