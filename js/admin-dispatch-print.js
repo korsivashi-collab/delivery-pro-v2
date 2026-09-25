@@ -2,22 +2,19 @@
 
 import { state, getLocalDateString } from "./admin-state.js";
 import { formatNumber } from "./admin-dispatch-core.js";
+import {
+    parsePdfToEditableDocument,
+    renderEditableDocument,
+    generateDefaultEditableTemplate,
+    templateBuilderState
+} from "./admin-dispatch-template.js";
 
 let invoiceSearchKeyword = '';
 let currentSenderFilter = 'ALL';
-let currentTemplateCanvasData = null;
 
 // 🌟 좌측 인쇄 리스트 정렬 상태 변수
 let printListSortField = 'originalIdx'; // 'originalIdx', 'senderName', 'storeName', 'address'
 let printListSortAsc = true;
-
-// 🌟 PDF 양식 직접 지우개(화이트) 상태 변수
-let isEraserActive = false;
-let eraserSize = 30; // 기본 중간 크기 (px)
-let isDrawing = false;
-let canvasUndoStack = [];
-let lastMouseX = 0;
-let lastMouseY = 0;
 
 // ==========================================
 // 1. 주문서 통합관리 모달 열기 & 초기화
@@ -59,7 +56,6 @@ export function exportToInvoiceModal() {
     loadSavedForms(); 
     renderInvoiceOrderList();
     previewInvoiceRow(0); 
-    initCanvasEraserEvents();
 }
 
 export function populateSenderFilterDropdown() {
@@ -261,183 +257,8 @@ export function previewInvoiceRow(idx) {
 }
 
 // ==========================================
-// 🌟 4. PDF 양식 캔버스 지우개(수정액) 엔진 & PDF 렌더링
+// 4. 양식 제작용 PDF 드롭존 초기화
 // ==========================================
-function getCanvasMousePos(canvas, evt) {
-    const rect = canvas.getBoundingClientRect();
-    const scaleX = canvas.width / rect.width;
-    const scaleY = canvas.height / rect.height;
-    return {
-        x: (evt.clientX - rect.left) * scaleX,
-        y: (evt.clientY - rect.top) * scaleY
-    };
-}
-
-function pushUndoState() {
-    const canvas = document.getElementById('pdf-template-canvas');
-    if (!canvas) return;
-    if (canvasUndoStack.length >= 12) canvasUndoStack.shift();
-    const ctx = canvas.getContext('2d');
-    canvasUndoStack.push(ctx.getImageData(0, 0, canvas.width, canvas.height));
-}
-
-export function undoCanvasEraser() {
-    const canvas = document.getElementById('pdf-template-canvas');
-    if (!canvas || canvasUndoStack.length === 0) {
-        alert("되돌릴 작업 내역이 없습니다.");
-        return;
-    }
-    const ctx = canvas.getContext('2d');
-    const prevState = canvasUndoStack.pop();
-    ctx.putImageData(prevState, 0, 0);
-    currentTemplateCanvasData = canvas.toDataURL('image/jpeg', 0.85);
-}
-
-export function toggleEraserMode(forceState) {
-    if (forceState !== undefined) isEraserActive = forceState;
-    else isEraserActive = !isEraserActive;
-
-    const btn = document.getElementById('btn-toggle-eraser');
-    const txt = document.getElementById('eraser-mode-text');
-    const canvas = document.getElementById('pdf-template-canvas');
-
-    if (isEraserActive) {
-        if (btn) {
-            btn.className = "px-3 py-1.5 rounded-lg text-xs font-black bg-rose-600 text-white shadow-sm transition flex items-center gap-1.5 active:scale-95";
-        }
-        if (txt) txt.innerText = "지우개(화이트) 활성화 중";
-        if (canvas) canvas.style.cursor = 'crosshair';
-    } else {
-        if (btn) {
-            btn.className = "px-3 py-1.5 rounded-lg text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 transition flex items-center gap-1.5 active:scale-95";
-        }
-        if (txt) txt.innerText = "지우개(화이트) 켜기";
-        if (canvas) canvas.style.cursor = 'default';
-    }
-}
-
-export function setEraserSize(size) {
-    eraserSize = size;
-    document.querySelectorAll('.eraser-sz-btn').forEach(btn => {
-        const sz = parseInt(btn.getAttribute('data-sz'), 10);
-        if (sz === size) {
-            btn.className = "eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-black bg-indigo-600 text-white shadow-2xs";
-        } else {
-            btn.className = "eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-bold text-gray-600 hover:bg-white";
-        }
-    });
-}
-
-export function ensureEraserToolbar() {
-    let tb = document.getElementById('canvas-eraser-toolbar');
-    const printArea = document.getElementById('print-area');
-    if (!printArea) return;
-
-    if (!tb) {
-        tb = document.createElement('div');
-        tb.id = 'canvas-eraser-toolbar';
-        tb.className = 'flex items-center gap-2.5 bg-white/95 backdrop-blur-sm p-2.5 rounded-2xl shadow-md border border-gray-300 mb-3 sticky top-0 z-30 select-none flex-wrap';
-        tb.innerHTML = `
-            <button type="button" id="btn-toggle-eraser" onclick="window.toggleEraserMode()" class="px-3 py-1.5 rounded-lg text-xs font-black bg-gray-100 hover:bg-gray-200 text-gray-700 transition flex items-center gap-1.5 active:scale-95">
-                <i class="fa-solid fa-eraser text-indigo-600"></i> <span id="eraser-mode-text">지우개(화이트) 켜기</span>
-            </button>
-            <div class="flex items-center gap-1 bg-gray-100 border border-gray-200 rounded-lg p-1">
-                <span class="text-[10px] font-bold text-gray-500 px-1">굵기:</span>
-                <button type="button" onclick="window.setEraserSize(15)" class="eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-bold text-gray-600 hover:bg-white" data-sz="15">소</button>
-                <button type="button" onclick="window.setEraserSize(30)" class="eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-black bg-indigo-600 text-white shadow-2xs" data-sz="30">중</button>
-                <button type="button" onclick="window.setEraserSize(55)" class="eraser-sz-btn px-2.5 py-0.5 rounded text-[11px] font-bold text-gray-600 hover:bg-white" data-sz="55">대</button>
-            </div>
-            <button type="button" onclick="window.undoCanvasEraser()" class="px-3 py-1.5 rounded-lg text-xs font-bold text-gray-700 hover:bg-gray-100 border border-gray-200 transition shadow-2xs active:scale-95 flex items-center gap-1" title="실행 취소">
-                <i class="fa-solid fa-rotate-left"></i> 되돌리기
-            </button>
-            <span class="text-[10px] text-indigo-700 font-bold ml-auto bg-indigo-50 px-2 py-1 rounded-md border border-indigo-100">
-                <i class="fa-solid fa-circle-info mr-1"></i>기존 내용(받는분, 날짜, 금액 등)을 마우스로 문질러 지운 후 [폼 저장]을 누르세요.
-            </span>
-        `;
-        printArea.parentNode.insertBefore(tb, printArea);
-    }
-}
-
-function initCanvasEraserEvents() {
-    const canvas = document.getElementById('pdf-template-canvas');
-    if (!canvas || canvas.dataset.eraserBound === 'true') return;
-
-    canvas.addEventListener('mousedown', (e) => {
-        if (!isEraserActive) return;
-        pushUndoState();
-        isDrawing = true;
-        const pos = getCanvasMousePos(canvas, e);
-        lastMouseX = pos.x;
-        lastMouseY = pos.y;
-
-        const ctx = canvas.getContext('2d');
-        ctx.beginPath();
-        ctx.fillStyle = '#ffffff';
-        ctx.arc(pos.x, pos.y, eraserSize / 2, 0, Math.PI * 2);
-        ctx.fill();
-    });
-
-    canvas.addEventListener('mousemove', (e) => {
-        if (!isDrawing || !isEraserActive) return;
-        const pos = getCanvasMousePos(canvas, e);
-        const ctx = canvas.getContext('2d');
-
-        ctx.beginPath();
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = eraserSize;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.moveTo(lastMouseX, lastMouseY);
-        ctx.lineTo(pos.x, pos.y);
-        ctx.stroke();
-
-        lastMouseX = pos.x;
-        lastMouseY = pos.y;
-    });
-
-    const stopDrawing = () => {
-        if (isDrawing) {
-            isDrawing = false;
-            currentTemplateCanvasData = canvas.toDataURL('image/jpeg', 0.85);
-        }
-    };
-
-    canvas.addEventListener('mouseup', stopDrawing);
-    canvas.addEventListener('mouseleave', stopDrawing);
-
-    canvas.dataset.eraserBound = 'true';
-}
-
-async function renderPdfDocumentToCanvas(pdfDoc) {
-    const canvas = document.getElementById('pdf-template-canvas');
-    const printArea = document.getElementById('print-area');
-    const placeholder = document.getElementById('preview-placeholder');
-    if (!canvas || !printArea) return;
-
-    try {
-        const page = await pdfDoc.getPage(1);
-        const viewport = page.getViewport({ scale: 1.5 });
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const context = canvas.getContext('2d');
-
-        await page.render({ canvasContext: context, viewport }).promise;
-
-        currentTemplateCanvasData = canvas.toDataURL('image/jpeg', 0.85);
-        canvasUndoStack = [];
-
-        if (placeholder) placeholder.classList.add('hidden');
-        printArea.classList.remove('hidden');
-
-        ensureEraserToolbar();
-        initCanvasEraserEvents();
-        toggleEraserMode(true); // PDF 로드 시 바로 지울 수 있도록 지우개 모드 켜기
-    } catch (e) {
-        console.error("PDF 캔버스 렌더링 실패:", e);
-        alert("PDF 양식을 화면에 렌더링하는 중 오류가 발생했습니다: " + e.message);
-    }
-}
-
 export function initTemplatePdfDropZone() {
     const dropzone = document.getElementById('template-pdf-dropzone');
     const fileInput = document.getElementById('template-pdf-file-input');
@@ -450,7 +271,7 @@ export function initTemplatePdfDropZone() {
     if (fileInput) {
         fileInput.addEventListener('change', async (e) => {
             const file = e.target.files?.[0];
-            if (file) await handleTemplatePdfFile(file);
+            if (file) await parsePdfToEditableDocument(file);
             e.target.value = '';
         });
     }
@@ -468,79 +289,13 @@ export function initTemplatePdfDropZone() {
         dropzone.classList.remove('bg-red-100', 'border-red-500');
         const file = e.dataTransfer.files?.[0];
         if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
-            await handleTemplatePdfFile(file);
+            await parsePdfToEditableDocument(file);
         } else if (file) {
             alert("양식 제작용 파일은 PDF 파일만 지원합니다.");
         }
     });
 
     dropzone.dataset.bound = 'true';
-}
-
-export async function handleTemplatePdfFile(file) {
-    if (!window.pdfjsLib) {
-        alert("PDF 라이브러리가 로드되지 않았습니다. 새로고침 후 다시 시도해 주세요.");
-        return;
-    }
-
-    try {
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-        const pdf = await loadingTask.promise;
-
-        await renderPdfDocumentToCanvas(pdf);
-
-        const page1 = await pdf.getPage(1);
-        const textContent = await page1.getTextContent();
-        const pageText = textContent.items.map(it => it.str.trim()).filter(Boolean).join(' ');
-
-        let detectedTitle = file.name.replace(/\.[^/.]+$/, '').trim();
-        let detectedRegno = '';
-        let detectedName = '';
-        let detectedAddr = '';
-        let detectedTel = '';
-        let detectedAddTel = '';
-
-        const bizMatch = pageText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/);
-        if (bizMatch) detectedRegno = bizMatch[0].replace(/\s+/g, '-');
-
-        const telMatch = pageText.match(/(?:0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})/g);
-        if (telMatch && telMatch.length > 0) {
-            detectedTel = telMatch[0];
-            if (telMatch.length > 1) detectedAddTel = telMatch[1];
-        }
-
-        const addrMatch = pageText.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*?(?:로|길|동|읍|면|가)\s*[\d\-]+/);
-        if (addrMatch) detectedAddr = addrMatch[0].trim();
-
-        const storeMatch = pageText.match(/(?:상호|법인명|상호명|공급자)\s*[:|]?\s*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
-        if (storeMatch) detectedName = storeMatch[1].trim();
-
-        const titleInput = document.getElementById('input-form-title');
-        const regnoInput = document.getElementById('input-prov-regno');
-        const nameInput = document.getElementById('input-prov-name');
-        const addrInput = document.getElementById('input-prov-addr');
-        const telInput = document.getElementById('input-prov-tel');
-        const addTelInput = document.getElementById('input-prov-add-tel');
-
-        if (titleInput) titleInput.value = detectedTitle || '새 주문서 양식';
-        if (regnoInput) regnoInput.value = detectedRegno;
-        if (nameInput) nameInput.value = detectedName;
-        if (addrInput) addrInput.value = detectedAddr;
-        if (telInput) telInput.value = detectedTel;
-        if (addTelInput) addTelInput.value = detectedAddTel;
-
-        const accordion = document.getElementById('form-setup-accordion');
-        if (accordion && accordion.classList.contains('hidden')) {
-            accordion.classList.remove('hidden');
-            accordion.classList.add('flex');
-        }
-
-        alert(`[PDF 양식 인식 완료]\n\n업로드된 PDF 파일의 첫 페이지를 문서 양식으로 중앙에 로드했습니다.\n\n불필요한 글자나 이전 주문 내역을 마우스로 지우신 후, 우측 [폼 저장]을 눌러 기본 양식으로 등록해 주세요.`);
-    } catch (e) {
-        console.error("PDF 파싱 오류:", e);
-        alert("PDF 파일 양식 분석 중 오류가 발생했습니다: " + e.message);
-    }
 }
 
 // ==========================================
@@ -552,7 +307,10 @@ export function loadSavedForms() {
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     
     if (savedForms.length === 0) { 
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-[10px] font-bold">저장된 폼이 없습니다.<br>PDF를 업로드하거나 폼을 작성하고 저장하세요.</div>`; 
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-[10px] font-bold">저장된 서류 양식이 없습니다.<br>PDF를 업로드하여 양식을 생성하세요.</div>`; 
+        // 기본 템플릿으로 에디터 초기화
+        const defaultHtml = generateDefaultEditableTemplate();
+        renderEditableDocument(defaultHtml);
         return; 
     }
     
@@ -586,7 +344,7 @@ export function loadSavedForms() {
 
     if (state.currentSelectedFormIndex === null) {
         const defaultIdx = savedForms.findIndex(f => f.isDefault);
-        if (defaultIdx >= 0) applySavedForm(defaultIdx);
+        applySavedForm(defaultIdx >= 0 ? defaultIdx : 0);
     }
 }
 
@@ -596,7 +354,7 @@ export function setAsDefaultForm(idx) {
 
     savedForms.forEach((f, i) => { f.isDefault = (i === idx); });
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    alert(`[${savedForms[idx].title}] 서식이 기본 주문서 양식으로 설정되었습니다.`);
+    alert(`[${savedForms[idx].title}] 양식이 기본 주문서 양식으로 설정되었습니다.`);
     loadSavedForms();
 }
 
@@ -613,7 +371,7 @@ export function previewSavedForm(idx) {
     applySavedForm(idx); 
 }
 
-export async function applySavedForm(idx) {
+export function applySavedForm(idx) {
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     const form = savedForms[idx];  
     if (!form) return;
@@ -624,82 +382,27 @@ export async function applySavedForm(idx) {
     const nameInput = document.getElementById('input-prov-name');
     const addrInput = document.getElementById('input-prov-addr');
     const telInput = document.getElementById('input-prov-tel');
-    const addTelInput = document.getElementById('input-prov-add-tel');
 
     if (titleInput) titleInput.value = form.title || '';
     if (regnoInput) regnoInput.value = form.regno || '';
     if (nameInput) nameInput.value = form.name || '';
     if (addrInput) addrInput.value = form.addr || '';
     if (telInput) telInput.value = form.tel || '';
-    if (addTelInput) addTelInput.value = form.addTel || '';
 
-    if (form.canvasData) {
-        currentTemplateCanvasData = form.canvasData;
-        const canvas = document.getElementById('pdf-template-canvas');
-        const printArea = document.getElementById('print-area');
-        const placeholder = document.getElementById('preview-placeholder');
-        if (canvas && printArea) {
-            const img = new Image();
-            img.onload = () => {
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(img, 0, 0);
-                if (placeholder) placeholder.classList.add('hidden');
-                printArea.classList.remove('hidden');
-
-                ensureEraserToolbar();
-                initCanvasEraserEvents();
-                toggleEraserMode(false);
-            };
-            img.src = form.canvasData;
-        }
+    if (form.templateHtml) {
+        templateBuilderState.activeTemplateTitle = form.title || '주문서 양식';
+        templateBuilderState.currentDocHtml = form.templateHtml;
+        renderEditableDocument(form.templateHtml);
     }
 
     loadSavedForms(); 
 }
 
 export function saveProviderForm() {
-    const titleInput = document.getElementById('input-form-title');
-    const title = titleInput ? titleInput.value.trim() : '';
-    if (!title) { alert("저장할 폼의 '제목'을 입력해주세요."); return; }
-    
-    if (!currentTemplateCanvasData) {
-        alert("등록된 PDF 문서 양식이 없습니다. 우측에서 먼저 PDF 양식을 업로드해 주세요.");
-        return;
+    // 서식 모듈의 양식 저장 함수로 위임
+    if (window.saveCurrentDocumentTemplate) {
+        window.saveCurrentDocumentTemplate();
     }
-
-    const newForm = {
-        title, 
-        regno: document.getElementById('input-prov-regno')?.value.trim() || '',
-        name: document.getElementById('input-prov-name')?.value.trim() || '',
-        addr: document.getElementById('input-prov-addr')?.value.trim() || '',
-        tel: document.getElementById('input-prov-tel')?.value.trim() || '',
-        addTel: document.getElementById('input-prov-add-tel')?.value.trim() || '',
-        canvasData: currentTemplateCanvasData,
-        isDefault: false,
-        savedAt: Date.now()
-    };
-    
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
-    const existingIdx = savedForms.findIndex(f => f.title === title);
-    
-    if (existingIdx >= 0) {
-        if (confirm(`'${title}'(으)로 이미 저장된 폼이 있습니다. 덮어쓰시겠습니까?`)) {
-            newForm.isDefault = savedForms[existingIdx].isDefault;
-            savedForms[existingIdx] = newForm;
-        } else {
-            return;
-        }
-    } else { 
-        if (savedForms.length === 0) newForm.isDefault = true;
-        savedForms.push(newForm); 
-    }
-    
-    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    alert(`[${title}] 양식 폼이 성공적으로 저장 목록에 기록되었습니다.`);
-    toggleEraserMode(false);
-    loadSavedForms();
 }
 
 export function deleteSavedForm(idx) {
@@ -715,22 +418,14 @@ export function deleteSavedForm(idx) {
 
 export function cancelProviderFormEdit() {
     state.currentSelectedFormIndex = null;
-    currentTemplateCanvasData = null;
-    canvasUndoStack = [];
 
     ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
     
-    const printArea = document.getElementById('print-area');
-    const placeholder = document.getElementById('preview-placeholder');
-    const tb = document.getElementById('canvas-eraser-toolbar');
-    if (printArea) printArea.classList.add('hidden');
-    if (placeholder) placeholder.classList.remove('hidden');
-    if (tb) tb.remove();
-
-    toggleEraserMode(false);
+    const defaultHtml = generateDefaultEditableTemplate();
+    renderEditableDocument(defaultHtml);
     loadSavedForms(); 
 }
 
@@ -738,7 +433,7 @@ export function updateLivePreview() {}
 export function syncPreviewData() {}
 
 // ==========================================
-// 6. 주문서 일괄 출력 (PDF 양식 기반 + 상단 마킹 바)
+// 6. 주문서 일괄 출력 (웹 서류 양식 기반 동적 데이터 합성)
 // ==========================================
 export function executeBatchPrint() {
     if (!state.printReadyList || state.printReadyList.length === 0) { 
@@ -752,8 +447,11 @@ export function executeBatchPrint() {
         return;
     }
 
-    if (!currentTemplateCanvasData) {
-        alert("등록된 주문서 문서 양식이 없습니다.\n우측에서 PDF 양식을 업로드하거나 저장된 양식을 먼저 선택해 주세요.");
+    const docCanvas = document.getElementById('editable-doc-canvas');
+    const baseTemplateHtml = docCanvas ? docCanvas.innerHTML : templateBuilderState.currentDocHtml;
+
+    if (!baseTemplateHtml) {
+        alert("등록된 주문서 양식이 없습니다. 먼저 양식을 생성하거나 선택해 주세요.");
         return;
     }
 
@@ -767,32 +465,65 @@ export function executeBatchPrint() {
     });
 
     let printPagesHtml = '';
+    const today = getLocalDateString();
+
     selectedOrders.forEach((item, idx) => {
         const driverName = item.assignedDriver ? item.assignedDriver : '미배정';
-        const sender = item.senderName || '화주사 미지정';
-        const store = item.storeName || '-';
-        const addr = item.address || item.fullAddress || '';
-        const phone = item.phone || '';
-        const orderNo = item.orderNo || '';
-        const itemsSummary = item.itemName || (item.items && item.items.length > 0 ? `${item.items[0].name} (총 ${item.qty}개)` : '');
+        let pageHtml = baseTemplateHtml;
+
+        // 🌟 1. 필드 데이터 치환
+        pageHtml = pageHtml.replace(/\{\{상호명\}\}/g, item.storeName || item.senderName || '-')
+                           .replace(/\{\{발송자\}\}/g, item.senderName || '-')
+                           .replace(/\{\{배송지주소\}\}/g, item.fullAddress || item.address || '-')
+                           .replace(/\{\{고객연락처\}\}/g, item.phone || '-')
+                           .replace(/\{\{배송요청사항\}\}/g, item.memo || '')
+                           .replace(/\{\{총금액\}\}/g, item.total ? `${formatNumber(item.total)}원` : '');
+
+        // 🌟 2. 날짜 및 주문번호 치환
+        pageHtml = pageHtml.replace(/tpl-bind-date">.*?<\/b>/g, `tpl-bind-date">${today}</b>`)
+                           .replace(/tpl-bind-orderno">.*?<\/b>/g, `tpl-bind-orderno">${item.orderNo || `ORD-${idx + 1}`}</b>`);
+
+        // 🌟 3. 품목 목록 치환
+        let itemsRowsHtml = '';
+        if (item.items && item.items.length > 0) {
+            item.items.forEach((it, i) => {
+                itemsRowsHtml += `
+                <tr class="item-row">
+                    <td class="text-center">${i + 1}</td>
+                    <td class="font-bold">${it.name || '-'}</td>
+                    <td class="text-center">${it.unit || '개'}</td>
+                    <td class="text-center font-bold">${formatNumber(it.qty) || '1'}</td>
+                    <td class="text-right">${formatNumber(it.price) || ''}</td>
+                    <td class="text-right font-black">${formatNumber(it.total) || ''}</td>
+                </tr>`;
+            });
+        } else {
+            itemsRowsHtml = `
+            <tr class="item-row">
+                <td class="text-center">1</td>
+                <td class="font-bold">${item.itemName || '-'}</td>
+                <td class="text-center">${item.unit || '개'}</td>
+                <td class="text-center font-bold">${formatNumber(item.qty) || '1'}</td>
+                <td class="text-right">${formatNumber(item.price) || ''}</td>
+                <td class="text-right font-black">${formatNumber(item.total) || ''}</td>
+            </tr>`;
+        }
+
+        // 품목 tbody 교체
+        pageHtml = pageHtml.replace(/<tbody id="tpl-items-tbody">[\s\S]*?<\/tbody>/, `<tbody id="tpl-items-tbody">${itemsRowsHtml}</tbody>`);
+
+        // contenteditable 비활성화
+        pageHtml = pageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
 
         printPagesHtml += `
         <div class="print-page-wrapper">
             <div class="driver-marking-bar">
-                <div class="bar-row bar-top">
-                    <span class="bar-badge">#${idx + 1}</span>
-                    <span class="bar-driver"><b>담당기사:</b> ${driverName}</span>
-                    <span class="bar-sender"><b>발송(화주):</b> ${sender}</span>
-                    <span class="bar-orderno"><b>주문번호:</b> ${orderNo}</span>
-                </div>
-                <div class="bar-row bar-bottom">
-                    <span class="bar-store"><b>받는분:</b> ${store}</span>
-                    <span class="bar-phone"><b>연락처:</b> ${phone}</span>
-                    <span class="bar-addr"><b>배송주소:</b> ${addr}</span>
-                </div>
-                ${itemsSummary ? `<div class="bar-row bar-items"><b>배송품목:</b> ${itemsSummary}</div>` : ''}
+                <span>[배송순번 #${idx + 1}]</span>
+                <span><b>담당기사:</b> ${driverName}</span>
+                <span><b>발송(화주):</b> ${item.senderName || '-'}</span>
+                <span><b>받는분:</b> ${item.storeName || '-'}</span>
             </div>
-            <img src="${currentTemplateCanvasData}" class="pdf-template-img" alt="주문서 양식">
+            ${pageHtml}
         </div>`;
     });
 
@@ -812,13 +543,22 @@ export function executeBatchPrint() {
         }
         body { margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; color: #000; }
         .print-page-wrapper { width: 210mm; height: 297mm; margin: 0 auto; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; }
-        .driver-marking-bar { width: 100%; font-size: 11px; background: #f8fafc; border: 2px solid #000; padding: 6px 10px; margin-bottom: 6px; border-radius: 4px; display: flex; flex-direction: column; gap: 3px; }
-        .bar-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: nowrap; }
-        .bar-badge { font-weight: 900; background: #000; color: #fff; padding: 1px 6px; border-radius: 3px; font-size: 12px; }
-        .bar-driver b, .bar-sender b, .bar-orderno b, .bar-store b, .bar-phone b, .bar-addr b, .bar-items b { color: #1e3a8a; }
-        .bar-addr { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 48%; }
-        .bar-items { font-size: 10.5px; border-top: 1px dashed #cbd5e1; padding-top: 2px; margin-top: 1px; color: #334155; }
-        .pdf-template-img { width: 100%; max-height: 255mm; object-fit: contain; }
+        .driver-marking-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 900; background: #f8fafc; border: 1.5px solid #000; padding: 6px 12px; margin-bottom: 6px; border-radius: 4px; }
+        .doc-sheet { width: 100%; max-width: 190mm; background: #fff; color: #000; font-size: 11px; }
+        .doc-header { text-align: center; margin-bottom: 8px; }
+        .doc-main-title { font-size: 22px; font-weight: 900; letter-spacing: 4px; text-decoration: underline; margin-bottom: 4px; }
+        .doc-meta-row { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin-bottom: 4px; }
+        .doc-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; table-layout: fixed; }
+        .doc-table th, .doc-table td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; }
+        .doc-table th { background: #f1f5f9; text-align: center; font-weight: bold; }
+        .vertical-header { text-align: center; line-height: 1.3; }
+        .text-center { text-align: center; }
+        .text-right { text-align: right; }
+        .font-bold { font-weight: bold; }
+        .font-black { font-weight: 900; }
+        .mt-2 { margin-top: 6px; }
+        .mt-4 { margin-top: 12px; }
+        .doc-sign-area { text-align: right; font-size: 11px; font-weight: bold; }
     </style></head><body>${printPagesHtml}</body></html>`);
     doc.close();
 
@@ -1091,7 +831,7 @@ export function executePickingListPrint() {
 
     iframe.onload = function() {
         setTimeout(() => {
-            iframe.contentWindow.focus();
+            iframe.contentWindow.focus();  
             iframe.contentWindow.print();
             setTimeout(() => { 
                 document.body.removeChild(iframe); 
@@ -1114,7 +854,6 @@ window.syncPreviewData = syncPreviewData;
 window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
 window.initTemplatePdfDropZone = initTemplatePdfDropZone;
-window.handleTemplatePdfFile = handleTemplatePdfFile;
 window.setAsDefaultForm = setAsDefaultForm;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
@@ -1131,8 +870,3 @@ window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
 window.sortPrintList = sortPrintList;
-
-// 지우개 툴바 제어 함수 바인딩
-window.toggleEraserMode = toggleEraserMode;
-window.setEraserSize = setEraserSize;
-window.undoCanvasEraser = undoCanvasEraser;

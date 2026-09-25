@@ -77,12 +77,18 @@ import {
     cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
     updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
     filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
-    renderInvoiceOrderList, initTemplatePdfDropZone, handleTemplatePdfFile,
+    renderInvoiceOrderList, initTemplatePdfDropZone,
     populateSenderFilterDropdown, filterBySender,
     openPickingDriverModal, closePickingDriverModal,
     toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint,
     sortPrintList
 } from "./admin-dispatch-print.js";
+
+// 🌟 신규 분리된 서식 에디터/빌더 모듈 가져오기
+import {
+    parsePdfToEditableDocument, renderEditableDocument,
+    addDocTableRow, deleteDocTableRow, saveCurrentDocumentTemplate
+} from "./admin-dispatch-template.js";
 
 import {
     renderLocationSidebar, jumpToDriverDelivery, focusDriverLocationOnMap,
@@ -704,7 +710,6 @@ window.syncPreviewData = syncPreviewData;
 window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
 window.initTemplatePdfDropZone = initTemplatePdfDropZone;
-window.handleTemplatePdfFile = handleTemplatePdfFile;
 window.setAsDefaultForm = setAsDefaultForm;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
@@ -722,6 +727,13 @@ window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
 window.sortPrintList = sortPrintList;
+
+// 🌟 [관제 신규 서식 빌더/에디터(Template)]
+window.parsePdfToEditableDocument = parsePdfToEditableDocument;
+window.renderEditableDocument = renderEditableDocument;
+window.addDocTableRow = addDocTableRow;
+window.deleteDocTableRow = deleteDocTableRow;
+window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 
 // [관제 데이터 추출(Export)]
 window.openExcelExportModal = openExcelExportModal;
