@@ -5,8 +5,8 @@ import { formatNumber } from "./admin-dispatch-core.js";
 import {
     parsePdfToEditableDocument,
     renderEditableDocument,
-    generateDefaultEditableTemplate,
-    templateBuilderState
+    templateBuilderState,
+    saveCurrentDocumentTemplate
 } from "./admin-dispatch-template.js";
 
 let invoiceSearchKeyword = '';
@@ -106,7 +106,7 @@ function getFilteredPrintOrders() {
         });
     }
 
-    // 정렬 규칙 적용
+    // 정렬 적용
     list.sort((a, b) => {
         let valA = '';
         let valB = '';
@@ -299,18 +299,20 @@ export function initTemplatePdfDropZone() {
 }
 
 // ==========================================
-// 5. 저장된 양식 목록 관리
+// 5. 저장된 양식 목록 관리 (백지 대기 상태 유지)
 // ==========================================
 export function loadSavedForms() {
     const listEl = document.getElementById('saved-forms-list');
     if (!listEl) return;
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     
+    // 🌟 저장된 양식이 없을 경우: 가짜 템플릿을 생성하지 않고 순수 백지 대기 상태를 유지
     if (savedForms.length === 0) { 
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-[10px] font-bold">저장된 서류 양식이 없습니다.<br>PDF를 업로드하여 양식을 생성하세요.</div>`; 
-        // 기본 템플릿으로 에디터 초기화
-        const defaultHtml = generateDefaultEditableTemplate();
-        renderEditableDocument(defaultHtml);
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-[10px] font-bold">저장된 서류 양식이 없습니다.<br>우측에서 PDF를 업로드하여 양식을 생성하세요.</div>`; 
+        const placeholder = document.getElementById('preview-placeholder');
+        const editorWrapper = document.getElementById('doc-editor-wrapper');
+        if (placeholder) placeholder.classList.remove('hidden');
+        if (editorWrapper) editorWrapper.innerHTML = '';
         return; 
     }
     
@@ -344,7 +346,9 @@ export function loadSavedForms() {
 
     if (state.currentSelectedFormIndex === null) {
         const defaultIdx = savedForms.findIndex(f => f.isDefault);
-        applySavedForm(defaultIdx >= 0 ? defaultIdx : 0);
+        if (defaultIdx >= 0) {
+            applySavedForm(defaultIdx);
+        }
     }
 }
 
@@ -399,7 +403,6 @@ export function applySavedForm(idx) {
 }
 
 export function saveProviderForm() {
-    // 서식 모듈의 양식 저장 함수로 위임
     if (window.saveCurrentDocumentTemplate) {
         window.saveCurrentDocumentTemplate();
     }
@@ -419,13 +422,16 @@ export function deleteSavedForm(idx) {
 export function cancelProviderFormEdit() {
     state.currentSelectedFormIndex = null;
 
-    ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel', 'input-prov-add-tel'].forEach(id => {
+    ['input-form-title', 'input-prov-regno', 'input-prov-name', 'input-prov-addr', 'input-prov-tel'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.value = '';
     });
     
-    const defaultHtml = generateDefaultEditableTemplate();
-    renderEditableDocument(defaultHtml);
+    const placeholder = document.getElementById('preview-placeholder');
+    const editorWrapper = document.getElementById('doc-editor-wrapper');
+    if (placeholder) placeholder.classList.remove('hidden');
+    if (editorWrapper) editorWrapper.innerHTML = '';
+
     loadSavedForms(); 
 }
 
@@ -433,7 +439,7 @@ export function updateLivePreview() {}
 export function syncPreviewData() {}
 
 // ==========================================
-// 6. 주문서 일괄 출력 (웹 서류 양식 기반 동적 데이터 합성)
+// 6. 주문서 일괄 출력 (PDF 레이아웃 복원 양식 데이터 치환 인쇄)
 // ==========================================
 export function executeBatchPrint() {
     if (!state.printReadyList || state.printReadyList.length === 0) { 
@@ -451,7 +457,7 @@ export function executeBatchPrint() {
     const baseTemplateHtml = docCanvas ? docCanvas.innerHTML : templateBuilderState.currentDocHtml;
 
     if (!baseTemplateHtml) {
-        alert("등록된 주문서 양식이 없습니다. 먼저 양식을 생성하거나 선택해 주세요.");
+        alert("등록된 주문서 서식이 없습니다. 먼저 양식용 PDF를 업로드하거나 양식을 선택해 주세요.");
         return;
     }
 
@@ -465,52 +471,18 @@ export function executeBatchPrint() {
     });
 
     let printPagesHtml = '';
-    const today = getLocalDateString();
 
     selectedOrders.forEach((item, idx) => {
         const driverName = item.assignedDriver ? item.assignedDriver : '미배정';
         let pageHtml = baseTemplateHtml;
 
-        // 🌟 1. 필드 데이터 치환
+        // 🌟 주문 데이터 치환
         pageHtml = pageHtml.replace(/\{\{상호명\}\}/g, item.storeName || item.senderName || '-')
                            .replace(/\{\{발송자\}\}/g, item.senderName || '-')
                            .replace(/\{\{배송지주소\}\}/g, item.fullAddress || item.address || '-')
                            .replace(/\{\{고객연락처\}\}/g, item.phone || '-')
                            .replace(/\{\{배송요청사항\}\}/g, item.memo || '')
                            .replace(/\{\{총금액\}\}/g, item.total ? `${formatNumber(item.total)}원` : '');
-
-        // 🌟 2. 날짜 및 주문번호 치환
-        pageHtml = pageHtml.replace(/tpl-bind-date">.*?<\/b>/g, `tpl-bind-date">${today}</b>`)
-                           .replace(/tpl-bind-orderno">.*?<\/b>/g, `tpl-bind-orderno">${item.orderNo || `ORD-${idx + 1}`}</b>`);
-
-        // 🌟 3. 품목 목록 치환
-        let itemsRowsHtml = '';
-        if (item.items && item.items.length > 0) {
-            item.items.forEach((it, i) => {
-                itemsRowsHtml += `
-                <tr class="item-row">
-                    <td class="text-center">${i + 1}</td>
-                    <td class="font-bold">${it.name || '-'}</td>
-                    <td class="text-center">${it.unit || '개'}</td>
-                    <td class="text-center font-bold">${formatNumber(it.qty) || '1'}</td>
-                    <td class="text-right">${formatNumber(it.price) || ''}</td>
-                    <td class="text-right font-black">${formatNumber(it.total) || ''}</td>
-                </tr>`;
-            });
-        } else {
-            itemsRowsHtml = `
-            <tr class="item-row">
-                <td class="text-center">1</td>
-                <td class="font-bold">${item.itemName || '-'}</td>
-                <td class="text-center">${item.unit || '개'}</td>
-                <td class="text-center font-bold">${formatNumber(item.qty) || '1'}</td>
-                <td class="text-right">${formatNumber(item.price) || ''}</td>
-                <td class="text-right font-black">${formatNumber(item.total) || ''}</td>
-            </tr>`;
-        }
-
-        // 품목 tbody 교체
-        pageHtml = pageHtml.replace(/<tbody id="tpl-items-tbody">[\s\S]*?<\/tbody>/, `<tbody id="tpl-items-tbody">${itemsRowsHtml}</tbody>`);
 
         // contenteditable 비활성화
         pageHtml = pageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
@@ -522,8 +494,11 @@ export function executeBatchPrint() {
                 <span><b>담당기사:</b> ${driverName}</span>
                 <span><b>발송(화주):</b> ${item.senderName || '-'}</span>
                 <span><b>받는분:</b> ${item.storeName || '-'}</span>
+                <span><b>주소:</b> ${item.address || ''}</span>
             </div>
-            ${pageHtml}
+            <div class="print-sheet-content">
+                ${pageHtml}
+            </div>
         </div>`;
     });
 
@@ -544,21 +519,21 @@ export function executeBatchPrint() {
         body { margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; color: #000; }
         .print-page-wrapper { width: 210mm; height: 297mm; margin: 0 auto; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; }
         .driver-marking-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 900; background: #f8fafc; border: 1.5px solid #000; padding: 6px 12px; margin-bottom: 6px; border-radius: 4px; }
-        .doc-sheet { width: 100%; max-width: 190mm; background: #fff; color: #000; font-size: 11px; }
+        .print-sheet-content { width: 100%; flex: 1; position: relative; }
+        .pdf-layout-paper { position: relative; width: 100%; min-height: 260mm; background: #fff; }
+        .pdf-text-item { position: absolute; white-space: nowrap; line-height: 1.2; font-family: 'Malgun Gothic', 'Dotum', sans-serif; color: #000; }
+        .doc-sheet { width: 100%; background: #fff; color: #000; font-size: 11px; }
         .doc-header { text-align: center; margin-bottom: 8px; }
         .doc-main-title { font-size: 22px; font-weight: 900; letter-spacing: 4px; text-decoration: underline; margin-bottom: 4px; }
-        .doc-meta-row { display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin-bottom: 4px; }
         .doc-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; table-layout: fixed; }
         .doc-table th, .doc-table td { border: 1px solid #000; padding: 4px 6px; vertical-align: middle; }
         .doc-table th { background: #f1f5f9; text-align: center; font-weight: bold; }
-        .vertical-header { text-align: center; line-height: 1.3; }
         .text-center { text-align: center; }
         .text-right { text-align: right; }
         .font-bold { font-weight: bold; }
         .font-black { font-weight: 900; }
         .mt-2 { margin-top: 6px; }
         .mt-4 { margin-top: 12px; }
-        .doc-sign-area { text-align: right; font-size: 11px; font-weight: bold; }
     </style></head><body>${printPagesHtml}</body></html>`);
     doc.close();
 

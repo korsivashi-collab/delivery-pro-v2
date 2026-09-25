@@ -5,12 +5,13 @@ import { state, getLocalDateString } from "./admin-state.js";
 // 현재 편집 중인 서식 상태
 export const templateBuilderState = {
     activeTemplateId: null,
-    activeTemplateTitle: '기본 주문서 양식',
-    currentDocHtml: ''
+    activeTemplateTitle: '',
+    currentDocHtml: '',
+    pdfViewportRatio: 1.414 // A4 표준 비율 (297 / 210)
 };
 
 // ==========================================
-// 1. PDF 파일을 분석하여 편집 가능한 웹 문서 서식(HTML)으로 변환
+// 1. PDF 원본 좌표계를 분석하여 1:1 웹 문서 서식으로 정밀 복원
 // ==========================================
 export async function parsePdfToEditableDocument(file) {
     if (!window.pdfjsLib) {
@@ -28,216 +29,80 @@ export async function parsePdfToEditableDocument(file) {
             return;
         }
 
-        // 대표 1페이지의 텍스트와 좌표 추출
+        // 1페이지 원본 크기 및 텍스트 벡터 추출
         const page1 = await pdf.getPage(1);
-        const textContent = await page1.getTextContent();
-        
-        // 텍스트 블록 정렬 및 공급자/주문 데이터 분석
-        const rawItems = textContent.items.map(it => ({
-            str: it.str.trim(),
-            x: Math.round(it.transform[4]),
-            y: Math.round(it.transform[5])
-        })).filter(it => it.str.length > 0);
+        const viewport = page1.getViewport({ scale: 1.0 });
+        const pdfWidth = viewport.width;
+        const pdfHeight = viewport.height;
+        templateBuilderState.pdfViewportRatio = (pdfHeight / pdfWidth) || 1.414;
 
-        const pageText = rawItems.map(it => it.str).join(' ');
+        const textContent = await page1.getTextContent({ normalizeWhitespace: true });
+        const items = textContent.items;
 
-        // 기본 정보 감지
-        const docTitle = file.name.replace(/\.[^/.]+$/, '').trim() || '신규 주문서 양식';
-        let detectedRegno = '';
-        let detectedName = '';
-        let detectedAddr = '';
-        let detectedTel = '';
+        if (!items || items.length === 0) {
+            alert("PDF 파일에서 텍스트 레이아웃을 감지하지 못했습니다. (텍스트가 포함된 원본 PDF를 업로드해 주세요)");
+            return;
+        }
 
-        const bizMatch = pageText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/);
-        if (bizMatch) detectedRegno = bizMatch[0].replace(/\s+/g, '-');
+        // PDF 좌표계 (좌하단 기준 0,0) -> 웹 문서 좌표계 (상단 기준 %, pt)로 1:1 변환
+        let textBlocksHtml = '';
+        items.forEach((item, idx) => {
+            const str = (item.str || '').trim();
+            if (!str) return;
 
-        const telMatch = pageText.match(/(?:0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})/g);
-        if (telMatch && telMatch.length > 0) detectedTel = telMatch[0];
+            const transform = item.transform; // [scaleX, skewY, skewX, scaleY, tx, ty]
+            const x = transform[4];
+            const y = transform[5];
 
-        const addrMatch = pageText.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*?(?:로|길|동|읍|면|가)\s*[\d\-]+/);
-        if (addrMatch) detectedAddr = addrMatch[0].trim();
+            // 폰트 크기 계산 (기본 10pt 보정)
+            const fontSize = Math.max(9, Math.round(Math.sqrt(transform[0] * transform[0] + transform[1] * transform[1]))) || 10;
+            
+            // 상단 기준 백분율 좌표 변환
+            const leftPercent = ((x / pdfWidth) * 100).toFixed(2);
+            const topPercent = (((pdfHeight - y - fontSize) / pdfHeight) * 100).toFixed(2);
 
-        const storeMatch = pageText.match(/(?:상호|법인명|상호명|공급자)\s*[:|]?\s*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
-        if (storeMatch) detectedName = storeMatch[1].trim();
-
-        // 🌟 워드처럼 직접 클릭하여 지우고 수정할 수 있는 구조화된 HTML 서식 템플릿 생성
-        const editableDocHtml = generateDefaultEditableTemplate({
-            title: docTitle,
-            provRegno: detectedRegno,
-            provName: detectedName,
-            provAddr: detectedAddr,
-            provTel: detectedTel
+            textBlocksHtml += `
+            <div class="pdf-text-item" 
+                 contenteditable="true" 
+                 spellcheck="false" 
+                 style="position: absolute; left: ${leftPercent}%; top: ${topPercent}%; font-size: ${fontSize}px;" 
+                 data-idx="${idx}"
+                 title="클릭하여 내용을 수정하거나 불필요한 글자를 지우세요">
+                ${escapeHtml(str)}
+            </div>`;
         });
 
+        const docTitle = file.name.replace(/\.[^/.]+$/, '').trim() || '신규 주문서 양식';
         templateBuilderState.activeTemplateTitle = docTitle;
-        templateBuilderState.currentDocHtml = editableDocHtml;
 
-        renderEditableDocument(editableDocHtml);
+        // 원본 PDF 레이아웃이 보존된 웹 서류 문서 컨테이너 생성
+        const reconstructedHtml = `
+        <div class="doc-sheet pdf-layout-paper" contenteditable="false" style="position: relative; width: 100%; aspect-ratio: ${pdfWidth} / ${pdfHeight}; min-height: 270mm; background: #ffffff;">
+            ${textBlocksHtml}
+        </div>`;
 
-        // 공급자 입력 필드에도 기본값 동기화
+        templateBuilderState.currentDocHtml = reconstructedHtml;
+        renderEditableDocument(reconstructedHtml);
+
         const titleInput = document.getElementById('input-form-title');
-        const regnoInput = document.getElementById('input-prov-regno');
-        const nameInput = document.getElementById('input-prov-name');
-        const addrInput = document.getElementById('input-prov-addr');
-        const telInput = document.getElementById('input-prov-tel');
-
         if (titleInput) titleInput.value = docTitle;
-        if (regnoInput) regnoInput.value = detectedRegno;
-        if (nameInput) nameInput.value = detectedName;
-        if (addrInput) addrInput.value = detectedAddr;
-        if (telInput) telInput.value = detectedTel;
 
-        alert(`[PDF 서류 양식 생성 완료]\n\n업로드된 PDF에서 서식 구조를 읽어와 웹 문서 양식으로 변환했습니다.\n화면의 글자를 워드처럼 직접 클릭하여 불필요한 내용을 지우거나 수정한 뒤 [양식 저장]을 눌러주세요.`);
+        alert(`[PDF 서류 원본 양식 복원 완료]\n\n업로드하신 PDF의 실제 글자 배치와 서식 구조를 화면에 1:1로 복원했습니다.\n\n화면의 글자를 워드처럼 직접 클릭하여 불필요한 주문내역, 일자, 상호를 지운 뒤 우측의 [양식 저장]을 눌러 기본 서식으로 보관하세요.`);
     } catch (e) {
         console.error("PDF 서식 변환 오류:", e);
         alert("PDF 서식 변환 중 오류가 발생했습니다: " + e.message);
     }
 }
 
-// ==========================================
-// 2. 편집 가능한 HTML 서식 생성 엔진 (워드형 contenteditable)
-// ==========================================
-export function generateDefaultEditableTemplate(data = {}) {
-    const title = data.title || '주문서';
-    const provRegno = data.provRegno || '';
-    const provName = data.provName || '';
-    const provAddr = data.provAddr || '';
-    const provTel = data.provTel || '';
-
-    return `
-    <div class="doc-sheet a4-portrait" contenteditable="false">
-        <!-- 문서 헤더 -->
-        <div class="doc-header">
-            <h2 class="doc-main-title" contenteditable="true" spellcheck="false">${title}</h2>
-            <div class="doc-meta-row">
-                <span class="meta-item">발행일자: <b class="tpl-bind-date" contenteditable="true">${getLocalDateString()}</b></span>
-                <span class="meta-item">주문번호: <b class="tpl-bind-orderno" contenteditable="true">ORD-자동부여</b></span>
-            </div>
-        </div>
-
-        <!-- 공급자 & 공급받는자 정보 테이블 (워드형 직접 수정 가능) -->
-        <table class="doc-table party-info-table">
-            <colgroup>
-                <col style="width: 5%;">
-                <col style="width: 15%;">
-                <col style="width: 30%;">
-                <col style="width: 5%;">
-                <col style="width: 15%;">
-                <col style="width: 30%;">
-            </colgroup>
-            <tbody>
-                <tr>
-                    <th rowspan="4" class="vertical-header" contenteditable="true">공<br>급<br>자</th>
-                    <th contenteditable="true">등록번호</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-prov-regno font-bold">${provRegno}</td>
-                    <th rowspan="4" class="vertical-header" contenteditable="true">받<br>는<br>분</th>
-                    <th contenteditable="true">상호(간판명)</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-bind-store font-black bg-blue-50/50">{{상호명}}</td>
-                </tr>
-                <tr>
-                    <th contenteditable="true">상호(법인명)</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-prov-name">${provName}</td>
-                    <th contenteditable="true">발송(화주)</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-bind-sender font-bold bg-amber-50/50">{{발송자}}</td>
-                </tr>
-                <tr>
-                    <th contenteditable="true">사업장 주소</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-prov-addr">${provAddr}</td>
-                    <th contenteditable="true">배송 주소</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-bind-addr bg-blue-50/50">{{배송지주소}}</td>
-                </tr>
-                <tr>
-                    <th contenteditable="true">연락처 / TEL</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-prov-tel">${provTel}</td>
-                    <th contenteditable="true">전화번호</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-bind-phone bg-blue-50/50">{{고객연락처}}</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <!-- 주문 품목 상세 테이블 -->
-        <table class="doc-table item-list-table mt-2">
-            <colgroup>
-                <col style="width: 7%;">
-                <col style="width: 45%;">
-                <col style="width: 12%;">
-                <col style="width: 12%;">
-                <col style="width: 12%;">
-                <col style="width: 12%;">
-            </colgroup>
-            <thead>
-                <tr>
-                    <th contenteditable="true">No.</th>
-                    <th contenteditable="true">품 목 명 (규 격)</th>
-                    <th contenteditable="true">단위</th>
-                    <th contenteditable="true">수량</th>
-                    <th contenteditable="true">단가</th>
-                    <th contenteditable="true">금액</th>
-                </tr>
-            </thead>
-            <tbody id="tpl-items-tbody">
-                <tr class="item-row">
-                    <td class="text-center" contenteditable="true">1</td>
-                    <td contenteditable="true" spellcheck="false" class="font-bold">{{상품명}}</td>
-                    <td class="text-center" contenteditable="true">개</td>
-                    <td class="text-center font-bold" contenteditable="true">{{수량}}</td>
-                    <td class="text-right" contenteditable="true">{{단가}}</td>
-                    <td class="text-right font-black" contenteditable="true">{{총액}}</td>
-                </tr>
-                <tr class="item-row empty-row">
-                    <td class="text-center" contenteditable="true">2</td>
-                    <td contenteditable="true"></td>
-                    <td class="text-center" contenteditable="true"></td>
-                    <td class="text-center" contenteditable="true"></td>
-                    <td class="text-right" contenteditable="true"></td>
-                    <td class="text-right" contenteditable="true"></td>
-                </tr>
-                <tr class="item-row empty-row">
-                    <td class="text-center" contenteditable="true">3</td>
-                    <td contenteditable="true"></td>
-                    <td class="text-center" contenteditable="true"></td>
-                    <td class="text-center" contenteditable="true"></td>
-                    <td class="text-right" contenteditable="true"></td>
-                    <td class="text-right" contenteditable="true"></td>
-                </tr>
-                <tr class="item-row empty-row">
-                    <td class="text-center" contenteditable="true">4</td>
-                    <td contenteditable="true"></td>
-                    <td class="text-center" contenteditable="true"></td>
-                    <td class="text-center" contenteditable="true"></td>
-                    <td class="text-right" contenteditable="true"></td>
-                    <td class="text-right" contenteditable="true"></td>
-                </tr>
-            </tbody>
-        </table>
-
-        <!-- 하단 비고 및 합계 -->
-        <table class="doc-table footer-table mt-2">
-            <colgroup>
-                <col style="width: 15%;">
-                <col style="width: 55%;">
-                <col style="width: 15%;">
-                <col style="width: 15%;">
-            </colgroup>
-            <tbody>
-                <tr>
-                    <th contenteditable="true">배송 메모</th>
-                    <td contenteditable="true" spellcheck="false" class="tpl-bind-memo bg-gray-50/50">{{배송요청사항}}</td>
-                    <th contenteditable="true">합계 금액</th>
-                    <td contenteditable="true" spellcheck="false" class="text-right font-black text-rose-600 tpl-bind-total">{{총금액}}</td>
-                </tr>
-            </tbody>
-        </table>
-
-        <!-- 서명란 -->
-        <div class="doc-sign-area mt-4">
-            <span contenteditable="true">인수자 확인: ____________________ (서명)</span>
-        </div>
-    </div>`;
+function escapeHtml(text) {
+    return text.replace(/&/g, '&amp;')
+               .replace(/</g, '&lt;')
+               .replace(/>/g, '&gt;')
+               .replace(/"/g, '&quot;');
 }
 
 // ==========================================
-// 3. 서식 화면 렌더링 및 에디터 툴바 제어
+// 2. 워드형 서식 에디터 렌더링 및 편집 툴바
 // ==========================================
 export function renderEditableDocument(htmlContent) {
     const previewContainer = document.getElementById('inv-view-preview');
@@ -257,30 +122,30 @@ export function renderEditableDocument(htmlContent) {
         previewContainer.appendChild(editorWrapper);
     }
 
-    // 에디터 상단 툴바 (행 추가, 행 삭제, 서식 초기화)
+    // 워드형 편집 툴바: 불필요한 글자를 지우고 자동 치환 태그({{상호명}} 등)를 원클릭 삽입
     editorWrapper.innerHTML = `
-        <div class="doc-editor-toolbar flex items-center justify-between w-full max-w-[210mm] bg-white p-2.5 rounded-xl border border-gray-300 shadow-sm sticky top-0 z-20">
-            <div class="flex items-center gap-1.5">
+        <div class="doc-editor-toolbar flex items-center justify-between w-full max-w-[210mm] bg-white p-2.5 rounded-xl border border-gray-300 shadow-sm sticky top-0 z-30 select-none flex-wrap gap-2">
+            <div class="flex items-center gap-1.5 flex-wrap">
                 <span class="text-xs font-black text-indigo-700 flex items-center gap-1">
-                    <i class="fa-solid fa-pen-nib"></i> 서식 직접 편집 모드
+                    <i class="fa-solid fa-pen-nib"></i> 원본 서식 직접 편집 모드
                 </span>
-                <span class="text-[11px] text-gray-400 font-bold ml-2">| 글자를 직접 클릭하여 불필요한 내용을 지우세요</span>
+                <span class="text-[11px] text-gray-400 font-bold">| 글자를 지우고 아래 태그를 넣으세요:</span>
+                <button type="button" onclick="window.insertDocTag('{{상호명}}')" class="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-[11px] font-black transition active:scale-95">+ 상호명</button>
+                <button type="button" onclick="window.insertDocTag('{{발송자}}')" class="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[11px] font-black transition active:scale-95">+ 발송자</button>
+                <button type="button" onclick="window.insertDocTag('{{배송지주소}}')" class="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded text-[11px] font-black transition active:scale-95">+ 주소</button>
+                <button type="button" onclick="window.insertDocTag('{{고객연락처}}')" class="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 rounded text-[11px] font-black transition active:scale-95">+ 전화번호</button>
             </div>
             <div class="flex items-center gap-1.5">
-                <button type="button" onclick="window.addDocTableRow()" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-gray-700 text-xs font-bold rounded-lg transition active:scale-95">
-                    <i class="fa-solid fa-plus text-[10px]"></i> 품목 행 추가
-                </button>
-                <button type="button" onclick="window.deleteDocTableRow()" class="px-2.5 py-1 bg-gray-100 hover:bg-gray-200 text-rose-600 text-xs font-bold rounded-lg transition active:scale-95">
-                    <i class="fa-solid fa-minus text-[10px]"></i> 마지막 행 삭제
+                <button type="button" onclick="window.clearActiveSelection()" class="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 text-xs font-bold rounded-lg transition active:scale-95">
+                    <i class="fa-solid fa-eraser text-[10px]"></i> 선택 삭제
                 </button>
             </div>
         </div>
-        <div id="editable-doc-canvas" class="doc-canvas-paper shadow-2xl bg-white">
+        <div id="editable-doc-canvas" class="doc-canvas-paper shadow-2xl bg-white w-full max-w-[210mm] relative p-6 border border-gray-200">
             ${htmlContent}
         </div>
     `;
 
-    // 에디터 내용 변경 시 실시간 상태 캡처
     const docCanvas = document.getElementById('editable-doc-canvas');
     if (docCanvas) {
         docCanvas.addEventListener('input', () => {
@@ -289,41 +154,55 @@ export function renderEditableDocument(htmlContent) {
     }
 }
 
-export function addDocTableRow() {
-    const tbody = document.getElementById('tpl-items-tbody');
-    if (!tbody) return;
-    const rowCount = tbody.querySelectorAll('tr').length + 1;
-    const tr = document.createElement('tr');
-    tr.className = 'item-row empty-row';
-    tr.innerHTML = `
-        <td class="text-center" contenteditable="true">${rowCount}</td>
-        <td contenteditable="true"></td>
-        <td class="text-center" contenteditable="true"></td>
-        <td class="text-center" contenteditable="true"></td>
-        <td class="text-right" contenteditable="true"></td>
-        <td class="text-right" contenteditable="true"></td>
-    `;
-    tbody.appendChild(tr);
+// 태그 원클릭 삽입
+export function insertDocTag(tagStr) {
+    const selection = window.getSelection();
+    if (!selection || !selection.rangeCount) {
+        alert("태그를 삽입할 텍스트 위치를 먼저 클릭해 주세요.");
+        return;
+    }
+    const range = selection.getRangeAt(0);
+    range.deleteContents();
+    const tagNode = document.createTextNode(tagStr);
+    range.insertNode(tagNode);
+    range.collapse(false);
+
     templateBuilderState.currentDocHtml = document.getElementById('editable-doc-canvas')?.innerHTML || '';
 }
 
-export function deleteDocTableRow() {
-    const tbody = document.getElementById('tpl-items-tbody');
-    if (!tbody) return;
-    const rows = tbody.querySelectorAll('tr');
-    if (rows.length > 1) {
-        rows[rows.length - 1].remove();
+// 선택된 텍스트 블록 완전 삭제
+export function clearActiveSelection() {
+    const activeEl = document.activeElement;
+    if (activeEl && activeEl.classList.contains('pdf-text-item')) {
+        activeEl.remove();
         templateBuilderState.currentDocHtml = document.getElementById('editable-doc-canvas')?.innerHTML || '';
+    } else {
+        const selection = window.getSelection();
+        if (selection && selection.rangeCount) {
+            selection.deleteFromDocument();
+            templateBuilderState.currentDocHtml = document.getElementById('editable-doc-canvas')?.innerHTML || '';
+        } else {
+            alert("지우고자 하는 글자 블록을 먼저 클릭해 주세요.");
+        }
     }
 }
 
+// 호환성용 기본 백지 생성기
+export function generateDefaultEditableTemplate() {
+    return `<div class="doc-sheet a4-portrait" contenteditable="false" style="padding: 20mm; text-align: center; color: #9ca3af; font-weight: bold; font-size: 13px;">우측에서 양식 PDF를 업로드하면 서식이 이곳에 1:1로 복원됩니다.</div>`;
+}
+
+// 호환성용 행 제어
+export function addDocTableRow() {}
+export function deleteDocTableRow() {}
+
 // ==========================================
-// 4. 서식 저장 및 불러오기 엔진
+// 3. 사용자가 편집 완료한 맞춤 양식 저장
 // ==========================================
 export function saveCurrentDocumentTemplate() {
     const docCanvas = document.getElementById('editable-doc-canvas');
     if (!docCanvas) {
-        alert("저장할 서식 내용이 없습니다. 먼저 PDF를 업로드하거나 양식을 불러와 주세요.");
+        alert("저장할 서식 내용이 없습니다. 먼저 PDF를 업로드해 주세요.");
         return;
     }
 
@@ -356,16 +235,18 @@ export function saveCurrentDocumentTemplate() {
     }
 
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    alert(`[${title}] 양식이 기본 서류 양식으로 성공적으로 저장되었습니다.`);
+    alert(`[${title}] 양식이 성공적으로 저장되었습니다.\n좌측에서 주문을 선택하고 [주문서 일괄 출력]을 실행하면 이 양식에 데이터가 채워져 인쇄됩니다.`);
 
     if (window.loadSavedForms) window.loadSavedForms();
 }
 
 // ==========================================
-// 5. 전역 Window 객체 바인딩
+// 4. 전역 Window 객체 바인딩
 // ==========================================
 window.parsePdfToEditableDocument = parsePdfToEditableDocument;
 window.renderEditableDocument = renderEditableDocument;
+window.insertDocTag = insertDocTag;
+window.clearActiveSelection = clearActiveSelection;
+window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 window.addDocTableRow = addDocTableRow;
 window.deleteDocTableRow = deleteDocTableRow;
-window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
