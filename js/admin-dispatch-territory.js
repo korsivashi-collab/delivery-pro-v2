@@ -301,7 +301,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     setTimeout(() => {
         const container = document.getElementById('territory-map-container');
         if (!territoryMap) {
-            territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
+            territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 });
             
             // 지도 빈 공간을 클릭했을 때도 해당 위치로 핀을 이동시킴
             kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
@@ -348,13 +348,21 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
                 const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
                 label.setMap(territoryMap); otherTerritoryOverlays.push(label);
                 
-                // 🌟 타 기사 외곽 반경: 20% 축소된 2단계 반경(r2) 기준
-                let rMax = 2400; 
-                if (d.territoryScale === 'gu') rMax = 8000; 
-                else if (d.territoryScale === 'si') rMax = 24000;
+                // 🌟 타 기사 1단계 단일 반경 및 오리지널 사이즈 적용, 투명도 증가
+                let rMax = 3000; 
+                if (d.territoryScale === 'gu') rMax = 10000; 
+                else if (d.territoryScale === 'si') rMax = 30000;
                 
                 const otherSizeRatio = (d.territorySize || 100) / 100;
-                const circle = new kakao.maps.Circle({ center: pos, radius: rMax * otherSizeRatio, strokeWeight: 1, strokeColor: '#9ca3af', strokeOpacity: 0.6, fillColor: '#d1d5db', fillOpacity: 0.2 });
+                const circle = new kakao.maps.Circle({ 
+                    center: pos, 
+                    radius: rMax * otherSizeRatio, 
+                    strokeWeight: 2, 
+                    strokeColor: '#4b5563', 
+                    strokeOpacity: 0.9, 
+                    fillColor: '#9ca3af', 
+                    fillOpacity: 0.45 
+                });
                 circle.setMap(territoryMap); otherTerritoryOverlays.push(circle);
             }
         });
@@ -382,10 +390,11 @@ export function setTerritoryScale(scale, skipRedraw = false) {
         else btn.className = "px-5 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
     });
 
+    // 🌟 화면에 약 70% 정도 꽉 차게 보이도록 줌 레벨 최적화
     if (territoryMap) {
-        if (scale === 'dong') territoryMap.setLevel(7); 
-        else if (scale === 'gu') territoryMap.setLevel(9); 
-        else if (scale === 'si') territoryMap.setLevel(11); 
+        if (scale === 'dong') territoryMap.setLevel(8); 
+        else if (scale === 'gu') territoryMap.setLevel(10); 
+        else if (scale === 'si') territoryMap.setLevel(12); 
     }
     if (!skipRedraw && territoryMarker) setTerritoryCenter(territoryMarker.getPosition());
 }
@@ -423,39 +432,32 @@ export function setTerritoryCenter(latLng) {
         setTerritoryCenter(territoryMarker.getPosition());
     });
 
-    // 🌟 반경 3개에서 2개로 축소 및 기본 크기 20% 축소 적용
-    // 기존: dong(1500, 3000, 5000), gu(5000, 10000, 15000), si(15000, 30000, 45000)
-    // 20% 축소 적용 후 2단계 반경:
-    let r1, r2;
-    if (state.currentTerritoryScale === 'dong') { 
-        r1 = 1200; // 1500 * 0.8
-        r2 = 2400; // 3000 * 0.8
-    } else if (state.currentTerritoryScale === 'gu') { 
-        r1 = 4000; // 5000 * 0.8
-        r2 = 8000; // 10000 * 0.8
-    } else if (state.currentTerritoryScale === 'si') { 
-        r1 = 12000; // 15000 * 0.8
-        r2 = 24000; // 30000 * 0.8
-    }
+    // 🌟 1단계 단일 반경으로 통합 및 오리지널 사이즈 복원
+    let r = 3000;
+    if (state.currentTerritoryScale === 'gu') r = 10000;
+    else if (state.currentTerritoryScale === 'si') r = 30000;
 
     const sizeRatio = currentTerritorySize / 100;
-    r1 *= sizeRatio; 
-    r2 *= sizeRatio;
+    r *= sizeRatio; 
 
-    // 2단계 원형 렌더링
-    const c1 = new kakao.maps.Circle({ center: latLng, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.45 });
-    const c2 = new kakao.maps.Circle({ center: latLng, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.2 });
-
-    // 원 클릭 시에도 핀이 해당 위치로 이동되도록 설정
-    [c1, c2].forEach(c => {
-        kakao.maps.event.addListener(c, 'click', function(mouseEvent) {
-            setTerritoryCenter(mouseEvent.latLng);
-        });
+    // 1단 원형 렌더링
+    const c1 = new kakao.maps.Circle({ 
+        center: latLng, 
+        radius: r, 
+        strokeWeight: 2, 
+        strokeColor: '#2563eb', 
+        strokeOpacity: 0.8, 
+        fillColor: '#3b82f6', 
+        fillOpacity: 0.3 
     });
 
-    c2.setMap(territoryMap); 
+    // 원 클릭 시에도 핀이 해당 위치로 이동되도록 설정
+    kakao.maps.event.addListener(c1, 'click', function(mouseEvent) {
+        setTerritoryCenter(mouseEvent.latLng);
+    });
+
     c1.setMap(territoryMap);
-    territoryCircles = [c2, c1];
+    territoryCircles = [c1];
 }
 
 export async function saveDriverTerritory() {
@@ -511,23 +513,27 @@ export function openAllTerritoriesMap() {
                 const label = new kakao.maps.CustomOverlay({ position: pos, content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`, yAnchor: 1 });
                 label.setMap(allTerritoriesMap); allTerritoriesOverlays.push(label);
 
-                // 🌟 전체 현황 지도에서도 2단계 및 20% 축소 반경 적용
-                let r1, r2; 
+                // 🌟 전체 현황 지도에서도 1단계 단일 반경 및 오리지널 사이즈 적용
+                let r = 3000; 
                 const scale = d.territoryScale || 'dong';
-                if (scale === 'dong') { r1 = 1200; r2 = 2400; } 
-                else if (scale === 'gu') { r1 = 4000; r2 = 8000; } 
-                else if (scale === 'si') { r1 = 12000; r2 = 24000; }
+                if (scale === 'gu') r = 10000; 
+                else if (scale === 'si') r = 30000;
 
                 const sizeRatio = (d.territorySize || 100) / 100;
-                r1 *= sizeRatio; 
-                r2 *= sizeRatio;
+                r *= sizeRatio; 
 
-                const c1 = new kakao.maps.Circle({ center: pos, radius: r1, strokeWeight: 2, strokeColor: '#2563eb', strokeOpacity: 0.8, fillColor: '#3b82f6', fillOpacity: 0.3 });
-                const c2 = new kakao.maps.Circle({ center: pos, radius: r2, strokeWeight: 1, strokeColor: '#3b82f6', strokeOpacity: 0.6, fillColor: '#60a5fa', fillOpacity: 0.15 });
+                const c1 = new kakao.maps.Circle({ 
+                    center: pos, 
+                    radius: r, 
+                    strokeWeight: 2, 
+                    strokeColor: '#2563eb', 
+                    strokeOpacity: 0.8, 
+                    fillColor: '#3b82f6', 
+                    fillOpacity: 0.35 
+                });
 
-                c2.setMap(allTerritoriesMap); 
                 c1.setMap(allTerritoriesMap);
-                allTerritoriesOverlays.push(c2, c1);
+                allTerritoriesOverlays.push(c1);
             }
         });
 

@@ -294,7 +294,6 @@ export function renderDispatchDriverDetail() {
     if (tbody) tbody.innerHTML = html;
 }
 
-// 🌟 수동 기사 배정 및 변경 함수 (ID 및 orderNo 다중 매칭)
 export function changeOrderDriver(itemId, newDriverPhone) {
     let item = state.parsedExcelList.find(o => String(o.id) === String(itemId) || String(o.orderNo) === String(itemId));
     if (!item && !isNaN(itemId)) {
@@ -310,8 +309,38 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 🌟 5. 체크박스 선택 기반 자동할당 알고리즘 실행 (외곽 우선 1원칙)
+// 🌟 5. 할당 초기화 및 자동할당 실행 엔진
 // ==========================================
+
+export async function revertAutoDispatch() {
+    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
+        alert("초기화할 배송 데이터가 없습니다.");
+        return;
+    }
+
+    const assignedOrders = state.parsedExcelList.filter(o => o.assignedDriver);
+    if (assignedOrders.length === 0) {
+        alert("이미 모든 주문이 미배정 상태입니다.");
+        return;
+    }
+
+    if (!confirm("기사들에게 배정된 모든 할당 내역을 초기화(미배정) 하시겠습니까?\n\n* 주문 데이터는 삭제되지 않으며 기사 할당 정보만 초기화됩니다.")) {
+        return;
+    }
+
+    // 모든 항목의 assignedDriver를 null로 되돌림
+    state.parsedExcelList.forEach(item => {
+        item.assignedDriver = null;
+    });
+
+    if (window.renderExcelTable) window.renderExcelTable();
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.autoSaveExcelToFirebase) await window.autoSaveExcelToFirebase();
+
+    alert("모든 할당 내역이 초기화되었습니다.");
+}
+
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀/주문 데이터가 없습니다."); 
@@ -327,7 +356,6 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 🌟 사용자가 우측 전체 현황 체크박스로 선택한 항목들만 할당 대상으로 추출
     const checkedBoxes = document.querySelectorAll('.row-checkbox:checked');
     if (checkedBoxes.length === 0) {
         alert("자동할당할 배송지를 우측 [전체 현황]에서 체크박스로 선택해 주세요.\n\n* 전체 할당: 테이블 헤더의 전체 선택 체크박스 체크 후 실행\n* 일부 할당: 배정할 배송지만 체크박스 선택 후 실행");
@@ -400,7 +428,6 @@ export function runAutoDispatchAlgorithm() {
         return { order, distFromBase };
     });
 
-    // 외곽 물량 우선 정렬
     ordersWithDist.sort((a, b) => b.distFromBase - a.distFromBase);
 
     ordersWithDist.forEach(({ order }) => {
@@ -453,7 +480,7 @@ export function runAutoDispatchAlgorithm() {
 }
 
 // ==========================================
-// 6. 기사 앱 수동 전송 엔진 (전화번호 필드 전달)
+// 🌟 6. 기사 앱 수동 전송 엔진 (전체 일괄 & 개별 선택 지원)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -469,21 +496,47 @@ export async function sendRoutesToDrivers() {
         return;
     }
 
+    let targetOrders = [];
+    let targetDriverNames = [];
+
+    // 기사가 개별 선택되어 있는 경우 (선택/일괄 여부를 팝업으로 물어봄)
+    if (state.selectedDispatchDriverId) {
+        const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+        const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
+        
+        const isBatch = confirm(`[동선 전송 옵션 선택]\n\n현재 [${driverName}] 기사님의 상세 내역을 보고 계십니다.\n\n[확인] : "전체 기사"에게 모두 일괄 전송합니다.\n[취소] : "현재 선택된 기사"에게만 개별 전송합니다.`);
+        
+        if (isBatch) {
+            targetOrders = assignedOrders;
+            if (!confirm(`배정된 총 ${targetOrders.length}건의 배송 동선을 전체 기사들에게 일괄 전송하시겠습니까?`)) return;
+        } else {
+            targetOrders = assignedOrders.filter(o => o.assignedDriver === driverName);
+            if (targetOrders.length === 0) {
+                alert(`[${driverName}] 기사님에게 배정된 주문이 없습니다.`);
+                return;
+            }
+            if (!confirm(`[${driverName}] 기사님에게 배정된 ${targetOrders.length}건의 배송 동선만 전송하시겠습니까?`)) return;
+        }
+    } else {
+        targetOrders = assignedOrders;
+        const uniqueDrivers = new Set(targetOrders.map(o => o.assignedDriver));
+        if (!confirm(`총 ${uniqueDrivers.size}명의 기사에게 ${targetOrders.length}건의 배송 동선을 일괄 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 등록됩니다.`)) {
+            return;
+        }
+    }
+
     const driverMap = {};
-    assignedOrders.forEach(o => {
+    targetOrders.forEach(o => {
         if (!driverMap[o.assignedDriver]) driverMap[o.assignedDriver] = [];
         driverMap[o.assignedDriver].push(o);
     });
 
-    const targetDriverNames = Object.keys(driverMap);
-    if (!confirm(`배정된 ${assignedOrders.length}건의 배송 동선을 해당 기사들의 스마트폰으로 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 등록됩니다.`)) {
-        return;
-    }
+    targetDriverNames = Object.keys(driverMap);
 
     const btn = document.getElementById('btn-send-routes-to-drivers');
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 기사 앱 전송 중...';
+        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 전송 중...';
     }
 
     try {
@@ -499,7 +552,7 @@ export async function sendRoutesToDrivers() {
                 displayNumber: idx + 1,
                 address: ord.address || '',
                 storeName: ord.storeName || ord.senderName || '',
-                phone: ord.phone || '', // 정제된 수령인 전화번호 전달
+                phone: ord.phone || '', 
                 lat: ord.lat || null,
                 lng: ord.lng || null,
                 orderNo: ord.orderNo || '', 
@@ -518,7 +571,7 @@ export async function sendRoutesToDrivers() {
             successCount++;
         }
 
-        alert(`[동선 전송 완료]\n총 ${successCount}명의 기사 스마트폰으로 배송 동선이 전송되었습니다.\n기사님들은 앱에서 코스를 바로 확인하고 운행할 수 있습니다.`);
+        alert(`[동선 전송 완료]\n총 ${successCount}명의 기사 스마트폰으로 배송 동선이 성공적으로 전송되었습니다.`);
     } catch (e) {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
@@ -656,5 +709,6 @@ window.selectDispatchDriver = selectDispatchDriver;
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
+window.revertAutoDispatch = revertAutoDispatch; // 🌟 추가된 초기화 함수 바인딩
 window.sendRoutesToDrivers = sendRoutesToDrivers;
 window.printSelectedDriverItemList = printSelectedDriverItemList;

@@ -48,7 +48,8 @@ import {
     saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI,
     renderDispatchDriverList, toggleDispatchDriver, adjustDriverWeight,
     selectDispatchDriver, renderDispatchDriverDetail, changeOrderDriver,
-    runAutoDispatchAlgorithm, sendRoutesToDrivers, printSelectedDriverItemList
+    runAutoDispatchAlgorithm, revertAutoDispatch, initDispatchResizer, // 🌟 새로 추가된 기능 가져오기
+    sendRoutesToDrivers, printSelectedDriverItemList
 } from "./admin-dispatch-auto.js";
 
 import {
@@ -622,6 +623,8 @@ window.selectDispatchDriver = selectDispatchDriver;
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
+window.revertAutoDispatch = revertAutoDispatch; // 🌟 추가된 할당 초기화 함수 바인딩
+window.initDispatchResizer = initDispatchResizer; // 🌟 추가된 리사이저 바인딩
 window.sendRoutesToDrivers = sendRoutesToDrivers;
 window.printSelectedDriverItemList = printSelectedDriverItemList;
 window.toggleDispatchDriver = toggleDispatchDriver;
