@@ -77,18 +77,26 @@ export function cleanAddress(rawAddr) {
 }
 
 // ==========================================
-// 🌟 0-2. 출고지 주소/창고 기반 공급자 매핑 헬퍼
+// 🌟 0-2. 출고지 주소/창고 기반 공급자 매핑 헬퍼 (특정 업체명 하드코딩 완전 제거)
 // ==========================================
 function extractSenderFromWarehouse(warehouseAddr) {
     if (!warehouseAddr || typeof warehouseAddr !== 'string') return '';
     const clean = warehouseAddr.trim();
     if (!clean || clean === '-') return '';
 
-    // 알려진 출고지-공급자 자동 매핑
-    if (clean.includes('건원대로') || clean.includes('윤진') || clean.includes('인창동')) {
-        return '윤진유통주식회사';
+    // 1) 텍스트 내에 상호 패턴((주), 주식회사, 상사, 유통, 물류, 푸드 등)이 직접 포함된 경우 추출
+    const corpMatch = clean.match(/(?:\(?주\)?|주식회사|\b회사\b|\b상사\b|\b유통\b|\b물류\b|\b식품\b|\b푸드\b|\b로지스\b)[가-힣A-Za-z0-9\s]+/);
+    if (corpMatch) {
+        return corpMatch[0].trim();
     }
 
+    // 2) [대괄호] 또는 (소괄호)로 상호가 별도 기재된 경우 (단, 우편번호나 주소 식별자 제외)
+    const bracketMatch = clean.match(/[\[\(]([가-힣A-Za-z0-9\s]{2,15})[\]\)]/);
+    if (bracketMatch && !/^\d+$/.test(bracketMatch[1]) && !/^(출고|배송|주소|기본|도로|지하)/.test(bracketMatch[1])) {
+        return bracketMatch[1].trim();
+    }
+
+    // 3) 상호가 없고 순수 주소 형태일 경우: 행정구역 기반 범용 출고지 표기
     let addrWithoutZip = clean.replace(/\[\d+\]/g, '').trim();
     const match = addrWithoutZip.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)?\s*([가-힣]+(?:시|군|구))\s*([가-힣]+(?:동|읍|면|리|가))/);
     if (match) {
@@ -99,7 +107,7 @@ function extractSenderFromWarehouse(warehouseAddr) {
     if (parts.length >= 2) {
         return `[출고지] ${parts.slice(0, 2).join(' ')}`;
     }
-    return clean.slice(0, 15);
+    return `[출고지] ${clean.slice(0, 15)}`;
 }
 
 // ==========================================
@@ -109,17 +117,21 @@ function extractSenderFromFileName(fileName) {
     if (!fileName || typeof fileName !== 'string') return '';
     let name = fileName.replace(/\.[^/.]+$/, '').trim();
 
+    // 일반 관리용 파일명 제외
     if (/^(발송관리|주문관리|배송관리|주문목록|배송목록|주문서|발주서|order|delivery|orders)[\d_\-\s]*$/i.test(name)) {
         return '';
     }
 
+    // [회사명] 파일명.xlsx 형태
     const bracketMatch = name.match(/^[\[\(\{]([가-힣A-Za-z0-9\s]{2,15})[\]\}\)]/);
     if (bracketMatch) return bracketMatch[1].trim();
 
+    // 구분자 분리
     const parts = name.split(/[_\-\s]+/);
-    if (parts.length > 1 && !/^\d+$/.test(parts[0])) {
-        if (!/^(발송관리|주문관리|배송관리|주문목록|배송목록|주문서|order|orders)$/i.test(parts[0])) {
-            return parts[0].trim();
+    for (const part of parts) {
+        const p = part.trim();
+        if (p.length >= 2 && !/^\d+$/.test(p) && !/^(발송관리\vert{}주문관리\vert{}배송관리\vert{}주문목록\vert{}배송목록\vert{}주문서\vert{}발주서\vert{}order\vert{}orders)$/i.test(p)) {
+            return p;
         }
     }
     return '';
@@ -330,14 +342,14 @@ export function processExcelData(jsonData, fileName = '') {
             }
         }
 
-        // 5. 🌟 공급자 / 화주명 추출 (3단계 우선순위 규칙)
+        // 5. 🌟 공급자 / 화주명 추출 (규칙: 1공급자 > 2출고지 > 3파일명 유추 > 정보 없음)
         let senderName = '';
 
-        // [1순위]: 엑셀 컬럼 탐색 (쿠폰/금액/포인트 등의 열 배제)
+        // [1순위]: 엑셀 컬럼 탐색 (쿠폰/금액/포인트/코드 등의 열 배제)
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (!/쿠폰|금액|할인|포인트|비용|코드|단가/i.test(ck)) {
-                if (/공급자|화주|발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명/i.test(ck)) {
+            if (!/쿠폰|금액|할인|포인트|비용|코드|단가|사업자/i.test(ck)) {
+                if (/공급자|화주|발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|공급처|제조사/i.test(ck)) {
                     if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                         senderName = String(row[k]).trim();
                         break;
@@ -351,7 +363,7 @@ export function processExcelData(jsonData, fileName = '') {
             let rawWarehouse = '';
             for (const k of keys) {
                 const ck = k.replace(/\s+/g, '');
-                if (/출고지|출하지|발송지|창고|출고창고/i.test(ck)) {
+                if (/출고지|출하지|발송지|창고|출고창고|출고주소|발송주소|보내는분/i.test(ck)) {
                     if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                         rawWarehouse = String(row[k]).trim();
                         break;
@@ -363,14 +375,14 @@ export function processExcelData(jsonData, fileName = '') {
             }
         }
 
-        // [3순위]: 업로드한 파일명에서 화주명 추출
+        // [3순위]: 업로드한 파일명에서 회사명 유추
         if (!senderName && fileName) {
             senderName = extractSenderFromFileName(fileName);
         }
 
-        // [최종 기본값]: 1~3순위 모두 없을 경우
+        // [최종 기본값]: 1~3순위 모두 없을 경우 '정보 없음'으로 통일
         if (!senderName) {
-            senderName = '공급자 미상';
+            senderName = '정보 없음';
         }
 
         // 6. 주문번호 추출

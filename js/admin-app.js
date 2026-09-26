@@ -77,14 +77,14 @@ import {
     cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
     updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
     filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
-    renderInvoiceOrderList, initTemplatePdfDropZone,
+    handleHeaderCheckAll, renderInvoiceOrderList, initTemplatePdfDropZone,
     populateSenderFilterDropdown, filterBySender,
     openPickingDriverModal, closePickingDriverModal,
     toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint,
-    sortPrintList
+    sortPrintList, initInvoiceResizer
 } from "./admin-dispatch-print.js";
 
-// 🌟 서식 빌더 모듈 (삭제된 행 추가/삭제 import 제거 완료)
+// 🌟 서식 빌더 모듈
 import {
     parsePdfToEditableDocument, renderEditableDocument,
     saveCurrentDocumentTemplate
@@ -702,6 +702,7 @@ window.clearAllExcelRows = clearAllExcelRows;
 // [관제 인쇄(Print)]
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.filterInvoicePrintList = filterInvoicePrintList;
+window.handleHeaderCheckAll = handleHeaderCheckAll; // 🌟 스마트 전체 온/오프 핸들러
 window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
 window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
@@ -726,6 +727,7 @@ window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
 window.sortPrintList = sortPrintList;
+window.initInvoiceResizer = initInvoiceResizer; // 🌟 주문서 목록 폭 조절 리사이저
 
 // 🌟 [관제 신규 서식 빌더/에디터(Template)]
 window.parsePdfToEditableDocument = parsePdfToEditableDocument;

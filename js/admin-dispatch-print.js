@@ -154,7 +154,7 @@ export function filterBySender(senderName) {
 }
 
 // ==========================================
-// 2. 좌측 인쇄 대상 리스트 (엑셀 형식 표 & 정렬)
+// 2. 좌측 인쇄 대상 리스트 (스마트 토글 및 헤더 동기화)
 // ==========================================
 function getFilteredPrintOrders() {
     if (!state.printReadyList) return [];
@@ -230,20 +230,39 @@ export function updateInvoiceCountBadge() {
     const chkAll = document.getElementById('chk-invoice-all-table');
     if (chkAll) {
         chkAll.checked = (total > 0 && selected === total);
+        chkAll.indeterminate = (selected > 0 && selected < total);
     }
 }
 
-export function toggleAllInvoiceSelection(isChecked) {
+// 🌟 헤더 체크박스 클릭 핸들러 (1건이라도 선택되어 있으면 무조건 전체 해제, 0건이면 전체 선택)
+export function handleHeaderCheckAll(e) {
+    if (e) e.stopPropagation();
     const filtered = getFilteredPrintOrders();
+    const selectedCount = filtered.filter(it => it._selected !== false).length;
+    
+    const nextState = (selectedCount === 0);
+    toggleAllInvoiceSelection(nextState);
+}
+
+// 전체 선택 / 전체 해제 공용 제어 함수
+export function toggleAllInvoiceSelection(targetState) {
+    const filtered = getFilteredPrintOrders();
+    const isCheck = (typeof targetState === 'boolean') ? targetState : false;
+
     filtered.forEach(it => {
-        it._selected = isChecked;
+        it._selected = isCheck;
     });
+
     renderInvoiceOrderList();
     updateInvoiceCountBadge();
 }
 
-export function toggleSingleInvoiceItem(targetId, isChecked) {
-    const item = state.printReadyList.find(it => String(it.id) === String(targetId));
+// 개별 항목 선택 토글 (인덱스 fallback 보강)
+export function toggleSingleInvoiceItem(targetId, isChecked, idx) {
+    let item = state.printReadyList.find(it => String(it.id) === String(targetId));
+    if (!item && idx !== undefined && state.printReadyList[idx]) {
+        item = state.printReadyList[idx];
+    }
     if (item) {
         item._selected = isChecked;
     }
@@ -256,7 +275,9 @@ export function renderInvoiceOrderList() {
     if (!listEl) return;
 
     const filtered = getFilteredPrintOrders();
-    updateInvoiceCountBadge();
+    const total = filtered.length;
+    const selected = filtered.filter(it => it._selected !== false).length;
+    const isAllChecked = (total > 0 && selected === total);
 
     const getArrow = (field) => {
         if (printListSortField !== field) return ' ↕';
@@ -265,6 +286,7 @@ export function renderInvoiceOrderList() {
 
     if (!filtered || filtered.length === 0) {
         listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">조건에 일치하는 주문이 없습니다.</div>`;
+        updateInvoiceCountBadge();
         return;
     }
 
@@ -273,7 +295,9 @@ export function renderInvoiceOrderList() {
         <table class="w-full text-left border-collapse text-xs whitespace-nowrap excel-table">
             <thead>
                 <tr class="bg-gray-100 text-gray-700 font-black border-b border-gray-200">
-                    <th class="py-2.5 px-2 text-center w-8"><input type="checkbox" id="chk-invoice-all-table" onchange="window.toggleAllInvoiceSelection(this.checked)" class="cursor-pointer"></th>
+                    <th class="py-2.5 px-2 text-center w-8">
+                        <input type="checkbox" id="chk-invoice-all-table" ${isAllChecked ? 'checked' : ''} onclick="window.handleHeaderCheckAll(event)" class="cursor-pointer">
+                    </th>
                     <th class="py-2.5 px-2 text-center w-10">No.</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('senderName')">공급자${getArrow('senderName')}</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('storeName')">상호(간판명)${getArrow('storeName')}</th>
@@ -288,14 +312,14 @@ export function renderInvoiceOrderList() {
         const isCurrent = (state.currentPreviewInvoiceIndex === originalIdx);
         const isChecked = (item._selected !== false);
 
-        const senderDisplay = item.senderName || '-';
+        const senderDisplay = item.senderName || '정보 없음';
         const storeDisplay = item.storeName || '-';
         const addressDisplay = item.address || item.fullAddress || '-';
 
         tableHtml += `
         <tr onclick="window.previewInvoiceRow(${originalIdx})" class="hover:bg-indigo-50/60 cursor-pointer transition ${isCurrent ? 'bg-indigo-50/80 ring-1 ring-indigo-400 font-bold' : ''}">
             <td class="text-center py-2 px-2" onclick="event.stopPropagation()">
-                <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked)" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer row-checkbox" data-idx="${originalIdx}">
+                <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked, ${originalIdx})" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer row-checkbox" data-idx="${originalIdx}">
             </td>
             <td class="text-center py-2 px-2 font-mono text-gray-400 font-bold">${originalIdx + 1}</td>
             <td class="py-2 px-3 font-black text-amber-900 truncate max-w-[100px]" title="${senderDisplay}">${senderDisplay}</td>
@@ -306,6 +330,8 @@ export function renderInvoiceOrderList() {
 
     tableHtml += `</tbody></table></div>`;
     listEl.innerHTML = tableHtml;
+
+    updateInvoiceCountBadge();
 }
 
 // ==========================================
@@ -323,7 +349,6 @@ export function previewInvoiceRow(idx) {
         labelEl.innerText = `#${idx + 1} ${sName}${item.storeName || item.address || ''}${driverName}`;
     }
 
-    // 선택된 주문건의 실제 데이터(담당기사, 사업자번호, 품목, 금액, 주소 등)를 서식에 채워 실시간 미리보기
     const docCanvas = document.getElementById('editable-doc-canvas');
     const baseTemplate = templateBuilderState.currentDocHtml;
     if (docCanvas && baseTemplate && typeof fillTemplateWithOrderData === 'function') {
@@ -541,10 +566,8 @@ export function executeBatchPrint() {
     selectedOrders.forEach((item, idx) => {
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, item, idx);
 
-        // 인쇄 시 contenteditable 비활성화
         filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
 
-        // 여백이나 패딩으로 인한 2페이지 밀림 방지: 순수 A4 시트만 배치
         printPagesHtml += `
         <div class="print-page-wrapper">
             <div class="print-sheet-content">
@@ -559,7 +582,6 @@ export function executeBatchPrint() {
     
     const doc = iframe.contentWindow.document; 
     doc.open();
-    // 🌟 핵심: A4 규격(210mm x 297mm) 고정, 외부 마진 0 설정, 테이블 높이 강제 확장 스타일 완전 제거
     doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
         * { box-sizing: border-box; }
         @media print { 
@@ -934,6 +956,7 @@ export function executePickingListPrint() {
 // ==========================================
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.filterInvoicePrintList = filterInvoicePrintList;
+window.handleHeaderCheckAll = handleHeaderCheckAll; // 🌟 스마트 전체 온/오프 핸들러
 window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
 window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
