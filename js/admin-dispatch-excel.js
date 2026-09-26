@@ -6,7 +6,40 @@ import { processSinglePdfFile } from "./admin-dispatch-pdf.js";
 import { doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
-// 0. 전화번호 복원 및 표준화 헬퍼 (010-XXXX-XXXX)
+// 0. 로컬 스토리지 기반 주소 캐시(Cache) 관리 엔진
+// ==========================================
+const GEO_CACHE_KEY = 'deliveryPro_geoCache';
+let memoryGeoCache = null;
+
+function getGeoCache() {
+    if (memoryGeoCache !== null) return memoryGeoCache;
+    try {
+        const stored = localStorage.getItem(GEO_CACHE_KEY);
+        memoryGeoCache = stored ? JSON.parse(stored) : {};
+    } catch (e) {
+        memoryGeoCache = {};
+    }
+    return memoryGeoCache;
+}
+
+function saveGeoCache(cache) {
+    try {
+        const keys = Object.keys(cache);
+        if (keys.length > 3000) {
+            const trimmedCache = {};
+            keys.slice(keys.length - 2000).forEach(k => { trimmedCache[k] = cache[k]; });
+            memoryGeoCache = trimmedCache;
+            localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(trimmedCache));
+            return;
+        }
+        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cache));
+    } catch (e) {
+        console.warn("주소 캐시 저장 실패:", e);
+    }
+}
+
+// ==========================================
+// 0-1. 전화번호 복원 및 표준화 헬퍼 (010-XXXX-XXXX)
 // ==========================================
 export function formatPhoneNumber(val) {
     if (!val) return '';
@@ -38,7 +71,7 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
-// 0-1. 주소 정밀 절삭 엔진
+// 0-2. 주소 정밀 절삭 엔진
 // ==========================================
 export function cleanAddress(rawAddr) {
     if (!rawAddr || typeof rawAddr !== 'string') return '';
@@ -77,7 +110,7 @@ export function cleanAddress(rawAddr) {
 }
 
 // ==========================================
-// 🌟 0-2. 출고지 주소/창고 기반 공급자 매핑 헬퍼 (특정 업체명 하드코딩 완전 제거)
+// 🌟 0-3. 출고지 주소/창고 기반 공급자 매핑 헬퍼 (특정 업체명 하드코딩 완전 제거)
 // ==========================================
 function extractSenderFromWarehouse(warehouseAddr) {
     if (!warehouseAddr || typeof warehouseAddr !== 'string') return '';
@@ -111,7 +144,7 @@ function extractSenderFromWarehouse(warehouseAddr) {
 }
 
 // ==========================================
-// 🌟 0-3. 업로드 파일명 기반 공급자명 추출 헬퍼
+// 🌟 0-4. 업로드 파일명 기반 공급자명 추출 헬퍼
 // ==========================================
 function extractSenderFromFileName(fileName) {
     if (!fileName || typeof fileName !== 'string') return '';
@@ -130,7 +163,7 @@ function extractSenderFromFileName(fileName) {
     const parts = name.split(/[_\-\s]+/);
     for (const part of parts) {
         const p = part.trim();
-        if (p.length >= 2 && !/^\d+$/.test(p) && !/^(발송관리\vert{}주문관리\vert{}배송관리\vert{}주문목록\vert{}배송목록\vert{}주문서\vert{}발주서\vert{}order\vert{}orders)$/i.test(p)) {
+        if (p.length >= 2 && !/^\d+$/.test(p) && !/^(발송관리|주문관리|배송관리|주문목록|배송목록|주문서|발주서|order|orders)$/i.test(p)) {
             return p;
         }
     }
@@ -645,44 +678,87 @@ export function processSingleExcelFile(file) {
 }
 
 // ==========================================
-// 5. 주소 -> 정밀 좌표(위/경도) 지오코딩 엔진
+// 5. 주소 -> 정밀 좌표(위/경도) 지오코딩 엔진 (캐시 우선 & 지수 백오프)
 // ==========================================
-function getCoordsFromAddress(address) {
-    return new Promise((resolve) => {
-        const targetAddr = cleanAddress(address);
-        if (!targetAddr || !window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
-            resolve(null); 
-            return; 
-        }
-        const geocoder = new window.kakao.maps.services.Geocoder();
+async function getCoordsFromAddress(address) {
+    const targetAddr = cleanAddress(address);
+    if (!targetAddr) return null;
+    const cleanKey = targetAddr.trim();
+    if (!cleanKey) return null;
 
-        geocoder.addressSearch(targetAddr.trim(), (res1, stat1) => {
-            if (stat1 === window.kakao.maps.services.Status.OK && res1[0]) {
-                const fullAddr = (res1[0].road_address && res1[0].road_address.address_name) 
-                    ? res1[0].road_address.address_name 
-                    : res1[0].address_name;
-                resolve({ lat: parseFloat(res1[0].y), lng: parseFloat(res1[0].x), fullAddress: fullAddr });
-            } else {
-                const basicMatch = targetAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
-                if (basicMatch) {
-                    geocoder.addressSearch(basicMatch[0], (res2, stat2) => {
-                        if (stat2 === window.kakao.maps.services.Status.OK && res2[0]) {
-                            resolve({ lat: parseFloat(res2[0].y), lng: parseFloat(res2[0].x), fullAddress: res2[0].address_name });
+    // 1단계: 로컬 주소 캐시 우선 확인 (카카오 호출 0회 처리)
+    const cache = getGeoCache();
+    if (cache[cleanKey]) {
+        return cache[cleanKey];
+    }
+
+    if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
+        return null; 
+    }
+    const geocoder = new window.kakao.maps.services.Geocoder();
+
+    // 🌟 2단계: 지수 백오프(Exponential Backoff with Jitter) 429 차단 방어 래퍼
+    const queryKakaoWithRetry = async (queryStr) => {
+        const maxRetries = 3;
+        const delays = [200, 500, 1000];
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            const result = await new Promise((resolve) => {
+                try {
+                    geocoder.addressSearch(queryStr, (res, status) => {
+                        if (status === window.kakao.maps.services.Status.OK && res && res[0]) {
+                            const fullAddr = (res[0].road_address && res[0].road_address.address_name) 
+                                ? res[0].road_address.address_name 
+                                : res[0].address_name;
+                            resolve({ success: true, data: { lat: parseFloat(res[0].y), lng: parseFloat(res[0].x), fullAddress: fullAddr } });
+                        } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
+                            resolve({ success: false, retryable: false });
                         } else {
-                            resolve(null);
+                            // ERROR: 429 Rate Limit 초과 또는 일시적 통신 오류
+                            resolve({ success: false, retryable: true });
                         }
                     });
-                } else {
-                    resolve(null);
+                } catch (err) {
+                    resolve({ success: false, retryable: true });
                 }
-            }
-        });
-    });
+            });
+
+            if (result.success) return result.data;
+            if (!result.retryable || attempt === maxRetries) break;
+
+            // 지수 백오프 + 무작위 지연(Jitter 0~50ms) 부여
+            const jitter = Math.floor(Math.random() * 50);
+            const delay = (delays[attempt] || 1000) + jitter;
+            await new Promise(r => setTimeout(r, delay));
+        }
+        return null;
+    };
+
+    // 1차: 정제된 깔끔한 주소로 검색
+    let coords = await queryKakaoWithRetry(cleanKey);
+
+    // 2차: 도로명+번지수 기본 패턴만으로 재검색
+    if (!coords) {
+        const basicMatch = cleanKey.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
+        if (basicMatch && basicMatch[0] !== cleanKey) {
+            coords = await queryKakaoWithRetry(basicMatch[0]);
+        }
+    }
+
+    if (coords) {
+        cache[cleanKey] = coords;
+        saveGeoCache(cache);
+        return coords;
+    }
+
+    return null;
 }
 
 async function batchGeocodeExcelList(items) {
     const dropZone = document.getElementById('excel-drop-zone');
     const originalDropHtml = dropZone ? dropZone.innerHTML : '';
+    const cache = getGeoCache();
+
     for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (dropZone) {
@@ -695,6 +771,10 @@ async function batchGeocodeExcelList(items) {
         if (item.address && (!item.lat || !item.lng)) {
             if (!item.fullAddress) item.fullAddress = item.address;
             item.address = cleanAddress(item.address);
+
+            const cleanKey = item.address.trim();
+            const isCached = !!cache[cleanKey];
+
             const coords = await getCoordsFromAddress(item.address);
             if (coords) { 
                 item.lat = coords.lat; 
@@ -703,7 +783,11 @@ async function batchGeocodeExcelList(items) {
                     item.address = coords.fullAddress;
                 }
             }
-            await new Promise(r => setTimeout(r, 40));
+
+            // 신규 카카오 API 호출 건에만 40ms 안전 딜레이 적용 (캐시 적중 건은 즉시 패스)
+            if (!isCached) {
+                await new Promise(r => setTimeout(r, 40));
+            }
         }
     }
     if (dropZone) dropZone.innerHTML = originalDropHtml;

@@ -356,45 +356,78 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
 }
 
 // ==========================================
-// 4. 주소 좌표(위/경도) 지오코딩 엔진 (캐시 우선 확인)
+// 4. 주소 좌표(위/경도) 지오코딩 엔진 (캐시 우선 확인 & 429 지수 백오프 방어)
 // ==========================================
 async function getCoordsFromAddress(address) {
     if (!address) return null;
     const cleanKey = address.trim();
     if (!cleanKey) return null;
 
+    // 1단계: 로컬 주소 캐시 우선 확인 (카카오 호출 0회 처리)
     const cache = getGeoCache();
     if (cache[cleanKey]) {
         return cache[cleanKey];
     }
 
-    return new Promise((resolve) => {
-        if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
-            resolve(null); 
-            return; 
-        }
-        const geocoder = new window.kakao.maps.services.Geocoder();
-        geocoder.addressSearch(cleanKey, (result, status) => {
-            if (status === window.kakao.maps.services.Status.OK && result[0]) {
-                let fullAddress = result[0].address_name;
-                if (result[0].road_address && result[0].road_address.address_name) {
-                    fullAddress = result[0].road_address.address_name;
+    if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
+        return null; 
+    }
+    const geocoder = new window.kakao.maps.services.Geocoder();
+
+    // 🌟 2단계: 지수 백오프(Exponential Backoff with Jitter) 429 차단 방어 래퍼
+    const queryKakaoWithRetry = async (queryStr) => {
+        const maxRetries = 3;
+        const delays = [200, 500, 1000];
+
+        for (let attempt = 0; attempt <= maxRetries; attempt++) {
+            const result = await new Promise((resolve) => {
+                try {
+                    geocoder.addressSearch(queryStr, (res, status) => {
+                        if (status === window.kakao.maps.services.Status.OK && res && res[0]) {
+                            const fullAddr = (res[0].road_address && res[0].road_address.address_name) 
+                                ? res[0].road_address.address_name 
+                                : res[0].address_name;
+                            resolve({ success: true, data: { lat: parseFloat(res[0].y), lng: parseFloat(res[0].x), fullAddress: fullAddr } });
+                        } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
+                            resolve({ success: false, retryable: false });
+                        } else {
+                            // 429 Rate Limit 초과 또는 일시적 통신 지연 오류
+                            resolve({ success: false, retryable: true });
+                        }
+                    });
+                } catch (err) {
+                    resolve({ success: false, retryable: true });
                 }
-                const resData = { 
-                    lat: parseFloat(result[0].y), 
-                    lng: parseFloat(result[0].x), 
-                    fullAddress: fullAddress 
-                };
+            });
 
-                cache[cleanKey] = resData;
-                saveGeoCache(cache);
+            if (result.success) return result.data;
+            if (!result.retryable || attempt === maxRetries) break;
 
-                resolve(resData);
-            } else { 
-                resolve(null); 
-            }
-        });
-    });
+            const jitter = Math.floor(Math.random() * 50);
+            const delay = (delays[attempt] || 1000) + jitter;
+            await new Promise(r => setTimeout(r, delay));
+        }
+        return null;
+    };
+
+    // 1차: 정제 주소로 검색
+    let coords = await queryKakaoWithRetry(cleanKey);
+
+    // 2차: 도로명+지번 번지수 기본 패턴으로 재시도
+    if (!coords) {
+        const basicMatch = cleanKey.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
+        if (basicMatch && basicMatch[0] !== cleanKey) {
+            coords = await queryKakaoWithRetry(basicMatch[0]);
+        }
+    }
+
+    if (coords) {
+        cache[cleanKey] = coords;
+        saveGeoCache(cache);
+        return coords;
+    }
+
+    return null;
 }
 
 export async function batchGeocodePdfList(items) {

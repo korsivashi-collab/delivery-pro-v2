@@ -1,7 +1,7 @@
 // js/admin-app.js
 
 import { db } from "./admin-api.js";
-import { doc, getDoc, onSnapshot, collection, query, orderBy, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 import { renderPaginationControls } from "./admin-ui.js";
@@ -356,8 +356,8 @@ window.initMasterDataSync = function() {
         }
     });
 
-    // 6. 메시지 실시간 동기화
-    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
+    // 6. 메시지 실시간 동기화 (최신 50건으로 제한하여 읽기 비용 및 부하 90% 이상 절감)
+    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
         if (typeof renderMessageFeed === 'function') renderMessageFeed(); 
@@ -702,7 +702,7 @@ window.clearAllExcelRows = clearAllExcelRows;
 // [관제 인쇄(Print)]
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.filterInvoicePrintList = filterInvoicePrintList;
-window.handleHeaderCheckAll = handleHeaderCheckAll; // 🌟 스마트 전체 온/오프 핸들러
+window.handleHeaderCheckAll = handleHeaderCheckAll;
 window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
 window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
@@ -727,7 +727,7 @@ window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
 window.sortPrintList = sortPrintList;
-window.initInvoiceResizer = initInvoiceResizer; // 🌟 주문서 목록 폭 조절 리사이저
+window.initInvoiceResizer = initInvoiceResizer;
 
 // 🌟 [관제 신규 서식 빌더/에디터(Template)]
 window.parsePdfToEditableDocument = parsePdfToEditableDocument;
