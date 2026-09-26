@@ -424,7 +424,7 @@
 
         <!-- 3단 본문 레이아웃 -->
         <div class="flex-1 flex gap-3 p-3 overflow-hidden bg-slate-100">
-            <!-- 🌟 1단 (좌측): 인쇄 대상 목록 (엑셀 형식 표 & 발송사 필터) -->
+            <!-- 🌟 1단 (좌측): 인쇄 대상 목록 (엑셀 형식 표 & 공급자 필터) -->
             <div class="w-[380px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
                 <div class="bg-gray-50 border-b border-gray-200 p-3 flex flex-col gap-2.5 shadow-2xs z-10">
                     <div class="flex justify-between items-center">
@@ -434,11 +434,11 @@
                         <span class="text-[11px] font-black bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full" id="invoice-target-count-badge">선택 0 / 0건</span>
                     </div>
 
-                    <!-- 발송회사(화주)별 분류 필터 드롭다운 -->
+                    <!-- 공급자별 분류 필터 드롭다운 -->
                     <div>
-                        <label class="block text-[10px] font-bold text-gray-500 mb-1">발송회사(화주)별 분류</label>
+                        <label class="block text-[10px] font-bold text-gray-500 mb-1">공급자별 분류</label>
                         <select id="invoice-sender-filter" onchange="window.filterBySender(this.value)" class="w-full bg-white border border-gray-300 rounded-lg p-1.5 text-xs font-black text-gray-800 outline-none focus:border-indigo-500 shadow-2xs cursor-pointer">
-                            <option value="ALL">전체 발송회사 (모아보기)</option>
+                            <option value="ALL">전체 공급자 (모아보기)</option>
                         </select>
                     </div>
 
