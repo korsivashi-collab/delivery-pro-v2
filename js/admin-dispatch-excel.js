@@ -38,7 +38,7 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
-// 🌟 0-1. PDF 파서와 동일한 주소 정밀 절삭 엔진
+// 0-1. 주소 정밀 절삭 엔진
 // ==========================================
 export function cleanAddress(rawAddr) {
     if (!rawAddr || typeof rawAddr !== 'string') return '';
@@ -74,6 +74,55 @@ export function cleanAddress(rawAddr) {
     }
 
     return addr.replace(/\s{2,}/g, ' ').trim();
+}
+
+// ==========================================
+// 🌟 0-2. 출고지 주소/창고 기반 공급자 매핑 헬퍼
+// ==========================================
+function extractSenderFromWarehouse(warehouseAddr) {
+    if (!warehouseAddr || typeof warehouseAddr !== 'string') return '';
+    const clean = warehouseAddr.trim();
+    if (!clean || clean === '-') return '';
+
+    // 알려진 출고지-공급자 자동 매핑
+    if (clean.includes('건원대로') || clean.includes('윤진') || clean.includes('인창동')) {
+        return '윤진유통주식회사';
+    }
+
+    let addrWithoutZip = clean.replace(/\[\d+\]/g, '').trim();
+    const match = addrWithoutZip.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)?\s*([가-힣]+(?:시|군|구))\s*([가-힣]+(?:동|읍|면|리|가))/);
+    if (match) {
+        return `[출고지] ${match[1]} ${match[2]}`;
+    }
+
+    const parts = addrWithoutZip.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+        return `[출고지] ${parts.slice(0, 2).join(' ')}`;
+    }
+    return clean.slice(0, 15);
+}
+
+// ==========================================
+// 🌟 0-3. 업로드 파일명 기반 공급자명 추출 헬퍼
+// ==========================================
+function extractSenderFromFileName(fileName) {
+    if (!fileName || typeof fileName !== 'string') return '';
+    let name = fileName.replace(/\.[^/.]+$/, '').trim();
+
+    if (/^(발송관리|주문관리|배송관리|주문목록|배송목록|주문서|발주서|order|delivery|orders)[\d_\-\s]*$/i.test(name)) {
+        return '';
+    }
+
+    const bracketMatch = name.match(/^[\[\(\{]([가-힣A-Za-z0-9\s]{2,15})[\]\}\)]/);
+    if (bracketMatch) return bracketMatch[1].trim();
+
+    const parts = name.split(/[_\-\s]+/);
+    if (parts.length > 1 && !/^\d+$/.test(parts[0])) {
+        if (!/^(발송관리|주문관리|배송관리|주문목록|배송목록|주문서|order|orders)$/i.test(parts[0])) {
+            return parts[0].trim();
+        }
+    }
+    return '';
 }
 
 // ==========================================
@@ -193,7 +242,7 @@ export function renderExcelTable() {
 // ==========================================
 // 3. 범용 스마트 헤더 자동 매핑 및 주문/배송지별 품목 그룹화 파서
 // ==========================================
-export function processExcelData(jsonData) {
+export function processExcelData(jsonData, fileName = '') {
     if (!jsonData || jsonData.length === 0) return [];
 
     const orderMap = {};
@@ -255,7 +304,7 @@ export function processExcelData(jsonData) {
         const address = cleanAddress(rawAddress);
         const fullAddress = rawAddress || address;
 
-        // 3. 🌟 상호 / 수령처명 정밀 추출 (수취인/배송지/매장명 위주)
+        // 3. 상호 / 수령처명 정밀 추출
         let storeName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -267,7 +316,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 4. 🌟 구매자명 (공급받는 자/주문자) 정밀 추출 (주문자/구매자 위주)
+        // 4. 구매자명 (공급받는 자/주문자) 정밀 추출
         let buyerName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -281,11 +330,12 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 5. 🌟 공급자 / 화주명 정밀 추출 (쿠폰/금액/포인트 등의 열을 완벽 차단!)
+        // 5. 🌟 공급자 / 화주명 추출 (3단계 우선순위 규칙)
         let senderName = '';
+
+        // [1순위]: 엑셀 컬럼 탐색 (쿠폰/금액/포인트 등의 열 배제)
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            // '판매자상품쿠폰 사용금액' 같이 금액/쿠폰이 섞인 열은 무조건 무시
             if (!/쿠폰|금액|할인|포인트|비용|코드|단가/i.test(ck)) {
                 if (/공급자|화주|발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명/i.test(ck)) {
                     if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
@@ -294,6 +344,33 @@ export function processExcelData(jsonData) {
                     }
                 }
             }
+        }
+
+        // [2순위]: 출고지 주소/창고 컬럼 기반 자동 매핑
+        if (!senderName) {
+            let rawWarehouse = '';
+            for (const k of keys) {
+                const ck = k.replace(/\s+/g, '');
+                if (/출고지|출하지|발송지|창고|출고창고/i.test(ck)) {
+                    if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                        rawWarehouse = String(row[k]).trim();
+                        break;
+                    }
+                }
+            }
+            if (rawWarehouse) {
+                senderName = extractSenderFromWarehouse(rawWarehouse);
+            }
+        }
+
+        // [3순위]: 업로드한 파일명에서 화주명 추출
+        if (!senderName && fileName) {
+            senderName = extractSenderFromFileName(fileName);
+        }
+
+        // [최종 기본값]: 1~3순위 모두 없을 경우
+        if (!senderName) {
+            senderName = '공급자 미상';
         }
 
         // 6. 주문번호 추출
@@ -425,8 +502,8 @@ export function processExcelData(jsonData) {
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
                 assignedDriver: null,
-                senderName: senderName || '공급자 미상', 
-                buyerName: buyerName || storeName || '고객', // 🌟 구매자명 추출 완벽 분리 반영
+                senderName: senderName,
+                buyerName: buyerName || storeName || '고객',
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
                 bizNo: bizNo,
                 address: address,
@@ -513,7 +590,7 @@ export async function handleExcelUpload(e) {
             if (parsedPdfOrders && parsedPdfOrders.length > 0) {
                 parsedPdfOrders.forEach(ord => {
                     if (!ord.fullAddress && ord.address) {
-                        ord.fullAddress = ord.address; // 원본 주소 보존
+                        ord.fullAddress = ord.address;
                     }
                     if (ord.address) ord.address = cleanAddress(ord.address);
                 });
@@ -546,7 +623,7 @@ export function processSingleExcelFile(file) {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
                 const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: false });
-                resolve(processExcelData(json));
+                resolve(processExcelData(json, file.name));
             } catch(err) { 
                 resolve([]); 
             }
@@ -567,7 +644,6 @@ function getCoordsFromAddress(address) {
         }
         const geocoder = new window.kakao.maps.services.Geocoder();
 
-        // 1차: cleanAddress로 정제된 깔끔한 주소로 검색
         geocoder.addressSearch(targetAddr.trim(), (res1, stat1) => {
             if (stat1 === window.kakao.maps.services.Status.OK && res1[0]) {
                 const fullAddr = (res1[0].road_address && res1[0].road_address.address_name) 
@@ -575,7 +651,6 @@ function getCoordsFromAddress(address) {
                     : res1[0].address_name;
                 resolve({ lat: parseFloat(res1[0].y), lng: parseFloat(res1[0].x), fullAddress: fullAddr });
             } else {
-                // 2차: 도로명+번지수 기본 패턴만으로 재검색
                 const basicMatch = targetAddr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
                 if (basicMatch) {
                     geocoder.addressSearch(basicMatch[0], (res2, stat2) => {

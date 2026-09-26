@@ -130,9 +130,31 @@ export function populateSenderFilterDropdown() {
     selectEl.innerHTML = html;
 }
 
+// 🌟 방안 A: 공급자 필터 선택 시 해당 공급자 주문만 자동 전체 선택 & 타 공급자 주문 자동 해제
 export function filterBySender(senderName) {
     currentSenderFilter = senderName;
+
+    if (state.printReadyList && state.printReadyList.length > 0) {
+        state.printReadyList.forEach(item => {
+            if (senderName === 'ALL') {
+                item._selected = true;
+            } else {
+                item._selected = ((item.senderName || '').trim() === senderName);
+            }
+        });
+    }
+
     renderInvoiceOrderList();
+    updateInvoiceCountBadge();
+
+    // 필터링된 첫 번째 주문으로 미리보기 자동 전환
+    const filtered = getFilteredPrintOrders();
+    if (filtered.length > 0) {
+        const firstIdx = state.printReadyList.indexOf(filtered[0]);
+        if (firstIdx !== -1) {
+            previewInvoiceRow(firstIdx);
+        }
+    }
 }
 
 // ==========================================
@@ -306,7 +328,7 @@ export function previewInvoiceRow(idx) {
         labelEl.innerText = `#${idx + 1} ${sName}${item.storeName || item.address || ''}${driverName}`;
     }
 
-    // 🌟 선택된 주문건의 실제 데이터(사업자번호, 품목, 금액, 주소 등)를 서식에 채워 실시간 미리보기!
+    // 선택된 주문건의 실제 데이터(사업자번호, 품목, 금액, 주소 등)를 서식에 채워 실시간 미리보기
     const docCanvas = document.getElementById('editable-doc-canvas');
     const baseTemplate = templateBuilderState.currentDocHtml;
     if (docCanvas && baseTemplate && typeof fillTemplateWithOrderData === 'function') {
@@ -505,7 +527,7 @@ export function executeBatchPrint() {
         return;
     }
 
-    // 🌟 베이스 원본 템플릿 가져오기 (태그가 유지된 currentDocHtml 활용)
+    // 베이스 원본 템플릿 가져오기
     const baseTemplateHtml = templateBuilderState.currentDocHtml || document.getElementById('editable-doc-canvas')?.innerHTML;
 
     if (!baseTemplateHtml || !baseTemplateHtml.trim()) {
@@ -525,13 +547,12 @@ export function executeBatchPrint() {
     let printPagesHtml = '';
 
     selectedOrders.forEach((item, idx) => {
-        // 🌟 핵심: template.js의 fillTemplateWithOrderData로 사업자번호, 상품리스트, 단가, 세액, 총액, 결제수단 등 100% 치환
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, item, idx);
 
         // 인쇄 시 contenteditable 속성 비활성화
         filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
 
-        // 상단 배송순번 등 표시 바(driver-marking-bar) 완전 제거
+        // 상단 배송순번 등 표시 바(driver-marking-bar) 완전 제거 유지
         printPagesHtml += `
         <div class="print-page-wrapper">
             <div class="print-sheet-content">
@@ -546,7 +567,6 @@ export function executeBatchPrint() {
     
     const doc = iframe.contentWindow.document; 
     doc.open();
-    // 스타일에서 driver-marking-bar 삭제
     doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
         * { box-sizing: border-box; }
         @media print { 

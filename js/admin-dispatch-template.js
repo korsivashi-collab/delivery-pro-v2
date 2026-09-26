@@ -57,13 +57,12 @@ export async function parsePdfToEditableDocument(file) {
         const bizMatch = rawText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/);
         if (bizMatch) provRegno = bizMatch[0].replace(/\s+/g, '-');
 
-        // 🌟 1. 공급자 상호명(법인명) 정밀 파싱 오류 수정
-        // "보관용)", "구매자명" 등의 주변 텍스트가 딸려오는 문제를 완벽히 차단합니다.
+        // 공급자 상호명(법인명) 정밀 파싱
         const storeMatch = rawText.match(/(?:상호\(법인명\)|상호명|상호|법인명|공급자)[\s:|]*([가-힣A-Za-z0-9\(\)주식회사]+)/);
         if (storeMatch) {
             let val = storeMatch[1].trim();
             val = val.split(/(?:구매자|주문자|보관용|공급받는|주문일자)/)[0].trim();
-            provName = val.replace(/^[)|\]}>\s]+/, '').trim(); // 앞부분 쓰레기 특수문자 제거
+            provName = val.replace(/^[)|\]}>\s]+/, '').trim();
         }
 
         const addrMatch = rawText.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*?(?:로|길|동|읍|면|가)\s*[\d\-]+(?:\s*[가-힣0-9\(\)\,\-\.]*)?/);
@@ -96,7 +95,7 @@ export async function parsePdfToEditableDocument(file) {
 
         renderEditableDocument(formHtml);
 
-        alert(`[PDF 양식 인식 완료]\n\n1. 원본 PDF의 칸(테두리선)과 공급자 정보를 복원했습니다.\n2. 워드로 작업하듯 불필요한 글자를 클릭하여 수정/삭제하세요.\n3. 작업 완료 후 상단 [양식 저장]을 누르면 기본 양식으로 등록됩니다.`);
+        alert(`[PDF 양식 인식 완료]\n\n1. A4 용지 정중앙(148.5mm) 기준 점선 절취선 고정 양식이 적용되었습니다.\n2. 공급자 및 구매자 정보가 완벽히 분리 복원되었습니다.\n3. 확인 후 상단 [양식 저장]을 누르면 기본 양식으로 등록됩니다.`);
     } catch (e) {
         console.error("PDF 서식 파싱 오류:", e);
         alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
@@ -115,19 +114,20 @@ function extractItemTableColumns(rawText) {
 }
 
 // ==========================================
-// 2. 완벽한 표 테두리(칸)와 치환 태그를 갖춘 HTML 빌더
+// 🌟 2. A4 정중앙(148.5mm) 완벽 고정 2등분 HTML 빌더
 // ==========================================
 function buildCleanTemplatedHtml(cfg) {
     if (cfg.isTwoPart) {
+        // A4 높이 297mm를 정확히 절반(148.5mm)씩 고정 분할하고 가운데 점선 배치
         return `
-        <div class="doc-sheet invoice-two-half" contenteditable="false">
+        <div class="doc-sheet invoice-two-half" style="width: 210mm; height: 297mm; max-height: 297mm; display: flex; flex-direction: column; box-sizing: border-box; margin: 0 auto; background: #fff; position: relative;" contenteditable="false">
             ${generateSingleInvoiceBlock(cfg, '공급자 보관용')}
-            <div class="invoice-cut-line"></div>
+            <div class="invoice-cut-line" style="border-top: 1.5px dashed #4b5563; width: 100%; margin: 0; box-sizing: border-box; flex-shrink: 0; height: 0;"></div>
             ${generateSingleInvoiceBlock(cfg, '공급받는자용')}
         </div>`;
     } else {
         return `
-        <div class="doc-sheet invoice-full-page" contenteditable="false">
+        <div class="doc-sheet invoice-full-page" style="width: 210mm; min-height: 297mm; box-sizing: border-box; margin: 0 auto; background: #fff;" contenteditable="false">
             ${generateSingleInvoiceBlock(cfg, '공급자 보관용')}
         </div>`;
     }
@@ -137,7 +137,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
     const title = cfg.docTitle || '거래명세표';
     const cols = cfg.columns || ['No.', '상품명', '규격(단위)', '수량', '단가', '총액'];
 
-    const thsHtml = cols.map(c => `<th contenteditable="true" style="border: 1px solid #000; padding: 4px 5px; background: #f8fafc; text-align: center; font-weight: bold;">${c}</th>`).join('');
+    const thsHtml = cols.map(c => `<th contenteditable="true" style="border: 1px solid #000; padding: 3px 4px; background: #f8fafc; text-align: center; font-weight: bold; font-size: 10px;">${c}</th>`).join('');
 
     const colgroupHtml = `
         <colgroup>
@@ -154,47 +154,47 @@ function generateSingleInvoiceBlock(cfg, partName) {
     `;
 
     const trSample = `
-        <tr class="item-row">
-            <td style="border: 1px solid #000; text-align: center; padding: 4px;">1</td>
-            <td style="border: 1px solid #000; font-weight: bold; padding: 4px 6px;" contenteditable="true">{{상품명}}</td>
-            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; text-align: center; padding: 4px;" contenteditable="true">{{단위}}</td>' : ''}
-            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; text-align: center; padding: 4px;" contenteditable="true">-</td>' : ''}
-            <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 4px;" contenteditable="true">{{수량}}</td>
-            <td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true">{{단가}}</td>
-            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true">{{공급가액}}</td>' : ''}
-            ${cols.includes('세액') ? '<td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true">{{세액}}</td>' : ''}
-            <td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: 4px 6px;" contenteditable="true">{{총액}}</td>
+        <tr class="item-row" style="height: 18px;">
+            <td style="border: 1px solid #000; text-align: center; padding: 2px;">1</td>
+            <td style="border: 1px solid #000; font-weight: bold; padding: 2px 5px;" contenteditable="true">{{상품명}}</td>
+            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">{{단위}}</td>' : ''}
+            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">-</td>' : ''}
+            <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2px;" contenteditable="true">{{수량}}</td>
+            <td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true">{{단가}}</td>
+            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true">{{공급가액}}</td>' : ''}
+            ${cols.includes('세액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true">{{세액}}</td>' : ''}
+            <td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: 2px 5px;" contenteditable="true">{{총액}}</td>
         </tr>
     `;
 
     const emptyRows = [2, 3, 4, 5].map(num => `
-        <tr class="item-row empty-row">
-            <td style="border: 1px solid #000; text-align: center; padding: 4px;">${num}</td>
-            <td style="border: 1px solid #000; padding: 4px 6px;" contenteditable="true"></td>
-            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; text-align: center; padding: 4px;" contenteditable="true"></td>' : ''}
-            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; text-align: center; padding: 4px;" contenteditable="true"></td>' : ''}
-            <td style="border: 1px solid #000; text-align: center; padding: 4px;" contenteditable="true"></td>
-            <td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true"></td>
-            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true"></td>' : ''}
-            ${cols.includes('세액') ? '<td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true"></td>' : ''}
-            <td style="border: 1px solid #000; text-align: right; padding: 4px 6px;" contenteditable="true"></td>
+        <tr class="item-row empty-row" style="height: 18px;">
+            <td style="border: 1px solid #000; text-align: center; padding: 2px;">${num}</td>
+            <td style="border: 1px solid #000; padding: 2px 5px;" contenteditable="true"></td>
+            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true"></td>' : ''}
+            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true"></td>' : ''}
+            <td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true"></td>
+            <td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true"></td>
+            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true"></td>' : ''}
+            ${cols.includes('세액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true"></td>' : ''}
+            <td style="border: 1px solid #000; text-align: right; padding: 2px 5px;" contenteditable="true"></td>
         </tr>
     `).join('');
 
+    // 🌟 핵심: 상/하단 각 블록을 148.5mm(A4 정확한 50%)로 고정하여 절취선 일치 보장
     return `
-    <div class="invoice-box-part" style="padding: 6mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff;">
-        <div style="text-align: center; position: relative; margin-bottom: 6px;">
-            <h2 class="doc-main-title" contenteditable="true" style="font-size: 21px; font-weight: 900; letter-spacing: 5px; text-decoration: underline; margin: 0 0 4px 0;">
-                ${title}<span style="font-size: 13px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(${partName})</span>
+    <div class="invoice-box-part" style="width: 100%; height: 148.5mm; max-height: 148.5mm; padding: 5mm 8mm 4mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
+        <div style="text-align: center; position: relative; margin-bottom: 3px; flex-shrink: 0;">
+            <h2 class="doc-main-title" contenteditable="true" style="font-size: 19px; font-weight: 900; letter-spacing: 5px; text-decoration: underline; margin: 0 0 2px 0;">
+                ${title}<span style="font-size: 12px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(${partName})</span>
             </h2>
-            <div style="display: flex; justify-content: space-between; font-size: 10px; font-weight: bold; margin-top: 4px;">
+            <div style="display: flex; justify-content: space-between; font-size: 9.5px; font-weight: bold; margin-top: 2px;">
                 <span>주문일자: <b class="tpl-bind-date" contenteditable="true">{{주문일자}}</b></span>
                 <span>주문번호: <b class="tpl-bind-orderno" contenteditable="true">{{주문번호}}</b></span>
             </div>
         </div>
 
-        <!-- 🌟 2. 공급받는자 위치에 "구매자명" 완벽 원상 복구 적용 -->
-        <table class="doc-table party-table" style="width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed;">
+        <table class="doc-table party-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; margin-bottom: 3px; table-layout: fixed; flex-shrink: 0;">
             <colgroup>
                 <col style="width: 4%;">
                 <col style="width: 16%;">
@@ -205,52 +205,55 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </colgroup>
             <tbody>
                 <tr>
-                    <td rowspan="5" style="border: 1px solid #000; text-align: center; font-weight: bold; line-height: 1.3; background: #f8fafc; padding: 2px;" contenteditable="true">공<br>급<br>자</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">사업자등록번호</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true" spellcheck="false">${cfg.provRegno || ''}</td>
-                    <td rowspan="5" style="border: 1px solid #000; text-align: center; font-weight: bold; line-height: 1.3; background: #f8fafc; padding: 2px;" contenteditable="true">공<br>급<br>받<br>는<br>자</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">사업자등록번호</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px; background: #f0fdf4;" contenteditable="true">{{사업자번호}}</td>
+                    <td rowspan="5" style="border: 1px solid #000; text-align: center; font-weight: bold; line-height: 1.2; background: #f8fafc; padding: 2px;" contenteditable="true">공<br>급<br>자</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">사업자등록번호</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true" spellcheck="false">${cfg.provRegno || ''}</td>
+                    <td rowspan="5" style="border: 1px solid #000; text-align: center; font-weight: bold; line-height: 1.2; background: #f8fafc; padding: 2px;" contenteditable="true">공<br>급<br>받<br>는<br>자</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">사업자등록번호</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px; background: #f0fdf4;" contenteditable="true">{{사업자번호}}</td>
                 </tr>
                 <tr>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">상호(법인명)</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px;" contenteditable="true" spellcheck="false">${cfg.provName || ''}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">구 매 자 명</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px; font-weight: bold; background: #f0fdf4;" contenteditable="true">{{구매자명}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">상호(법인명)</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: bold;" contenteditable="true" spellcheck="false">${cfg.provName || ''}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">구 매 자 명</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: bold; background: #f0fdf4;" contenteditable="true">{{구매자명}}</td>
                 </tr>
-                <tr style="height: 38px;">
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">주 소</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px; font-size: 9.5px; line-height: 1.2;" contenteditable="true" spellcheck="false">${cfg.provAddr || ''}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">주 소</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px; font-size: 9.5px; line-height: 1.2; background: #eff6ff;" contenteditable="true">{{배송지주소}}</td>
-                </tr>
-                <tr>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">연락처/FAX</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px;" contenteditable="true" spellcheck="false">${cfg.provTel || ''}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">배송지명(간판명)</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px; font-weight: 900; background: #eff6ff;" contenteditable="true">{{상호명}}</td>
+                <tr style="height: 32px;">
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">주 소</td>
+                    <td style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; line-height: 1.15;" contenteditable="true" spellcheck="false">${cfg.provAddr || ''}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">주 소</td>
+                    <td style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; line-height: 1.15; background: #eff6ff;" contenteditable="true">{{배송지주소}}</td>
                 </tr>
                 <tr>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">추 가 연 락 처</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px;" contenteditable="true" spellcheck="false">${cfg.provAddTel || ''}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">연 락 처</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px; background: #eff6ff;" contenteditable="true">{{고객연락처}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">연락처/FAX</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px;" contenteditable="true" spellcheck="false">${cfg.provTel || ''}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">배송지명(간판명)</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: 900; background: #eff6ff;" contenteditable="true">{{상호명}}</td>
+                </tr>
+                <tr>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">추 가 연 락 처</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px;" contenteditable="true" spellcheck="false">${cfg.provAddTel || ''}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">연 락 처</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px; background: #eff6ff;" contenteditable="true">{{고객연락처}}</td>
                 </tr>
             </tbody>
         </table>
 
-        <table class="doc-table item-table" style="width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed;">
-            ${colgroupHtml}
-            <thead>
-                <tr>${thsHtml}</tr>
-            </thead>
-            <tbody class="tpl-items-tbody">
-                ${trSample}
-                ${emptyRows}
-            </tbody>
-        </table>
+        <!-- 상품 테이블: 148.5mm 안에서 유연하게 영역 차지 -->
+        <div style="flex: 1; min-height: 0; overflow: hidden; margin-bottom: 3px;">
+            <table class="doc-table item-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; table-layout: fixed;">
+                ${colgroupHtml}
+                <thead>
+                    <tr>${thsHtml}</tr>
+                </thead>
+                <tbody class="tpl-items-tbody">
+                    ${trSample}
+                    ${emptyRows}
+                </tbody>
+            </table>
+        </div>
 
-        <table class="doc-table footer-table" style="width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; table-layout: fixed;">
+        <table class="doc-table footer-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; table-layout: fixed; flex-shrink: 0; margin-bottom: 2px;">
             <colgroup>
                 <col style="width: 15%;">
                 <col style="width: 35%;">
@@ -261,24 +264,24 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </colgroup>
             <tbody>
                 <tr>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 3px;" contenteditable="true">결 제 수 단</td>
-                    <td style="border: 1px solid #000; padding: 3px 6px;" contenteditable="true">{{결제수단}}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 3px;" contenteditable="true">총 상품수량</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">{{총수량}}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 3px;" contenteditable="true">배 송 비</td>
-                    <td style="border: 1px solid #000; text-align: right; padding: 3px 6px;" contenteditable="true">0원</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">결 제 수 단</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 5px;" contenteditable="true">{{결제수단}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">총 상품수량</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">{{총수량}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">배 송 비</td>
+                    <td style="border: 1px solid #000; text-align: right; padding: 2.5px 5px;" contenteditable="true">0원</td>
                 </tr>
-                <tr style="height: 34px;">
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 3px;" contenteditable="true">배송 요청사항</td>
-                    <td colspan="3" style="border: 1px solid #000; padding: 3px 6px; font-size: 9.5px; vertical-align: top;" contenteditable="true">{{배송요청사항}}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: 900; background: #f1f5f9; padding: 3px;" contenteditable="true">총주문금액</td>
-                    <td style="border: 1px solid #000; text-align: right; font-weight: 900; color: #dc2626; padding: 3px 6px; background: #f1f5f9;" contenteditable="true">{{총금액}}</td>
+                <tr style="height: 28px;">
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">배송 요청사항</td>
+                    <td colspan="3" style="border: 1px solid #000; padding: 2.5px 5px; font-size: 9px; vertical-align: top; line-height: 1.2;" contenteditable="true">{{배송요청사항}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: 900; background: #f1f5f9; padding: 2.5px;" contenteditable="true">총주문금액</td>
+                    <td style="border: 1px solid #000; text-align: right; font-weight: 900; color: #dc2626; padding: 2.5px 5px; background: #f1f5f9;" contenteditable="true">{{총금액}}</td>
                 </tr>
             </tbody>
         </table>
 
-        <div style="text-align: right; font-size: 10.5px; font-weight: bold; margin-top: 5px; padding-right: 10px;">
-            <span contenteditable="true">인수자: <span style="display: inline-block; width: 80px; border-bottom: 1px solid #000; text-align: center;">서 명</span></span>
+        <div style="text-align: right; font-size: 10px; font-weight: bold; padding-right: 5px; flex-shrink: 0;">
+            <span contenteditable="true">인수자: <span style="display: inline-block; width: 75px; border-bottom: 1px solid #000; text-align: center;">서 명</span></span>
         </div>
     </div>`;
 }
@@ -320,7 +323,7 @@ export function renderEditableDocument(htmlContent) {
                 </button>
             </div>
         </div>
-        <div id="editable-doc-canvas" class="doc-canvas-paper shadow-2xl bg-white w-full max-w-[210mm] relative p-0 border border-gray-300">
+        <div id="editable-doc-canvas" class="doc-canvas-paper shadow-2xl bg-white w-full max-w-[210mm] relative p-0 border border-gray-300 overflow-hidden">
             ${htmlContent}
         </div>
     `;
@@ -360,7 +363,6 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const bizNo = order.bizNo || '';
     const storeName = order.storeName || order.senderName || '-';
     const senderName = order.senderName || order.storeName || '-';
-    // 구매자명(buyerName)이 없으면 안전하게 상호명으로 대체
     const buyerName = order.buyerName || order.storeName || '-'; 
     const address = order.fullAddress || order.address || '-';
     const phone = order.phone || '';
@@ -391,7 +393,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
                .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
 
-    // 2. 다중 품목 테이블 지능형 동적 생성
+    // 2. 다중 품목 테이블 지능형 동적 생성 (148.5mm 정중앙 한계선 보존용 정밀 스케일링)
     const items = (order.items && order.items.length > 0) ? order.items : [{
         name: order.itemName || '상품명 미지정',
         qty: order.qty || 1,
@@ -402,14 +404,13 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
 
     const cols = templateBuilderState.detectedColumns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
 
-    // 품목 개수에 따라 테이블 높이 및 글씨 크기 지능형 스케일링
     const isDense = items.length > 5;
     const isVeryDense = items.length > 8;
-    const isExtreme = items.length > 12;
+    const isExtreme = items.length > 11;
 
-    const cellPadding = isExtreme ? '1px 2px' : (isVeryDense ? '2px 3px' : (isDense ? '3px 4px' : '4px 6px'));
-    const fontSize = isExtreme ? '8px' : (isVeryDense ? '8.5px' : (isDense ? '9.5px' : 'inherit'));
-    const rowHeight = isExtreme ? '14px' : (isVeryDense ? '16px' : (isDense ? '20px' : 'auto'));
+    const cellPadding = isExtreme ? '1px 2px' : (isVeryDense ? '1.5px 3px' : (isDense ? '2.5px 3px' : '3px 5px'));
+    const fontSize = isExtreme ? '8px' : (isVeryDense ? '8.5px' : (isDense ? '9px' : '9.5px'));
+    const rowHeight = isExtreme ? '13px' : (isVeryDense ? '15px' : (isDense ? '17px' : '19px'));
 
     let itemsRowsHtml = '';
     items.forEach((it, i) => {
@@ -423,7 +424,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
         <tr class="item-row" style="font-size: ${fontSize}; height: ${rowHeight};">
             <td style="border: 1px solid #000; text-align: center; padding: ${cellPadding};">${i + 1}</td>
             <td style="border: 1px solid #000; font-weight: bold; padding: ${cellPadding};">
-                <div style="max-height: ${isVeryDense ? '16px' : 'auto'}; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${it.name || '-'}</div>
+                <div style="max-height: ${rowHeight}; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">${it.name || '-'}</div>
             </td>
             ${cols.includes('규격(단위)') ? `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding};">${it.unit || '개'}</td>` : ''}
             ${cols.includes('제조사(원산지)') ? `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding};">국내산</td>` : ''}
@@ -435,25 +436,25 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
         </tr>`;
     });
 
-    // 최소 5행 유지를 위한 빈칸 채우기
+    // 5행 미만일 때만 빈 행 채움
     const remainCount = Math.max(0, 5 - items.length);
     for (let r = 0; r < remainCount; r++) {
         const rowNo = items.length + r + 1;
         itemsRowsHtml += `
-        <tr class="item-row empty-row" style="height: auto;">
-            <td style="border: 1px solid #000; text-align: center; padding: 4px;">${rowNo}</td>
-            <td style="border: 1px solid #000; padding: 4px 6px;"></td>
-            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; padding: 4px;"></td>' : ''}
-            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; padding: 4px;"></td>' : ''}
-            <td style="border: 1px solid #000; padding: 4px;"></td>
-            <td style="border: 1px solid #000; padding: 4px 6px;"></td>
-            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; padding: 4px 6px;"></td>' : ''}
-            ${cols.includes('세액') ? '<td style="border: 1px solid #000; padding: 4px 6px;"></td>' : ''}
-            <td style="border: 1px solid #000; padding: 4px 6px;"></td>
+        <tr class="item-row empty-row" style="height: 18px;">
+            <td style="border: 1px solid #000; text-align: center; padding: 2px;">${rowNo}</td>
+            <td style="border: 1px solid #000; padding: 2px 5px;"></td>
+            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; padding: 2px;"></td>' : ''}
+            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; padding: 2px;"></td>' : ''}
+            <td style="border: 1px solid #000; padding: 2px;"></td>
+            <td style="border: 1px solid #000; padding: 2px 5px;"></td>
+            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; padding: 2px 5px;"></td>' : ''}
+            ${cols.includes('세액') ? '<td style="border: 1px solid #000; padding: 2px 5px;"></td>' : ''}
+            <td style="border: 1px solid #000; padding: 2px 5px;"></td>
         </tr>`;
     }
 
-    // 모든 tpl-items-tbody 교체 (정규식 전역 g 플래그로 상단/하단 모두 치환)
+    // 모든 tpl-items-tbody 교체
     html = html.replace(/<tbody class="tpl-items-tbody">[\s\S]*?<\/tbody>/g, `<tbody class="tpl-items-tbody">${itemsRowsHtml}</tbody>`);
 
     return html;
@@ -497,7 +498,6 @@ export function saveCurrentDocumentTemplate() {
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     alert(`[${trimmedTitle}] 서식이 성공적으로 저장되었습니다.\n우측 '저장된 주문서 양식 목록'에 등록되었습니다.`);
 
-    // 우측 저장된 목록 즉시 갱신
     if (window.loadSavedForms) window.loadSavedForms();
 }
 
