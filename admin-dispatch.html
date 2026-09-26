@@ -425,7 +425,7 @@
         <!-- 3단 본문 레이아웃 -->
         <div class="flex-1 flex gap-3 p-3 overflow-hidden bg-slate-100">
             <!-- 🌟 1단 (좌측): 인쇄 대상 목록 (엑셀 형식 표 & 공급자 필터) -->
-            <div class="w-[380px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
+            <div id="invoice-list-panel" class="w-[380px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden shrink-0">
                 <div class="bg-gray-50 border-b border-gray-200 p-3 flex flex-col gap-2.5 shadow-2xs z-10">
                     <div class="flex justify-between items-center">
                         <span class="text-xs font-black text-gray-800 flex items-center gap-1.5">
@@ -456,8 +456,13 @@
                 </div>
             </div>
 
+            <!-- 🌟 마우스 드래그 리사이저 바 (주문서 목록 ↔ 에디터 간격 조절) -->
+            <div id="invoice-panel-resizer" class="w-2.5 hover:w-3 bg-slate-200 hover:bg-indigo-500 cursor-col-resize transition-all shrink-0 rounded-full my-1 flex items-center justify-center group select-none shadow-2xs" title="좌우로 드래그하여 목록과 에디터 너비를 조절하세요">
+                <div class="w-0.5 h-8 bg-gray-400 group-hover:bg-white rounded-full transition"></div>
+            </div>
+
             <!-- 🌟 2단 (중앙): 워드형 서식 직접 편집 & 미리보기 영역 -->
-            <div class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden min-w-[500px]">
+            <div id="invoice-editor-panel" class="flex-1 bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden min-w-[400px]">
                 <div class="bg-gray-100 border-b border-gray-200 p-2.5 px-4 flex justify-between items-center relative z-10 shadow-sm">
                     <span class="text-xs font-black text-gray-700 flex items-center gap-1.5">
                         <i class="fa-solid fa-file-pen text-indigo-600"></i> 주문서 양식 직접 편집 (워드형 서식 에디터)
