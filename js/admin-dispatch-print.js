@@ -1234,7 +1234,7 @@ export function executePickingListPrint() {
             iframe.contentWindow.print();
             setTimeout(() => { 
                 document.body.removeChild(iframe); 
-                closePickingDriverModal();
+                // 🌟 인쇄창을 닫거나 취소해도 모달이 강제로 꺼지지 않도록 삭제 처리 완료
             }, 1000);
         }, 600);
     };
@@ -1245,7 +1245,7 @@ export function executePickingListPrint() {
 // ==========================================
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.filterInvoicePrintList = filterInvoicePrintList;
-window.handleHeaderCheckAll = handleHeaderCheckAll; // 🌟 스마트 전체 온/오프 핸들러
+window.handleHeaderCheckAll = handleHeaderCheckAll;
 window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
 window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
