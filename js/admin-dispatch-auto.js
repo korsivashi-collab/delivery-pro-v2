@@ -4,6 +4,8 @@ import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+// 🌟 1단계에서 분리 생성한 순수 연산 엔진 모듈 임포트
+import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
 
 // ==========================================
 // 1. 본사 거점 설정 및 UI 동기화
@@ -159,27 +161,28 @@ export function renderDispatchDriverList() {
         const devId = d.deviceId || d.key; 
         const phoneDisplay = d.phone || d.key;
         const licKey = d.key || '';
-        const zones = d.territoryZones || [];
+        const tLat = d.territoryLat || ''; 
+        const tLng = d.territoryLng || ''; 
+        const tScale = d.territoryScale || ''; 
         const t1 = d.territory1 || ''; 
+        const t2 = d.territory2 || '';
         
         let territoryBadge = '';
-        if (zones.length > 0 || t1) {
-            const zoneCountText = zones.length > 0 ? `${zones.length}개 구역` : '설정됨';
-            const summaryTitle = zones.length > 0 ? zones.map(z => z.name).join(', ') : t1;
-            
+        if (tLat && tLng) {
+            let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
             territoryBadge = `
                 <div class="flex flex-col items-end gap-1" onclick="event.stopPropagation()">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded-xl font-black shadow-xs transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
-                        <i class="fa-solid fa-map-location-dot text-[11px]"></i> 권역 설정 (${zoneCountText})
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded-xl font-black shadow-xs transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
+                        <i class="fa-solid fa-map-location-dot text-[11px]"></i> 권역 설정 (${scaleLabel})
                     </button>
-                    <span class="text-[10px] text-gray-500 font-bold truncate max-w-[140px] text-right" title="${summaryTitle}">
-                        <i class="fa-solid fa-location-dot text-indigo-400 mr-0.5"></i>${t1 || summaryTitle}
+                    <span class="text-[10px] text-gray-500 font-bold truncate max-w-[140px] text-right" title="${t1} ${t2}">
+                        <i class="fa-solid fa-location-dot text-indigo-400 mr-0.5"></i>${t1 || t2 || '설정됨'}
                     </span>
                 </div>`;
         } else {
             territoryBadge = `
                 <div class="flex flex-col items-end gap-1" onclick="event.stopPropagation()">
-                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}')" class="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 text-xs px-3 py-1.5 rounded-xl font-black transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
+                    <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '', '', '')" class="bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-300 text-xs px-3 py-1.5 rounded-xl font-black transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
                         <i class="fa-solid fa-triangle-exclamation text-amber-500 text-[11px]"></i> 권역 미설정
                     </button>
                     <span class="text-[10px] text-amber-600 font-bold">권역 설정 필요</span>
@@ -241,9 +244,10 @@ export function selectDispatchDriver(devId) {
 }
 
 // ==========================================
-// 4. 기사별 할당 상세 내역 및 주소지별 정렬 UI
+// 4. 기사별 할당 상세 내역 및 수동 기사 재배정 UI (주소지별 정렬 탑재)
 // ==========================================
 
+// 주소지별 정렬 상태 변수 ('none', 'asc', 'desc')
 let detailAddressSortState = 'none';
 
 export function sortDetailByAddress() {
@@ -261,6 +265,7 @@ export function renderDispatchDriverDetail() {
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
     
+    // 기사가 선택되지 않았을 때
     if (!state.selectedDispatchDriverId) {
         if (header) header.classList.remove('hidden'); 
         if (table) table.classList.add('hidden'); 
@@ -285,14 +290,20 @@ export function renderDispatchDriverDetail() {
         return;
     }
 
+    // 주소지별 가나다순 정렬 적용
     if (detailAddressSortState !== 'none') {
         assignedItems = [...assignedItems].sort((a, b) => {
             const addrA = (a.address || a.fullAddress || '').trim();
             const addrB = (b.address || b.fullAddress || '').trim();
-            return detailAddressSortState === 'asc' ? addrA.localeCompare(addrB, 'ko') : addrB.localeCompare(addrA, 'ko');
+            if (detailAddressSortState === 'asc') {
+                return addrA.localeCompare(addrB, 'ko');
+            } else {
+                return addrB.localeCompare(addrA, 'ko');
+            }
         });
     }
 
+    // 테이블 헤더 정렬 화살표 갱신
     const arrowSymbol = detailAddressSortState === 'asc' ? ' ▲' : (detailAddressSortState === 'desc' ? ' ▼' : ' ↕');
     const theadAddressTh = table ? table.querySelector('thead tr th:nth-child(2)') : null;
     if (theadAddressTh) {
@@ -383,44 +394,8 @@ export async function revertAutoDispatch() {
 }
 
 // ==========================================
-// 🌟 6. 행정구역(구+동) 스마트 매칭 & 중복 균등 배차 알고리즘
+// 🌟 6. 자동할당 알고리즘 실행 (분리된 연산 엔진 모듈 호출로 간결화)
 // ==========================================
-
-// 주소 텍스트와 개별 권역(Zone) 간의 매칭 검사
-function isAddressInZone(fullAddr, zone) {
-    if (!fullAddr || !zone) return false;
-    const addr = fullAddr.trim();
-
-    if (zone.type === 'dong' && zone.dong) {
-        // 동 단위 매칭: 
-        // 1) 주소에 해당 동 이름(예: "역삼1동" 또는 "역삼동")이 포함되는지 확인
-        const hasDong = addr.includes(zone.dong) || (zone.dong.endsWith('동') && addr.includes(zone.dong.slice(0, -1)));
-        // 2) 구/군이 지정되어 있는 경우 구 이름도 일치하는지 교차 검증
-        const hasSigungu = !zone.sigungu || addr.includes(zone.sigungu);
-        return hasDong && hasSigungu;
-    } else if (zone.type === 'gu' && zone.sigungu) {
-        // 구 단위 매칭: 주소에 해당 구/군 이름(예: "양천구", "마포구")이 포함되는지 확인
-        return addr.includes(zone.sigungu);
-    }
-    return false;
-}
-
-// 후보 기사군 중 가중치를 고려하여 가장 여유 있는 기사 선발 (라운드 로빈)
-function pickBestDriverFromCandidates(candidates) {
-    if (!candidates || candidates.length === 0) return null;
-    if (candidates.length === 1) return candidates[0];
-
-    return candidates.reduce((best, curr) => {
-        // 가중치가 높을수록 실질 할당 부하(loadScore)를 낮게 계산하여 물량을 더 받게 함
-        const bestScore = best.assignedCount - (best.weight || 0);
-        const currScore = curr.assignedCount - (curr.weight || 0);
-
-        if (currScore < bestScore) return curr;
-        if (currScore === bestScore && curr.assignedCount < best.assignedCount) return curr;
-        return best;
-    });
-}
-
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀/주문 데이터가 없습니다."); 
@@ -450,73 +425,21 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 기사별 상태 객체 초기화
-    const driverStats = activeDrivers.map(d => {
-        const devId = d.deviceId || d.key;
-        return {
-            driver: d,
-            devId: devId,
-            phone: d.phone || devId,
-            weight: autoDispatchState.weights[devId] || 0,
-            zones: d.territoryZones || [],
-            legacyAddr: d.territory1 || '',
-            assignedCount: 0
-        };
+    const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
+    const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
+
+    // 🌟 분리된 순수 연산 엔진에 파라미터를 넘겨 배차 알고리즘 수행
+    const result = executeAutoDispatch({
+        targetOrders,
+        activeDrivers,
+        weights: autoDispatchState.weights,
+        companyBase
     });
 
-    let countDongMatched = 0;
-    let countGuMatched = 0;
-    let countFallback = 0;
-
-    // 🌟 [5단계 스마트 배차 파이프라인]
-    targetOrders.forEach(order => {
-        const fullAddr = (order.fullAddress || order.address || '').trim();
-
-        // 1. 동(Dong) 단위 권역을 만족하는 기사 탐색 (1순위 상세 일치)
-        const dongCandidates = driverStats.filter(ds => 
-            ds.zones.some(z => z.type === 'dong' && isAddressInZone(fullAddr, z))
-        );
-
-        if (dongCandidates.length > 0) {
-            const chosen = pickBestDriverFromCandidates(dongCandidates);
-            chosen.assignedCount++;
-            order.assignedDriver = chosen.phone;
-            countDongMatched++;
-            return;
-        }
-
-        // 2. 구(Gu) 단위 권역을 만족하는 기사 탐색 (2순위 광역 일치)
-        const guCandidates = driverStats.filter(ds => 
-            ds.zones.some(z => z.type === 'gu' && isAddressInZone(fullAddr, z))
-        );
-
-        if (guCandidates.length > 0) {
-            const chosen = pickBestDriverFromCandidates(guCandidates);
-            chosen.assignedCount++;
-            order.assignedDriver = chosen.phone;
-            countGuMatched++;
-            return;
-        }
-
-        // 3. 레거시(구버전 텍스트 주소) 권역 호환 검사
-        const legacyCandidates = driverStats.filter(ds => 
-            ds.legacyAddr && ds.legacyAddr !== '상세 주소 확인 불가' && fullAddr.includes(ds.legacyAddr.split(' ')[0])
-        );
-
-        if (legacyCandidates.length > 0) {
-            const chosen = pickBestDriverFromCandidates(legacyCandidates);
-            chosen.assignedCount++;
-            order.assignedDriver = chosen.phone;
-            countGuMatched++;
-            return;
-        }
-
-        // 4. 권역 외(미지정 지역) 주문: 전체 기사 중 가장 여유 있는 기사에게 공평 분배
-        const fallbackChosen = pickBestDriverFromCandidates(driverStats);
-        fallbackChosen.assignedCount++;
-        order.assignedDriver = fallbackChosen.phone;
-        countFallback++;
-    });
+    if (!result.success) {
+        alert(`[알고리즘 실행 오류] ${result.message}`);
+        return;
+    }
 
     // 화면 테이블 및 Firebase 비동기 저장 갱신
     if (window.renderExcelTable) window.renderExcelTable();
@@ -524,14 +447,7 @@ export function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(
-        `[자동할당 배분 완료]\n\n` +
-        `총 ${targetOrders.length}건이 ${activeDrivers.length}명의 기사에게 스마트하게 배분되었습니다.\n\n` +
-        `• 1순위 (상세 동 일치): ${countDongMatched}건\n` +
-        `• 2순위 (광역 구 일치): ${countGuMatched}건\n` +
-        `• 권역 외 (균등 배분): ${countFallback}건\n\n` +
-        `내역 검토 후 이상이 없으면 상단 [동선 전송] 버튼을 눌러주세요.`
-    );
+    alert(`[자동할당 배분 완료]\n지형(하천/산맥) 우회 원칙에 따라 총 ${result.totalOrders}건이 ${activeDrivers.length}명의 기사에게 스마트하게 배분되었습니다.\n\n내역 검토 후 이상이 없으면 [동선 전송] 버튼을 눌러주세요.`);
 }
 
 // ==========================================
@@ -628,7 +544,7 @@ export async function sendRoutesToDrivers() {
 }
 
 // ==========================================
-// 8. 선택된 기사 전용 상품 합산 피킹 리스트
+// 8. 선택된 기사 전용 상품 합산 피킹 리스트 (100% 온전 보존)
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -742,7 +658,7 @@ export function printSelectedDriverItemList() {
 }
 
 // ==========================================
-// 9. 전역 Window 객체 바인딩
+// 9. 전역 Window 객체 바인딩 (100% 온전 보존)
 // ==========================================
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
