@@ -32,6 +32,18 @@ export const RIVER_BARRIER_LINES = [
     ]
 ];
 
+// 🌟 신규 추가: 주요 산맥 및 도심 산 가상 차단선 (북한산, 관악산, 남산 등)
+export const MOUNTAIN_BARRIER_LINES = [
+    // 1. 북한산/도봉산 라인 (서울 북부 단절)
+    [ { lat: 37.680, lng: 126.930 }, { lat: 37.660, lng: 126.990 }, { lat: 37.630, lng: 127.010 } ],
+    // 2. 관악산 라인 (서울 남부/과천 안양 단절)
+    [ { lat: 37.460, lng: 126.930 }, { lat: 37.430, lng: 126.980 }, { lat: 37.440, lng: 127.010 } ],
+    // 3. 남산 라인 (서울 도심부 남북 단절)
+    [ { lat: 37.555, lng: 126.975 }, { lat: 37.545, lng: 127.000 } ],
+    // 4. 수락산/불암산 라인 (서울 노원/경기 남양주 단절)
+    [ { lat: 37.680, lng: 127.080 }, { lat: 37.650, lng: 127.090 }, { lat: 37.620, lng: 127.100 } ]
+];
+
 // 서울 강북 14개 구 및 강남 11개 구 목록
 export const SEOUL_GANGBUK_GU = ['종로구', '중구', '용산구', '성동구', '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '노원구', '은평구', '서대문구', '마포구'];
 export const SEOUL_GANGNAM_GU = ['양천구', '강서구', '구로구', '금천구', '영등포구', '동작구', '관악구', '서초구', '강남구', '송파구', '강동구'];
@@ -40,7 +52,7 @@ export const SEOUL_GANGNAM_GU = ['양천구', '강서구', '구로구', '금천�
 // 2. 기하 및 거리 연산 함수 (순수 연산 엔진)
 // ==========================================
 
-// 수학적 선분 교차 검사 함수 (CCW)
+// 수학적 선분 교차 검사 함수 (CCW 알고리즘)
 function ccw(p1, p2, p3) {
     const cross = (p2.lng - p1.lng) * (p3.lat - p1.lat) - (p2.lat - p1.lat) * (p3.lng - p1.lng);
     if (Math.abs(cross) < 1e-9) return 0;
@@ -55,16 +67,22 @@ function linesIntersect(p1, p2, p3, p4) {
     return (d1 * d2 < 0) && (d3 * d4 < 0);
 }
 
-// 두 지점 사이가 전국 주요 강줄기 차단선을 가로지르는지 확인
-export function checkRiverCrossings(p1, p2) {
+// 🌟 강줄기 및 산맥 횡단 여부 통합 검사
+export function checkGeoBarriers(p1, p2) {
+    let crossesRiver = false;
+    let crossesMountain = false;
+
     for (const river of RIVER_BARRIER_LINES) {
         for (let i = 0; i < river.length - 1; i++) {
-            if (linesIntersect(p1, p2, river[i], river[i + 1])) {
-                return true;
-            }
+            if (linesIntersect(p1, p2, river[i], river[i + 1])) crossesRiver = true;
         }
     }
-    return false;
+    for (const mountain of MOUNTAIN_BARRIER_LINES) {
+        for (let i = 0; i < mountain.length - 1; i++) {
+            if (linesIntersect(p1, p2, mountain[i], mountain[i + 1])) crossesMountain = true;
+        }
+    }
+    return { crossesRiver, crossesMountain };
 }
 
 // 주소 문자열에서 시/도, 시/군/구 및 한강 강남/강북 특성 추출
@@ -89,7 +107,7 @@ export function parseAreaInfo(addr) {
     return { sido, sigungu, isSeoulGangbuk, isSeoulGangnam };
 }
 
-// 기본 직선거리 (Haversine 공식, km)
+// 기본 직선거리 (Haversine 공식, 단위: km)
 export function getBaseDist(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 999999;
     const R = 6371; 
@@ -101,36 +119,36 @@ export function getBaseDist(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 지형지물(강, 산, 행정구역) 가상 페널티가 결합된 실질 거리 계산기 (페널티 강화)
+// 🌟 지형지물(강, 산, 행정구역) 가상 페널티 결합 실질 거리 연산
 export function calculateGeoPenalizedDist(lat1, lon1, lat2, lon2, addr1 = '', addr2 = '') {
     const baseDistance = getBaseDist(lat1, lon1, lat2, lon2);
     if (baseDistance >= 999999) return baseDistance;
 
     let penalty = 0;
-
-    // 1. 강줄기 가상 차단선 통과 시 강력 차단 (45km 페널티)
     const p1 = { lat: lat1, lng: lon1 };
     const p2 = { lat: lat2, lng: lon2 };
-    if (checkRiverCrossings(p1, p2)) {
-        penalty += 45;
-    }
 
-    // 2. 주소 기반 행정구역 및 한강 남북 분리 검사
+    // 1. 산맥/하천 가상 차단선 통과 시 페널티 대폭 강화
+    const barriers = checkGeoBarriers(p1, p2);
+    if (barriers.crossesRiver) penalty += 60;    // 강 도하 페널티 60km 추가
+    if (barriers.crossesMountain) penalty += 50; // 산맥 관통 페널티 50km 추가
+
+    // 2. 주소 기반 행정구역 분리 페널티 검사
     const area1 = parseAreaInfo(addr1);
     const area2 = parseAreaInfo(addr2);
 
     if (area1.sido && area2.sido) {
-        // 서울 강남 ↔ 강북 교차 배정 강력 차단 (60km 페널티)
+        // 서울 강남 ↔ 강북 교차 배정 강력 차단
         if ((area1.isSeoulGangbuk && area2.isSeoulGangnam) || (area1.isSeoulGangnam && area2.isSeoulGangbuk)) {
-            penalty += 60;
+            penalty += 80;
         }
-        // 광역 시/도가 서로 다른 경우 (예: 서울 ↔ 경기 남부, 인천 등)
+        // 광역 시/도가 서로 다른 경우 (예: 서울 ↔ 경기 등)
         else if (area1.sido !== area2.sido) {
-            penalty += 25;
+            penalty += 35;
         }
         // 같은 시/도 내에서 시·군·구가 다른 경우
         else if (area1.sigungu && area2.sigungu && area1.sigungu !== area2.sigungu) {
-            penalty += 8;
+            penalty += 12;
         }
     }
 
@@ -154,6 +172,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
         const devId = d.deviceId || d.key;
         const w = weights[devId] || 0;
 
+        // 가중치에 따른 물량 Cap 조정
         let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
         if (exactCap < 0) exactCap = 0;
 
@@ -208,7 +227,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
         // 정원이 남아있는 활성 기사 목록 추출
         const availableDrivers = driverStats.filter(ds => ds.assignedCount < ds.targetCap);
 
-        // 만약 모든 기사의 정원이 찼다면(예외 상황), 전체 기사 중 절대 최단거리 기사로 Fallback
+        // 정원이 모두 찼을 경우 잔여 물량은 가장 가까운 기사에게 강제 오버부킹(Fallback)
         if (availableDrivers.length === 0) {
             unassigned.forEach(order => {
                 let bestDriver = null;
@@ -223,8 +242,8 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
             break;
         }
 
-        // 남아있는 각 배송지에 대해:
-        // 정원이 남은 기사들과의 거리 중 1순위 기사(최소 거리)와 2순위 기사를 찾아 차이(Regret)를 계산
+        // 🌟 Regret(후회 비용) 탐색: 
+        // 각 배송지에 대해 1순위(최단거리) 기사와 2순위 기사 간의 페널티 거리 차이를 계산
         let bestCandidate = null;
         let maxRegret = -Infinity;
         let bestCandidateDriver = null;
@@ -233,7 +252,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
         for (let i = 0; i < unassigned.length; i++) {
             const order = unassigned[i];
 
-            // 사용 가능한 기사들과의 페널티 거리 계산 및 정렬
+            // 남은 기사들과 해당 배송지의 페널티 거리를 계산 후 정렬
             const driverDistances = availableDrivers.map(ds => ({
                 driver: ds,
                 dist: calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr)
@@ -242,8 +261,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
             const closest = driverDistances[0];
             const secondClosest = driverDistances.length > 1 ? driverDistances[1] : null;
 
-            // 외곽 배송지일수록 1순위와 2순위 간의 거리 차이(Regret)가 수십 km에 달함
-            // 남은 기사가 1명이면 그 기사와 가까운 순서대로 처리
+            // 외곽 배송지이거나 강/산을 건너야 하는 경우 1순위와 2순위 간의 거리 차이(Regret)가 매우 큼
             const regret = secondClosest ? (secondClosest.dist - closest.dist) : (1000 - closest.dist);
 
             if (regret > maxRegret) {
@@ -254,7 +272,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
             }
         }
 
-        // 대체 불가능한 외곽 배송지부터 해당 기사에게 즉시 확정 배정
+        // 가장 아쉬움(Regret)이 큰, 즉 대체 불가능한 배송지부터 해당 1순위 기사에게 확정 배정
         if (bestCandidate && bestCandidateDriver && bestCandidateIndex !== -1) {
             bestCandidateDriver.assignedCount++;
             bestCandidate.assignedDriver = bestCandidateDriver.phone;
