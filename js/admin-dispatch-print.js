@@ -18,15 +18,15 @@ let printListSortField = 'originalIdx'; // 'originalIdx', 'senderName', 'storeNa
 let printListSortAsc = true;
 
 // ==========================================
-// 1. 주문서 통합관리 모달 열기 & 초기화 (DOM 클래스 충돌 방지 완벽 격리)
+// 1. 주문서 통합관리 모달 열기 & 초기화 (주문 데이터 없어도 상시 진입 허용)
 // ==========================================
 export function exportToInvoiceModal() {
-    // 🌟 핵심 수정: 전체 화면의 .row-checkbox가 아니라, '엑셀 테이블(#invoice-excel-tbody)' 내부의 체크박스만 엄격히 조회
+    // 엑셀 테이블(#invoice-excel-tbody) 내부의 체크박스만 엄격히 조회
     const excelCheckboxes = document.querySelectorAll('#invoice-excel-tbody .row-checkbox:checked');
     state.printReadyList = [];
 
     if (excelCheckboxes.length > 0) {
-        // 사용자가 엑셀 테이블에서 특정 배송지만 체크한 경우 -> 해당 배송지들만 주문서로 전달
+        // 사용자가 엑셀 테이블에서 특정 배송지를 선택한 경우
         excelCheckboxes.forEach(cb => { 
             const idx = parseInt(cb.getAttribute('data-idx'), 10); 
             if (state.parsedExcelList && state.parsedExcelList[idx]) {
@@ -35,11 +35,11 @@ export function exportToInvoiceModal() {
             }
         });
     } else if (state.parsedExcelList && state.parsedExcelList.length > 0) {
-        // 체크된 항목이 없을 경우 -> 현재 업로드된 전체 주문 목록(108건 등)을 누락 없이 전원 로드!
+        // 체크된 항목이 없을 때 등록된 주문 데이터가 있으면 전체 로드
         state.printReadyList = state.parsedExcelList.map(item => ({ ...item, _selected: true }));
     } else {
-        alert("주문서로 출력할 주문 데이터가 없습니다. 엑셀이나 PDF를 먼저 업로드해 주세요.");
-        return;
+        // 🌟 [핵심 변경] 주문 데이터가 없어도 차단하지 않고 빈 목록 상태로 모달 오픈 허용 (일반 양식 작업 가능)
+        state.printReadyList = [];
     }
 
     if (window.closeAutoDispatchModal) window.closeAutoDispatchModal(); 
@@ -57,10 +57,14 @@ export function exportToInvoiceModal() {
 
     populateSenderFilterDropdown();
     initTemplatePdfDropZone();
-    initInvoiceResizer(); // 🌟 목록 패널 폭 조절 리사이저 초기화
+    initInvoiceResizer(); // 목록 패널 폭 조절 리사이저 초기화
     loadSavedForms(); 
     renderInvoiceOrderList();
-    previewInvoiceRow(0); 
+    
+    // 주문이 있을 때만 1번 주문 미리보기 바인딩
+    if (state.printReadyList.length > 0) {
+        previewInvoiceRow(0); 
+    }
 }
 
 // 🌟 주문서 목록 폭 조절(드래그) 리사이저 엔진
@@ -113,7 +117,12 @@ export function initInvoiceResizer() {
 
 export function populateSenderFilterDropdown() {
     const selectEl = document.getElementById('invoice-sender-filter');
-    if (!selectEl || !state.printReadyList) return;
+    if (!selectEl) return;
+
+    if (!state.printReadyList || state.printReadyList.length === 0) {
+        selectEl.innerHTML = `<option value="ALL">전체 공급자 (주문 없음)</option>`;
+        return;
+    }
 
     const senders = new Set();
     state.printReadyList.forEach(item => {
@@ -224,7 +233,7 @@ export function sortPrintList(field) {
 
 export function updateInvoiceCountBadge() {
     const badge = document.getElementById('invoice-target-count-badge');
-    if (!badge || !state.printReadyList) return;
+    if (!badge) return;
     const filtered = getFilteredPrintOrders();
     const total = filtered.length;
     const selected = filtered.filter(it => it._selected !== false).length;
@@ -237,7 +246,7 @@ export function updateInvoiceCountBadge() {
     }
 }
 
-// 🌟 헤더 체크박스 클릭 핸들러 (1건이라도 선택되어 있으면 무조건 전체 해제, 0건이면 전체 선택)
+// 헤더 체크박스 클릭 핸들러
 export function handleHeaderCheckAll(e) {
     if (e) e.stopPropagation();
     const filtered = getFilteredPrintOrders();
@@ -288,7 +297,7 @@ export function renderInvoiceOrderList() {
     };
 
     if (!filtered || filtered.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">조건에 일치하는 주문이 없습니다.</div>`;
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">출력할 주문 데이터가 없습니다.<br><span class="text-[10px] text-gray-400 font-normal">우측에서 서식 PDF 업로드 및 양식 편집이 가능합니다.</span></div>`;
         updateInvoiceCountBadge();
         return;
     }
@@ -319,7 +328,6 @@ export function renderInvoiceOrderList() {
         const storeDisplay = item.storeName || '-';
         const addressDisplay = item.address || item.fullAddress || '-';
 
-        // 🌟 클래스명을 invoice-row-checkbox 로 명확히 분리하여 엑셀 테이블(.row-checkbox)과 절대 충돌하지 않도록 처리
         tableHtml += `
         <tr onclick="window.previewInvoiceRow(${originalIdx})" class="hover:bg-indigo-50/60 cursor-pointer transition ${isCurrent ? 'bg-indigo-50/80 ring-1 ring-indigo-400 font-bold' : ''}">
             <td class="text-center py-2 px-2" onclick="event.stopPropagation()">
@@ -339,7 +347,7 @@ export function renderInvoiceOrderList() {
 }
 
 // ==========================================
-// 3. 주문 1건 미리보기 연동 (선택 주문 데이터 실시간 서식 합성)
+// 3. 주문 1건 미리보기 연동
 // ==========================================
 export function previewInvoiceRow(idx) {
     if (!state.printReadyList || !state.printReadyList[idx]) return;
@@ -535,7 +543,7 @@ export function updateLivePreview() {}
 export function syncPreviewData() {}
 
 // ==========================================
-// 🌟 6. 주문서 일괄 출력 (A4 1장 밀림 완전 방지 및 1건 1장 완벽 출력)
+// 6. 주문서 일괄 출력
 // ==========================================
 export function executeBatchPrint() {
     if (!state.printReadyList || state.printReadyList.length === 0) { 
@@ -569,7 +577,6 @@ export function executeBatchPrint() {
 
     selectedOrders.forEach((item, idx) => {
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, item, idx);
-
         filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
 
         printPagesHtml += `
@@ -694,7 +701,7 @@ export function executeBatchPrint() {
 }
 
 // ==========================================
-// 🌟 7. 피킹 리스트 (A4 1페이지 실측 기반 동적 2열 전환 엔진)
+// 7. 피킹 리스트
 // ==========================================
 export const pickingModalState = {
     selectedDrivers: new Set()
@@ -790,7 +797,7 @@ export function renderPickingDriverList(uniqueDrivers) {
     }
 }
 
-// 🌟 피킹 리스트 페이지 내부 HTML 조립 헬퍼 (1열 / 2열 공용)
+// 피킹 리스트 페이지 내부 HTML 조립 헬퍼
 function buildPickingPageHtml(driverName, driverOrdersCount, aggregatedList, isTwoColumn, dateStr) {
     const totalItemTypes = aggregatedList.length;
     const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
@@ -798,7 +805,6 @@ function buildPickingPageHtml(driverName, driverOrdersCount, aggregatedList, isT
     let tableContentHtml = '';
 
     if (!isTwoColumn) {
-        // [1열 형태] 콤팩트 테이블
         let rowsHtml = '';
         aggregatedList.forEach((item, idx) => {
             rowsHtml += `
@@ -837,7 +843,6 @@ function buildPickingPageHtml(driverName, driverOrdersCount, aggregatedList, isT
             </tbody>
         </table>`;
     } else {
-        // [2열 형태] 좌/우 균등 분할 테이블 (1장에 완벽 수납)
         const halfPoint = Math.ceil(totalItemTypes / 2);
         const leftList = aggregatedList.slice(0, halfPoint);
         const rightList = aggregatedList.slice(halfPoint);
@@ -933,7 +938,7 @@ function buildPickingPageHtml(driverName, driverOrdersCount, aggregatedList, isT
     </div>`;
 }
 
-// 🌟 피킹 인쇄 전용 CSS 스타일
+// 피킹 인쇄 전용 CSS 스타일
 const pickingPrintStyles = `
     * { box-sizing: border-box; }
     @media print {
@@ -1133,7 +1138,6 @@ export function executePickingListPrint() {
     let allDriversPagesHtml = '';
     let validPageCount = 0;
 
-    // 🌟 [핵심 개선] 실제 내용물 순수 높이 측정을 위한 가상 컨테이너 생성 (height 고정 해제)
     const measureContainer = document.createElement('div');
     measureContainer.style.cssText = 'position:fixed;left:-9999px;top:0;width:210mm;box-sizing:border-box;visibility:hidden;z-index:-999;';
     
