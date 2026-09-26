@@ -37,6 +37,18 @@ const SEOUL_GU_CODE_MAP = {
 
 const SEOUL_DONG_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/southkorea/seoul-maps/kostat/2013/json/seoul_submunicipalities_geo_simple.json";
 
+// 기사별 영역 구분을 위한 고유 컬러 팔레트
+const DRIVER_PALETTE = [
+    { stroke: '#1d4ed8', fill: '#3b82f6', badge: 'bg-blue-600' },     // 블루
+    { stroke: '#047857', fill: '#10b981', badge: 'bg-emerald-600' },  // 에메랄드
+    { stroke: '#6d28d9', fill: '#8b5cf6', badge: 'bg-purple-600' },   // 바이올렛
+    { stroke: '#b45309', fill: '#f59e0b', badge: 'bg-amber-600' },    // 앰버
+    { stroke: '#be123c', fill: '#f43f5e', badge: 'bg-rose-600' },     // 로즈
+    { stroke: '#0f766e', fill: '#14b8a6', badge: 'bg-teal-600' },     // 틸
+    { stroke: '#4338ca', fill: '#6366f1', badge: 'bg-indigo-600' },   // 인디고
+    { stroke: '#c026d3', fill: '#e879f9', badge: 'bg-fuchsia-600' }   // 푸시아
+];
+
 let seoulDongGeoData = null;
 let territoryMap = null;
 let currentSido = "서울";
@@ -57,18 +69,23 @@ function injectMinimalMapStyle() {
     const style = document.createElement('style');
     style.id = styleId;
     style.innerHTML = `
-        /* 배경 지도 화려한 지하철/건물 색상 제거 및 소프트 흑백화 */
-        #territory-map-container img {
-            filter: grayscale(88%) contrast(80%) brightness(106%) opacity(40%) !important;
+        /* 배경 지도 화려한 지하철/건물 색상 제거 및 소프트 흑백 톤다운 */
+        #territory-map-container img,
+        #all-territories-map-container img {
+            filter: grayscale(90%) contrast(75%) brightness(105%) opacity(35%) !important;
         }
-        #territory-map-container {
+        #territory-map-container,
+        #all-territories-map-container {
             background-color: #f8fafc !important;
         }
-        /* 동 이름 배지 가독성 */
         .dong-name-badge {
             pointer-events: none;
             user-select: none;
             box-shadow: 0 2px 4px rgba(0,0,0,0.12);
+        }
+        .all-territory-driver-badge {
+            user-select: none;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.22);
         }
     `;
     document.head.appendChild(style);
@@ -133,7 +150,7 @@ function getFeatureCentroid(allPolygonsPaths) {
 }
 
 // ==========================================
-// 3. 권역 모달 초기화 및 드릴다운 렌더링
+// 3. 개별 권역 모달 초기화 및 드릴다운 렌더링
 // ==========================================
 export async function openDriverTerritoryModal(devId, phone) {
     try { if (window.event) window.event.stopPropagation(); } catch (e) {}
@@ -274,7 +291,6 @@ async function renderCurrentSigunguPolygons(sido, sigungu) {
                 const isSelected = currentSelectedZones.some(z => z.id === zoneId || z.id === guZoneId);
                 const assignedOtherDriver = otherDriverZoneMap.get(zoneId) || otherDriverZoneMap.get(guZoneId);
 
-                // 색상 테마: 선택 시 시원한 블루 / 미선택 시 깔끔한 화이트-슬레이트
                 let strokeColor = isSelected ? '#1d4ed8' : '#64748b';
                 let fillColor = isSelected ? '#3b82f6' : (assignedOtherDriver ? '#cbd5e1' : '#ffffff');
                 let fillOpacity = isSelected ? 0.65 : (assignedOtherDriver ? 0.50 : 0.40);
@@ -318,7 +334,6 @@ async function renderCurrentSigunguPolygons(sido, sigungu) {
                     });
                 });
 
-                // 동 이름 배지 라벨 오버레이
                 if (featureCentroid) {
                     const labelEl = document.createElement('div');
                     labelEl.className = 'dong-name-badge';
@@ -349,7 +364,6 @@ async function renderCurrentSigunguPolygons(sido, sigungu) {
         }
     }
 
-    // 경기/인천 등 외부 지역 포커스
     if (window.kakao && kakao.maps && kakao.maps.services) {
         const geocoder = new kakao.maps.services.Geocoder();
         geocoder.addressSearch(`${sido} ${sigungu}`, (result, status) => {
@@ -579,14 +593,17 @@ export async function saveDriverTerritory() {
 }
 
 // ==========================================
-// 7. 전체 기사 권역 설정 현황 지도 모달
+// 🌟 7. 전체 기사 권역 설정 현황 지도 모달 (배경 톤다운 + 기사별 실제 권역 다각형 완벽 표시)
 // ==========================================
-export function openAllTerritoriesMap() {
+export async function openAllTerritoriesMap() {
     const modal = document.getElementById('all-territories-modal');
     if (!modal) return;
     modal.classList.remove('hidden');
 
-    setTimeout(() => {
+    // 배경 지도 소프트 흑백 톤다운 적용
+    injectMinimalMapStyle();
+
+    setTimeout(async () => {
         const container = document.getElementById('all-territories-map-container');
         if (!allTerritoriesMap) {
             allTerritoriesMap = new kakao.maps.Map(container, {
@@ -599,30 +616,107 @@ export function openAllTerritoriesMap() {
         allTerritoriesOverlays = [];
 
         const allDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
+        const geojson = await loadSeoulDongGeoJSON();
         let bounds = new kakao.maps.LatLngBounds();
         let hasValidPoint = false;
 
-        allDrivers.forEach(d => {
+        allDrivers.forEach((d, driverIdx) => {
             const zones = d.territoryZones || [];
             const dName = d.phone || d.key;
+            const colorTheme = DRIVER_PALETTE[driverIdx % DRIVER_PALETTE.length];
 
-            if (zones.length > 0 && d.territoryLat && d.territoryLng) {
-                hasValidPoint = true;
+            if (zones.length > 0) {
+                // 🌟 1. 기사별로 저장된 구/동에 해당하는 모든 실제 다각형 피처 수집
+                const matchedFeatures = [];
+
+                if (geojson && geojson.features) {
+                    zones.forEach(zone => {
+                        const guCode = SEOUL_GU_CODE_MAP[zone.sigungu];
+                        if (!guCode) return;
+
+                        if (zone.type === 'gu') {
+                            // '구 전체'인 경우 해당 자치구의 모든 동 피처 수집
+                            const guFeatures = geojson.features.filter(f => f.properties && f.properties.code && f.properties.code.startsWith(guCode));
+                            matchedFeatures.push(...guFeatures);
+                        } else if (zone.type === 'dong' && zone.dong) {
+                            // '개별 동'인 경우 해당 구 코드와 동 명칭 일치 피처 수집
+                            const dongFeature = geojson.features.find(f => 
+                                f.properties && f.properties.code && f.properties.code.startsWith(guCode) && f.properties.name === zone.dong
+                            );
+                            if (dongFeature) matchedFeatures.push(dongFeature);
+                        }
+                    });
+                }
+
+                const uniqueFeatures = Array.from(new Set(matchedFeatures));
+
+                // 🌟 2. 해당 기사 고유 색상으로 다각형(Polygon)을 지도 위에 채색
+                uniqueFeatures.forEach(feature => {
+                    const allPolys = getPolygonPaths(feature);
+                    allPolys.forEach(polyPaths => {
+                        const polygon = new kakao.maps.Polygon({
+                            path: polyPaths,
+                            strokeWeight: 2,
+                            strokeColor: colorTheme.stroke,
+                            strokeOpacity: 0.95,
+                            strokeStyle: 'solid',
+                            fillColor: colorTheme.fill,
+                            fillOpacity: 0.55
+                        });
+
+                        polygon.setMap(allTerritoriesMap);
+                        allTerritoriesOverlays.push(polygon);
+
+                        polyPaths.forEach(ring => {
+                            ring.forEach(pt => {
+                                bounds.extend(pt);
+                                hasValidPoint = true;
+                            });
+                        });
+                    });
+                });
+
+                // 🌟 3. 기사 권역의 중심에 기사 정보 뱃지 오버레이 배치
+                let centerPos = null;
+                if (d.territoryLat && d.territoryLng) {
+                    centerPos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                } else if (uniqueFeatures.length > 0) {
+                    const firstPaths = getPolygonPaths(uniqueFeatures[0]);
+                    centerPos = getFeatureCentroid(firstPaths);
+                }
+
+                if (centerPos) {
+                    bounds.extend(centerPos);
+                    hasValidPoint = true;
+
+                    const zoneSummary = zones.map(z => z.name).slice(0, 3).join(', ') + (zones.length > 3 ? ` 외 ${zones.length - 3}곳` : '');
+                    const label = new kakao.maps.CustomOverlay({
+                        position: centerPos,
+                        content: `
+                        <div class="all-territory-driver-badge bg-slate-900/95 text-white text-xs px-3.5 py-2 rounded-2xl shadow-xl border-2 mb-8 max-w-[220px] text-center" style="border-color: ${colorTheme.stroke};">
+                            <span class="font-black text-sm block mb-0.5 flex items-center justify-center gap-1.5" style="color: ${colorTheme.fill};">
+                                <i class="fa-solid fa-truck text-xs"></i>${dName}
+                            </span>
+                            <span class="text-[10px] text-gray-300 block truncate font-medium">${zoneSummary}</span>
+                        </div>`,
+                        yAnchor: 1
+                    });
+                    label.setMap(allTerritoriesMap);
+                    allTerritoriesOverlays.push(label);
+                }
+            } else if (d.territoryLat && d.territoryLng) {
+                // 권역 미지정이지만 기본 좌표가 있는 경우 마커 표시
                 const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
                 bounds.extend(pos);
+                hasValidPoint = true;
 
                 const marker = new kakao.maps.Marker({ position: pos });
                 marker.setMap(allTerritoriesMap);
                 allTerritoriesOverlays.push(marker);
 
-                const zoneSummary = zones.map(z => z.name).slice(0, 3).join(', ') + (zones.length > 3 ? ` 외 ${zones.length - 3}곳` : '');
                 const label = new kakao.maps.CustomOverlay({
                     position: pos,
-                    content: `
-                    <div class="bg-slate-900 text-white text-xs px-3 py-1.5 rounded-xl shadow-lg border border-indigo-400 mb-8 max-w-[200px] text-center">
-                        <span class="font-black text-amber-300 block mb-0.5"><i class="fa-solid fa-truck text-xs mr-1"></i>${dName}</span>
-                        <span class="text-[10px] text-gray-300 block truncate">${zoneSummary}</span>
-                    </div>`,
+                    content: `<div class="bg-slate-800 text-white text-[11px] px-2.5 py-1 rounded-xl shadow-md font-bold mb-8 border border-slate-600">${dName} (권역 미설정)</div>`,
                     yAnchor: 1
                 });
                 label.setMap(allTerritoriesMap);
@@ -632,6 +726,8 @@ export function openAllTerritoriesMap() {
 
         if (hasValidPoint) {
             allTerritoriesMap.setBounds(bounds);
+        } else {
+            allTerritoriesMap.setLevel(7);
         }
     }, 200);
 }
