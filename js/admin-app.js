@@ -49,7 +49,7 @@ import {
     renderDispatchDriverList, toggleDispatchDriver, toggleAllDispatchDrivers, adjustDriverWeight,
     selectDispatchDriver, renderDispatchDriverDetail, changeOrderDriver,
     runAutoDispatchAlgorithm, revertAutoDispatch, initDispatchResizer,
-    sendRoutesToDrivers, printSelectedDriverItemList
+    sendRoutesToDrivers, printSelectedDriverItemList, sortDetailByAddress
 } from "./admin-dispatch-auto.js";
 
 import {
@@ -90,13 +90,15 @@ import {
     saveCurrentDocumentTemplate
 } from "./admin-dispatch-template.js";
 
+// 🌟 신규 행정구역(구/동) 권역 설정 모듈 임포트
 import {
     renderLocationSidebar, jumpToDriverDelivery, focusDriverLocationOnMap,
     showFallbackLocation, closeCurrentLocationOverlay, drawAllDriversOnMap,
     fitMapToAllDrivers, openDriverTerritoryModal, closeDriverTerritoryModal,
-    setTerritoryScale, setTerritoryCenter, saveDriverTerritory,
-    openAllTerritoriesMap, closeAllTerritoriesMap,
-    toggleTerritoryPinMode, searchTerritoryAddress, adjustModalTerritorySize
+    onTerritorySidoChange, onTerritorySigunguChange, toggleDongZone,
+    toggleEntireSigungu, removeTerritoryZone, clearTerritoryBasket,
+    searchTerritoryAddress, saveDriverTerritory,
+    openAllTerritoriesMap, closeAllTerritoriesMap
 } from "./admin-dispatch-territory.js";
 
 import {
@@ -632,6 +634,7 @@ window.clearCompanyBaseAddress = clearCompanyBaseAddress;
 window.updateCompanyBaseUI = updateCompanyBaseUI;
 window.renderDispatchDriverList = renderDispatchDriverList;
 window.selectDispatchDriver = selectDispatchDriver;
+window.sortDetailByAddress = sortDetailByAddress;
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
@@ -667,7 +670,7 @@ window.closeDispatchInboxModal = closeDispatchInboxModal;
 window.deleteNoticeFromDispatchInbox = deleteNoticeFromDispatchInbox;
 window.clearAllDispatchInbox = clearAllDispatchInbox;
 
-// [관제 권역/지도(Territory)]
+// [관제 신규 권역/지도(Territory) 전역 바인딩]
 window.renderLocationSidebar = renderLocationSidebar;
 window.jumpToDriverDelivery = jumpToDriverDelivery;
 window.focusDriverLocationOnMap = focusDriverLocationOnMap;
@@ -677,14 +680,16 @@ window.drawAllDriversOnMap = drawAllDriversOnMap;
 window.fitMapToAllDrivers = fitMapToAllDrivers;
 window.openDriverTerritoryModal = openDriverTerritoryModal;
 window.closeDriverTerritoryModal = closeDriverTerritoryModal;
-window.setTerritoryScale = setTerritoryScale;
-window.setTerritoryCenter = setTerritoryCenter;
+window.onTerritorySidoChange = onTerritorySidoChange;
+window.onTerritorySigunguChange = onTerritorySigunguChange;
+window.toggleDongZone = toggleDongZone;
+window.toggleEntireSigungu = toggleEntireSigungu;
+window.removeTerritoryZone = removeTerritoryZone;
+window.clearTerritoryBasket = clearTerritoryBasket;
+window.searchTerritoryAddress = searchTerritoryAddress;
 window.saveDriverTerritory = saveDriverTerritory;
 window.openAllTerritoriesMap = openAllTerritoriesMap;
 window.closeAllTerritoriesMap = closeAllTerritoriesMap;
-window.toggleTerritoryPinMode = toggleTerritoryPinMode;
-window.searchTerritoryAddress = searchTerritoryAddress;
-window.adjustModalTerritorySize = adjustModalTerritorySize;
 
 // [관제 엑셀(Excel)]
 window.loadExcelFromFirebase = loadExcelFromFirebase;
@@ -729,7 +734,7 @@ window.printAggregatedItemList = openPickingDriverModal;
 window.sortPrintList = sortPrintList;
 window.initInvoiceResizer = initInvoiceResizer;
 
-// 🌟 [관제 신규 서식 빌더/에디터(Template)]
+// [관제 신규 서식 빌더/에디터(Template)]
 window.parsePdfToEditableDocument = parsePdfToEditableDocument;
 window.renderEditableDocument = renderEditableDocument;
 window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
