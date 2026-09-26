@@ -273,11 +273,12 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 4. 🌟 발송자 / 구매자명 (발송회사, 위탁처 등) 정밀 추출
+        // 4. 🌟 공급자 / 화주명 (발송회사, 위탁처 등) 정밀 추출 (구매자/주문자 배제)
         let senderName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            if (/발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는분|보내는사람|구매자명|주문자명|발주자|주문자|구매자/i.test(ck)) {
+            // 구매자명, 주문자명 등 주문자 정보는 화주(공급자)로 인식하지 않도록 철저히 분리
+            if (/공급자|화주|발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는분|보내는사람/i.test(ck)) {
                 if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
                     senderName = String(row[k]).trim();
                     break;
@@ -417,12 +418,12 @@ export function processExcelData(jsonData) {
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
                 assignedDriver: null,
-                senderName: senderName || '발송처 미상',
+                senderName: senderName || '공급자 미상',
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
                 bizNo: bizNo,
                 address: address, // 정제 주소 (내비/관제용)
                 fullAddress: fullAddress, // 명세서 인쇄용 원본 전체 주소
-                storeName: storeName || senderName || '배송처',
+                storeName: storeName || '상호 미상', // 상호명이 우선순위가 높도록 조정
                 phone: phone,
                 itemName: itemName,
                 unit: unit || '개',

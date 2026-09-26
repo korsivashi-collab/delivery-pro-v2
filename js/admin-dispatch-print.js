@@ -69,7 +69,7 @@ export function populateSenderFilterDropdown() {
         if (s) senders.add(s);
     });
 
-    let html = `<option value="ALL">전체 발송회사 (모아보기 - 총 ${state.printReadyList.length}건)</option>`;
+    let html = `<option value="ALL">전체 공급자 (모아보기 - 총 ${state.printReadyList.length}건)</option>`;
     senders.forEach(sName => {
         const count = state.printReadyList.filter(it => (it.senderName || '').trim() === sName).length;
         html += `<option value="${sName}" ${currentSenderFilter === sName ? 'selected' : ''}>${sName} (${count}건)</option>`;
@@ -206,7 +206,7 @@ export function renderInvoiceOrderList() {
                 <tr class="bg-gray-100 text-gray-700 font-black border-b border-gray-200">
                     <th class="py-2.5 px-2 text-center w-8"><input type="checkbox" id="chk-invoice-all-table" onchange="window.toggleAllInvoiceSelection(this.checked)" class="cursor-pointer"></th>
                     <th class="py-2.5 px-2 text-center w-10">No.</th>
-                    <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('senderName')">발송자(화주)${getArrow('senderName')}</th>
+                    <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('senderName')">공급자${getArrow('senderName')}</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('storeName')">상호(간판명)${getArrow('storeName')}</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('address')">배송지 주소${getArrow('address')}</th>
                 </tr>
@@ -473,23 +473,15 @@ export function executeBatchPrint() {
     let printPagesHtml = '';
 
     selectedOrders.forEach((item, idx) => {
-        const driverName = item.assignedDriver ? item.assignedDriver : '미배정';
-
         // 🌟 핵심: template.js의 fillTemplateWithOrderData로 사업자번호, 상품리스트, 단가, 세액, 총액, 결제수단 등 100% 치환
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, item, idx);
 
         // 인쇄 시 contenteditable 속성 비활성화
         filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
 
+        // 상단 배송순번 등 표시 바(driver-marking-bar) 완전 제거
         printPagesHtml += `
         <div class="print-page-wrapper">
-            <div class="driver-marking-bar">
-                <span>[배송순번 #${idx + 1}]</span>
-                <span><b>담당기사:</b> ${driverName}</span>
-                <span><b>발송(화주):</b> ${item.senderName || '-'}</span>
-                <span><b>받는분:</b> ${item.storeName || '-'}</span>
-                <span><b>주소:</b> ${item.address || ''}</span>
-            </div>
             <div class="print-sheet-content">
                 ${filledPageHtml}
             </div>
@@ -502,6 +494,7 @@ export function executeBatchPrint() {
     
     const doc = iframe.contentWindow.document; 
     doc.open();
+    // 스타일에서 driver-marking-bar 삭제
     doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
         * { box-sizing: border-box; }
         @media print { 
@@ -512,7 +505,6 @@ export function executeBatchPrint() {
         }
         body { margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; color: #000; }
         .print-page-wrapper { width: 210mm; height: 297mm; margin: 0 auto; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; }
-        .driver-marking-bar { width: 100%; display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 900; background: #f8fafc; border: 1.5px solid #000; padding: 6px 12px; margin-bottom: 6px; border-radius: 4px; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         .print-sheet-content { width: 100%; flex: 1; position: relative; }
         .doc-sheet { width: 100%; background: #fff; color: #000; font-size: 11px; }
         .doc-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; table-layout: fixed; }
