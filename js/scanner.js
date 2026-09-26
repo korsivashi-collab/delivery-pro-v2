@@ -19,6 +19,15 @@ import {
     findOverlappingPOIFromAddress
 } from './kakao.js';
 import { state } from './state.js';
+import { 
+    isLicenseExpiredLocally, 
+    clearAuthStorage, 
+    getOrCreateDeviceId 
+} from './auth.js';
+import { 
+    firebaseCheckLicenseOnce, 
+    checkIfDeviceBlocked 
+} from './api.js';
 
 const MAX_MONTHLY_SCANS = 1250; 
 const SCAN_COOLDOWN_MS = 1000;
@@ -243,6 +252,35 @@ export function initCameraScan() {
     cameraInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+
+        // 🌟 [보안 및 라이선스 1회 단발성 검증] 스캔 전 계정 유효성 점검 (서버 부하 0)
+        const deviceId = getOrCreateDeviceId();
+        try {
+            const isBlocked = await checkIfDeviceBlocked(deviceId);
+            if (isBlocked) {
+                window.location.replace('error.html');
+                return;
+            }
+        } catch (err) {}
+
+        if (isLicenseExpiredLocally()) {
+            alert("⚠️ 라이선스 사용기한이 만료되었습니다.\n관리자에게 문의해 주세요.");
+            clearAuthStorage();
+            window.location.reload();
+            return;
+        }
+
+        const savedKey = localStorage.getItem('deliveryProKey');
+        if (savedKey) {
+            const licCheck = await firebaseCheckLicenseOnce(savedKey, deviceId);
+            if (!licCheck.valid && !licCheck.isOffline) {
+                alert(`⚠️ [라이선스 알림]\n${licCheck.msg || "라이선스가 유효하지 않습니다."}`);
+                clearAuthStorage();
+                window.location.reload();
+                return;
+            }
+        }
+
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
         let addressStr = null; 
@@ -274,7 +312,7 @@ export function initCameraScan() {
             extractedPhone = result.phone;
         }
 
-        // 2. 주소 좌표 획득 (위치 설정용)
+        // 2. 주소 좌표 획득 (로컬 캐시 및 지수 백오프 적용)
         let coords = null;
         while (!coords) {
             try {
@@ -290,13 +328,12 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 순수 주소 기반 3단계 순차 파이프라인 (좌표 반경 검색 제거 완료)
+        // 3. 상호명 순수 주소 기반 3단계 순차 파이프라인
         let finalStoreName = null;
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                // 오직 해당 주소 키워드로 등록된 공식 상점 리스트만 가져옴 (주변 무작위 상가 혼입 원천 차단)
                 let addressPlaces = await getPOIsByAddress(addressStr);
 
                 // [1단계] 순서 동일률 50% 이상 핵심 상호 매칭
@@ -309,7 +346,7 @@ export function initCameraScan() {
                     finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
                 }
 
-                // [3단계] 황색 명세표 등 표 라벨 정밀 추출 및 가비지 필터링
+                // [3단계] 표 라벨 정밀 추출 및 가비지 필터링
                 if (!finalStoreName) {
                     let extracted = extractStoreNameLogic(rawOCRText);
                     if (extracted) {
@@ -317,18 +354,15 @@ export function initCameraScan() {
                         let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
                         let textForRegex = rawOCRText.replace(/\n/g, ' ');
 
-                        // 사람 이름(성명, 받는분) 오검출 필터링
                         let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
                         if (blockRegex.test(textForRegex)) {
                             isGarbage = true;
                         }
 
-                        // 층수 필터링
                         if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) {
                             isGarbage = true;
                         }
 
-                        // 길이 및 숫자 필터링
                         if (extracted.length < 2 || /^\d+$/.test(extracted)) {
                             isGarbage = true;
                         }

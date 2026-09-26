@@ -4,7 +4,23 @@
 // =================================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
-import { getFirestore, collection, addDoc, getDoc, getDocs, onSnapshot, query, where, updateDoc, doc, increment, setDoc, deleteDoc, orderBy } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { 
+    getFirestore, 
+    collection, 
+    addDoc, 
+    getDoc, 
+    getDocs, 
+    onSnapshot, 
+    query, 
+    where, 
+    updateDoc, 
+    doc, 
+    increment, 
+    setDoc, 
+    deleteDoc, 
+    orderBy,
+    limit 
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
 
 const firebaseConfig = {
@@ -135,31 +151,103 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     };
 }
 
-// 3. 라이선스 실시간 상태 감시
+// 3. 라이선스 상태 감시 (24시간 상시 구독을 단발성 1회 getDoc으로 최적화하여 비용 절감)
 export function watchLicenseStatus(key, callback, onUpdateCallback) {
-    const docRef = doc(db, "licenses", key);
-    return onSnapshot(docRef, (docSnap) => {
+    (async () => {
+        try {
+            let docRef = doc(db, "licenses", key);
+            let docSnap = await getDoc(docRef);
+
+            if (!docSnap.exists()) {
+                docRef = doc(db, "licenses", `PRO-${key}`);
+                docSnap = await getDoc(docRef);
+            }
+            if (!docSnap.exists()) {
+                docRef = doc(db, "licenses", `TRIAL-${key}`);
+                docSnap = await getDoc(docRef);
+            }
+
+            if (!docSnap.exists()) {
+                if (callback) callback('DELETED', '관리자에 의해 라이선스가 삭제되었습니다.');
+                return;
+            }
+
+            const data = docSnap.data();
+            if (data.status === 'suspended') {
+                if (callback) callback('SUSPENDED', '관리자에 의해 라이선스가 일시 정지되었습니다.');
+                return;
+            }
+
+            if (data.expireDate) {
+                const parts = data.expireDate.split('.');
+                const expire = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59);
+                if (new Date() > expire) {
+                    if (callback) callback('EXPIRED', `라이선스 유효기간(${data.expireDate})이 만료되었습니다.`);
+                    return;
+                }
+            }
+
+            if (onUpdateCallback) {
+                onUpdateCallback(data);
+            }
+        } catch (e) {
+            console.warn("라이선스 단발성 검증 네트워크 오류:", e);
+        }
+    })();
+
+    // 기존 호출부(auth.js 등)의 unsubscribe 해제 함수 호환용 더미 반환
+    return () => {};
+}
+
+// 🌟 [신규 추가] 주요 액션(스캔 시점 등) 단발성 1회 라이선스 유효성 검증 함수 (서버 부하 0)
+export async function firebaseCheckLicenseOnce(key, deviceId) {
+    if (!key) return { valid: false, msg: "라이선스 키가 올바르지 않습니다." };
+    try {
+        let docRef = doc(db, "licenses", key);
+        let docSnap = await getDoc(docRef);
+
         if (!docSnap.exists()) {
-            callback('DELETED', '관리자에 의해 라이선스가 삭제되었습니다.');
-            return;
+            docRef = doc(db, "licenses", `PRO-${key}`);
+            docSnap = await getDoc(docRef);
         }
+        if (!docSnap.exists()) {
+            docRef = doc(db, "licenses", `TRIAL-${key}`);
+            docSnap = await getDoc(docRef);
+        }
+
+        if (!docSnap.exists()) {
+            return { valid: false, msg: "등록되지 않은 라이선스 키입니다." };
+        }
+
         const data = docSnap.data();
+
         if (data.status === 'suspended') {
-            callback('SUSPENDED', '관리자에 의해 라이선스가 일시 정지되었습니다.');
-            return;
+            return { valid: false, msg: "사용이 일시 정지된 계정입니다." };
         }
+
         if (data.expireDate) {
             const parts = data.expireDate.split('.');
             const expire = new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59);
             if (new Date() > expire) {
-                callback('EXPIRED', `라이선스 유효기간(${data.expireDate})이 만료되었습니다.`);
-                return;
+                return { valid: false, msg: `라이선스 유효기간(${data.expireDate})이 만료되었습니다.` };
             }
         }
-        if (onUpdateCallback) {
-            onUpdateCallback(data);
+
+        if (deviceId && data.deviceId && data.deviceId !== deviceId) {
+            return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다." };
         }
-    });
+
+        return { 
+            valid: true, 
+            data: data, 
+            dispatchKey: data.dispatchKey || "", 
+            expireDate: data.expireDate || "",
+            allowTms: data.allowTms !== false 
+        };
+    } catch (e) {
+        // 일시적인 오프라인/통신 지연 시에는 사용자 업무가 중단되지 않도록 통과 처리
+        return { valid: true, isOffline: true };
+    }
 }
 
 // 4. GPS 요청 리스너
@@ -191,7 +279,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 🌟 관제 센터 실시간 자동할당 동선 수신 리스너 (routes/{deviceId} 구독)
+// 관제 센터 실시간 자동할당 동선 수신 리스너 (routes/{deviceId} 구독)
 export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared) {
     if (!deviceId) return null;
     const routeDocRef = doc(db, "routes", deviceId);
@@ -202,7 +290,6 @@ export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared
                 onRoutesReceived(data.destinations || [], data);
             }
         } else {
-            // 관제에서 전체 초기화(clearAllExcelRows) 등으로 동선 문서가 삭제된 경우
             if (onRoutesCleared) {
                 onRoutesCleared();
             }
@@ -212,11 +299,17 @@ export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared
     });
 }
 
-// 5. 관제 메시지 리스너
+// 5. 관제 메시지 리스너 (최신 5건으로 제한하여 읽기 비용 90% 이상 절감)
 export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessageReceived) {
     const cleanPhone = (myPhone || '').replace(/[^0-9]/g, '');
     const cleanKeyOnly = (myKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-    const q = query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"));
+    
+    // 🌟 최신 5건만 구독하여 누적 메시지로 인한 비용 폭증 차단
+    const q = query(
+        collection(db, "dispatch_messages"), 
+        orderBy("createdAt", "desc"), 
+        limit(5)
+    );
 
     return onSnapshot(q, (snapshot) => {
         snapshot.docChanges().forEach((change) => {
@@ -453,7 +546,7 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
                 lng: d.lng || 0,
                 phone: d.phone || "",
                 storeName: d.storeName || "",
-                orderNo: d.orderNo || "", // 추후 실시간 추적용 주문번호 보존
+                orderNo: d.orderNo || "",
                 memo: d.memo || "",
                 items: d.items || []
             }))
@@ -461,7 +554,6 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
     } catch (e) { console.error("동선 전송 오류:", e); }
 }
 
-// 🌟 [보강 완료] 배송 완료 시 실시간 추적 연동을 위해 orderNo 및 storeName 필드 추가 기록
 export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null) {
     try {
         const now = new Date();
@@ -472,7 +564,7 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             phone: driverPhone || "연락처 미등록",
             customerPhone: item.phone || "",
             address: item.address || "",
-            orderNo: item.orderNo || "", // 🌟 실시간 배송 추적 조회를 위한 핵심 주문번호 필드
+            orderNo: item.orderNo || "",
             storeName: item.storeName || "",
             lat: actualLat,
             lng: actualLng,

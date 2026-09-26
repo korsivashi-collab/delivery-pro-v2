@@ -24,7 +24,7 @@ import { getDeviceRealGPS, startGpsWatcher } from './gps.js';
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
 let gpsRequestWatcherUnsub = null;  
-let activeRoutesWatcherUnsub = null; // 관제 실시간 동선 수신 리스너 구독 해제용 변수
+let activeRoutesWatcherUnsub = null;
 
 let onRemoteRoutesReceivedCallback = null;
 let onRemoteRoutesClearedCallback = null;
@@ -35,6 +35,24 @@ let onRemoteRoutesClearedCallback = null;
 export function setRemoteRoutesHandler(onReceived, onCleared) {
     onRemoteRoutesReceivedCallback = onReceived;
     onRemoteRoutesClearedCallback = onCleared;
+}
+
+// ==========================================
+// 0-1. 🌟 로컬스토리지 기반 날짜 대조 만료 검사 (서버 호출 0회)
+// ==========================================
+export function isLicenseExpiredLocally() {
+    const expireDateStr = localStorage.getItem('deliveryProExpireDate');
+    if (!expireDateStr) return false;
+    try {
+        const parts = expireDateStr.split('.');
+        if (parts.length === 3) {
+            const expireDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 23, 59, 59);
+            return new Date() > expireDate;
+        }
+    } catch (e) {
+        console.warn("로컬 날짜 파싱 오류:", e);
+    }
+    return false;
 }
 
 // ==========================================
@@ -104,7 +122,7 @@ export function unlockApp() {
 }
 
 // ==========================================
-// 5. 라이선스 실시간 상태 감시 (정지/만료 감지)
+// 5. 라이선스 상태 감시 (부하 없는 단발성 1회 검증 연동)
 // ==========================================
 export function startLicenseRealtimeWatcher(key) {
     if (licenseWatcherUnsub) licenseWatcherUnsub();
@@ -136,7 +154,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
         syncMyParkingMemosFromServer(phone, deviceId, key);
     }
 
-    // 관제/운영사 메시지 실시간 감시
+    // 관제/운영사 메시지 실시간 감시 (최신 5건 한정 구독)
     if (dispatchMsgWatcherUnsub) dispatchMsgWatcherUnsub();
     dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phone, key, (msg) => {
         saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
@@ -150,7 +168,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     if (gpsRequestWatcherUnsub) gpsRequestWatcherUnsub();
     gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phone, key, getDeviceRealGPS);
 
-    // 🌟 관제 센터 실시간 자동할당 동선 감시 (routes/{deviceId} 구독)
+    // 관제 센터 실시간 자동할당 동선 감시 (routes/{deviceId} 구독)
     if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
     activeRoutesWatcherUnsub = listenToActiveRoutes(
         deviceId, 
@@ -186,6 +204,7 @@ export async function checkSavedAuth() {
 
     const savedKey = localStorage.getItem('deliveryProKey');
     const savedPhone = localStorage.getItem('deliveryProUserPhone');
+    const savedExpire = localStorage.getItem('deliveryProExpireDate');
     const bootScreen = document.getElementById('boot-screen');
 
     if (savedKey) {
@@ -197,8 +216,20 @@ export async function checkSavedAuth() {
         if (inputPhone) inputPhone.value = savedPhone;
     }
 
+    // 🌟 1단계 로컬 만료일 대조: 이미 유효기간이 지났다면 서버 호출 없이 즉시 만료 처리 (비용 0원)
+    if (savedExpire && isLicenseExpiredLocally()) {
+        clearAuthStorage();
+        const authMsg = document.getElementById('auth-message');
+        if (authMsg) authMsg.innerText = `라이선스 유효기간(${savedExpire})이 만료되었습니다.`;
+        const authScreen = document.getElementById('auth-screen');
+        if (authScreen) authScreen.classList.remove('hidden');
+        if (bootScreen) bootScreen.classList.add('hidden');
+        return;
+    }
+
     const cleanDigits = (savedPhone || '').replace(/[^0-9]/g, '');
 
+    // 🌟 2단계 서버 검증: 앱 켤 때 1회 단발성 검증 (getDoc)
     if (savedKey && cleanDigits.length >= 9) {
         try {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
@@ -397,3 +428,5 @@ export async function logout() {
     clearAuthStorage();
     window.location.reload();
 }
+
+window.isLicenseExpiredLocally = isLicenseExpiredLocally;
