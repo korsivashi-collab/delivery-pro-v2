@@ -100,7 +100,7 @@ export async function processSinglePdfFile(file) {
             const textContent = await page.getTextContent({ normalizeWhitespace: true });
             const viewport = page.getViewport({ scale: 1.0 });
 
-            // X좌표 기준 좌(공급자) / 우(공급받는자) 분리 파싱
+            // 좌표 기반 분리 및 추출 실행
             const pageOrders = parseSinglePageOrder(textContent.items, pageNum, viewport.width, viewport.height, file.name);
 
             pageOrders.forEach(ord => {
@@ -126,7 +126,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 3. X좌표 분리 및 공급받는 자(배송지) 전용 정밀 추출 엔진
+// 🌟 3. 고도화된 정보 분류 엔진 (상호, 연락처, 품목 100% 적출)
 // ==========================================
 function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     if (!items || items.length === 0) return [];
@@ -139,28 +139,27 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     }));
 
     if (validTokens.length === 0) return [];
-
-    // 페이지 전체 텍스트
     const allTextJoined = validTokens.map(it => it.text).join(' ');
 
     // 1. 주문번호 감지
     let orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
     const orderNoMatch = allTextJoined.match(/(?:주문번호|오더번호|발주번호)[\s:|]*([A-Z0-9_\-]+)/i);
-    if (orderNoMatch) {
-        orderNo = orderNoMatch[1].trim();
-    }
+    if (orderNoMatch) orderNo = orderNoMatch[1].trim();
 
     // 2. 담당 기사 감지
     let assignedDriver = null;
-    const driverMatch = allTextJoined.match(/(?:담당기사|배송기사|기사명)[\s:|]*([가-힣A-Za-z0-9_\-]+)/);
+    const driverMatch = allTextJoined.match(/담당기사[\s:|]*([0-9\-\.]+)/);
     if (driverMatch) {
-        const dVal = driverMatch[1].trim();
-        if (!/^(주문|발주|배송|No|공급|거래)/.test(dVal)) {
-            assignedDriver = dVal;
+        assignedDriver = formatPhoneNumber(driverMatch[1]);
+    } else {
+        const driverMatch2 = allTextJoined.match(/(?:담당기사|배송기사|기사명)[\s:|]*([가-힣A-Za-z0-9_\-]+)/);
+        if (driverMatch2) {
+            const dVal = driverMatch2[1].trim();
+            if (!/^(주문|발주|배송|No|공급|거래)/.test(dVal)) assignedDriver = dVal;
         }
     }
 
-    // 3. 발송사(공급자 화주) 상호 감지
+    // 3. 발송사(공급자) 감지
     let senderName = '';
     const provStoreMatch = allTextJoined.match(/공급자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
     if (provStoreMatch) {
@@ -169,129 +168,101 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         const generalStoreMatch = allTextJoined.match(/상호\(법인명\)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
         if (generalStoreMatch) senderName = generalStoreMatch[1].split(/[\n\r|]/)[0].trim();
     }
-    if (!senderName && fileName) {
-        senderName = fileName.replace(/\.[^/.]+$/, '').split(/[_\-\s]+/)[0].trim();
-    }
+    if (!senderName && fileName) senderName = fileName.replace(/\.[^/.]+$/, '').split(/[_\-\s]+/)[0].trim();
     if (!senderName) senderName = '정보 없음';
 
-    // 🌟 핵심: A4 너비 기준 공급자(좌측)와 공급받는 자(우측) 영역 물리적 분리
-    // 상단 인적사항 테이블 영역은 보통 X축 42%~45% 이상이 공급받는 자(수취처)
+    // 화면 우측 절반(배송받는곳) 텍스트를 집중 분석하기 위한 필터링
     const splitX = pageWidth * 0.42;
-
-    // 상단 블록(수취자 인적사항 영역) 추출: 상품 테이블 시작 전(보통 y > pageHeight * 0.4)이면서 우측 영역
     const buyerTokens = validTokens.filter(t => t.x >= splitX && t.y >= pageHeight * 0.35);
     const buyerTextCombined = buyerTokens.map(t => t.text).join(' ');
 
     // 4. 배송지명(간판명) 추출
     let storeName = '';
     const storeRegexList = [
-        /(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[\s:|]*([^\n\r|]+)/i,
-        /공급받는\s*자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*([^\n\r|]+)/i
+        /(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[\s:|]*(.+?)(?:\s+(?:연락처|전화|주소|사업자|No\.|구매자|결제|배송비|총|배송요청사항|$))/i,
+        /공급받는\s*자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*(.+?)(?:\s+(?:연락처|전화|주소|사업자|No\.|구매자|결제|배송비|총|배송지명|간판명|$))/i
     ];
     for (const reg of storeRegexList) {
         const m = buyerTextCombined.match(reg) || allTextJoined.match(reg);
         if (m) {
             let val = m[1].replace(/^[|:>\s]+/, '').trim();
-            val = val.split(/(?:연락처|전화|주소|사업자|No\.|구매자)/)[0].trim();
-            if (val && val !== '|' && val.length > 1) {
-                storeName = val;
-                break;
-            }
+            if (val && val !== '|' && val.length > 1) { storeName = val; break; }
         }
     }
 
     // 5. 구매자명 추출
     let buyerName = '';
     const buyerMatch = buyerTextCombined.match(/(?:구매자명|주문자명|수령인|수취인|받는분)[\s:|]*([가-힣A-Za-z0-9]{2,10})/);
-    if (buyerMatch) {
-        buyerName = buyerMatch[1].trim();
-    }
+    if (buyerMatch) buyerName = buyerMatch[1].trim();
 
     if (!storeName) storeName = buyerName || '배송처';
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
-    // 6. 고객 연락처 추출 (공급자 추가연락처 010-8776-5400 배제)
+    // 6. 고객 연락처 추출
     let phone = '';
-    // 수취자 영역에서 우선 검색
     const buyerPhones = buyerTextCombined.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/g) || [];
     if (buyerPhones.length > 0) {
         phone = formatPhoneNumber(buyerPhones[0]);
     } else {
-        // 하이픈 없는 11자리 휴대폰 번호 검색
         const noHyphenMatches = buyerTextCombined.match(/01[016789]\d{7,8}/g) || [];
-        if (noHyphenMatches.length > 0) {
-            phone = formatPhoneNumber(noHyphenMatches[0]);
-        }
+        if (noHyphenMatches.length > 0) phone = formatPhoneNumber(noHyphenMatches[0]);
+    }
+    if (!phone) {
+        const allPhones = allTextJoined.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/g) || [];
+        if (allPhones.length > 1) phone = formatPhoneNumber(allPhones[allPhones.length - 1]);
+        else if (allPhones.length === 1) phone = formatPhoneNumber(allPhones[0]);
     }
 
-    // 7. 배송지 주소 정밀 추출 (수취자 영역 전용)
+    // 7. 배송지 주소 추출
     let rawAddress = '';
-
-    // 수취자 토큰들 중 대한민국 시/도로 시작하는 도로명/지번 패턴 검색
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣A-Za-z0-9\s\(\)\-\,\.]{5,80}?(?:로|길|대로|동|읍|면|리|가)\s*[\d\-]+(?:\s*[가-힣A-Za-z0-9\(\)\,\-\.\s]*)/g;
     
     const buyerAddrMatches = buyerTextCombined.match(regionRegex) || [];
     if (buyerAddrMatches.length > 0) {
         rawAddress = buyerAddrMatches[0];
     } else {
-        // 공급자 주소(예: 건원대로 등)를 배제하고 전체 텍스트에서 2번째 매칭 탐색
         const allAddrMatches = allTextJoined.match(regionRegex) || [];
-        const filtered = allAddrMatches.filter(a => !a.includes('건원대로') && !a.includes('공급자'));
-        if (filtered.length > 0) {
-            rawAddress = filtered[0];
-        } else if (allAddrMatches.length > 1) {
-            rawAddress = allAddrMatches[1];
-        } else if (allAddrMatches.length > 0) {
-            rawAddress = allAddrMatches[0];
-        }
+        if (allAddrMatches.length > 0) rawAddress = allAddrMatches[allAddrMatches.length - 1];
     }
 
-    // 라벨 및 잡음 제거
     rawAddress = rawAddress.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제|인수자)/)[0];
-    rawAddress = rawAddress.replace(/\[\d+\]/g, ' ')
-                           .replace(/받\s*주소/g, ' ')
-                           .replace(/\b받\b/g, ' ')
-                           .replace(/\b주소\b/g, ' ')
-                           .replace(/\|/g, ' ')
-                           .replace(/[:]/g, ' ')
-                           .trim();
+    rawAddress = rawAddress.replace(/\[\d+\]/g, ' ').replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\|/g, ' ').replace(/[:]/g, ' ').trim();
 
-    // 🌟 전체 원본 주소 (상세 호수, 층수 보존)
     const fullAddress = rawAddress.replace(/\s{2,}/g, ' ').trim();
-
-    // 🌟 내비/관제용 정제 주소:
-    // 도로명+숫자+길(예: 공원로6나길 43-2)이 손상되지 않도록 괄호 앞까지만 안전하게 절삭
     let cleanAddr = fullAddress;
     const parenIdx = cleanAddr.indexOf('(');
-    if (parenIdx !== -1) {
-        cleanAddr = cleanAddr.slice(0, parenIdx);
-    }
+    if (parenIdx !== -1) cleanAddr = cleanAddr.slice(0, parenIdx);
     const address = cleanAddr.replace(/\s{2,}/g, ' ').trim();
 
-    // 8. 수취자 사업자번호 추출
+    // 8. 구매자 사업자번호 추출
     let bizNo = '';
     const bizMatches = buyerTextCombined.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/g) || [];
     if (bizMatches.length > 0) {
         bizNo = bizMatches[0].replace(/\s+/g, '-');
     } else {
         const allBiz = allTextJoined.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/g) || [];
-        if (allBiz.length >= 2) bizNo = allBiz[1].replace(/\s+/g, '-');
+        if (allBiz.length >= 2) bizNo = allBiz[allBiz.length - 1].replace(/\s+/g, '-');
     }
 
-    // 9. 배송 요청사항 추출
+    // 9. 결제 수단 및 배송 요청사항 (메모) 추출
     let memo = '';
-    const memoMatch = allTextJoined.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)[\s:|]*([^\n\r|]+)/);
-    if (memoMatch) {
-        memo = memoMatch[1].split(/(?:총\s*상품수량|총주문금액|인수자|배송비|총\s*상품금액)/)[0].trim();
+    let payMethod = '';
+    const payMatch = allTextJoined.match(/결제\s*수단[\s:|]*([가-힣a-zA-Z\s]+)/);
+    if (payMatch) payMethod = payMatch[1].split(/(?:총|배송|No|인수)/)[0].trim();
+
+    const memoMatch = allTextJoined.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)[\s:|]*(.+?)(?:총\s*상품수량|총주문금액|인수자|배송비|총\s*상품금액|거래명세표|$)/);
+    if (memoMatch) memo = memoMatch[1].trim();
+
+    if (payMethod && !memo.includes(payMethod)) {
+        memo = `[결제: ${payMethod}] ` + memo;
     }
 
-    // 10. 품목 테이블 파싱
-    // 행 단위로 묶기
+    // 🌟 10. 품목(Table) 정밀 추출 및 중복 제거(상/하단 보관용 분리)
     const lineMap = new Map();
     validTokens.forEach(t => {
         let matchedY = null;
         for (const ey of lineMap.keys()) {
-            if (Math.abs(ey - t.y) <= 4) { matchedY = ey; break; }
+            if (Math.abs(ey - t.y) <= 6) { matchedY = ey; break; }
         }
         const targetY = matchedY !== null ? matchedY : t.y;
         if (!lineMap.has(targetY)) lineMap.set(targetY, []);
@@ -299,37 +270,64 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     });
 
     const sortedYKeys = Array.from(lineMap.keys()).sort((a, b) => b - a);
-    const orderItems = [];
+    const rawOrderItems = [];
 
     sortedYKeys.forEach(yKey => {
         const lineTokens = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const lineStr = lineTokens.map(t => t.text).join(' ').trim();
 
-        // 번호(1~99)로 시작하는 상품 라인 탐색
-        const rowMatch = lineStr.match(/^(\d{1,2})\s+([★\[\(\w가-힣\s\/\-\.]+?)(?:\s+(\d+(?:\.\d+)?[a-zA-Z가-힣\*]*))?\s+(?:국내산|중국산|수입산)?\s*(\d+)\s+([\d,]+)/);
-        if (rowMatch) {
-            const pName = rowMatch[2].trim().replace(/^[|>\s]+/, '');
-            const pUnit = rowMatch[3] ? rowMatch[3].trim() : '개';
-            const pQty = parseInt(rowMatch[4], 10) || 1;
-            const pPrice = parseInt(rowMatch[5].replace(/,/g, ''), 10) || 0;
-            const pTotal = pPrice * pQty;
-
-            orderItems.push({
-                name: pName,
-                qty: pQty,
-                unit: pUnit,
-                price: pPrice,
-                total: pTotal
-            });
+        // 번호(1~99) 띄어쓰기로 시작하는 테이블 행 탐색
+        if (/^\d{1,3}\s+/.test(lineStr)) {
+            const tokens = lineStr.split(/\s+/);
+            if (tokens.length >= 3 && /^\d+$/.test(tokens[0])) {
+                let numCount = 0;
+                for (let i = tokens.length - 1; i >= 1; i--) {
+                    if (/^[\d,]+$/.test(tokens[i])) numCount++;
+                    else break;
+                }
+                
+                if (numCount > 5) numCount = 5; // 수량,단가,공급가액,세액,총액 (최대 5개 컬럼 한정)
+                
+                if (numCount >= 2) {
+                    const total = parseInt(tokens[tokens.length - 1].replace(/,/g, ''), 10);
+                    let qty = 1, price = 0;
+                    
+                    if (numCount === 2) {
+                        qty = parseInt(tokens[tokens.length - 2].replace(/,/g, ''), 10);
+                        price = total;
+                    } else {
+                        qty = parseInt(tokens[tokens.length - numCount].replace(/,/g, ''), 10);
+                        price = parseInt(tokens[tokens.length - numCount + 1].replace(/,/g, ''), 10);
+                    }
+                    
+                    const nameTokens = tokens.slice(1, tokens.length - numCount);
+                    let pName = nameTokens.join(' ').replace(/^\s+|\s+$/g, '');
+                    
+                    rawOrderItems.push({ name: pName, qty: qty, unit: '개', price: price, total: total });
+                }
+            }
         }
     });
 
-    let qty = orderItems.length > 0 ? orderItems.reduce((sum, it) => sum + it.qty, 0) : 1;
+    // 공급자/공급받는자 등 동일 페이지 중복 인쇄된 상품 리스트 제거 필터
+    const orderItems = [];
+    const seenItems = new Set();
+    rawOrderItems.forEach(it => {
+        const key = `${it.name}_${it.qty}_${it.total}`;
+        if (!seenItems.has(key)) {
+            seenItems.add(key);
+            orderItems.push(it);
+        }
+    });
+
+    let qtySum = orderItems.length > 0 ? orderItems.reduce((sum, it) => sum + it.qty, 0) : 1;
+    let totalAmt = orderItems.length > 0 ? orderItems.reduce((sum, it) => sum + it.total, 0) : 0;
+    
     let itemName = '';
     if (orderItems.length > 1) {
-        itemName = `${orderItems[0].name} 외 ${orderItems.length - 1}건 (총 ${qty}개)`;
+        itemName = `${orderItems[0].name} 외 ${orderItems.length - 1}건`;
     } else if (orderItems.length === 1) {
-        itemName = `${orderItems[0].name} (${orderItems[0].qty}${orderItems[0].unit})`;
+        itemName = `${orderItems[0].name}`;
     } else {
         itemName = '상품 정보 미등록';
     }
@@ -347,9 +345,9 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         phone: phone,
         itemName: itemName,
         unit: orderItems.length > 0 ? orderItems[0].unit : '개',
-        qty: qty,
-        price: '',
-        total: '',
+        qty: qtySum,
+        price: orderItems.length === 1 ? orderItems[0].price : '',
+        total: totalAmt || '',
         memo: memo,
         lat: null,
         lng: null,
