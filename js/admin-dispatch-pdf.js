@@ -100,7 +100,6 @@ export async function processSinglePdfFile(file) {
             const textContent = await page.getTextContent({ normalizeWhitespace: true });
             const viewport = page.getViewport({ scale: 1.0 });
 
-            // 좌표 기반 분리 및 추출 실행
             const pageOrders = parseSinglePageOrder(textContent.items, pageNum, viewport.width, viewport.height, file.name);
 
             pageOrders.forEach(ord => {
@@ -126,12 +125,11 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 🌟 3. 고도화된 정보 분류 엔진 (상호, 연락처, 품목 100% 적출)
+// 🌟 3. X-Y 좌표 동적 매핑 기반 하이브리드 파싱 엔진
 // ==========================================
 function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     if (!items || items.length === 0) return [];
 
-    // 유효한 텍스트 토큰 추출 및 좌표 정규화
     const validTokens = items.filter(it => it.str && it.str.trim() !== '').map(it => ({
         text: it.str.trim(),
         x: Math.round(it.transform[4]),
@@ -139,7 +137,53 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     }));
 
     if (validTokens.length === 0) return [];
-    const allTextJoined = validTokens.map(it => it.text).join(' ');
+
+    // 🌟 PDF 생성기마다 다른 좌표계(Y축 뒤집힘) 자동 보정 및 라인 그룹화
+    const lineMap = new Map();
+    validTokens.forEach(t => {
+        let matchedY = null;
+        for (const ey of lineMap.keys()) {
+            if (Math.abs(ey - t.y) <= 6) { matchedY = ey; break; }
+        }
+        const targetY = matchedY !== null ? matchedY : t.y;
+        if (!lineMap.has(targetY)) lineMap.set(targetY, []);
+        lineMap.get(targetY).push(t);
+    });
+
+    let sortedYKeys = Array.from(lineMap.keys());
+    if (sortedYKeys.length > 1) {
+        let yDirection = -1; // 기본: Y가 큰 쪽이 화면 상단
+        const topToken = validTokens.find(t => t.text.includes('명세표') || t.text.includes('주문일자'));
+        const bottomToken = validTokens.find(t => t.text.includes('총주문금액') || t.text.includes('합계'));
+        if (topToken && bottomToken && topToken.y < bottomToken.y) {
+            yDirection = 1; // Y가 작은 쪽이 화면 상단 (좌표 역전된 PDF)
+        }
+        sortedYKeys.sort((a, b) => (a - b) * yDirection);
+    }
+
+    // 🌟 동적 X좌표 분할선 탐지 (하드코딩 비율 폐기)
+    let splitX = pageWidth * 0.38;
+    const buyerLabelToken = validTokens.find(t => t.text.includes('공급받는') || t.text.includes('구매자') || t.text.includes('배송지명'));
+    if (buyerLabelToken) {
+        splitX = buyerLabelToken.x - 30; // '공급받는 자' 라벨보다 약간 왼쪽을 기준으로 절단
+    }
+
+    const buyerTextLines = [];
+    const allTextLines = [];
+
+    sortedYKeys.forEach(yKey => {
+        const lineTokens = lineMap.get(yKey).sort((a, b) => a.x - b.x);
+        allTextLines.push(lineTokens.map(t => t.text).join(' ').trim());
+
+        // 분할선 우측 데이터만 필터링 (공급받는자 영역)
+        const rightTokens = lineTokens.filter(t => t.x >= splitX);
+        if (rightTokens.length > 0) {
+            buyerTextLines.push(rightTokens.map(t => t.text).join(' ').trim());
+        }
+    });
+
+    const allTextJoined = allTextLines.join(' ');
+    const buyerTextCombined = buyerTextLines.join(' ');
 
     // 1. 주문번호 감지
     let orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
@@ -148,14 +192,15 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
 
     // 2. 담당 기사 감지
     let assignedDriver = null;
-    const driverMatch = allTextJoined.match(/담당기사[\s:|]*([0-9\-\.]+)/);
+    const driverMatch = allTextJoined.match(/(?:담당기사|배송기사|기사명)[\s:|]*([가-힣A-Za-z0-9_\-\.]+)/);
     if (driverMatch) {
-        assignedDriver = formatPhoneNumber(driverMatch[1]);
-    } else {
-        const driverMatch2 = allTextJoined.match(/(?:담당기사|배송기사|기사명)[\s:|]*([가-힣A-Za-z0-9_\-]+)/);
-        if (driverMatch2) {
-            const dVal = driverMatch2[1].trim();
-            if (!/^(주문|발주|배송|No|공급|거래)/.test(dVal)) assignedDriver = dVal;
+        let dVal = driverMatch[1].trim();
+        if (!/^(주문|발주|배송|No|공급|거래)/.test(dVal)) {
+            if (/^01[0-9]{8,9}$/.test(dVal.replace(/[^0-9]/g, ''))) {
+                assignedDriver = formatPhoneNumber(dVal);
+            } else {
+                assignedDriver = dVal;
+            }
         }
     }
 
@@ -171,16 +216,11 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     if (!senderName && fileName) senderName = fileName.replace(/\.[^/.]+$/, '').split(/[_\-\s]+/)[0].trim();
     if (!senderName) senderName = '정보 없음';
 
-    // 화면 우측 절반(배송받는곳) 텍스트를 집중 분석하기 위한 필터링
-    const splitX = pageWidth * 0.42;
-    const buyerTokens = validTokens.filter(t => t.x >= splitX && t.y >= pageHeight * 0.35);
-    const buyerTextCombined = buyerTokens.map(t => t.text).join(' ');
-
     // 4. 배송지명(간판명) 추출
     let storeName = '';
     const storeRegexList = [
-        /(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[\s:|]*(.+?)(?:\s+(?:연락처|전화|주소|사업자|No\.|구매자|결제|배송비|총|배송요청사항|$))/i,
-        /공급받는\s*자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*(.+?)(?:\s+(?:연락처|전화|주소|사업자|No\.|구매자|결제|배송비|총|배송지명|간판명|$))/i
+        /(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명)[\s:|]*(.+?)(?:\s+(?:연락처|전화|주소|사업자|No\.|구매자|결제|배송비|총|배송요청|담당|$))/i,
+        /공급받는\s*자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*(.+?)(?:\s+(?:연락처|전화|주소|사업자|No\.|구매자|결제|배송비|총|배송지명|간판명|담당|$))/i
     ];
     for (const reg of storeRegexList) {
         const m = buyerTextCombined.match(reg) || allTextJoined.match(reg);
@@ -225,7 +265,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         if (allAddrMatches.length > 0) rawAddress = allAddrMatches[allAddrMatches.length - 1];
     }
 
-    rawAddress = rawAddress.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제|인수자)/)[0];
+    rawAddress = rawAddress.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제|인수자|담당기사)/)[0];
     rawAddress = rawAddress.replace(/\[\d+\]/g, ' ').replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\|/g, ' ').replace(/[:]/g, ' ').trim();
 
     const fullAddress = rawAddress.replace(/\s{2,}/g, ' ').trim();
@@ -247,7 +287,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     // 9. 결제 수단 및 배송 요청사항 (메모) 추출
     let memo = '';
     let payMethod = '';
-    const payMatch = allTextJoined.match(/결제\s*수단[\s:|]*([가-힣a-zA-Z\s]+)/);
+    const payMatch = allTextJoined.match(/(?:결제수단|결제\s*수단)[\s:|]*([가-힣a-zA-Z\s]+)/);
     if (payMatch) payMethod = payMatch[1].split(/(?:총|배송|No|인수)/)[0].trim();
 
     const memoMatch = allTextJoined.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)[\s:|]*(.+?)(?:총\s*상품수량|총주문금액|인수자|배송비|총\s*상품금액|거래명세표|$)/);
@@ -257,21 +297,8 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         memo = `[결제: ${payMethod}] ` + memo;
     }
 
-    // 🌟 10. 품목(Table) 정밀 추출 및 중복 제거(상/하단 보관용 분리)
-    const lineMap = new Map();
-    validTokens.forEach(t => {
-        let matchedY = null;
-        for (const ey of lineMap.keys()) {
-            if (Math.abs(ey - t.y) <= 6) { matchedY = ey; break; }
-        }
-        const targetY = matchedY !== null ? matchedY : t.y;
-        if (!lineMap.has(targetY)) lineMap.set(targetY, []);
-        lineMap.get(targetY).push(t);
-    });
-
-    const sortedYKeys = Array.from(lineMap.keys()).sort((a, b) => b - a);
+    // 10. 품목(Table) 정밀 추출 및 중복 제거
     const rawOrderItems = [];
-
     sortedYKeys.forEach(yKey => {
         const lineTokens = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const lineStr = lineTokens.map(t => t.text).join(' ').trim();
@@ -286,7 +313,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
                     else break;
                 }
                 
-                if (numCount > 5) numCount = 5; // 수량,단가,공급가액,세액,총액 (최대 5개 컬럼 한정)
+                if (numCount > 5) numCount = 5; 
                 
                 if (numCount >= 2) {
                     const total = parseInt(tokens[tokens.length - 1].replace(/,/g, ''), 10);
@@ -309,7 +336,6 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         }
     });
 
-    // 공급자/공급받는자 등 동일 페이지 중복 인쇄된 상품 리스트 제거 필터
     const orderItems = [];
     const seenItems = new Set();
     rawOrderItems.forEach(it => {
