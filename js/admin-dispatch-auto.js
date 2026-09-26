@@ -395,15 +395,12 @@ export function renderDispatchDriverDetail() {
     const table = document.getElementById('detail-driver-table');
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
-    const btnDriverPrint = document.getElementById('btn-driver-items-print');
-    const btnSendRoutes = document.getElementById('btn-send-routes-to-drivers');
     
+    // 기사가 선택되지 않았을 때
     if (!state.selectedDispatchDriverId) {
         if (header) header.classList.remove('hidden'); 
         if (table) table.classList.add('hidden'); 
         if (badge) badge.classList.add('hidden'); 
-        if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
-        if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         return;
     }
 
@@ -420,8 +417,6 @@ export function renderDispatchDriverDetail() {
     }
 
     if (assignedItems.length === 0) {
-        if (btnDriverPrint) btnDriverPrint.classList.add('hidden');
-        if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
     }
@@ -448,9 +443,6 @@ export function renderDispatchDriverDetail() {
         theadAddressTh.title = "클릭 시 주소지(지역별) 가나다순으로 정렬합니다";
         theadAddressTh.innerHTML = `배송지 주소 / 고객 정보 <span class="text-[10px] text-blue-600 font-bold">${arrowSymbol}</span>`;
     }
-
-    if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
-    if (btnSendRoutes) btnSendRoutes.classList.remove('hidden');
 
     let html = '';
     assignedItems.forEach((item, idx) => {
@@ -775,13 +767,13 @@ export async function sendRoutesToDrivers() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane"></i> 동선 전송';
+            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 동선 전송';
         }
     }
 }
 
 // ==========================================
-// 8. 선택된 기사 전용 상품 합산 피킹 리스트
+// 8. 선택된 기사 전용 상품 합산 피킹 리스트 (100% 온전 보존)
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -895,7 +887,7 @@ export function printSelectedDriverItemList() {
 }
 
 // ==========================================
-// 9. 전역 Window 객체 바인딩
+// 9. 전역 Window 객체 바인딩 (100% 온전 보존)
 // ==========================================
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
@@ -905,10 +897,10 @@ window.toggleAllDispatchDrivers = toggleAllDispatchDrivers;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
 window.selectDispatchDriver = selectDispatchDriver;
-window.sortDetailByAddress = sortDetailByAddress; // 🌟 주소지 정렬 함수 바인딩
+window.sortDetailByAddress = sortDetailByAddress; // 주소지 정렬 함수
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
 window.revertAutoDispatch = revertAutoDispatch;
 window.sendRoutesToDrivers = sendRoutesToDrivers;
-window.printSelectedDriverItemList = printSelectedDriverItemList;
+window.printSelectedDriverItemList = printSelectedDriverItemList; // 외부 참조 완전 보존
