@@ -26,7 +26,6 @@ function getGeoCache() {
 
 function saveGeoCache(cache) {
     try {
-        // 캐시 항목이 3000개를 넘어가면 오래된 순서대로 정리하여 용량 보호
         const keys = Object.keys(cache);
         if (keys.length > 3000) {
             const trimmedCache = {};
@@ -68,7 +67,7 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
-// 2. 단일 PDF 파일 로드 및 페이지별 텍스트 파싱
+// 2. 단일 PDF 파일 로드 및 페이지별 범용 파싱 엔진
 // ==========================================
 export async function processSinglePdfFile(file) {
     if (!window.pdfjsLib) {
@@ -86,31 +85,35 @@ export async function processSinglePdfFile(file) {
         const totalPages = pdf.numPages;
 
         const extractedOrders = [];
-        const seenOrderNos = new Set();
+        const seenOrderKeys = new Set();
 
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             if (dropZone) {
                 dropZone.innerHTML = `
                     <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
                         <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                        <span>대용량 PDF 분석 중... (${pageNum} / ${totalPages} 페이지)</span>
+                        <span>대용량 PDF 정밀 분석 중... (${pageNum} / ${totalPages} 페이지)</span>
                     </div>`;
             }
 
             const page = await pdf.getPage(pageNum);
-            const textContent = await page.getTextContent();
-            
-            // X좌표 기반 좌/우 공간 분리 파싱
-            const pageLines = groupTextContentByLines(textContent.items);
-            const orderData = parseOrderFromPageLines(pageLines, pageNum);
+            const textContent = await page.getTextContent({ normalizeWhitespace: true });
+            const viewport = page.getViewport({ scale: 1.0 });
 
-            if (orderData && (orderData.address || orderData.storeName || orderData.orderNo)) {
-                if (orderData.orderNo && seenOrderNos.has(orderData.orderNo)) {
-                    continue;
+            // 범용 스마트 텍스트 블록 파싱 실행
+            const pageOrders = parseOrdersFromPage(textContent.items, pageNum, viewport.width, file.name);
+
+            pageOrders.forEach(ord => {
+                // 고유 식별 키 생성 (주문번호 또는 배송지주소+상호명)
+                const uniqueKey = ord.orderNo && !ord.orderNo.startsWith('PDF-')
+                    ? ord.orderNo
+                    : `${ord.address}___${ord.storeName}`;
+
+                if (!seenOrderKeys.has(uniqueKey) && (ord.address || ord.storeName)) {
+                    seenOrderKeys.add(uniqueKey);
+                    extractedOrders.push(ord);
                 }
-                if (orderData.orderNo) seenOrderNos.add(orderData.orderNo);
-                extractedOrders.push(orderData);
-            }
+            });
         }
 
         return extractedOrders;
@@ -124,225 +127,257 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 3. Y축 정렬 및 X축 기준 좌(공급자 제외) / 우(수취자) 분리 엔진
+// 3. 다중 양식 대응 인공지능형 PDF 데이터 추출 알고리즘
 // ==========================================
-function groupTextContentByLines(items) {
+function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
     if (!items || items.length === 0) return [];
-    const lineMap = new Map();
 
-    items.forEach(item => {
-        const str = item.str ? item.str.trim() : '';
-        if (!str) return;
+    // 1단계: 텍스트 아이템들을 좌표 기반으로 정렬 (위 -> 아래, 좌 -> 우)
+    const sortedItems = [...items].filter(it => it.str && it.str.trim() !== '').map(it => ({
+        text: it.str.trim(),
+        x: Math.round(it.transform[4]),
+        y: Math.round(it.transform[5])
+    }));
 
-        const y = Math.round(item.transform[5]);
-        const x = Math.round(item.transform[4]);
-
-        let matchedY = null;
-        for (const existingY of lineMap.keys()) {
-            if (Math.abs(existingY - y) <= 4) matchedY = existingY;
-        }
-
-        const targetY = matchedY !== null ? matchedY : y;
-        if (!lineMap.has(targetY)) lineMap.set(targetY, []);
-        lineMap.get(targetY).push({ x, text: str });
+    sortedItems.sort((a, b) => {
+        if (Math.abs(b.y - a.y) > 4) return b.y - a.y; // 상단 행 우선
+        return a.x - b.x; // 좌측 우선
     });
 
-    const sortedYKeys = Array.from(lineMap.keys()).sort((a, b) => b - a);
-    const sortedLines = [];
+    const fullTextLines = [];
+    let currentY = null;
+    let currentLineTokens = [];
 
-    sortedYKeys.forEach(yKey => {
-        const lineItems = lineMap.get(yKey).sort((a, b) => a.x - b.x);
-        
-        // x >= 220 영역만 공급받는 자(수취자) 데이터로 인정 (좌측 공급자 주소 배제)
-        const rightItems = lineItems.filter(i => i.x >= 220);
-        const rightText = rightItems.map(i => i.text).join(' ').trim();
-        const fullText = lineItems.map(i => i.text).join(' ').trim();
-
-        if (fullText) {
-            sortedLines.push({ y: yKey, fullText, rightText });
+    sortedItems.forEach(item => {
+        if (currentY === null || Math.abs(item.y - currentY) > 4) {
+            if (currentLineTokens.length > 0) {
+                fullTextLines.push(currentLineTokens);
+            }
+            currentY = item.y;
+            currentLineTokens = [item];
+        } else {
+            currentLineTokens.push(item);
         }
     });
+    if (currentLineTokens.length > 0) fullTextLines.push(currentLineTokens);
 
-    return sortedLines;
-}
+    // 플랫 텍스트 리스트
+    const flatTokens = sortedItems.map(it => it.text);
+    const combinedFullText = flatTokens.join(' ');
 
-// ==========================================
-// 4. 상품 테이블 전용 파싱 헬퍼
-// ==========================================
-function parseItemLine(text, itemsArray) {
-    const rowMatch = text.match(/^(\d+)\s+(.+)/);
-    if (!rowMatch) return;
-    
-    const rest = rowMatch[2];
-    const priceMatch = rest.match(/(\d+)\s+[\d,]+(?:\s+[\d,]+)*$/);
-    
-    if (priceMatch) {
-        const qtyNum = parseInt(priceMatch[1], 10) || 1;
-        const nameStr = rest.slice(0, priceMatch.index).trim();
-        const unitMatch = nameStr.match(/(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
-        const unitStr = unitMatch ? unitMatch[0] : '개';
-        itemsArray.push({ name: nameStr, qty: qtyNum, unit: unitStr });
+    // 2단계: 양식 내 주요 메타데이터 추출 (주문번호, 담당기사, 공급자 상호)
+    let orderNo = '';
+    const orderNoMatch = combinedFullText.match(/(?:주문번호|오더번호|발주번호)[\s:|]*([A-Z0-9_\-]+)/i);
+    if (orderNoMatch) {
+        orderNo = orderNoMatch[1].trim();
     } else {
-        const qtyMatch = rest.match(/(\d+)\s*(개|EA|박스|box|kg|g|팩|포|캔|묶음|판|ea)/i);
-        if (qtyMatch) {
-            const qtyNum = parseInt(qtyMatch[1], 10) || 1;
-            const unitStr = qtyMatch[2];
-            const nameStr = rest.replace(qtyMatch[0], '').trim();
-            itemsArray.push({ name: nameStr || rest, qty: qtyNum, unit: unitStr });
-        } else {
-            itemsArray.push({ name: rest, qty: 1, unit: '개' });
-        }
+        orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
     }
-}
 
-// ==========================================
-// 5. 주문 정보 파싱 및 주소 정제 규칙 엔진
-// ==========================================
-function parseOrderFromPageLines(lines, pageNum) {
-    let storeName = '';
+    let assignedDriver = null;
+    const driverMatch = combinedFullText.match(/(?:담당기사|배송기사|기사명)[\s:|]*([가-힣A-Za-z0-9_\-]+)/);
+    if (driverMatch) {
+        const dVal = driverMatch[1].trim();
+        if (!/^(주문|발주|배송|No|공급)/.test(dVal)) assignedDriver = dVal;
+    }
+
+    // 공급자(화주사)명 감지
     let senderName = '';
-    let phone = '';
-    let address = '';
-    let fullAddress = '';
-    let memo = '';
-    let orderNo = `PDF-${pageNum}-${Date.now().toString().slice(-4)}`;
-    let items = [];
-
-    let isItemSection = false;
-    let buyerSectionLines = [];
-    let fullRawTextLines = [];
-
-    lines.forEach(line => {
-        fullRawTextLines.push(line.fullText);
-
-        if (/No\.|상품명|단가|수량|규격/i.test(line.fullText)) isItemSection = true;
-
-        if (isItemSection) {
-            if (/결제\s*수단|총\s*상품수량|배송비|총\s*주문금액|합계/i.test(line.fullText)) {
-                isItemSection = false;
-            } else if (/^\d+\s+/.test(line.fullText.trim())) {
-                parseItemLine(line.fullText, items);
-            }
-        } else {
-            if (line.rightText && line.rightText.length > 1) {
-                buyerSectionLines.push(line.rightText);
-            }
-        }
-
-        if (!memo && /(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/.test(line.fullText)) {
-            memo = line.fullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)\s*[:|]?\s*(.+)/)[1].trim();
-        }
-        if (/주문번호|오더번호|발주번호/.test(line.fullText)) {
-            const m = line.fullText.match(/(?:주문번호|오더번호|발주번호)\s*[:|]?\s*([A-Z0-9_\-]+)/i);
-            if (m) orderNo = m[1].trim();
-        }
-    });
-
-    // 1단계: 수취자 영역에서 상호 및 연락처 탐색
-    buyerSectionLines.forEach(text => {
-        // 🌟 수령처 (받으시는 분, 배송지)
-        if (/(?:배송지명|간판명|매장명|가게명|상호명|상호|수령인|수신자|수취인|받는\s*분|받는분)/.test(text)) {
-            let val = text.replace(/.*(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호\(법인명\)|상호명|상호|수령인|수신자|수취인|받는\s*분|받는분)\s*[:|]?\s*/i, '').trim();
-            if (val && !/^\d+$/.test(val)) storeName = val; 
-        }
-        
-        // 🌟 발송자 (보내는 분, 판매처, 주문자)
-        if (!senderName && /(?:발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는\s*분|보내는분|보내는사람|구매자명|주문자명|주문자|발주자|구매자|고객명)/.test(text)) {
-            let val = text.replace(/.*(?:발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는\s*분|보내는분|보내는사람|구매자명|주문자명|주문자|발주자|구매자|고객명)\s*[:|]?\s*/i, '').trim();
-            if (val && !/^\d+$/.test(val)) senderName = val;
-        }
-        
-        if (!phone && /(?:연락처|전화|휴대폰|핸드폰)/.test(text)) {
-            let m = text.match(/[0-9\-]{9,15}/);
-            if (m) phone = formatPhoneNumber(m[0]);
-        } else if (!phone) {
-            let m = text.match(/01[016789]-?\d{3,4}-?\d{4}/);
-            if (m) phone = formatPhoneNumber(m[0]);
-        }
-    });
-
-    const fullBuyerString = buyerSectionLines.join(' ');
-    if (!storeName) {
-        const m = fullBuyerString.match(/(?:배송지명\(간판명\)|배송지명|간판명|매장명|가게명|상호|수령인|받는\s*분)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
-        if (m) storeName = m[1].trim();
+    const senderMatch = combinedFullText.match(/(?:공급자|출고처|발송처|화주)[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
+    if (senderMatch) {
+        senderName = senderMatch[1].split(/[\n\r|]/)[0].trim();
     }
     if (!senderName) {
-        const m = fullBuyerString.match(/(?:구매자명|주문자명|보내는\s*분|판매처|발송자)\s*[:|]\s*([^\s\d]+(?:[ \t]+[^\s\d]+)*)/);
-        if (m) senderName = m[1].trim();
+        const generalStore = combinedFullText.match(/상호\(법인명\)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
+        if (generalStore) senderName = generalStore[1].split(/[\n\r|]/)[0].trim();
     }
+    if (!senderName && fileName) {
+        senderName = fileName.replace(/\.[^/.]+$/, '').split(/[_\-\s]+/)[0].trim();
+    }
+    if (!senderName) senderName = '정보 없음';
 
-    if (!storeName) storeName = senderName || '배송처 미상';
-    if (!senderName) senderName = storeName;
-
-    // 상호명 앞 특수기호 및 닫는 괄호 정제
-    storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
-
-    // 2단계: 주소 추출 및 원본/정제 분리
-    const combinedCandidate = fullBuyerString + ' ' + fullRawTextLines.join(' ');
-    const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
-    const regionMatch = fullBuyerString.match(regionRegex) || combinedCandidate.match(regionRegex);
-
-    if (regionMatch) {
-        let rawAddr = regionMatch[0];
-
-        // 필드 라벨 및 우편번호/잡음 정리
-        rawAddr = rawAddr.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제)/)[0];
-        rawAddr = rawAddr.replace(/\[\d+\]/g, ' ')
-                         .replace(/받\s*주소/g, ' ')
-                         .replace(/\b받\b/g, ' ')
-                         .replace(/\b주소\b/g, ' ')
-                         .replace(/\|/g, ' ')
-                         .replace(/[:]/g, ' ')
-                         .trim();
-
-        // 🌟 원본 전체 주소 보존 (층, 호수, 괄호 등 인쇄용 상세정보 유지)
-        fullAddress = rawAddr.replace(/\s{2,}/g, ' ').trim();
-
-        // 🌟 내비/관제용 정제 주소: '(' 가 인식되면 뒷부분 절삭
-        let cleanAddr = fullAddress;
-        const parenIdx = cleanAddr.indexOf('(');
-        if (parenIdx !== -1) {
-            cleanAddr = cleanAddr.slice(0, parenIdx);
+    // 3단계: [공급받는 자 / 수취처] 배송지 정보 정밀 추출
+    // 표에서 라벨과 값이 셀로 분리되어 있는 경우를 완벽 해결하기 위해 인접 토큰 검색기 활용
+    function findValueAfterLabel(labelKeywords) {
+        for (let i = 0; i < flatTokens.length; i++) {
+            const tok = flatTokens[i];
+            for (const kw of labelKeywords) {
+                if (tok.includes(kw)) {
+                    // 같은 토큰 안에 콜론이나 값으로 들어있는 경우
+                    let directVal = tok.replace(new RegExp(`.*${kw}\\s*[:|]?\\s*`, 'i'), '').trim();
+                    directVal = directVal.replace(/^[|:>\s]+/, '').trim();
+                    if (directVal && directVal !== '|' && directVal.length > 1) {
+                        return directVal;
+                    }
+                    // 다음 토큰 1~3개 뒤 탐색 (중간의 '|' 기호 건너뜀)
+                    for (let step = 1; step <= 3; step++) {
+                        if (i + step < flatTokens.length) {
+                            let nextTok = flatTokens[i + step].trim();
+                            nextTok = nextTok.replace(/^[|:>\s]+/, '').trim();
+                            if (nextTok && nextTok !== '|' && nextTok.length > 0 && !labelKeywords.some(k => nextTok.includes(k))) {
+                                return nextTok;
+                            }
+                        }
+                    }
+                }
+            }
         }
-
-        address = cleanAddr.replace(/\s{2,}/g, ' ').trim();
+        return '';
     }
 
-    // 아이템 수량 합산 처리
-    let qty = 1;
+    // 1) 수령처 상호(간판명)
+    let storeName = findValueAfterLabel(['배송지명(간판명)', '배송지명', '간판명', '매장명', '가게명', '수령처']);
+    if (!storeName) {
+        storeName = findValueAfterLabel(['상호명', '상호', '수령인', '수취인', '받는분']);
+    }
+
+    // 2) 구매자명 / 주문자명
+    let buyerName = findValueAfterLabel(['구매자명', '주문자명', '발주자', '구매자', '고객명']);
+    if (!buyerName) buyerName = storeName || '고객';
+
+    // 3) 수취인 연락처
+    let phone = '';
+    const phoneCandidates = combinedFullText.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/g) || [];
+    if (phoneCandidates.length > 0) {
+        // 공급자 연락처(보통 상단 첫 번째)를 제외하고 배송지 연락처를 우선 매칭
+        phone = formatPhoneNumber(phoneCandidates[phoneCandidates.length - 1]);
+        if (phoneCandidates.length >= 2) {
+            phone = formatPhoneNumber(phoneCandidates[1]);
+        }
+    }
+
+    // 4) 배송지 주소 (가장 핵심: 한국 주소 패턴 기반 자동 탐지)
+    let rawAddress = '';
+
+    // A. 라벨 뒤의 주소 우선 탐색
+    for (let i = 0; i < flatTokens.length; i++) {
+        if (flatTokens[i] === '주소' || flatTokens[i].endsWith('주소')) {
+            for (let step = 1; step <= 4; step++) {
+                if (i + step < flatTokens.length) {
+                    const candidate = flatTokens[i + step].replace(/^[|:>\s]+/, '').trim();
+                    if (/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(candidate)) {
+                        // 공급자 주소(보통 구리시 본사 등 첫 번째 주소)와 공급받는 자 주소가 있을 때 두 번째 주소를 우선 채택
+                        rawAddress = candidate;
+                    }
+                }
+            }
+        }
+    }
+
+    // B. 주소 라벨이 없거나 토큰이 분리된 경우, 전체 텍스트에서 배송 주소 패턴 다중 검출
+    if (!rawAddress || rawAddress.includes('건원대로')) {
+        const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣A-Za-z0-9\s\(\)\-\,\.]{6,60}?(?:로|길|동|읍|면|가)\s*[\d\-]+(?:\s*[가-힣A-Za-z0-9\(\)\,\-\.\s]*)/g;
+        const allAddrMatches = combinedFullText.match(regionRegex) || [];
+        
+        if (allAddrMatches.length > 0) {
+            // 본사 공급자 주소(예: 건원대로 등)를 거르고 실제 배송 수취 주소 선택
+            const buyerAddrs = allAddrMatches.filter(a => !a.includes('건원대로') && !a.includes('공급자'));
+            if (buyerAddrs.length > 0) {
+                rawAddress = buyerAddrs[0];
+            } else {
+                rawAddress = allAddrMatches[allAddrMatches.length - 1];
+            }
+        }
+    }
+
+    // C. 주소 뒤쪽에 붙은 라벨 및 잡음 텍스트 정밀 제거
+    rawAddress = rawAddress.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제|인수자)/)[0];
+    rawAddress = rawAddress.replace(/\[\d+\]/g, ' ')
+                           .replace(/받\s*주소/g, ' ')
+                           .replace(/\b받\b/g, ' ')
+                           .replace(/\b주소\b/g, ' ')
+                           .replace(/\|/g, ' ')
+                           .replace(/[:]/g, ' ')
+                           .trim();
+
+    const fullAddress = rawAddress.replace(/\s{2,}/g, ' ').trim();
+
+    // 내비/관제용 정제 주소: 괄호'(' 이전 주소 추출
+    let cleanAddr = fullAddress;
+    const parenIdx = cleanAddr.indexOf('(');
+    if (parenIdx !== -1) {
+        cleanAddr = cleanAddr.slice(0, parenIdx);
+    }
+    const address = cleanAddr.replace(/\s{2,}/g, ' ').trim();
+
+    // 5) 사업자번호 추출
+    let bizNo = '';
+    const bizMatches = combinedFullText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/g) || [];
+    if (bizMatches.length >= 2) {
+        bizNo = bizMatches[1].replace(/\s+/g, '-');
+    } else if (bizMatches.length === 1) {
+        bizNo = bizMatches[0].replace(/\s+/g, '-');
+    }
+
+    // 6) 배송 요청사항(메모) 추출
+    let memo = '';
+    const memoMatch = combinedFullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)[\s:|]*([^\n\r|]+)/);
+    if (memoMatch) {
+        memo = memoMatch[1].split(/(?:총\s*상품수량|총주문금액|인수자|배송비)/)[0].trim();
+    }
+
+    // 7) 상품 품목(Items) 파싱
+    const items = [];
+    fullTextLines.forEach(lineTokens => {
+        const lineStr = lineTokens.map(t => t.text).join(' ').trim();
+        // 번호로 시작하는 상품 테이블 행 패턴 (예: "1 ★공산 핫★ 참치 ... 1 13,840 ...")
+        const rowMatch = lineStr.match(/^(\d+)\s+([★\[\(\w가-힣\s\/\-\.]+?)(?:\s+(\d+(?:\.\d+)?[a-zA-Z가-힣]*))?\s+(?:국내산|중국산|수입산)?\s*(\d+)\s+([\d,]+)/);
+        if (rowMatch) {
+            const pName = rowMatch[2].trim().replace(/^[|>\s]+/, '');
+            const pUnit = rowMatch[3] ? rowMatch[3].trim() : '개';
+            const pQty = parseInt(rowMatch[4], 10) || 1;
+            const pPrice = parseInt(rowMatch[5].replace(/,/g, ''), 10) || 0;
+            const pTotal = pPrice * pQty;
+
+            items.push({
+                name: pName,
+                qty: pQty,
+                unit: pUnit,
+                price: pPrice,
+                total: pTotal
+            });
+        }
+    });
+
+    let qty = items.length > 0 ? items.reduce((sum, it) => sum + it.qty, 0) : 1;
     let itemName = '';
     if (items.length > 1) {
-        qty = items.reduce((sum, item) => sum + (item.qty || 1), 0);
-        itemName = `${items[0].name} 외 ${items.length - 1}건`;
+        itemName = `${items[0].name} 외 ${items.length - 1}건 (총 ${qty}개)`;
     } else if (items.length === 1) {
-        qty = items[0].qty || 1;
-        itemName = `${items[0].name} (${qty}${items[0].unit})`;
+        itemName = `${items[0].name} (${items[0].qty}${items[0].unit})`;
+    } else {
+        itemName = '상품 정보 미등록';
     }
 
-    return {
+    // 상호명이 비어있을 경우 보정
+    if (!storeName) storeName = buyerName || '배송처';
+    storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
+
+    return [{
         id: Date.now() + Math.random(),
-        assignedDriver: null,
-        senderName,
-        orderNo,
-        bizNo: '',
-        address, // 내비/관제 목록 표시용 정제 주소
-        fullAddress: fullAddress || address, // 🌟 주문서 인쇄용 원본 상세 주소 (층수, 호수 보존)
-        storeName,
-        phone,
-        itemName,
+        assignedDriver: assignedDriver,
+        senderName: senderName,
+        buyerName: buyerName,
+        orderNo: orderNo,
+        bizNo: bizNo,
+        address: address, // 내비/관제용 도로명 번지 주소
+        fullAddress: fullAddress || address, // 🌟 인쇄용 층/호수 원본 상세 주소
+        storeName: storeName,
+        phone: phone,
+        itemName: itemName,
         unit: items.length > 0 ? items[0].unit : '개',
-        qty,
+        qty: qty,
         price: '',
         total: '',
-        memo,
+        memo: memo,
         lat: null,
         lng: null,
-        items
-    };
+        items: items
+    }];
 }
 
 // ==========================================
-// 6. 주소 좌표(위/경도) 변환 (캐시 우선 확인 시스템)
+// 4. 주소 좌표(위/경도) 지오코딩 엔진 (캐시 우선 확인)
 // ==========================================
 async function getCoordsFromAddress(address) {
     if (!address) return null;
@@ -394,12 +429,11 @@ export async function batchGeocodePdfList(items) {
             dropZone.innerHTML = `
                 <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
                     <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                    <span>PDF 배송지 좌표 분석 중... (${i + 1} / ${items.length})</span>
+                    <span>배송지 정밀 좌표 분석 중... (${i + 1} / ${items.length})</span>
                 </div>`;
         }
 
         if (item.address) {
-            // 🌟 fullAddress가 유실되지 않도록 보존
             if (!item.fullAddress) item.fullAddress = item.address;
 
             const isCached = !!cache[item.address.trim()];
@@ -421,7 +455,7 @@ export async function batchGeocodePdfList(items) {
 }
 
 // ==========================================
-// 7. 전역 Window 객체 바인딩
+// 5. 전역 Window 객체 바인딩
 // ==========================================
 window.formatPhoneNumber = formatPhoneNumber;
 window.processSinglePdfFile = processSinglePdfFile;
