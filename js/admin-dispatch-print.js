@@ -1129,15 +1129,27 @@ export function executePickingListPrint() {
     let allDriversPagesHtml = '';
     let validPageCount = 0;
 
-    // 🌟 [핵심] 브라우저 가상 측정 컨테이너 생성 (A4 1페이지 실제 렌더링 높이 실측용)
+    // 🌟 [핵심 개선] 실제 내용물 순수 높이 측정을 위한 가상 컨테이너 생성 (height 고정 해제)
     const measureContainer = document.createElement('div');
     measureContainer.style.cssText = 'position:fixed;left:-9999px;top:0;width:210mm;box-sizing:border-box;visibility:hidden;z-index:-999;';
-    measureContainer.innerHTML = `<style>${pickingPrintStyles}</style><div id="measure-target-inner"></div>`;
+    
+    // 측정 중에는 height: 297mm를 강제로 해제하여 순수 컨텐츠가 차지하는 높이를 실측
+    measureContainer.innerHTML = `
+        <style>
+            ${pickingPrintStyles}
+            .print-page { 
+                height: auto !important; 
+                max-height: none !important; 
+                overflow: visible !important; 
+            }
+        </style>
+        <div id="measure-target-inner"></div>
+    `;
     document.body.appendChild(measureContainer);
     const measureTarget = measureContainer.querySelector('#measure-target-inner');
 
-    // A4 1페이지(297mm) 가용 높이 임계값 (상하 여백 및 안전 마진 적용: 약 1040px)
-    const A4_MAX_PAGE_HEIGHT_PX = 1040;
+    // A4 1페이지 실제 인쇄 안전 높이 (297mm = 약 1,122px 중 상하 여백 및 브라우저 프린터 헤더 마진을 고려한 임계값: 1,020px)
+    const A4_PAGE_SAFE_HEIGHT_PX = 1020;
 
     selectedDriverList.forEach((driverName) => {
         const driverOrders = (state.parsedExcelList || []).filter(item => 
@@ -1178,20 +1190,21 @@ export function executePickingListPrint() {
         const aggregatedList = Object.values(aggregationMap).sort((a, b) => b.totalQty - a.totalQty);
         validPageCount++;
 
-        // 1단계: 1열 형태로 임시 렌더링하여 실제 높이를 측정
+        // 1단계: 1열 형태로 가상 렌더링 후 순수 내용물 전체 높이를 실측
         const singleColHtml = buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, false, dateStr);
         measureTarget.innerHTML = singleColHtml;
 
-        const actualMeasuredHeight = measureTarget.firstElementChild ? measureTarget.firstElementChild.offsetHeight : 0;
+        const pageEl = measureTarget.firstElementChild;
+        const actualMeasuredHeight = pageEl ? pageEl.scrollHeight : 0;
 
-        // 2단계: 실측 높이가 A4 1페이지 한계(1040px)를 초과하여 2페이지로 넘어갈 때만 2열 모드로 전환!
-        const isOverflow = actualMeasuredHeight > A4_MAX_PAGE_HEIGHT_PX;
+        // 2단계: 순수 높이가 A4 1장의 한계(1,020px)를 넘어 실제로 2페이지로 밀리는 경우에만 2열로 분할!
+        const isOverflow = actualMeasuredHeight > A4_PAGE_SAFE_HEIGHT_PX;
 
         if (isOverflow) {
-            // A4 1장을 넘칠 경우 -> 2열 나란히 분할하여 1장에 수납
+            // 2페이지로 넘어감 -> 2열로 분할하여 1장에 수납
             allDriversPagesHtml += buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, true, dateStr);
         } else {
-            // A4 1장에 안전하게 들어갈 경우 -> 보기 편한 1열 그대로 출력
+            // 1페이지 안에 완전히 들어감 -> 보기 좋은 1열 그대로 유지
             allDriversPagesHtml += singleColHtml;
         }
     });
