@@ -97,14 +97,13 @@ export async function processSinglePdfFile(file) {
             }
 
             const page = await pdf.getPage(pageNum);
-            const textContent = await page.getTextContent({ normalizeWhitespace: true });
+            const textContent = await page.getPageContent ? await page.getPageContent() : await page.getTextContent({ normalizeWhitespace: true });
             const viewport = page.getViewport({ scale: 1.0 });
 
             // 범용 스마트 텍스트 블록 파싱 실행
             const pageOrders = parseOrdersFromPage(textContent.items, pageNum, viewport.width, file.name);
 
             pageOrders.forEach(ord => {
-                // 고유 식별 키 생성 (주문번호 또는 배송지주소+상호명)
                 const uniqueKey = ord.orderNo && !ord.orderNo.startsWith('PDF-')
                     ? ord.orderNo
                     : `${ord.address}___${ord.storeName}`;
@@ -129,11 +128,11 @@ export async function processSinglePdfFile(file) {
 // ==========================================
 // 3. 다중 양식 대응 인공지능형 PDF 데이터 추출 알고리즘
 // ==========================================
-function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
-    if (!items || items.length === 0) return [];
+function parseOrdersFromPage(rawPdfItems, pageNum, pageWidth, fileName) {
+    if (!rawPdfItems || rawPdfItems.length === 0) return [];
 
     // 1단계: 텍스트 아이템들을 좌표 기반으로 정렬 (위 -> 아래, 좌 -> 우)
-    const sortedItems = [...items].filter(it => it.str && it.str.trim() !== '').map(it => ({
+    const sortedItems = [...rawPdfItems].filter(it => it.str && it.str.trim() !== '').map(it => ({
         text: it.str.trim(),
         x: Math.round(it.transform[4]),
         y: Math.round(it.transform[5])
@@ -161,11 +160,10 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
     });
     if (currentLineTokens.length > 0) fullTextLines.push(currentLineTokens);
 
-    // 플랫 텍스트 리스트
     const flatTokens = sortedItems.map(it => it.text);
     const combinedFullText = flatTokens.join(' ');
 
-    // 2단계: 양식 내 주요 메타데이터 추출 (주문번호, 담당기사, 공급자 상호)
+    // 2단계: 양식 내 메타데이터 추출 (주문번호, 담당기사, 공급자 상호)
     let orderNo = '';
     const orderNoMatch = combinedFullText.match(/(?:주문번호|오더번호|발주번호)[\s:|]*([A-Z0-9_\-]+)/i);
     if (orderNoMatch) {
@@ -197,19 +195,16 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
     if (!senderName) senderName = '정보 없음';
 
     // 3단계: [공급받는 자 / 수취처] 배송지 정보 정밀 추출
-    // 표에서 라벨과 값이 셀로 분리되어 있는 경우를 완벽 해결하기 위해 인접 토큰 검색기 활용
     function findValueAfterLabel(labelKeywords) {
         for (let i = 0; i < flatTokens.length; i++) {
             const tok = flatTokens[i];
             for (const kw of labelKeywords) {
                 if (tok.includes(kw)) {
-                    // 같은 토큰 안에 콜론이나 값으로 들어있는 경우
                     let directVal = tok.replace(new RegExp(`.*${kw}\\s*[:|]?\\s*`, 'i'), '').trim();
                     directVal = directVal.replace(/^[|:>\s]+/, '').trim();
                     if (directVal && directVal !== '|' && directVal.length > 1) {
                         return directVal;
                     }
-                    // 다음 토큰 1~3개 뒤 탐색 (중간의 '|' 기호 건너뜀)
                     for (let step = 1; step <= 3; step++) {
                         if (i + step < flatTokens.length) {
                             let nextTok = flatTokens[i + step].trim();
@@ -239,24 +234,21 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
     let phone = '';
     const phoneCandidates = combinedFullText.match(/01[016789][-\s]?\d{3,4}[-\s]?\d{4}/g) || [];
     if (phoneCandidates.length > 0) {
-        // 공급자 연락처(보통 상단 첫 번째)를 제외하고 배송지 연락처를 우선 매칭
         phone = formatPhoneNumber(phoneCandidates[phoneCandidates.length - 1]);
         if (phoneCandidates.length >= 2) {
             phone = formatPhoneNumber(phoneCandidates[1]);
         }
     }
 
-    // 4) 배송지 주소 (가장 핵심: 한국 주소 패턴 기반 자동 탐지)
+    // 4) 배송지 주소 정밀 추출
     let rawAddress = '';
 
-    // A. 라벨 뒤의 주소 우선 탐색
     for (let i = 0; i < flatTokens.length; i++) {
         if (flatTokens[i] === '주소' || flatTokens[i].endsWith('주소')) {
             for (let step = 1; step <= 4; step++) {
                 if (i + step < flatTokens.length) {
                     const candidate = flatTokens[i + step].replace(/^[|:>\s]+/, '').trim();
                     if (/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)/.test(candidate)) {
-                        // 공급자 주소(보통 구리시 본사 등 첫 번째 주소)와 공급받는 자 주소가 있을 때 두 번째 주소를 우선 채택
                         rawAddress = candidate;
                     }
                 }
@@ -264,13 +256,11 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
         }
     }
 
-    // B. 주소 라벨이 없거나 토큰이 분리된 경우, 전체 텍스트에서 배송 주소 패턴 다중 검출
     if (!rawAddress || rawAddress.includes('건원대로')) {
         const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣A-Za-z0-9\s\(\)\-\,\.]{6,60}?(?:로|길|동|읍|면|가)\s*[\d\-]+(?:\s*[가-힣A-Za-z0-9\(\)\,\-\.\s]*)/g;
         const allAddrMatches = combinedFullText.match(regionRegex) || [];
         
         if (allAddrMatches.length > 0) {
-            // 본사 공급자 주소(예: 건원대로 등)를 거르고 실제 배송 수취 주소 선택
             const buyerAddrs = allAddrMatches.filter(a => !a.includes('건원대로') && !a.includes('공급자'));
             if (buyerAddrs.length > 0) {
                 rawAddress = buyerAddrs[0];
@@ -280,7 +270,6 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
         }
     }
 
-    // C. 주소 뒤쪽에 붙은 라벨 및 잡음 텍스트 정밀 제거
     rawAddress = rawAddress.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제|인수자)/)[0];
     rawAddress = rawAddress.replace(/\[\d+\]/g, ' ')
                            .replace(/받\s*주소/g, ' ')
@@ -292,7 +281,6 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
 
     const fullAddress = rawAddress.replace(/\s{2,}/g, ' ').trim();
 
-    // 내비/관제용 정제 주소: 괄호'(' 이전 주소 추출
     let cleanAddr = fullAddress;
     const parenIdx = cleanAddr.indexOf('(');
     if (parenIdx !== -1) {
@@ -300,7 +288,7 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
     }
     const address = cleanAddr.replace(/\s{2,}/g, ' ').trim();
 
-    // 5) 사업자번호 추출
+    // 5) 사업자번호
     let bizNo = '';
     const bizMatches = combinedFullText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/g) || [];
     if (bizMatches.length >= 2) {
@@ -309,18 +297,17 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
         bizNo = bizMatches[0].replace(/\s+/g, '-');
     }
 
-    // 6) 배송 요청사항(메모) 추출
+    // 6) 배송 요청사항
     let memo = '';
     const memoMatch = combinedFullText.match(/(?:배송\s*요청사항|배송메모|요청사항|비고)[\s:|]*([^\n\r|]+)/);
     if (memoMatch) {
         memo = memoMatch[1].split(/(?:총\s*상품수량|총주문금액|인수자|배송비)/)[0].trim();
     }
 
-    // 7) 상품 품목(Items) 파싱
-    const items = [];
+    // 7) 상품 품목 파싱 (중복 변수명 충돌 제거)
+    const orderItems = [];
     fullTextLines.forEach(lineTokens => {
         const lineStr = lineTokens.map(t => t.text).join(' ').trim();
-        // 번호로 시작하는 상품 테이블 행 패턴 (예: "1 ★공산 핫★ 참치 ... 1 13,840 ...")
         const rowMatch = lineStr.match(/^(\d+)\s+([★\[\(\w가-힣\s\/\-\.]+?)(?:\s+(\d+(?:\.\d+)?[a-zA-Z가-힣]*))?\s+(?:국내산|중국산|수입산)?\s*(\d+)\s+([\d,]+)/);
         if (rowMatch) {
             const pName = rowMatch[2].trim().replace(/^[|>\s]+/, '');
@@ -329,7 +316,7 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
             const pPrice = parseInt(rowMatch[5].replace(/,/g, ''), 10) || 0;
             const pTotal = pPrice * pQty;
 
-            items.push({
+            orderItems.push({
                 name: pName,
                 qty: pQty,
                 unit: pUnit,
@@ -339,17 +326,16 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
         }
     });
 
-    let qty = items.length > 0 ? items.reduce((sum, it) => sum + it.qty, 0) : 1;
+    let qty = orderItems.length > 0 ? orderItems.reduce((sum, it) => sum + it.qty, 0) : 1;
     let itemName = '';
-    if (items.length > 1) {
-        itemName = `${items[0].name} 외 ${items.length - 1}건 (총 ${qty}개)`;
-    } else if (items.length === 1) {
-        itemName = `${items[0].name} (${items[0].qty}${items[0].unit})`;
+    if (orderItems.length > 1) {
+        itemName = `${orderItems[0].name} 외 ${orderItems.length - 1}건 (총 ${qty}개)`;
+    } else if (orderItems.length === 1) {
+        itemName = `${orderItems[0].name} (${orderItems[0].qty}${orderItems[0].unit})`;
     } else {
         itemName = '상품 정보 미등록';
     }
 
-    // 상호명이 비어있을 경우 보정
     if (!storeName) storeName = buyerName || '배송처';
     storeName = storeName.replace(/^[)|\]}>\s]+/, '').trim();
 
@@ -360,19 +346,19 @@ function parseOrdersFromPage(items, pageNum, pageWidth, fileName) {
         buyerName: buyerName,
         orderNo: orderNo,
         bizNo: bizNo,
-        address: address, // 내비/관제용 도로명 번지 주소
-        fullAddress: fullAddress || address, // 🌟 인쇄용 층/호수 원본 상세 주소
+        address: address,
+        fullAddress: fullAddress || address,
         storeName: storeName,
         phone: phone,
         itemName: itemName,
-        unit: items.length > 0 ? items[0].unit : '개',
+        unit: orderItems.length > 0 ? orderItems[0].unit : '개',
         qty: qty,
         price: '',
         total: '',
         memo: memo,
         lat: null,
         lng: null,
-        items: items
+        items: orderItems
     }];
 }
 
