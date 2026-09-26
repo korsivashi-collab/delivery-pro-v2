@@ -95,7 +95,7 @@ export async function parsePdfToEditableDocument(file) {
 
         renderEditableDocument(formHtml);
 
-        alert(`[PDF 양식 인식 완료]\n\n1. 상/하단 보관용에 [담당기사] 표시 영역이 추가되었습니다.\n2. A4 용지 1장에 상·하단이 정확히 출력되도록 규격이 최적화되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
+        alert(`[PDF 양식 인식 완료]\n\n1. 담당기사가 전표 분류에 최적화된 [우측 상단(주문번호 위)]으로 깔끔하게 이동 배치되었습니다.\n2. 거래명세표 제목이 정중앙에 정돈되어 원래 양식의 완성도를 유지합니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
     } catch (e) {
         console.error("PDF 서식 파싱 오류:", e);
         alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
@@ -114,7 +114,7 @@ function extractItemTableColumns(rawText) {
 }
 
 // ==========================================
-// 🌟 2. A4 정중앙(148.5mm) 완벽 고정 2등분 HTML 빌더 (담당기사 배지 포함)
+// 2. A4 정중앙(148.5mm) 고정 2등분 HTML 빌더 (우측 상단 담당기사 스탬프 배치)
 // ==========================================
 function buildCleanTemplatedHtml(cfg) {
     if (cfg.isTwoPart) {
@@ -180,18 +180,27 @@ function generateSingleInvoiceBlock(cfg, partName) {
         </tr>
     `).join('');
 
-    // 🌟 상·하단 각각에 [담당기사] 표시 배지 탑재 (물류 분류 시 한눈에 확인 가능)
+    // 🌟 핵심: 제목은 중앙 정렬을 유지하고, [담당기사]는 주문번호 바로 윗줄(우측 상단 최적 여백)에 깔끔한 전표 스탬프 박스로 배치
     return `
     <div class="invoice-box-part" style="width: 100%; height: 148.5mm; max-height: 148.5mm; padding: 4mm 8mm 3mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
-        <div style="text-align: center; position: relative; margin-bottom: 2px; flex-shrink: 0;">
-            <h2 class="doc-main-title" contenteditable="true" style="font-size: 19px; font-weight: 900; letter-spacing: 5px; text-decoration: underline; margin: 0 0 2px 0;">
-                ${title}<span style="font-size: 12px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(${partName})</span>
-            </h2>
-            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; font-weight: bold; margin-top: 2px;">
-                <span>주문일자: <b class="tpl-bind-date" contenteditable="true">{{주문일자}}</b></span>
-                <span style="font-size: 11px; font-weight: 900; color: #1e3a8a; background: #eff6ff; padding: 1.5px 8px; border: 1.5px solid #2563eb; border-radius: 4px; display: inline-flex; align-items: center;">
-                    담당기사: <b class="tpl-bind-driver" contenteditable="true" style="margin-left: 4px; color: #1d4ed8;">{{담당기사}}</b>
+        <div style="position: relative; margin-bottom: 2px; flex-shrink: 0;">
+            <!-- 우측 상단 여백 공간: 담당기사 표기 (주문번호 바로 위, 전표 분류 최적 위치) -->
+            <div style="position: absolute; right: 0; top: 0; text-align: right;">
+                <span style="font-size: 10.5px; font-weight: 900; color: #000; border: 1.5px solid #000; padding: 1.5px 7px; border-radius: 3px; background: #fafafa; display: inline-block; letter-spacing: -0.2px;">
+                    담당기사: <b class="tpl-bind-driver" contenteditable="true" style="color: #000; margin-left: 2px;">{{담당기사}}</b>
                 </span>
+            </div>
+
+            <!-- 중앙 타이틀 -->
+            <div style="text-align: center;">
+                <h2 class="doc-main-title" contenteditable="true" style="font-size: 19px; font-weight: 900; letter-spacing: 5px; text-decoration: underline; margin: 0 0 2px 0;">
+                    ${title}<span style="font-size: 12px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(${partName})</span>
+                </h2>
+            </div>
+
+            <!-- 하단 메타 정보 (주문일자 좌측, 주문번호 우측) -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 9.5px; font-weight: bold; margin-top: 3px;">
+                <span>주문일자: <b class="tpl-bind-date" contenteditable="true">{{주문일자}}</b></span>
                 <span>주문번호: <b class="tpl-bind-orderno" contenteditable="true">{{주문번호}}</b></span>
             </div>
         </div>
@@ -371,7 +380,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const phone = order.phone || '';
     const memo = order.memo || '';
     
-    // 🌟 핵심: 담당 기사 데이터 추출 (미배정 시 '미배정' 표시)
+    // 담당 기사 데이터 추출 (미배정 시 '미배정' 표시)
     const driverName = order.assignedDriver ? String(order.assignedDriver).trim() : '미배정';
 
     // 결제수단 자동 감지
