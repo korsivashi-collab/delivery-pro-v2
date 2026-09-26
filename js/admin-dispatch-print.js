@@ -66,7 +66,6 @@ export function initInvoiceResizer() {
     const listPanel = document.getElementById('invoice-list-panel');
     if (!resizer || !listPanel) return;
 
-    // 이전에 설정한 폭이 있으면 복원
     const savedWidth = localStorage.getItem('deliveryPro_invoiceListWidth');
     if (savedWidth) {
         listPanel.style.width = `${savedWidth}px`;
@@ -91,7 +90,6 @@ export function initInvoiceResizer() {
         const delta = e.clientX - startX;
         let newWidth = startWidth + delta;
         
-        // 최소/최대 폭 제한 설정 (너무 좁아지거나 중앙 에디터를 덮지 않도록)
         if (newWidth < 260) newWidth = 260;
         if (newWidth > 650) newWidth = 650;
 
@@ -103,7 +101,6 @@ export function initInvoiceResizer() {
             isDragging = false;
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-            // 조절 완료 후 현재 폭 저장
             localStorage.setItem('deliveryPro_invoiceListWidth', listPanel.offsetWidth);
         }
     });
@@ -130,7 +127,7 @@ export function populateSenderFilterDropdown() {
     selectEl.innerHTML = html;
 }
 
-// 🌟 방안 A: 공급자 필터 선택 시 해당 공급자 주문만 자동 전체 선택 & 타 공급자 주문 자동 해제
+// 공급자 필터 선택 시 해당 공급자 주문만 자동 전체 선택 & 타 공급자 주문 자동 해제
 export function filterBySender(senderName) {
     currentSenderFilter = senderName;
 
@@ -147,7 +144,6 @@ export function filterBySender(senderName) {
     renderInvoiceOrderList();
     updateInvoiceCountBadge();
 
-    // 필터링된 첫 번째 주문으로 미리보기 자동 전환
     const filtered = getFilteredPrintOrders();
     if (filtered.length > 0) {
         const firstIdx = state.printReadyList.indexOf(filtered[0]);
@@ -181,7 +177,6 @@ function getFilteredPrintOrders() {
         });
     }
 
-    // 정렬 적용
     list.sort((a, b) => {
         let valA = '';
         let valB = '';
@@ -328,7 +323,7 @@ export function previewInvoiceRow(idx) {
         labelEl.innerText = `#${idx + 1} ${sName}${item.storeName || item.address || ''}${driverName}`;
     }
 
-    // 선택된 주문건의 실제 데이터(사업자번호, 품목, 금액, 주소 등)를 서식에 채워 실시간 미리보기
+    // 선택된 주문건의 실제 데이터(담당기사, 사업자번호, 품목, 금액, 주소 등)를 서식에 채워 실시간 미리보기
     const docCanvas = document.getElementById('editable-doc-canvas');
     const baseTemplate = templateBuilderState.currentDocHtml;
     if (docCanvas && baseTemplate && typeof fillTemplateWithOrderData === 'function') {
@@ -388,7 +383,6 @@ export function loadSavedForms() {
     if (!listEl) return;
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     
-    // 저장된 양식이 없을 경우 대기 플레이스홀더 유지
     if (savedForms.length === 0) { 
         listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-[10px] font-bold">저장된 서류 양식이 없습니다.<br>우측에서 PDF를 업로드하여 양식을 생성하세요.</div>`; 
         const placeholder = document.getElementById('preview-placeholder');
@@ -467,7 +461,6 @@ export function applySavedForm(idx) {
         templateBuilderState.activeTemplateTitle = form.title || '주문서 양식';
         templateBuilderState.currentDocHtml = form.templateHtml;
 
-        // 현재 선택된 주문이 있다면 그 주문 데이터로 채워서 보여줌
         const curIdx = state.currentPreviewInvoiceIndex || 0;
         const curOrder = state.printReadyList ? state.printReadyList[curIdx] : null;
 
@@ -513,7 +506,7 @@ export function updateLivePreview() {}
 export function syncPreviewData() {}
 
 // ==========================================
-// 6. 주문서 일괄 출력 (동적 데이터 100% 치환 인쇄)
+// 🌟 6. 주문서 일괄 출력 (A4 1장 밀림 완전 방지 및 1건 1장 완벽 출력)
 // ==========================================
 export function executeBatchPrint() {
     if (!state.printReadyList || state.printReadyList.length === 0) { 
@@ -527,7 +520,6 @@ export function executeBatchPrint() {
         return;
     }
 
-    // 베이스 원본 템플릿 가져오기
     const baseTemplateHtml = templateBuilderState.currentDocHtml || document.getElementById('editable-doc-canvas')?.innerHTML;
 
     if (!baseTemplateHtml || !baseTemplateHtml.trim()) {
@@ -549,10 +541,10 @@ export function executeBatchPrint() {
     selectedOrders.forEach((item, idx) => {
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, item, idx);
 
-        // 인쇄 시 contenteditable 속성 비활성화
+        // 인쇄 시 contenteditable 비활성화
         filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
 
-        // 상단 배송순번 등 표시 바(driver-marking-bar) 완전 제거 유지
+        // 여백이나 패딩으로 인한 2페이지 밀림 방지: 순수 A4 시트만 배치
         printPagesHtml += `
         <div class="print-page-wrapper">
             <div class="print-sheet-content">
@@ -567,21 +559,94 @@ export function executeBatchPrint() {
     
     const doc = iframe.contentWindow.document; 
     doc.open();
+    // 🌟 핵심: A4 규격(210mm x 297mm) 고정, 외부 마진 0 설정, 테이블 높이 강제 확장 스타일 완전 제거
     doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
         * { box-sizing: border-box; }
         @media print { 
-            @page { size: A4 portrait; margin: 0; } 
-            body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; } 
-            .print-page-wrapper { page-break-after: always; width: 210mm; height: 297mm; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; }
-            .print-page-wrapper:last-child { page-break-after: auto; }
+            @page { 
+                size: A4 portrait; 
+                margin: 0; 
+            } 
+            html, body { 
+                margin: 0 !important; 
+                padding: 0 !important; 
+                width: 210mm !important; 
+                height: 297mm !important; 
+                background: white !important; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+            } 
+            .print-page-wrapper { 
+                width: 210mm !important; 
+                height: 297mm !important; 
+                max-height: 297mm !important; 
+                margin: 0 !important; 
+                padding: 0 !important; 
+                page-break-after: always !important; 
+                page-break-inside: avoid !important; 
+                break-after: page !important; 
+                overflow: hidden !important; 
+                box-sizing: border-box !important; 
+                display: flex !important; 
+                flex-direction: column !important; 
+                align-items: center !important; 
+                justify-content: flex-start !important; 
+            }
+            .print-page-wrapper:last-child { 
+                page-break-after: auto !important; 
+                break-after: auto !important; 
+            }
         }
-        body { margin: 0; padding: 0; font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; color: #000; }
-        .print-page-wrapper { width: 210mm; height: 297mm; margin: 0 auto; padding: 8mm 10mm; display: flex; flex-direction: column; align-items: center; }
-        .print-sheet-content { width: 100%; flex: 1; position: relative; }
-        .doc-sheet { width: 100%; background: #fff; color: #000; font-size: 11px; }
-        .doc-table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; table-layout: fixed; }
-        .doc-table th, .doc-table td { border: 1px solid #000; padding: 4px 5px; vertical-align: middle; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-        .invoice-cut-line { border-top: 1px dashed #6b7280; width: 100%; margin: 6px 0; }
+        body { 
+            margin: 0; 
+            padding: 0; 
+            font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+            background: white; 
+            color: #000; 
+        }
+        .print-page-wrapper { 
+            width: 210mm; 
+            height: 297mm; 
+            max-height: 297mm; 
+            margin: 0 auto; 
+            padding: 0; 
+            overflow: hidden; 
+            box-sizing: border-box; 
+            display: flex; 
+            flex-direction: column; 
+            align-items: center; 
+        }
+        .print-sheet-content { 
+            width: 210mm; 
+            height: 297mm; 
+            max-height: 297mm; 
+            overflow: hidden; 
+            box-sizing: border-box; 
+            position: relative; 
+        }
+        .doc-sheet { 
+            width: 210mm !important; 
+            height: 297mm !important; 
+            max-height: 297mm !important; 
+            background: #fff; 
+            color: #000; 
+            box-sizing: border-box; 
+        }
+        .invoice-box-part { 
+            width: 100% !important; 
+            height: 148.5mm !important; 
+            max-height: 148.5mm !important; 
+            box-sizing: border-box !important; 
+            overflow: hidden !important; 
+        }
+        .invoice-cut-line { 
+            border-top: 1.5px dashed #4b5563 !important; 
+            width: 100% !important; 
+            margin: 0 !important; 
+            height: 0 !important; 
+            box-sizing: border-box !important; 
+            flex-shrink: 0 !important; 
+        }
     </style></head><body>${printPagesHtml}</body></html>`);
     doc.close();
 

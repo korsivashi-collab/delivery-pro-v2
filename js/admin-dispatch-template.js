@@ -95,7 +95,7 @@ export async function parsePdfToEditableDocument(file) {
 
         renderEditableDocument(formHtml);
 
-        alert(`[PDF 양식 인식 완료]\n\n1. A4 용지 정중앙(148.5mm) 기준 점선 절취선 고정 양식이 적용되었습니다.\n2. 공급자 및 구매자 정보가 완벽히 분리 복원되었습니다.\n3. 확인 후 상단 [양식 저장]을 누르면 기본 양식으로 등록됩니다.`);
+        alert(`[PDF 양식 인식 완료]\n\n1. 상/하단 보관용에 [담당기사] 표시 영역이 추가되었습니다.\n2. A4 용지 1장에 상·하단이 정확히 출력되도록 규격이 최적화되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
     } catch (e) {
         console.error("PDF 서식 파싱 오류:", e);
         alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
@@ -114,11 +114,10 @@ function extractItemTableColumns(rawText) {
 }
 
 // ==========================================
-// 🌟 2. A4 정중앙(148.5mm) 완벽 고정 2등분 HTML 빌더
+// 🌟 2. A4 정중앙(148.5mm) 완벽 고정 2등분 HTML 빌더 (담당기사 배지 포함)
 // ==========================================
 function buildCleanTemplatedHtml(cfg) {
     if (cfg.isTwoPart) {
-        // A4 높이 297mm를 정확히 절반(148.5mm)씩 고정 분할하고 가운데 점선 배치
         return `
         <div class="doc-sheet invoice-two-half" style="width: 210mm; height: 297mm; max-height: 297mm; display: flex; flex-direction: column; box-sizing: border-box; margin: 0 auto; background: #fff; position: relative;" contenteditable="false">
             ${generateSingleInvoiceBlock(cfg, '공급자 보관용')}
@@ -137,7 +136,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
     const title = cfg.docTitle || '거래명세표';
     const cols = cfg.columns || ['No.', '상품명', '규격(단위)', '수량', '단가', '총액'];
 
-    const thsHtml = cols.map(c => `<th contenteditable="true" style="border: 1px solid #000; padding: 3px 4px; background: #f8fafc; text-align: center; font-weight: bold; font-size: 10px;">${c}</th>`).join('');
+    const thsHtml = cols.map(c => `<th contenteditable="true" style="border: 1px solid #000; padding: 2.5px 4px; background: #f8fafc; text-align: center; font-weight: bold; font-size: 9.5px;">${c}</th>`).join('');
 
     const colgroupHtml = `
         <colgroup>
@@ -181,20 +180,23 @@ function generateSingleInvoiceBlock(cfg, partName) {
         </tr>
     `).join('');
 
-    // 🌟 핵심: 상/하단 각 블록을 148.5mm(A4 정확한 50%)로 고정하여 절취선 일치 보장
+    // 🌟 상·하단 각각에 [담당기사] 표시 배지 탑재 (물류 분류 시 한눈에 확인 가능)
     return `
-    <div class="invoice-box-part" style="width: 100%; height: 148.5mm; max-height: 148.5mm; padding: 5mm 8mm 4mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
-        <div style="text-align: center; position: relative; margin-bottom: 3px; flex-shrink: 0;">
+    <div class="invoice-box-part" style="width: 100%; height: 148.5mm; max-height: 148.5mm; padding: 4mm 8mm 3mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
+        <div style="text-align: center; position: relative; margin-bottom: 2px; flex-shrink: 0;">
             <h2 class="doc-main-title" contenteditable="true" style="font-size: 19px; font-weight: 900; letter-spacing: 5px; text-decoration: underline; margin: 0 0 2px 0;">
                 ${title}<span style="font-size: 12px; font-weight: normal; letter-spacing: 0; text-decoration: none;">(${partName})</span>
             </h2>
-            <div style="display: flex; justify-content: space-between; font-size: 9.5px; font-weight: bold; margin-top: 2px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; font-weight: bold; margin-top: 2px;">
                 <span>주문일자: <b class="tpl-bind-date" contenteditable="true">{{주문일자}}</b></span>
+                <span style="font-size: 11px; font-weight: 900; color: #1e3a8a; background: #eff6ff; padding: 1.5px 8px; border: 1.5px solid #2563eb; border-radius: 4px; display: inline-flex; align-items: center;">
+                    담당기사: <b class="tpl-bind-driver" contenteditable="true" style="margin-left: 4px; color: #1d4ed8;">{{담당기사}}</b>
+                </span>
                 <span>주문번호: <b class="tpl-bind-orderno" contenteditable="true">{{주문번호}}</b></span>
             </div>
         </div>
 
-        <table class="doc-table party-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; margin-bottom: 3px; table-layout: fixed; flex-shrink: 0;">
+        <table class="doc-table party-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; margin-bottom: 2px; table-layout: fixed; flex-shrink: 0;">
             <colgroup>
                 <col style="width: 4%;">
                 <col style="width: 16%;">
@@ -218,7 +220,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">구 매 자 명</td>
                     <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: bold; background: #f0fdf4;" contenteditable="true">{{구매자명}}</td>
                 </tr>
-                <tr style="height: 32px;">
+                <tr style="height: 31px;">
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">주 소</td>
                     <td style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; line-height: 1.15;" contenteditable="true" spellcheck="false">${cfg.provAddr || ''}</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">주 소</td>
@@ -239,8 +241,8 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </tbody>
         </table>
 
-        <!-- 상품 테이블: 148.5mm 안에서 유연하게 영역 차지 -->
-        <div style="flex: 1; min-height: 0; overflow: hidden; margin-bottom: 3px;">
+        <!-- 상품 테이블: 148.5mm 안에서 적정 영역 유지 -->
+        <div style="flex: 1; min-height: 0; overflow: hidden; margin-bottom: 2px;">
             <table class="doc-table item-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; table-layout: fixed;">
                 ${colgroupHtml}
                 <thead>
@@ -264,24 +266,24 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </colgroup>
             <tbody>
                 <tr>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">결 제 수 단</td>
-                    <td style="border: 1px solid #000; padding: 2.5px 5px;" contenteditable="true">{{결제수단}}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">총 상품수량</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">{{총수량}}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">배 송 비</td>
-                    <td style="border: 1px solid #000; text-align: right; padding: 2.5px 5px;" contenteditable="true">0원</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2px;" contenteditable="true">결 제 수 단</td>
+                    <td style="border: 1px solid #000; padding: 2px 4px;" contenteditable="true">{{결제수단}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2px;" contenteditable="true">총 상품수량</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2px;" contenteditable="true">{{총수량}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2px;" contenteditable="true">배 송 비</td>
+                    <td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">0원</td>
                 </tr>
-                <tr style="height: 28px;">
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2.5px;" contenteditable="true">배송 요청사항</td>
-                    <td colspan="3" style="border: 1px solid #000; padding: 2.5px 5px; font-size: 9px; vertical-align: top; line-height: 1.2;" contenteditable="true">{{배송요청사항}}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: 900; background: #f1f5f9; padding: 2.5px;" contenteditable="true">총주문금액</td>
-                    <td style="border: 1px solid #000; text-align: right; font-weight: 900; color: #dc2626; padding: 2.5px 5px; background: #f1f5f9;" contenteditable="true">{{총금액}}</td>
+                <tr style="height: 26px;">
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; background: #f8fafc; padding: 2px;" contenteditable="true">배송 요청사항</td>
+                    <td colspan="3" style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; vertical-align: top; line-height: 1.15;" contenteditable="true">{{배송요청사항}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: 900; background: #f1f5f9; padding: 2px;" contenteditable="true">총주문금액</td>
+                    <td style="border: 1px solid #000; text-align: right; font-weight: 900; color: #dc2626; padding: 2px 4px; background: #f1f5f9;" contenteditable="true">{{총금액}}</td>
                 </tr>
             </tbody>
         </table>
 
-        <div style="text-align: right; font-size: 10px; font-weight: bold; padding-right: 5px; flex-shrink: 0;">
-            <span contenteditable="true">인수자: <span style="display: inline-block; width: 75px; border-bottom: 1px solid #000; text-align: center;">서 명</span></span>
+        <div style="text-align: right; font-size: 9.5px; font-weight: bold; padding-right: 5px; flex-shrink: 0;">
+            <span contenteditable="true">인수자: <span style="display: inline-block; width: 70px; border-bottom: 1px solid #000; text-align: center;">서 명</span></span>
         </div>
     </div>`;
 }
@@ -311,6 +313,7 @@ export function renderEditableDocument(htmlContent) {
                     <i class="fa-solid fa-file-signature"></i> 양식 직접 편집 (워드형)
                 </span>
                 <span class="text-[11px] text-gray-400 font-bold ml-1">| 태그 삽입:</span>
+                <button type="button" onclick="window.insertDocTag('{{담당기사}}')" class="px-2 py-0.5 bg-blue-100 hover:bg-blue-200 text-blue-800 border border-blue-300 rounded text-[11px] font-black transition active:scale-95">+ 담당기사</button>
                 <button type="button" onclick="window.insertDocTag('{{상호명}}')" class="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-[11px] font-black transition active:scale-95">+ 상호</button>
                 <button type="button" onclick="window.insertDocTag('{{구매자명}}')" class="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[11px] font-black transition active:scale-95">+ 구매자</button>
                 <button type="button" onclick="window.insertDocTag('{{공급자}}')" class="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 rounded text-[11px] font-black transition active:scale-95">+ 공급자</button>
@@ -352,7 +355,7 @@ export function insertDocTag(tagStr) {
 }
 
 // ==========================================
-// 4. [핵심] 다중 품목 동적 렌더링 엔진 (주문 데이터 서식 완벽 치환)
+// 4. [핵심] 다중 품목 동적 렌더링 엔진 (담당기사 및 주문 데이터 서식 완벽 치환)
 // ==========================================
 export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     if (!baseTemplateHtml || !order) return '';
@@ -368,6 +371,9 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const phone = order.phone || '';
     const memo = order.memo || '';
     
+    // 🌟 핵심: 담당 기사 데이터 추출 (미배정 시 '미배정' 표시)
+    const driverName = order.assignedDriver ? String(order.assignedDriver).trim() : '미배정';
+
     // 결제수단 자동 감지
     let payMethod = '카드결제';
     if (memo.includes('네이버페이')) payMethod = '네이버페이';
@@ -378,8 +384,10 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const totalQty = order.qty ? `${formatNumber(order.qty)}개` : '1개';
     const grandTotal = order.total ? `${formatNumber(order.total)}원` : '';
 
-    // 1. 단일 필드 태그 치환
-    html = html.replace(/\{\{\s*주문일자\s*\}\}/g, today)
+    // 1. 단일 필드 태그 치환 (담당기사 포함)
+    html = html.replace(/\{\{\s*담당기사\s*\}\}/g, driverName)
+               .replace(/\{\{\s*기사명\s*\}\}/g, driverName)
+               .replace(/\{\{\s*주문일자\s*\}\}/g, today)
                .replace(/\{\{\s*주문번호\s*\}\}/g, orderNo)
                .replace(/\{\{\s*사업자번호\s*\}\}/g, bizNo)
                .replace(/\{\{\s*상호명\s*\}\}/g, storeName)
@@ -393,7 +401,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
                .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
 
-    // 2. 다중 품목 테이블 지능형 동적 생성 (148.5mm 정중앙 한계선 보존용 정밀 스케일링)
+    // 2. 다중 품목 테이블 지능형 동적 생성
     const items = (order.items && order.items.length > 0) ? order.items : [{
         name: order.itemName || '상품명 미지정',
         qty: order.qty || 1,
@@ -408,9 +416,9 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const isVeryDense = items.length > 8;
     const isExtreme = items.length > 11;
 
-    const cellPadding = isExtreme ? '1px 2px' : (isVeryDense ? '1.5px 3px' : (isDense ? '2.5px 3px' : '3px 5px'));
+    const cellPadding = isExtreme ? '1px 2px' : (isVeryDense ? '1.5px 3px' : (isDense ? '2px 3px' : '2.5px 4px'));
     const fontSize = isExtreme ? '8px' : (isVeryDense ? '8.5px' : (isDense ? '9px' : '9.5px'));
-    const rowHeight = isExtreme ? '13px' : (isVeryDense ? '15px' : (isDense ? '17px' : '19px'));
+    const rowHeight = isExtreme ? '13px' : (isVeryDense ? '15px' : (isDense ? '17px' : '18px'));
 
     let itemsRowsHtml = '';
     items.forEach((it, i) => {
