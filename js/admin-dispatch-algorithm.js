@@ -124,11 +124,11 @@ export function calculateGeoPenalizedDist(lat1, lon1, lat2, lon2, addr1 = '', ad
         if ((area1.isSeoulGangbuk && area2.isSeoulGangnam) || (area1.isSeoulGangnam && area2.isSeoulGangbuk)) {
             penalty += 30;
         }
-        // 광역 시/도가 서로 다른 경우 (예: 서울 ↔ 경기 남부, 인천 등)
+        // 광역 시/도가 서로 다른 경우
         else if (area1.sido !== area2.sido) {
             penalty += 12;
         }
-        // 같은 시/도 내에서 시·군·구가 다른 경우 (자연 산맥/하천 지형 경계선 우선 클러스터링)
+        // 같은 시/도 내에서 시·군·구가 다른 경우 (자연 경계선 우선 분리)
         else if (area1.sigungu && area2.sigungu && area1.sigungu !== area2.sigungu) {
             penalty += 6;
         }
@@ -150,7 +150,6 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
         totalWeights += (weights[devId] || 0);
     });
 
-    // 1단계: 기본 균등 분배 및 가중치 반영
     let driverStats = activeDrivers.map(d => {
         const devId = d.deviceId || d.key;
         const w = weights[devId] || 0;
@@ -175,7 +174,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
         };
     });
 
-    // 2단계: 버림으로 인해 발생한 나머지 건수를 소수점 나머지가 높은 기사 순으로 공정하게 1건씩 추가 배분
+    // 소수점 잔여 물량을 나머지가 큰 기사부터 공정하게 1건씩 추가 배분
     const currentSum = driverStats.reduce((sum, d) => sum + d.targetCap, 0);
     const diff = totalOrders - currentSum;
 
@@ -188,7 +187,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 }
 
 // ==========================================
-// 4. [핵심 알고리즘] 균등 분배 및 지형 우회 자동 배차 실행기
+// 4. [핵심 알고리즘] 외곽 최우선 인접 클러스터링 자동 배차 실행기
 // ==========================================
 export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null }) {
     if (!targetOrders || targetOrders.length === 0) {
@@ -201,85 +200,90 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     const totalOrders = targetOrders.length;
     const driverStats = calculateDriverCapacities(activeDrivers, totalOrders, weights, companyBase);
 
-    // 1) 외곽 물량(본사 거점 기준 가장 먼 목적지) 우선 할당을 위한 정렬
-    const ordersWithDist = targetOrders.map(order => {
-        let distFromBase = 0;
-        if (order.lat && order.lng && companyBase && companyBase.lat && companyBase.lng) {
-            distFromBase = calculateGeoPenalizedDist(
-                order.lat, order.lng, 
-                companyBase.lat, companyBase.lng, 
-                order.fullAddress || order.address || '', 
-                companyBase.address || ''
-            );
+    // 거리 측정의 기준이 될 '본사 거점' (미설정 시 전체 배송지들의 평균 중심점 산출)
+    let baseLat = companyBase ? companyBase.lat : null;
+    let baseLng = companyBase ? companyBase.lng : null;
+    let baseAddr = companyBase ? companyBase.address : '';
+
+    if (!baseLat || !baseLng) {
+        const validOrders = targetOrders.filter(o => o.lat && o.lng);
+        if (validOrders.length > 0) {
+            baseLat = validOrders.reduce((sum, o) => sum + o.lat, 0) / validOrders.length;
+            baseLng = validOrders.reduce((sum, o) => sum + o.lng, 0) / validOrders.length;
+            baseAddr = '임시 가상 중심점';
+        } else {
+            baseLat = 37.566826; baseLng = 126.978656; // 서울시청 (Fallback)
         }
-        return { order, distFromBase };
-    });
+    }
 
-    ordersWithDist.sort((a, b) => b.distFromBase - a.distFromBase);
+    // 아직 배정되지 않은 주문 목록 (원본 복사)
+    let unassigned = [...targetOrders];
 
-    // 2) 지형 우회 가상 페널티를 고려한 최적 기사 탐색 및 배분
-    ordersWithDist.forEach(({ order }) => {
+    // 모든 배송지가 배정될 때까지 반복
+    while (unassigned.length > 0) {
+        // 1. 현재 남은 오더 중 본사(또는 중심)에서 '가장 먼(외곽)' 배송지 탐색
+        unassigned.sort((a, b) => {
+            const distA = calculateGeoPenalizedDist(a.lat, a.lng, baseLat, baseLng, a.fullAddress || a.address, baseAddr);
+            const distB = calculateGeoPenalizedDist(b.lat, b.lng, baseLat, baseLng, b.fullAddress || b.address, baseAddr);
+            return distB - distA; // 거리가 먼 순서대로(내림차순) 정렬
+        });
+
+        let currentOrder = unassigned[0];
         let bestDriver = null;
         let minDistance = Infinity;
 
-        // A. 정원(targetCap)이 남아있는 기사 중 최소 거리 기사 탐색
+        // 2. 이 가장 먼 배송지를 처리할 최적의 기사 찾기 (정원이 남은 기사 중 권역 중심이 가장 가까운 기사)
         driverStats.forEach(ds => {
             if (ds.assignedCount >= ds.targetCap) return;
-
-            let d = 999999;
-            if (order.lat && order.lng && ds.tLat && ds.tLng) {
-                d = calculateGeoPenalizedDist(
-                    order.lat, order.lng, 
-                    ds.tLat, ds.tLng, 
-                    order.fullAddress || order.address || '', 
-                    ds.tAddr
-                );
-            } else if (order.lat && order.lng && companyBase) {
-                d = calculateGeoPenalizedDist(
-                    order.lat, order.lng, 
-                    companyBase.lat, companyBase.lng, 
-                    order.fullAddress || order.address || '', 
-                    companyBase.address || ''
-                );
-            }
-
-            if (d < minDistance) {
-                minDistance = d;
+            const dist = calculateGeoPenalizedDist(currentOrder.lat, currentOrder.lng, ds.tLat, ds.tLng, currentOrder.fullAddress || currentOrder.address, ds.tAddr);
+            if (dist < minDistance) {
+                minDistance = dist;
                 bestDriver = ds;
             }
         });
 
-        // B. 모든 기사의 정원이 찼을 때의 차선책 (지형 페널티 감안 절대 최단거리 기사 선택)
+        // (안전장치) 모든 기사 정원이 찼는데도 남은 물량이 있다면 예외적으로 가장 가까운 기사에게 강제 초과 배정
         if (!bestDriver) {
-            let absMinDist = Infinity;
+            let absMin = Infinity;
             driverStats.forEach(ds => {
-                let d = 999999;
-                if (order.lat && order.lng && ds.tLat && ds.tLng) {
-                    d = calculateGeoPenalizedDist(
-                        order.lat, order.lng, 
-                        ds.tLat, ds.tLng, 
-                        order.fullAddress || order.address || '', 
-                        ds.tAddr
-                    );
-                }
-                if (d < absMinDist) {
-                    absMinDist = d;
+                const dist = calculateGeoPenalizedDist(currentOrder.lat, currentOrder.lng, ds.tLat, ds.tLng, currentOrder.fullAddress || currentOrder.address, ds.tAddr);
+                if (dist < absMin) {
+                    absMin = dist;
                     bestDriver = ds;
                 }
             });
-            if (!bestDriver) {
-                bestDriver = driverStats.reduce((prev, curr) => (prev.assignedCount < curr.assignedCount) ? prev : curr);
-            }
         }
 
+        // 3. 찾은 기사에게 외곽 오더 첫 할당
         bestDriver.assignedCount++;
-        order.assignedDriver = bestDriver.phone;
-    });
+        currentOrder.assignedDriver = bestDriver.phone;
+        unassigned.shift(); // 할당 완료된 0번째 항목 제거
+
+        // 4. [핵심 개선] 해당 기사의 할당량(Cap)이 모두 찰 때까지, 
+        // 방금 배정한 위치에서 '가장 가까운' 인접 오더를 싹쓸이로 묶음(클러스터링) 연속 할당
+        while (bestDriver.assignedCount < bestDriver.targetCap && unassigned.length > 0) {
+            // 남은 오더들을 '방금 배정한 위치(currentOrder)' 기준으로 다시 거리 오름차순 정렬
+            unassigned.sort((a, b) => {
+                const distA = calculateGeoPenalizedDist(a.lat, a.lng, currentOrder.lat, currentOrder.lng, a.fullAddress || a.address, currentOrder.fullAddress || currentOrder.address);
+                const distB = calculateGeoPenalizedDist(b.lat, b.lng, currentOrder.lat, currentOrder.lng, b.fullAddress || b.address, currentOrder.fullAddress || currentOrder.address);
+                return distA - distB; // 가까운 순서대로(오름차순) 정렬
+            });
+
+            // 가장 가까운 인접 배송지 선택 후 할당
+            let nextOrder = unassigned[0];
+            bestDriver.assignedCount++;
+            nextOrder.assignedDriver = bestDriver.phone;
+            unassigned.shift(); // 할당 완료 제거
+
+            // 다음 인접 탐색의 중심축을 방금 할당한 배송지로 갱신 (지그재그 방지)
+            currentOrder = nextOrder;
+        }
+    }
 
     return {
         success: true,
         totalOrders,
         driverStats,
-        allocatedCount: ordersWithDist.length
+        allocatedCount: targetOrders.length
     };
 }
