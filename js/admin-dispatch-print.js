@@ -18,21 +18,24 @@ let printListSortField = 'originalIdx'; // 'originalIdx', 'senderName', 'storeNa
 let printListSortAsc = true;
 
 // ==========================================
-// 1. 주문서 통합관리 모달 열기 & 초기화
+// 1. 주문서 통합관리 모달 열기 & 초기화 (DOM 클래스 충돌 방지 완벽 격리)
 // ==========================================
 export function exportToInvoiceModal() {
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    // 🌟 핵심 수정: 전체 화면의 .row-checkbox가 아니라, '엑셀 테이블(#invoice-excel-tbody)' 내부의 체크박스만 엄격히 조회
+    const excelCheckboxes = document.querySelectorAll('#invoice-excel-tbody .row-checkbox:checked');
     state.printReadyList = [];
 
-    if (checkboxes.length > 0) {
-        checkboxes.forEach(cb => { 
+    if (excelCheckboxes.length > 0) {
+        // 사용자가 엑셀 테이블에서 특정 배송지만 체크한 경우 -> 해당 배송지들만 주문서로 전달
+        excelCheckboxes.forEach(cb => { 
             const idx = parseInt(cb.getAttribute('data-idx'), 10); 
-            if (state.parsedExcelList[idx]) {
+            if (state.parsedExcelList && state.parsedExcelList[idx]) {
                 const item = { ...state.parsedExcelList[idx], _selected: true };
                 state.printReadyList.push(item); 
             }
         });
     } else if (state.parsedExcelList && state.parsedExcelList.length > 0) {
+        // 체크된 항목이 없을 경우 -> 현재 업로드된 전체 주문 목록(108건 등)을 누락 없이 전원 로드!
         state.printReadyList = state.parsedExcelList.map(item => ({ ...item, _selected: true }));
     } else {
         alert("주문서로 출력할 주문 데이터가 없습니다. 엑셀이나 PDF를 먼저 업로드해 주세요.");
@@ -257,7 +260,7 @@ export function toggleAllInvoiceSelection(targetState) {
     updateInvoiceCountBadge();
 }
 
-// 개별 항목 선택 토글 (인덱스 fallback 보강)
+// 개별 항목 선택 토글
 export function toggleSingleInvoiceItem(targetId, isChecked, idx) {
     let item = state.printReadyList.find(it => String(it.id) === String(targetId));
     if (!item && idx !== undefined && state.printReadyList[idx]) {
@@ -316,10 +319,11 @@ export function renderInvoiceOrderList() {
         const storeDisplay = item.storeName || '-';
         const addressDisplay = item.address || item.fullAddress || '-';
 
+        // 🌟 클래스명을 invoice-row-checkbox 로 명확히 분리하여 엑셀 테이블(.row-checkbox)과 절대 충돌하지 않도록 처리
         tableHtml += `
         <tr onclick="window.previewInvoiceRow(${originalIdx})" class="hover:bg-indigo-50/60 cursor-pointer transition ${isCurrent ? 'bg-indigo-50/80 ring-1 ring-indigo-400 font-bold' : ''}">
             <td class="text-center py-2 px-2" onclick="event.stopPropagation()">
-                <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked, ${originalIdx})" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer row-checkbox" data-idx="${originalIdx}">
+                <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked, ${originalIdx})" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer invoice-row-checkbox" data-idx="${originalIdx}">
             </td>
             <td class="text-center py-2 px-2 font-mono text-gray-400 font-bold">${originalIdx + 1}</td>
             <td class="py-2 px-3 font-black text-amber-900 truncate max-w-[100px]" title="${senderDisplay}">${senderDisplay}</td>
@@ -1133,7 +1137,6 @@ export function executePickingListPrint() {
     const measureContainer = document.createElement('div');
     measureContainer.style.cssText = 'position:fixed;left:-9999px;top:0;width:210mm;box-sizing:border-box;visibility:hidden;z-index:-999;';
     
-    // 측정 중에는 height: 297mm를 강제로 해제하여 순수 컨텐츠가 차지하는 높이를 실측
     measureContainer.innerHTML = `
         <style>
             ${pickingPrintStyles}
@@ -1148,7 +1151,6 @@ export function executePickingListPrint() {
     document.body.appendChild(measureContainer);
     const measureTarget = measureContainer.querySelector('#measure-target-inner');
 
-    // A4 1페이지 실제 인쇄 안전 높이 (297mm = 약 1,122px 중 상하 여백 및 브라우저 프린터 헤더 마진을 고려한 임계값: 1,020px)
     const A4_PAGE_SAFE_HEIGHT_PX = 1020;
 
     selectedDriverList.forEach((driverName) => {
@@ -1190,26 +1192,21 @@ export function executePickingListPrint() {
         const aggregatedList = Object.values(aggregationMap).sort((a, b) => b.totalQty - a.totalQty);
         validPageCount++;
 
-        // 1단계: 1열 형태로 가상 렌더링 후 순수 내용물 전체 높이를 실측
         const singleColHtml = buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, false, dateStr);
         measureTarget.innerHTML = singleColHtml;
 
         const pageEl = measureTarget.firstElementChild;
         const actualMeasuredHeight = pageEl ? pageEl.scrollHeight : 0;
 
-        // 2단계: 순수 높이가 A4 1장의 한계(1,020px)를 넘어 실제로 2페이지로 밀리는 경우에만 2열로 분할!
         const isOverflow = actualMeasuredHeight > A4_PAGE_SAFE_HEIGHT_PX;
 
         if (isOverflow) {
-            // 2페이지로 넘어감 -> 2열로 분할하여 1장에 수납
             allDriversPagesHtml += buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, true, dateStr);
         } else {
-            // 1페이지 안에 완전히 들어감 -> 보기 좋은 1열 그대로 유지
             allDriversPagesHtml += singleColHtml;
         }
     });
 
-    // 측정용 가상 컨테이너 제거
     document.body.removeChild(measureContainer);
 
     if (validPageCount === 0) {
@@ -1234,7 +1231,6 @@ export function executePickingListPrint() {
             iframe.contentWindow.print();
             setTimeout(() => { 
                 document.body.removeChild(iframe); 
-                // 🌟 인쇄창을 닫거나 취소해도 모달이 강제로 꺼지지 않도록 삭제 처리 완료
             }, 1000);
         }, 600);
     };

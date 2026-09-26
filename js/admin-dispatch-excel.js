@@ -203,12 +203,20 @@ export async function autoSaveExcelToFirebase() {
 }
 
 // ==========================================
-// 2. 엑셀/주문 테이블 화면 렌더링
+// 2. 엑셀/주문 테이블 화면 렌더링 (실시간 건수 뱃지 동기화 탑재)
 // ==========================================
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); 
+    const totalCountBadge = document.getElementById('excel-total-count-badge');
     if (!tbody) return;
-    if (state.parsedExcelList.length === 0) {
+
+    // 🌟 실시간 전체 현황 주문 건수 뱃지 갱신
+    const totalOrdersCount = state.parsedExcelList ? state.parsedExcelList.length : 0;
+    if (totalCountBadge) {
+        totalCountBadge.innerText = `총 ${totalOrdersCount}건`;
+    }
+
+    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
         const chkAll = document.getElementById('chk-excel-all'); 
         if (chkAll) chkAll.checked = false;
@@ -278,7 +286,7 @@ export function renderExcelTable() {
         chkAll.checked = false; 
         chkAll.onchange = (e) => { 
             const isChecked = e.target.checked; 
-            document.querySelectorAll('.row-checkbox').forEach(cb => { cb.checked = isChecked; }); 
+            document.querySelectorAll('#invoice-excel-tbody .row-checkbox').forEach(cb => { cb.checked = isChecked; }); 
         }; 
     }
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail(); 
@@ -577,12 +585,11 @@ export function processExcelData(jsonData, fileName = '') {
         }
     });
 
-    state.parsedExcelList.push(...groupedList);
     return groupedList;
 }
 
 // ==========================================
-// 4. 통합 드롭존 초기화 및 업로드 처리
+// 4. 통합 드롭존 초기화 및 업로드 처리 (누락 없는 누적 처리)
 // ==========================================
 export function initExcelDropZone() {
     const dropZone = document.getElementById('excel-drop-zone');
@@ -624,6 +631,7 @@ export async function handleExcelUpload(e) {
     const files = e.target.files; 
     if (!files || files.length === 0) return;
 
+    if (!state.parsedExcelList) state.parsedExcelList = [];
     const newlyAddedList = [];
 
     for (let i = 0; i < files.length; i++) {
@@ -644,7 +652,10 @@ export async function handleExcelUpload(e) {
             }
         } else {
             const parsedExcelOrders = await processSingleExcelFile(file);
-            newlyAddedList.push(...parsedExcelOrders);
+            if (parsedExcelOrders && parsedExcelOrders.length > 0) {
+                state.parsedExcelList.push(...parsedExcelOrders);
+                newlyAddedList.push(...parsedExcelOrders);
+            }
         }
     }
 
@@ -653,7 +664,7 @@ export async function handleExcelUpload(e) {
         await batchGeocodeExcelList(newlyAddedList); 
         renderExcelTable(); 
         await autoSaveExcelToFirebase(); 
-        alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지 데이터가 등록되었습니다.`);
+        alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지 데이터가 등록되었습니다.\n(현재 총 누적: ${state.parsedExcelList.length}곳)`);
     } else { 
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); 
     }
@@ -810,7 +821,7 @@ export async function deleteExcelRow(idx) {
 }
 
 export async function deleteSelectedExcelRows() {
-    const checkboxes = document.querySelectorAll('.row-checkbox:checked');
+    const checkboxes = document.querySelectorAll('#invoice-excel-tbody .row-checkbox:checked');
     if(checkboxes.length === 0) { 
         alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); 
         return; 
