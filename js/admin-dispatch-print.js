@@ -690,7 +690,7 @@ export function executeBatchPrint() {
 }
 
 // ==========================================
-// 7. 피킹 리스트 (선택된 기사별 각각 분리 출력)
+// 🌟 7. 피킹 리스트 (스마트 1장 맞춤 인쇄: 24종 이하 1열 콤팩트, 25종 이상 좌/우 2열 자동 분할)
 // ==========================================
 export const pickingModalState = {
     selectedDrivers: new Set()
@@ -837,40 +837,37 @@ export function executePickingListPrint() {
         const totalItemTypes = aggregatedList.length;
         const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
 
-        let tableRowsHtml = '';
-        aggregatedList.forEach((item, idx) => {
-            tableRowsHtml += `
-            <tr>
-                <td style="text-align: center; font-weight: bold; padding: 6px 4px;">${idx + 1}</td>
-                <td style="text-align: left; font-weight: bold; padding: 6px 8px; font-size: 11px;">${item.name}</td>
-                <td style="text-align: center; padding: 6px 4px;">${item.unit}</td>
-                <td style="text-align: right; font-weight: 900; padding: 6px 8px; font-size: 12px; color: #1e3a8a;">${formatNumber(item.totalQty)}</td>
-                <td style="text-align: center; font-weight: bold; color: #64748b; padding: 6px 4px;">${item.orderCount}곳</td>
-                <td style="text-align: center; padding: 6px 4px;"><span style="display: inline-block; width: 18px; height: 18px; border: 1.5px solid #000; border-radius: 3px;"></span></td>
-            </tr>`;
-        });
-
         validPageCount++;
-        allDriversPagesHtml += `
-        <div class="print-page">
-            <div class="header-title">창고 상차 피킹 리스트</div>
-            <div class="meta-info">
-                <span>출력일자: ${dateStr}</span>
-                <span style="font-size: 14px; color: #1e40af;">담당 기사: <b>${driverName}</b></span>
-            </div>
-            <div class="summary-box">
-                <span>배송처: <b>${driverOrders.length}</b>곳</span>
-                <span>품목 종류: <b>${totalItemTypes}</b>종</span>
-                <span>총 수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
-            </div>
-            <table>
+
+        // 🌟 24종 이하는 1열 콤팩트 모드, 25종 이상은 좌/우 2열 분할 모드로 1장에 맞춤
+        const isTwoColumn = totalItemTypes > 24;
+
+        let tableContentHtml = '';
+
+        if (!isTwoColumn) {
+            // [모드 1] 24종 이하: 1열 콤팩트 테이블
+            let rowsHtml = '';
+            aggregatedList.forEach((item, idx) => {
+                rowsHtml += `
+                <tr>
+                    <td class="col-center text-bold">${idx + 1}</td>
+                    <td class="col-left text-bold">${item.name}</td>
+                    <td class="col-center">${item.unit}</td>
+                    <td class="col-right text-black-bold">${formatNumber(item.totalQty)}</td>
+                    <td class="col-center text-muted">${item.orderCount}곳</td>
+                    <td class="col-center"><span class="check-box"></span></td>
+                </tr>`;
+            });
+
+            tableContentHtml = `
+            <table class="picking-table single-col-table">
                 <colgroup>
-                    <col style="width: 7%;">
-                    <col style="width: 48%;">
+                    <col style="width: 6%;">
+                    <col style="width: 52%;">
+                    <col style="width: 11%;">
                     <col style="width: 12%;">
-                    <col style="width: 13%;">
                     <col style="width: 10%;">
-                    <col style="width: 10%;">
+                    <col style="width: 9%;">
                 </colgroup>
                 <thead>
                     <tr>
@@ -883,9 +880,99 @@ export function executePickingListPrint() {
                     </tr>
                 </thead>
                 <tbody>
-                    ${tableRowsHtml}
+                    ${rowsHtml}
                 </tbody>
-            </table>
+            </table>`;
+        } else {
+            // [모드 2] 25종 이상: 좌/우 2열 나란히 분할 배치 (A4 1장에 최대 50종까지 완벽 수납)
+            const halfPoint = Math.ceil(totalItemTypes / 2);
+            const leftList = aggregatedList.slice(0, halfPoint);
+            const rightList = aggregatedList.slice(halfPoint);
+
+            const renderSubTableRows = (list, offset) => {
+                return list.map((item, i) => `
+                <tr>
+                    <td class="col-center text-bold">${offset + i + 1}</td>
+                    <td class="col-left text-bold">${item.name}</td>
+                    <td class="col-center">${item.unit}</td>
+                    <td class="col-right text-black-bold">${formatNumber(item.totalQty)}</td>
+                    <td class="col-center text-muted">${item.orderCount}곳</td>
+                    <td class="col-center"><span class="check-box"></span></td>
+                </tr>`).join('');
+            };
+
+            tableContentHtml = `
+            <div class="two-column-wrapper">
+                <div class="col-half">
+                    <table class="picking-table double-col-table">
+                        <colgroup>
+                            <col style="width: 8%;">
+                            <col style="width: 48%;">
+                            <col style="width: 13%;">
+                            <col style="width: 13%;">
+                            <col style="width: 10%;">
+                            <col style="width: 8%;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>No.</th>
+                                <th>상 품 명 (규격)</th>
+                                <th>단위</th>
+                                <th>수량</th>
+                                <th>배송</th>
+                                <th>확인</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${renderSubTableRows(leftList, 0)}
+                        </tbody>
+                    </table>
+                </div>
+                <div class="col-half">
+                    <table class="picking-table double-col-table">
+                        <colgroup>
+                            <col style="width: 8%;">
+                            <col style="width: 48%;">
+                            <col style="width: 13%;">
+                            <col style="width: 13%;">
+                            <col style="width: 10%;">
+                            <col style="width: 8%;">
+                        </colgroup>
+                        <thead>
+                            <tr>
+                                <th>No.</th>
+                                <th>상 품 명 (규격)</th>
+                                <th>단위</th>
+                                <th>수량</th>
+                                <th>배송</th>
+                                <th>확인</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${renderSubTableRows(rightList, halfPoint)}
+                        </tbody>
+                    </table>
+                </div>
+            </div>`;
+        }
+
+        allDriversPagesHtml += `
+        <div class="print-page ${isTwoColumn ? 'mode-two-col' : 'mode-single-col'}">
+            <div class="header-title">창고 상차 피킹 리스트</div>
+            <div class="meta-info">
+                <span>출력일자: ${dateStr}</span>
+                <span class="driver-name-text">담당 기사: <b>${driverName}</b></span>
+            </div>
+            <div class="summary-box">
+                <span>배송처: <b>${driverOrders.length}</b>곳</span>
+                <span>품목 종류: <b>${totalItemTypes}</b>종</span>
+                <span>총 수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
+            </div>
+            
+            <div class="table-container">
+                ${tableContentHtml}
+            </div>
+
             <div class="footer-sign">
                 <span>상차 기사(${driverName}): <span class="sign-box">(서명)</span></span>
                 <span>출고 검수자: <span class="sign-box">(서명)</span></span>
@@ -901,33 +988,189 @@ export function executePickingListPrint() {
     const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 동선 PRO - 기사별 피킹 리스트</title><style>
         * { box-sizing: border-box; }
         @media print {
-            @page { size: A4 portrait; margin: 10mm; }
-            body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: white; }
+            @page { 
+                size: A4 portrait; 
+                margin: 0; 
+            }
+            html, body { 
+                margin: 0 !important; 
+                padding: 0 !important; 
+                width: 210mm !important; 
+                height: 297mm !important; 
+                background: white !important; 
+                -webkit-print-color-adjust: exact !important; 
+                print-color-adjust: exact !important; 
+            }
             .print-page { 
-                box-shadow: none !important; 
-                border: none !important; 
-                width: 100% !important; 
-                height: auto !important; 
-                page-break-after: always; 
-                padding: 0;
-                margin: 0 0 20mm 0;
+                width: 210mm !important; 
+                height: 297mm !important; 
+                max-height: 297mm !important; 
+                margin: 0 !important; 
+                padding: 7mm 8mm 6mm 8mm !important; 
+                page-break-after: always !important; 
+                page-break-inside: avoid !important; 
+                break-after: page !important; 
+                overflow: hidden !important; 
+                box-sizing: border-box !important; 
+                display: flex !important; 
+                flex-direction: column !important; 
+                justify-content: flex-start !important; 
             }
             .print-page:last-child {
-                page-break-after: auto;
+                page-break-after: auto !important;
+                break-after: auto !important;
             }
         }
-        body { font-family: 'Malgun Gothic', 'Dotum', sans-serif; background: white; margin: 0; padding: 0; color: #1e293b; }
-        .print-page { width: 190mm; margin: 0 auto; padding: 5mm; page-break-after: always; }
-        .print-page:last-child { page-break-after: auto; }
-        .header-title { text-align: center; font-size: 22px; font-weight: 900; letter-spacing: 2px; margin-bottom: 4px; border-bottom: 3px double #000; padding-bottom: 6px; }
-        .meta-info { display: flex; justify-content: space-between; align-items: flex-end; font-size: 11px; font-weight: bold; margin-bottom: 10px; color: #334155; }
-        .summary-box { background-color: #f8fafc; border: 1.5px solid #cbd5e1; border-radius: 8px; padding: 8px 12px; display: flex; justify-content: space-around; font-size: 11px; font-weight: 900; margin-bottom: 12px; }
-        .summary-box span b { color: #2563eb; font-size: 13px; margin-left: 4px; }
-        table { width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10.5px; }
-        th { background-color: #f1f5f9; border: 1px solid #000; padding: 6px 4px; font-weight: 900; text-align: center; }
-        td { border: 1px solid #000; }
-        .footer-sign { display: flex; justify-content: flex-end; gap: 30px; margin-top: 18px; font-size: 11px; font-weight: bold; }
-        .sign-box { border-bottom: 1px solid #000; width: 90px; display: inline-block; text-align: center; }
+        body { 
+            font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+            background: white; 
+            margin: 0; 
+            padding: 0; 
+            color: #1e293b; 
+        }
+        .print-page { 
+            width: 210mm; 
+            height: 297mm; 
+            max-height: 297mm; 
+            margin: 0 auto; 
+            padding: 7mm 8mm 6mm 8mm; 
+            page-break-after: always; 
+            box-sizing: border-box; 
+            display: flex; 
+            flex-direction: column; 
+            justify-content: flex-start; 
+            overflow: hidden; 
+        }
+        .print-page:last-child { 
+            page-break-after: auto; 
+        }
+        .header-title { 
+            text-align: center; 
+            font-size: 19px; 
+            font-weight: 900; 
+            letter-spacing: 2px; 
+            margin-bottom: 2px; 
+            border-bottom: 2.5px double #000; 
+            padding-bottom: 3px; 
+        }
+        .meta-info { 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: flex-end; 
+            font-size: 10px; 
+            font-weight: bold; 
+            margin-bottom: 5px; 
+            color: #334155; 
+            padding: 0 2px; 
+        }
+        .driver-name-text { 
+            font-size: 12.5px; 
+            color: #1e40af; 
+        }
+        .summary-box { 
+            background-color: #f8fafc; 
+            border: 1.5px solid #cbd5e1; 
+            border-radius: 6px; 
+            padding: 4px 10px; 
+            display: flex; 
+            justify-content: space-around; 
+            font-size: 10.5px; 
+            font-weight: 900; 
+            margin-bottom: 6px; 
+            -webkit-print-color-adjust: exact; 
+            print-color-adjust: exact; 
+        }
+        .summary-box span b { 
+            color: #2563eb; 
+            font-size: 11.5px; 
+            margin-left: 3px; 
+        }
+        .table-container { 
+            flex: 1; 
+            overflow: hidden; 
+            display: flex; 
+            flex-direction: column; 
+        }
+        .picking-table { 
+            width: 100%; 
+            border-collapse: collapse; 
+            border: 1.5px solid #000; 
+            font-size: 9.5px; 
+            table-layout: fixed; 
+        }
+        .picking-table th { 
+            background-color: #f1f5f9; 
+            border: 1px solid #000; 
+            padding: 3.5px 3px; 
+            font-weight: 900; 
+            text-align: center; 
+            color: #0f172a; 
+            -webkit-print-color-adjust: exact; 
+            print-color-adjust: exact; 
+        }
+        .picking-table td { 
+            border: 1px solid #000; 
+            padding: 2.8px 4px; 
+            vertical-align: middle; 
+            line-height: 1.2; 
+        }
+        .two-column-wrapper { 
+            display: flex; 
+            gap: 6px; 
+            width: 100%; 
+            align-items: flex-start; 
+        }
+        .col-half { 
+            flex: 1; 
+            min-width: 0; 
+        }
+        .double-col-table th { 
+            padding: 2.5px 2px; 
+            font-size: 9px; 
+        }
+        .double-col-table td { 
+            padding: 2px 3px; 
+            font-size: 8.5px; 
+        }
+        .col-center { text-align: center; }
+        .col-left { 
+            text-align: left; 
+            white-space: normal; 
+            word-break: break-all; 
+        }
+        .col-right { text-align: right; }
+        .text-bold { font-weight: bold; }
+        .text-black-bold { 
+            font-weight: 900; 
+            color: #1e3a8a; 
+        }
+        .text-muted { 
+            font-weight: bold; 
+            color: #64748b; 
+        }
+        .check-box { 
+            display: inline-block; 
+            width: 13px; 
+            height: 13px; 
+            border: 1.2px solid #000; 
+            border-radius: 2px; 
+        }
+        .footer-sign { 
+            display: flex; 
+            justify-content: flex-end; 
+            gap: 25px; 
+            margin-top: 6px; 
+            padding-top: 4px; 
+            border-top: 1px solid #cbd5e1; 
+            font-size: 10px; 
+            font-weight: bold; 
+        }
+        .sign-box { 
+            border-bottom: 1px solid #000; 
+            width: 75px; 
+            display: inline-block; 
+            text-align: center; 
+        }
     </style></head><body>${allDriversPagesHtml}</body></html>`;
 
     const iframe = document.createElement('iframe');
