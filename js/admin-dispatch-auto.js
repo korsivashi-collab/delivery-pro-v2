@@ -375,8 +375,21 @@ export function selectDispatchDriver(devId) {
 }
 
 // ==========================================
-// 4. 기사별 할당 상세 내역 및 수동 기사 재배정 UI
+// 4. 기사별 할당 상세 내역 및 수동 기사 재배정 UI (주소지별 정렬 탑재)
 // ==========================================
+
+// 🌟 주소지별 정렬 상태 변수 ('none', 'asc', 'desc')
+let detailAddressSortState = 'none';
+
+export function sortDetailByAddress() {
+    if (detailAddressSortState === 'none' || detailAddressSortState === 'desc') {
+        detailAddressSortState = 'asc';
+    } else {
+        detailAddressSortState = 'desc';
+    }
+    renderDispatchDriverDetail();
+}
+
 export function renderDispatchDriverDetail() {
     const header = document.getElementById('detail-driver-header');
     const table = document.getElementById('detail-driver-table');
@@ -396,7 +409,7 @@ export function renderDispatchDriverDetail() {
 
     const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
-    const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
+    let assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
     const visibleDrivers = getFilteredVisibleDrivers();
 
     if (header) header.classList.add('hidden'); 
@@ -411,6 +424,29 @@ export function renderDispatchDriverDetail() {
         if (btnSendRoutes) btnSendRoutes.classList.add('hidden');
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
+    }
+
+    // 🌟 주소지별 가나다순 정렬 적용
+    if (detailAddressSortState !== 'none') {
+        assignedItems = [...assignedItems].sort((a, b) => {
+            const addrA = (a.address || a.fullAddress || '').trim();
+            const addrB = (b.address || b.fullAddress || '').trim();
+            if (detailAddressSortState === 'asc') {
+                return addrA.localeCompare(addrB, 'ko');
+            } else {
+                return addrB.localeCompare(addrA, 'ko');
+            }
+        });
+    }
+
+    // 🌟 테이블 헤더 정렬 화살표 갱신
+    const arrowSymbol = detailAddressSortState === 'asc' ? ' ▲' : (detailAddressSortState === 'desc' ? ' ▼' : ' ↕');
+    const theadAddressTh = table ? table.querySelector('thead tr th:nth-child(2)') : null;
+    if (theadAddressTh) {
+        theadAddressTh.className = "font-black cursor-pointer hover:bg-gray-100 select-none transition py-2 px-2 text-blue-700";
+        theadAddressTh.onclick = () => window.sortDetailByAddress();
+        theadAddressTh.title = "클릭 시 주소지(지역별) 가나다순으로 정렬합니다";
+        theadAddressTh.innerHTML = `배송지 주소 / 고객 정보 <span class="text-[10px] text-blue-600 font-bold">${arrowSymbol}</span>`;
     }
 
     if (btnDriverPrint) btnDriverPrint.classList.remove('hidden');
@@ -869,6 +905,7 @@ window.toggleAllDispatchDrivers = toggleAllDispatchDrivers;
 window.toggleDispatchDriver = toggleDispatchDriver;
 window.adjustDriverWeight = adjustDriverWeight;
 window.selectDispatchDriver = selectDispatchDriver;
+window.sortDetailByAddress = sortDetailByAddress; // 🌟 주소지 정렬 함수 바인딩
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
