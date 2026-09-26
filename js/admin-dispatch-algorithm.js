@@ -101,18 +101,18 @@ export function getBaseDist(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 지형지물(강, 산, 행정구역) 가상 페널티가 결합된 실질 거리 계산기
+// 지형지물(강, 산, 행정구역) 가상 페널티가 결합된 실질 거리 계산기 (페널티 강화)
 export function calculateGeoPenalizedDist(lat1, lon1, lat2, lon2, addr1 = '', addr2 = '') {
     const baseDistance = getBaseDist(lat1, lon1, lat2, lon2);
     if (baseDistance >= 999999) return baseDistance;
 
     let penalty = 0;
 
-    // 1. 강줄기 가상 차단선 통과 여부 검사
+    // 1. 강줄기 가상 차단선 통과 시 강력 차단 (45km 페널티)
     const p1 = { lat: lat1, lng: lon1 };
     const p2 = { lat: lat2, lng: lon2 };
     if (checkRiverCrossings(p1, p2)) {
-        penalty += 25; // 강을 건너야 할 경우 25km 가상 벌점
+        penalty += 45;
     }
 
     // 2. 주소 기반 행정구역 및 한강 남북 분리 검사
@@ -120,17 +120,17 @@ export function calculateGeoPenalizedDist(lat1, lon1, lat2, lon2, addr1 = '', ad
     const area2 = parseAreaInfo(addr2);
 
     if (area1.sido && area2.sido) {
-        // 서울 강남 ↔ 강북 교차 배정 강력 차단
+        // 서울 강남 ↔ 강북 교차 배정 강력 차단 (60km 페널티)
         if ((area1.isSeoulGangbuk && area2.isSeoulGangnam) || (area1.isSeoulGangnam && area2.isSeoulGangbuk)) {
-            penalty += 30;
+            penalty += 60;
         }
-        // 광역 시/도가 서로 다른 경우
+        // 광역 시/도가 서로 다른 경우 (예: 서울 ↔ 경기 남부, 인천 등)
         else if (area1.sido !== area2.sido) {
-            penalty += 12;
+            penalty += 25;
         }
-        // 같은 시/도 내에서 시·군·구가 다른 경우 (자연 경계선 우선 분리)
+        // 같은 시/도 내에서 시·군·구가 다른 경우
         else if (area1.sigungu && area2.sigungu && area1.sigungu !== area2.sigungu) {
-            penalty += 6;
+            penalty += 8;
         }
     }
 
@@ -187,7 +187,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 }
 
 // ==========================================
-// 4. [핵심 알고리즘] 외곽 최우선 인접 클러스터링 자동 배차 실행기
+// 4. [핵심 알고리즘] Regret 기반 권역 밀착 배분 알고리즘
 // ==========================================
 export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null }) {
     if (!targetOrders || targetOrders.length === 0) {
@@ -200,83 +200,70 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     const totalOrders = targetOrders.length;
     const driverStats = calculateDriverCapacities(activeDrivers, totalOrders, weights, companyBase);
 
-    // 거리 측정의 기준이 될 '본사 거점' (미설정 시 전체 배송지들의 평균 중심점 산출)
-    let baseLat = companyBase ? companyBase.lat : null;
-    let baseLng = companyBase ? companyBase.lng : null;
-    let baseAddr = companyBase ? companyBase.address : '';
-
-    if (!baseLat || !baseLng) {
-        const validOrders = targetOrders.filter(o => o.lat && o.lng);
-        if (validOrders.length > 0) {
-            baseLat = validOrders.reduce((sum, o) => sum + o.lat, 0) / validOrders.length;
-            baseLng = validOrders.reduce((sum, o) => sum + o.lng, 0) / validOrders.length;
-            baseAddr = '임시 가상 중심점';
-        } else {
-            baseLat = 37.566826; baseLng = 126.978656; // 서울시청 (Fallback)
-        }
-    }
-
-    // 아직 배정되지 않은 주문 목록 (원본 복사)
+    // 아직 배정되지 않은 주문 풀
     let unassigned = [...targetOrders];
 
-    // 모든 배송지가 배정될 때까지 반복
+    // 모든 주문이 배정될 때까지 반복
     while (unassigned.length > 0) {
-        // 1. 현재 남은 오더 중 본사(또는 중심)에서 '가장 먼(외곽)' 배송지 탐색
-        unassigned.sort((a, b) => {
-            const distA = calculateGeoPenalizedDist(a.lat, a.lng, baseLat, baseLng, a.fullAddress || a.address, baseAddr);
-            const distB = calculateGeoPenalizedDist(b.lat, b.lng, baseLat, baseLng, b.fullAddress || b.address, baseAddr);
-            return distB - distA; // 거리가 먼 순서대로(내림차순) 정렬
-        });
+        // 정원이 남아있는 활성 기사 목록 추출
+        const availableDrivers = driverStats.filter(ds => ds.assignedCount < ds.targetCap);
 
-        let currentOrder = unassigned[0];
-        let bestDriver = null;
-        let minDistance = Infinity;
-
-        // 2. 이 가장 먼 배송지를 처리할 최적의 기사 찾기 (정원이 남은 기사 중 권역 중심이 가장 가까운 기사)
-        driverStats.forEach(ds => {
-            if (ds.assignedCount >= ds.targetCap) return;
-            const dist = calculateGeoPenalizedDist(currentOrder.lat, currentOrder.lng, ds.tLat, ds.tLng, currentOrder.fullAddress || currentOrder.address, ds.tAddr);
-            if (dist < minDistance) {
-                minDistance = dist;
-                bestDriver = ds;
-            }
-        });
-
-        // (안전장치) 모든 기사 정원이 찼는데도 남은 물량이 있다면 예외적으로 가장 가까운 기사에게 강제 초과 배정
-        if (!bestDriver) {
-            let absMin = Infinity;
-            driverStats.forEach(ds => {
-                const dist = calculateGeoPenalizedDist(currentOrder.lat, currentOrder.lng, ds.tLat, ds.tLng, currentOrder.fullAddress || currentOrder.address, ds.tAddr);
-                if (dist < absMin) {
-                    absMin = dist;
-                    bestDriver = ds;
-                }
+        // 만약 모든 기사의 정원이 찼다면(예외 상황), 전체 기사 중 절대 최단거리 기사로 Fallback
+        if (availableDrivers.length === 0) {
+            unassigned.forEach(order => {
+                let bestDriver = null;
+                let minDist = Infinity;
+                driverStats.forEach(ds => {
+                    const d = calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr);
+                    if (d < minDist) { minDist = d; bestDriver = ds; }
+                });
+                bestDriver.assignedCount++;
+                order.assignedDriver = bestDriver.phone;
             });
+            break;
         }
 
-        // 3. 찾은 기사에게 외곽 오더 첫 할당
-        bestDriver.assignedCount++;
-        currentOrder.assignedDriver = bestDriver.phone;
-        unassigned.shift(); // 할당 완료된 0번째 항목 제거
+        // 남아있는 각 배송지에 대해:
+        // 정원이 남은 기사들과의 거리 중 1순위 기사(최소 거리)와 2순위 기사를 찾아 차이(Regret)를 계산
+        let bestCandidate = null;
+        let maxRegret = -Infinity;
+        let bestCandidateDriver = null;
+        let bestCandidateIndex = -1;
 
-        // 4. [핵심 개선] 해당 기사의 할당량(Cap)이 모두 찰 때까지, 
-        // 방금 배정한 위치에서 '가장 가까운' 인접 오더를 싹쓸이로 묶음(클러스터링) 연속 할당
-        while (bestDriver.assignedCount < bestDriver.targetCap && unassigned.length > 0) {
-            // 남은 오더들을 '방금 배정한 위치(currentOrder)' 기준으로 다시 거리 오름차순 정렬
-            unassigned.sort((a, b) => {
-                const distA = calculateGeoPenalizedDist(a.lat, a.lng, currentOrder.lat, currentOrder.lng, a.fullAddress || a.address, currentOrder.fullAddress || currentOrder.address);
-                const distB = calculateGeoPenalizedDist(b.lat, b.lng, currentOrder.lat, currentOrder.lng, b.fullAddress || b.address, currentOrder.fullAddress || currentOrder.address);
-                return distA - distB; // 가까운 순서대로(오름차순) 정렬
-            });
+        for (let i = 0; i < unassigned.length; i++) {
+            const order = unassigned[i];
 
-            // 가장 가까운 인접 배송지 선택 후 할당
-            let nextOrder = unassigned[0];
-            bestDriver.assignedCount++;
-            nextOrder.assignedDriver = bestDriver.phone;
-            unassigned.shift(); // 할당 완료 제거
+            // 사용 가능한 기사들과의 페널티 거리 계산 및 정렬
+            const driverDistances = availableDrivers.map(ds => ({
+                driver: ds,
+                dist: calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr)
+            })).sort((a, b) => a.dist - b.dist);
 
-            // 다음 인접 탐색의 중심축을 방금 할당한 배송지로 갱신 (지그재그 방지)
-            currentOrder = nextOrder;
+            const closest = driverDistances[0];
+            const secondClosest = driverDistances.length > 1 ? driverDistances[1] : null;
+
+            // 외곽 배송지일수록 1순위와 2순위 간의 거리 차이(Regret)가 수십 km에 달함
+            // 남은 기사가 1명이면 그 기사와 가까운 순서대로 처리
+            const regret = secondClosest ? (secondClosest.dist - closest.dist) : (1000 - closest.dist);
+
+            if (regret > maxRegret) {
+                maxRegret = regret;
+                bestCandidate = order;
+                bestCandidateDriver = closest.driver;
+                bestCandidateIndex = i;
+            }
+        }
+
+        // 대체 불가능한 외곽 배송지부터 해당 기사에게 즉시 확정 배정
+        if (bestCandidate && bestCandidateDriver && bestCandidateIndex !== -1) {
+            bestCandidateDriver.assignedCount++;
+            bestCandidate.assignedDriver = bestCandidateDriver.phone;
+            unassigned.splice(bestCandidateIndex, 1);
+        } else {
+            // 안전장치: 예외 발생 시 순차 처리
+            const order = unassigned.shift();
+            availableDrivers[0].assignedCount++;
+            order.assignedDriver = availableDrivers[0].phone;
         }
     }
 
