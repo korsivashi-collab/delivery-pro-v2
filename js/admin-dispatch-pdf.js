@@ -126,7 +126,7 @@ export async function processSinglePdfFile(file) {
 }
 
 // ==========================================
-// 🌟 3. 고도화된 정보 분류 엔진 (상호, 연락처, 품목 100% 적출)
+// 🌟 3. 고도화된 정보 분류 엔진 (공급자명 클린 파싱 적용)
 // ==========================================
 function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     if (!items || items.length === 0) return [];
@@ -159,15 +159,23 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         }
     }
 
-    // 3. 발송사(공급자) 감지
+    // 🌟 3. 발송사(공급자) 정밀 감지 (구매자명/주소/사업자 등 다음 항목 침범 차단)
     let senderName = '';
-    const provStoreMatch = allTextJoined.match(/공급자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
+    const provStoreMatch = allTextJoined.match(/공급자[\s\S]*?(?:상호\(법인명\)|상호명|상호)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,30})/);
     if (provStoreMatch) {
-        senderName = provStoreMatch[1].split(/[\n\r|]/)[0].trim();
+        senderName = provStoreMatch[1].split(/(?:구매자|주문자|공급받는|주소|사업자|연락처|전화|No\.|결제|배송)/)[0].trim();
     } else {
-        const generalStoreMatch = allTextJoined.match(/상호\(법인명\)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
-        if (generalStoreMatch) senderName = generalStoreMatch[1].split(/[\n\r|]/)[0].trim();
+        const generalStoreMatch = allTextJoined.match(/상호\(법인명\)[\s:|]*([가-힣A-Za-z0-9\(\)\s]{2,30})/);
+        if (generalStoreMatch) {
+            senderName = generalStoreMatch[1].split(/(?:구매자|주문자|공급받는|주소|사업자|연락처|전화|No\.|결제|배송)/)[0].trim();
+        }
     }
+
+    // 불필요한 특수문자나 괄호 잔여물 제거
+    if (senderName) {
+        senderName = senderName.replace(/^[|:>\s]+/, '').replace(/[|:>\s]+$/, '').trim();
+    }
+
     if (!senderName && fileName) senderName = fileName.replace(/\.[^/.]+$/, '').split(/[_\-\s]+/)[0].trim();
     if (!senderName) senderName = '정보 없음';
 
@@ -257,7 +265,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         memo = `[결제: ${payMethod}] ` + memo;
     }
 
-    // 🌟 10. 품목(Table) 정밀 추출 및 중복 제거(상/하단 보관용 분리)
+    // 10. 품목(Table) 정밀 추출 및 중복 제거
     const lineMap = new Map();
     validTokens.forEach(t => {
         let matchedY = null;
@@ -276,7 +284,6 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         const lineTokens = lineMap.get(yKey).sort((a, b) => a.x - b.x);
         const lineStr = lineTokens.map(t => t.text).join(' ').trim();
 
-        // 번호(1~99) 띄어쓰기로 시작하는 테이블 행 탐색
         if (/^\d{1,3}\s+/.test(lineStr)) {
             const tokens = lineStr.split(/\s+/);
             if (tokens.length >= 3 && /^\d+$/.test(tokens[0])) {
@@ -286,7 +293,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
                     else break;
                 }
                 
-                if (numCount > 5) numCount = 5; // 수량,단가,공급가액,세액,총액 (최대 5개 컬럼 한정)
+                if (numCount > 5) numCount = 5;
                 
                 if (numCount >= 2) {
                     const total = parseInt(tokens[tokens.length - 1].replace(/,/g, ''), 10);
@@ -309,7 +316,6 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         }
     });
 
-    // 공급자/공급받는자 등 동일 페이지 중복 인쇄된 상품 리스트 제거 필터
     const orderItems = [];
     const seenItems = new Set();
     rawOrderItems.forEach(it => {
@@ -363,7 +369,6 @@ async function getCoordsFromAddress(address) {
     const cleanKey = address.trim();
     if (!cleanKey) return null;
 
-    // 1단계: 로컬 주소 캐시 우선 확인 (카카오 호출 0회 처리)
     const cache = getGeoCache();
     if (cache[cleanKey]) {
         return cache[cleanKey];
@@ -374,7 +379,6 @@ async function getCoordsFromAddress(address) {
     }
     const geocoder = new window.kakao.maps.services.Geocoder();
 
-    // 🌟 2단계: 지수 백오프(Exponential Backoff with Jitter) 429 차단 방어 래퍼
     const queryKakaoWithRetry = async (queryStr) => {
         const maxRetries = 3;
         const delays = [200, 500, 1000];
@@ -391,7 +395,6 @@ async function getCoordsFromAddress(address) {
                         } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
                             resolve({ success: false, retryable: false });
                         } else {
-                            // 429 Rate Limit 초과 또는 일시적 통신 지연 오류
                             resolve({ success: false, retryable: true });
                         }
                     });
@@ -410,10 +413,8 @@ async function getCoordsFromAddress(address) {
         return null;
     };
 
-    // 1차: 정제 주소로 검색
     let coords = await queryKakaoWithRetry(cleanKey);
 
-    // 2차: 도로명+지번 번지수 기본 패턴으로 재시도
     if (!coords) {
         const basicMatch = cleanKey.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
         if (basicMatch && basicMatch[0] !== cleanKey) {
