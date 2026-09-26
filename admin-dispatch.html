@@ -288,13 +288,15 @@
                 <div class="w-0.5 h-8 bg-gray-400 group-hover:bg-white rounded-full transition"></div>
             </div>
 
-            <!-- 3단 (우측): 전체 배송지 현황 -->
+            <!-- 3단 (우측): 전체 배송지 현황 (실시간 등록 건수 배지 추가) -->
             <div id="dispatch-total-panel" class="flex-1 min-w-[380px] bg-white border border-gray-200 rounded-2xl shadow-xs flex flex-col overflow-hidden">
                 <div class="bg-gray-50 border-b border-gray-200 p-2.5 flex justify-between items-center z-10 shrink-0">
                     <div class="flex items-center gap-2">
                         <span class="px-2 py-1 bg-white border border-gray-200 rounded-md text-gray-800 font-black text-xs flex items-center gap-1 shadow-2xs">
                             <i class="fa-solid fa-list-check text-blue-600"></i> 전체 현황
                         </span>
+                        <!-- 🌟 실시간 전체 주문 건수 표시 뱃지 -->
+                        <span id="excel-total-count-badge" class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full shadow-2xs">총 0건</span>
                         <input type="date" id="dispatch-assign-date" class="px-2 py-1 bg-white border border-gray-300 text-gray-900 rounded-md text-[11px] font-black shadow-2xs outline-none cursor-pointer">
                     </div>
                     <div class="flex gap-1 items-center">
