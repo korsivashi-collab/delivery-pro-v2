@@ -690,7 +690,7 @@ export function executeBatchPrint() {
 }
 
 // ==========================================
-// 🌟 7. 피킹 리스트 (스마트 1장 맞춤 인쇄: 24종 이하 1열 콤팩트, 25종 이상 좌/우 2열 자동 분할)
+// 🌟 7. 피킹 리스트 (A4 1페이지 실측 기반 동적 2열 전환 엔진)
 // ==========================================
 export const pickingModalState = {
     selectedDrivers: new Set()
@@ -786,6 +786,338 @@ export function renderPickingDriverList(uniqueDrivers) {
     }
 }
 
+// 🌟 피킹 리스트 페이지 내부 HTML 조립 헬퍼 (1열 / 2열 공용)
+function buildPickingPageHtml(driverName, driverOrdersCount, aggregatedList, isTwoColumn, dateStr) {
+    const totalItemTypes = aggregatedList.length;
+    const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
+
+    let tableContentHtml = '';
+
+    if (!isTwoColumn) {
+        // [1열 형태] 콤팩트 테이블
+        let rowsHtml = '';
+        aggregatedList.forEach((item, idx) => {
+            rowsHtml += `
+            <tr>
+                <td class="col-center text-bold">${idx + 1}</td>
+                <td class="col-left text-bold">${item.name}</td>
+                <td class="col-center">${item.unit}</td>
+                <td class="col-right text-black-bold">${formatNumber(item.totalQty)}</td>
+                <td class="col-center text-muted">${item.orderCount}곳</td>
+                <td class="col-center"><span class="check-box"></span></td>
+            </tr>`;
+        });
+
+        tableContentHtml = `
+        <table class="picking-table single-col-table">
+            <colgroup>
+                <col style="width: 6%;">
+                <col style="width: 52%;">
+                <col style="width: 11%;">
+                <col style="width: 12%;">
+                <col style="width: 10%;">
+                <col style="width: 9%;">
+            </colgroup>
+            <thead>
+                <tr>
+                    <th>No.</th>
+                    <th>상 품 명 (품목 규격)</th>
+                    <th>단위</th>
+                    <th>총 수량</th>
+                    <th>배송처</th>
+                    <th>상차확인</th>
+                </tr>
+            </thead>
+            <tbody>
+                ${rowsHtml}
+            </tbody>
+        </table>`;
+    } else {
+        // [2열 형태] 좌/우 균등 분할 테이블 (1장에 완벽 수납)
+        const halfPoint = Math.ceil(totalItemTypes / 2);
+        const leftList = aggregatedList.slice(0, halfPoint);
+        const rightList = aggregatedList.slice(halfPoint);
+
+        const renderSubTableRows = (list, offset) => {
+            return list.map((item, i) => `
+            <tr>
+                <td class="col-center text-bold">${offset + i + 1}</td>
+                <td class="col-left text-bold">${item.name}</td>
+                <td class="col-center">${item.unit}</td>
+                <td class="col-right text-black-bold">${formatNumber(item.totalQty)}</td>
+                <td class="col-center text-muted">${item.orderCount}곳</td>
+                <td class="col-center"><span class="check-box"></span></td>
+            </tr>`).join('');
+        };
+
+        tableContentHtml = `
+        <div class="two-column-wrapper">
+            <div class="col-half">
+                <table class="picking-table double-col-table">
+                    <colgroup>
+                        <col style="width: 8%;">
+                        <col style="width: 48%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 10%;">
+                        <col style="width: 8%;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>No.</th>
+                            <th>상 품 명 (규격)</th>
+                            <th>단위</th>
+                            <th>수량</th>
+                            <th>배송</th>
+                            <th>확인</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${renderSubTableRows(leftList, 0)}
+                    </tbody>
+                </table>
+            </div>
+            <div class="col-half">
+                <table class="picking-table double-col-table">
+                    <colgroup>
+                        <col style="width: 8%;">
+                        <col style="width: 48%;">
+                        <col style="width: 13%;">
+                        <col style="width: 13%;">
+                        <col style="width: 10%;">
+                        <col style="width: 8%;">
+                    </colgroup>
+                    <thead>
+                        <tr>
+                            <th>No.</th>
+                            <th>상 품 명 (규격)</th>
+                            <th>단위</th>
+                            <th>수량</th>
+                            <th>배송</th>
+                            <th>확인</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${renderSubTableRows(rightList, halfPoint)}
+                    </tbody>
+                </table>
+            </div>
+        </div>`;
+    }
+
+    return `
+    <div class="print-page ${isTwoColumn ? 'mode-two-col' : 'mode-single-col'}">
+        <div class="header-title">창고 상차 피킹 리스트</div>
+        <div class="meta-info">
+            <span>출력일자: ${dateStr}</span>
+            <span class="driver-name-text">담당 기사: <b>${driverName}</b></span>
+        </div>
+        <div class="summary-box">
+            <span>배송처: <b>${driverOrdersCount}</b>곳</span>
+            <span>품목 종류: <b>${totalItemTypes}</b>종</span>
+            <span>총 수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
+        </div>
+        
+        <div class="table-container">
+            ${tableContentHtml}
+        </div>
+
+        <div class="footer-sign">
+            <span>상차 기사(${driverName}): <span class="sign-box">(서명)</span></span>
+            <span>출고 검수자: <span class="sign-box">(서명)</span></span>
+        </div>
+    </div>`;
+}
+
+// 🌟 피킹 인쇄 전용 CSS 스타일
+const pickingPrintStyles = `
+    * { box-sizing: border-box; }
+    @media print {
+        @page { 
+            size: A4 portrait; 
+            margin: 0; 
+        }
+        html, body { 
+            margin: 0 !important; 
+            padding: 0 !important; 
+            width: 210mm !important; 
+            height: 297mm !important; 
+            background: white !important; 
+            -webkit-print-color-adjust: exact !important; 
+            print-color-adjust: exact !important; 
+        }
+        .print-page { 
+            width: 210mm !important; 
+            height: 297mm !important; 
+            max-height: 297mm !important; 
+            margin: 0 !important; 
+            padding: 7mm 8mm 6mm 8mm !important; 
+            page-break-after: always !important; 
+            page-break-inside: avoid !important; 
+            break-after: page !important; 
+            overflow: hidden !important; 
+            box-sizing: border-box !important; 
+            display: flex !important; 
+            flex-direction: column !important; 
+            justify-content: flex-start !important; 
+        }
+        .print-page:last-child { 
+            page-break-after: auto !important; 
+            break-after: auto !important; 
+        }
+    }
+    body { 
+        font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
+        background: white; 
+        margin: 0; 
+        padding: 0; 
+        color: #1e293b; 
+    }
+    .print-page { 
+        width: 210mm; 
+        height: 297mm; 
+        max-height: 297mm; 
+        margin: 0 auto; 
+        padding: 7mm 8mm 6mm 8mm; 
+        page-break-after: always; 
+        box-sizing: border-box; 
+        display: flex; 
+        flex-direction: column; 
+        justify-content: flex-start; 
+        overflow: hidden; 
+    }
+    .print-page:last-child { 
+        page-break-after: auto; 
+    }
+    .header-title { 
+        text-align: center; 
+        font-size: 19px; 
+        font-weight: 900; 
+        letter-spacing: 2px; 
+        margin-bottom: 2px; 
+        border-bottom: 2.5px double #000; 
+        padding-bottom: 3px; 
+    }
+    .meta-info { 
+        display: flex; 
+        justify-content: space-between; 
+        align-items: flex-end; 
+        font-size: 10px; 
+        font-weight: bold; 
+        margin-bottom: 5px; 
+        color: #334155; 
+        padding: 0 2px; 
+    }
+    .driver-name-text { 
+        font-size: 12.5px; 
+        color: #1e40af; 
+    }
+    .summary-box { 
+        background-color: #f8fafc; 
+        border: 1.5px solid #cbd5e1; 
+        border-radius: 6px; 
+        padding: 4px 10px; 
+        display: flex; 
+        justify-content: space-around; 
+        font-size: 10.5px; 
+        font-weight: 900; 
+        margin-bottom: 6px; 
+        -webkit-print-color-adjust: exact; 
+        print-color-adjust: exact; 
+    }
+    .summary-box span b { 
+        color: #2563eb; 
+        font-size: 11.5px; 
+        margin-left: 3px; 
+    }
+    .table-container { 
+        flex: 1; 
+        overflow: hidden; 
+        display: flex; 
+        flex-direction: column; 
+    }
+    .picking-table { 
+        width: 100%; 
+        border-collapse: collapse; 
+        border: 1.5px solid #000; 
+        font-size: 9.5px; 
+        table-layout: fixed; 
+    }
+    .picking-table th { 
+        background-color: #f1f5f9; 
+        border: 1px solid #000; 
+        padding: 3.5px 3px; 
+        font-weight: 900; 
+        text-align: center; 
+        color: #0f172a; 
+        -webkit-print-color-adjust: exact; 
+        print-color-adjust: exact; 
+    }
+    .picking-table td { 
+        border: 1px solid #000; 
+        padding: 2.8px 4px; 
+        vertical-align: middle; 
+        line-height: 1.2; 
+    }
+    .two-column-wrapper { 
+        display: flex; 
+        gap: 6px; 
+        width: 100%; 
+        align-items: flex-start; 
+    }
+    .col-half { 
+        flex: 1; 
+        min-width: 0; 
+    }
+    .double-col-table th { 
+        padding: 2.5px 2px; 
+        font-size: 9px; 
+    }
+    .double-col-table td { 
+        padding: 2px 3px; 
+        font-size: 8.5px; 
+    }
+    .col-center { text-align: center; }
+    .col-left { 
+        text-align: left; 
+        white-space: normal; 
+        word-break: break-all; 
+    }
+    .col-right { text-align: right; }
+    .text-bold { font-weight: bold; }
+    .text-black-bold { 
+        font-weight: 900; 
+        color: #1e3a8a; 
+    }
+    .text-muted { 
+        font-weight: bold; 
+        color: #64748b; 
+    }
+    .check-box { 
+        display: inline-block; 
+        width: 13px; 
+        height: 13px; 
+        border: 1.2px solid #000; 
+        border-radius: 2px; 
+    }
+    .footer-sign { 
+        display: flex; 
+        justify-content: flex-end; 
+        gap: 25px; 
+        margin-top: 6px; 
+        padding-top: 4px; 
+        border-top: 1px solid #cbd5e1; 
+        font-size: 10px; 
+        font-weight: bold; 
+    }
+    .sign-box { 
+        border-bottom: 1px solid #000; 
+        width: 75px; 
+        display: inline-block; 
+        text-align: center; 
+    }
+`;
+
 export function executePickingListPrint() {
     if (pickingModalState.selectedDrivers.size === 0) {
         alert("출력할 기사를 1명 이상 선택해 주세요.");
@@ -796,6 +1128,16 @@ export function executePickingListPrint() {
     const dateStr = getLocalDateString();
     let allDriversPagesHtml = '';
     let validPageCount = 0;
+
+    // 🌟 [핵심] 브라우저 가상 측정 컨테이너 생성 (A4 1페이지 실제 렌더링 높이 실측용)
+    const measureContainer = document.createElement('div');
+    measureContainer.style.cssText = 'position:fixed;left:-9999px;top:0;width:210mm;box-sizing:border-box;visibility:hidden;z-index:-999;';
+    measureContainer.innerHTML = `<style>${pickingPrintStyles}</style><div id="measure-target-inner"></div>`;
+    document.body.appendChild(measureContainer);
+    const measureTarget = measureContainer.querySelector('#measure-target-inner');
+
+    // A4 1페이지(297mm) 가용 높이 임계값 (상하 여백 및 안전 마진 적용: 약 1040px)
+    const A4_MAX_PAGE_HEIGHT_PX = 1040;
 
     selectedDriverList.forEach((driverName) => {
         const driverOrders = (state.parsedExcelList || []).filter(item => 
@@ -834,344 +1176,35 @@ export function executePickingListPrint() {
         });
 
         const aggregatedList = Object.values(aggregationMap).sort((a, b) => b.totalQty - a.totalQty);
-        const totalItemTypes = aggregatedList.length;
-        const totalItemQtySum = aggregatedList.reduce((sum, item) => sum + item.totalQty, 0);
-
         validPageCount++;
 
-        // 🌟 24종 이하는 1열 콤팩트 모드, 25종 이상은 좌/우 2열 분할 모드로 1장에 맞춤
-        const isTwoColumn = totalItemTypes > 24;
+        // 1단계: 1열 형태로 임시 렌더링하여 실제 높이를 측정
+        const singleColHtml = buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, false, dateStr);
+        measureTarget.innerHTML = singleColHtml;
 
-        let tableContentHtml = '';
+        const actualMeasuredHeight = measureTarget.firstElementChild ? measureTarget.firstElementChild.offsetHeight : 0;
 
-        if (!isTwoColumn) {
-            // [모드 1] 24종 이하: 1열 콤팩트 테이블
-            let rowsHtml = '';
-            aggregatedList.forEach((item, idx) => {
-                rowsHtml += `
-                <tr>
-                    <td class="col-center text-bold">${idx + 1}</td>
-                    <td class="col-left text-bold">${item.name}</td>
-                    <td class="col-center">${item.unit}</td>
-                    <td class="col-right text-black-bold">${formatNumber(item.totalQty)}</td>
-                    <td class="col-center text-muted">${item.orderCount}곳</td>
-                    <td class="col-center"><span class="check-box"></span></td>
-                </tr>`;
-            });
+        // 2단계: 실측 높이가 A4 1페이지 한계(1040px)를 초과하여 2페이지로 넘어갈 때만 2열 모드로 전환!
+        const isOverflow = actualMeasuredHeight > A4_MAX_PAGE_HEIGHT_PX;
 
-            tableContentHtml = `
-            <table class="picking-table single-col-table">
-                <colgroup>
-                    <col style="width: 6%;">
-                    <col style="width: 52%;">
-                    <col style="width: 11%;">
-                    <col style="width: 12%;">
-                    <col style="width: 10%;">
-                    <col style="width: 9%;">
-                </colgroup>
-                <thead>
-                    <tr>
-                        <th>No.</th>
-                        <th>상 품 명 (품목 규격)</th>
-                        <th>단위</th>
-                        <th>총 수량</th>
-                        <th>배송처</th>
-                        <th>상차확인</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    ${rowsHtml}
-                </tbody>
-            </table>`;
+        if (isOverflow) {
+            // A4 1장을 넘칠 경우 -> 2열 나란히 분할하여 1장에 수납
+            allDriversPagesHtml += buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, true, dateStr);
         } else {
-            // [모드 2] 25종 이상: 좌/우 2열 나란히 분할 배치 (A4 1장에 최대 50종까지 완벽 수납)
-            const halfPoint = Math.ceil(totalItemTypes / 2);
-            const leftList = aggregatedList.slice(0, halfPoint);
-            const rightList = aggregatedList.slice(halfPoint);
-
-            const renderSubTableRows = (list, offset) => {
-                return list.map((item, i) => `
-                <tr>
-                    <td class="col-center text-bold">${offset + i + 1}</td>
-                    <td class="col-left text-bold">${item.name}</td>
-                    <td class="col-center">${item.unit}</td>
-                    <td class="col-right text-black-bold">${formatNumber(item.totalQty)}</td>
-                    <td class="col-center text-muted">${item.orderCount}곳</td>
-                    <td class="col-center"><span class="check-box"></span></td>
-                </tr>`).join('');
-            };
-
-            tableContentHtml = `
-            <div class="two-column-wrapper">
-                <div class="col-half">
-                    <table class="picking-table double-col-table">
-                        <colgroup>
-                            <col style="width: 8%;">
-                            <col style="width: 48%;">
-                            <col style="width: 13%;">
-                            <col style="width: 13%;">
-                            <col style="width: 10%;">
-                            <col style="width: 8%;">
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th>No.</th>
-                                <th>상 품 명 (규격)</th>
-                                <th>단위</th>
-                                <th>수량</th>
-                                <th>배송</th>
-                                <th>확인</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${renderSubTableRows(leftList, 0)}
-                        </tbody>
-                    </table>
-                </div>
-                <div class="col-half">
-                    <table class="picking-table double-col-table">
-                        <colgroup>
-                            <col style="width: 8%;">
-                            <col style="width: 48%;">
-                            <col style="width: 13%;">
-                            <col style="width: 13%;">
-                            <col style="width: 10%;">
-                            <col style="width: 8%;">
-                        </colgroup>
-                        <thead>
-                            <tr>
-                                <th>No.</th>
-                                <th>상 품 명 (규격)</th>
-                                <th>단위</th>
-                                <th>수량</th>
-                                <th>배송</th>
-                                <th>확인</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            ${renderSubTableRows(rightList, halfPoint)}
-                        </tbody>
-                    </table>
-                </div>
-            </div>`;
+            // A4 1장에 안전하게 들어갈 경우 -> 보기 편한 1열 그대로 출력
+            allDriversPagesHtml += singleColHtml;
         }
-
-        allDriversPagesHtml += `
-        <div class="print-page ${isTwoColumn ? 'mode-two-col' : 'mode-single-col'}">
-            <div class="header-title">창고 상차 피킹 리스트</div>
-            <div class="meta-info">
-                <span>출력일자: ${dateStr}</span>
-                <span class="driver-name-text">담당 기사: <b>${driverName}</b></span>
-            </div>
-            <div class="summary-box">
-                <span>배송처: <b>${driverOrders.length}</b>곳</span>
-                <span>품목 종류: <b>${totalItemTypes}</b>종</span>
-                <span>총 수량: <b>${formatNumber(totalItemQtySum)}</b>개</span>
-            </div>
-            
-            <div class="table-container">
-                ${tableContentHtml}
-            </div>
-
-            <div class="footer-sign">
-                <span>상차 기사(${driverName}): <span class="sign-box">(서명)</span></span>
-                <span>출고 검수자: <span class="sign-box">(서명)</span></span>
-            </div>
-        </div>`;
     });
+
+    // 측정용 가상 컨테이너 제거
+    document.body.removeChild(measureContainer);
 
     if (validPageCount === 0) {
         alert("선택된 기사들에게 배정된 배송 상품이 없습니다.");
         return;
     }
 
-    const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 동선 PRO - 기사별 피킹 리스트</title><style>
-        * { box-sizing: border-box; }
-        @media print {
-            @page { 
-                size: A4 portrait; 
-                margin: 0; 
-            }
-            html, body { 
-                margin: 0 !important; 
-                padding: 0 !important; 
-                width: 210mm !important; 
-                height: 297mm !important; 
-                background: white !important; 
-                -webkit-print-color-adjust: exact !important; 
-                print-color-adjust: exact !important; 
-            }
-            .print-page { 
-                width: 210mm !important; 
-                height: 297mm !important; 
-                max-height: 297mm !important; 
-                margin: 0 !important; 
-                padding: 7mm 8mm 6mm 8mm !important; 
-                page-break-after: always !important; 
-                page-break-inside: avoid !important; 
-                break-after: page !important; 
-                overflow: hidden !important; 
-                box-sizing: border-box !important; 
-                display: flex !important; 
-                flex-direction: column !important; 
-                justify-content: flex-start !important; 
-            }
-            .print-page:last-child {
-                page-break-after: auto !important;
-                break-after: auto !important;
-            }
-        }
-        body { 
-            font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
-            background: white; 
-            margin: 0; 
-            padding: 0; 
-            color: #1e293b; 
-        }
-        .print-page { 
-            width: 210mm; 
-            height: 297mm; 
-            max-height: 297mm; 
-            margin: 0 auto; 
-            padding: 7mm 8mm 6mm 8mm; 
-            page-break-after: always; 
-            box-sizing: border-box; 
-            display: flex; 
-            flex-direction: column; 
-            justify-content: flex-start; 
-            overflow: hidden; 
-        }
-        .print-page:last-child { 
-            page-break-after: auto; 
-        }
-        .header-title { 
-            text-align: center; 
-            font-size: 19px; 
-            font-weight: 900; 
-            letter-spacing: 2px; 
-            margin-bottom: 2px; 
-            border-bottom: 2.5px double #000; 
-            padding-bottom: 3px; 
-        }
-        .meta-info { 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: flex-end; 
-            font-size: 10px; 
-            font-weight: bold; 
-            margin-bottom: 5px; 
-            color: #334155; 
-            padding: 0 2px; 
-        }
-        .driver-name-text { 
-            font-size: 12.5px; 
-            color: #1e40af; 
-        }
-        .summary-box { 
-            background-color: #f8fafc; 
-            border: 1.5px solid #cbd5e1; 
-            border-radius: 6px; 
-            padding: 4px 10px; 
-            display: flex; 
-            justify-content: space-around; 
-            font-size: 10.5px; 
-            font-weight: 900; 
-            margin-bottom: 6px; 
-            -webkit-print-color-adjust: exact; 
-            print-color-adjust: exact; 
-        }
-        .summary-box span b { 
-            color: #2563eb; 
-            font-size: 11.5px; 
-            margin-left: 3px; 
-        }
-        .table-container { 
-            flex: 1; 
-            overflow: hidden; 
-            display: flex; 
-            flex-direction: column; 
-        }
-        .picking-table { 
-            width: 100%; 
-            border-collapse: collapse; 
-            border: 1.5px solid #000; 
-            font-size: 9.5px; 
-            table-layout: fixed; 
-        }
-        .picking-table th { 
-            background-color: #f1f5f9; 
-            border: 1px solid #000; 
-            padding: 3.5px 3px; 
-            font-weight: 900; 
-            text-align: center; 
-            color: #0f172a; 
-            -webkit-print-color-adjust: exact; 
-            print-color-adjust: exact; 
-        }
-        .picking-table td { 
-            border: 1px solid #000; 
-            padding: 2.8px 4px; 
-            vertical-align: middle; 
-            line-height: 1.2; 
-        }
-        .two-column-wrapper { 
-            display: flex; 
-            gap: 6px; 
-            width: 100%; 
-            align-items: flex-start; 
-        }
-        .col-half { 
-            flex: 1; 
-            min-width: 0; 
-        }
-        .double-col-table th { 
-            padding: 2.5px 2px; 
-            font-size: 9px; 
-        }
-        .double-col-table td { 
-            padding: 2px 3px; 
-            font-size: 8.5px; 
-        }
-        .col-center { text-align: center; }
-        .col-left { 
-            text-align: left; 
-            white-space: normal; 
-            word-break: break-all; 
-        }
-        .col-right { text-align: right; }
-        .text-bold { font-weight: bold; }
-        .text-black-bold { 
-            font-weight: 900; 
-            color: #1e3a8a; 
-        }
-        .text-muted { 
-            font-weight: bold; 
-            color: #64748b; 
-        }
-        .check-box { 
-            display: inline-block; 
-            width: 13px; 
-            height: 13px; 
-            border: 1.2px solid #000; 
-            border-radius: 2px; 
-        }
-        .footer-sign { 
-            display: flex; 
-            justify-content: flex-end; 
-            gap: 25px; 
-            margin-top: 6px; 
-            padding-top: 4px; 
-            border-top: 1px solid #cbd5e1; 
-            font-size: 10px; 
-            font-weight: bold; 
-        }
-        .sign-box { 
-            border-bottom: 1px solid #000; 
-            width: 75px; 
-            display: inline-block; 
-            text-align: center; 
-        }
-    </style></head><body>${allDriversPagesHtml}</body></html>`;
+    const pickingHtml = `<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 동선 PRO - 기사별 피킹 리스트</title><style>${pickingPrintStyles}</style></head><body>${allDriversPagesHtml}</body></html>`;
 
     const iframe = document.createElement('iframe');
     iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; 
