@@ -38,29 +38,25 @@ export function formatPhoneNumber(val) {
 }
 
 // ==========================================
-// 🌟 0-1. PDF 파서와 100% 동일한 주소 정밀 절삭 엔진
+// 🌟 0-1. PDF 파서와 동일한 주소 정밀 절삭 엔진
 // ==========================================
 export function cleanAddress(rawAddr) {
     if (!rawAddr || typeof rawAddr !== 'string') return '';
     let str = String(rawAddr).trim().replace(/[\r\n]+/g, ' ');
 
-    // 1. 행정구역(시/도) 시작점 감지 (앞단에 붙은 상호, 호수, 불필요한 메모 제거)
     const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
     const regionMatch = str.match(regionRegex);
     if (!regionMatch) return str;
 
     let addr = regionMatch[0];
 
-    // 2. 🌟 핵심: '(' 가 인식되면 '(' 와 뒷부분 전체를 즉시 모두 날림 (pdf.js 규칙 이식)
     const parenIdx = addr.indexOf('(');
     if (parenIdx !== -1) {
         addr = addr.slice(0, parenIdx);
     }
 
-    // 3. 다른 필드 라벨이 나오기 전까지만 절단
     addr = addr.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제)/)[0];
 
-    // 4. 우편번호 및 잔여 잡음 문자 정리
     addr = addr.replace(/\[\d+\]/g, ' ')
                .replace(/받\s*주소/g, ' ')
                .replace(/\b받\b/g, ' ')
@@ -69,7 +65,6 @@ export function cleanAddress(rawAddr) {
                .replace(/[:]/g, ' ')
                .trim();
 
-    // 5. '(' 가 없는 주소인 경우 도로명/지번 번지수 이후 상세 텍스트(층, 호, 건물명 등) 절삭
     const roadMatch = addr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+/);
     if (roadMatch) {
         const rest = addr.slice(roadMatch[0].length).trim();
@@ -153,7 +148,6 @@ export function renderExcelTable() {
             ? `<span class="bg-indigo-50 text-indigo-700 text-[9px] font-black px-1.5 py-0.5 rounded border border-indigo-200 shrink-0">외 ${item.items.length - 1}품목</span>`
             : '';
 
-        // 🌟 title 속성에 원본 전체 주소(fullAddress)를 바인딩하여 마우스 오버 시 상세 확인 가능
         const tooltipAddress = item.fullAddress || item.address || '';
 
         html += `
@@ -244,7 +238,7 @@ export function processExcelData(jsonData) {
         }
         const phone = formatPhoneNumber(phoneVal);
 
-        // 2. 배송지 주소 원본 추출 및 cleanAddress 적용
+        // 2. 배송지 주소 원본 추출
         let rawAddress = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -261,7 +255,7 @@ export function processExcelData(jsonData) {
         const address = cleanAddress(rawAddress);
         const fullAddress = rawAddress || address;
 
-        // 3. 🌟 상호 / 수령처명 (받으시는 분) 정밀 추출
+        // 3. 🌟 상호 / 수령처명 정밀 추출 (수취인/배송지/매장명 위주)
         let storeName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -273,20 +267,36 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 4. 🌟 공급자 / 화주명 (발송회사, 위탁처 등) 정밀 추출 (구매자/주문자 배제)
-        let senderName = '';
+        // 4. 🌟 구매자명 (공급받는 자/주문자) 정밀 추출 (주문자/구매자 위주)
+        let buyerName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
-            // 구매자명, 주문자명 등 주문자 정보는 화주(공급자)로 인식하지 않도록 철저히 분리
-            if (/공급자|화주|발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명|보내는분|보내는사람/i.test(ck)) {
-                if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
-                    senderName = String(row[k]).trim();
-                    break;
+            if (!/연락처|전화|코드|ID/i.test(ck)) {
+                if (/구매자명|주문자명|발주자|주문자|구매자|고객명/i.test(ck)) {
+                    if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                        buyerName = String(row[k]).trim();
+                        break;
+                    }
                 }
             }
         }
 
-        // 5. 주문번호 추출
+        // 5. 🌟 공급자 / 화주명 정밀 추출 (쿠폰/금액/포인트 등의 열을 완벽 차단!)
+        let senderName = '';
+        for (const k of keys) {
+            const ck = k.replace(/\s+/g, '');
+            // '판매자상품쿠폰 사용금액' 같이 금액/쿠폰이 섞인 열은 무조건 무시
+            if (!/쿠폰|금액|할인|포인트|비용|코드|단가/i.test(ck)) {
+                if (/공급자|화주|발송회사|발송자|발송처|판매처|판매자|위탁사|위탁처|쇼핑몰|업체명/i.test(ck)) {
+                    if (row[k] && String(row[k]).trim() !== '-' && String(row[k]).trim() !== '') {
+                        senderName = String(row[k]).trim();
+                        break;
+                    }
+                }
+            }
+        }
+
+        // 6. 주문번호 추출
         let orderNo = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -309,7 +319,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 6. 사업자등록번호
+        // 7. 사업자등록번호
         let bizNo = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -318,7 +328,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 7. 배송 메모
+        // 8. 배송 메모
         let memo = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -330,7 +340,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 8. 품목명
+        // 9. 품목명
         let itemName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -344,7 +354,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 9. 규격 / 단위
+        // 10. 규격 / 단위
         let unit = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -353,7 +363,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 10. 수량
+        // 11. 수량
         let qty = 1;
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -366,7 +376,7 @@ export function processExcelData(jsonData) {
             }
         }
 
-        // 11. 단가 및 결제금액
+        // 12. 단가 및 결제금액
         let price = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -385,11 +395,9 @@ export function processExcelData(jsonData) {
 
         if (!address && !storeName && !itemName) return;
 
-        // 단가 및 총액 숫자형 변환 (누적 계산용)
         let numPrice = parseInt(String(price).replace(/[^0-9]/g, ''), 10) || 0;
         let numTotal = parseInt(String(total).replace(/[^0-9]/g, ''), 10) || 0;
         
-        // 총액이 없고 단가와 수량이 있으면 자동 계산
         if (!numTotal && numPrice && qty) {
             numTotal = numPrice * qty;
         }
@@ -407,7 +415,6 @@ export function processExcelData(jsonData) {
             orderMap[orderKey].items.push(itemObj);
             orderMap[orderKey].qty += qty;
             
-            // 주문 전체 합계 금액 누적 갱신
             let currentGrandTotal = parseInt(String(orderMap[orderKey].total).replace(/[^0-9]/g, ''), 10) || 0;
             orderMap[orderKey].total = String(currentGrandTotal + numTotal);
 
@@ -418,12 +425,13 @@ export function processExcelData(jsonData) {
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
                 assignedDriver: null,
-                senderName: senderName || '공급자 미상',
+                senderName: senderName || '공급자 미상', 
+                buyerName: buyerName || storeName || '고객', // 🌟 구매자명 추출 완벽 분리 반영
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
                 bizNo: bizNo,
-                address: address, // 정제 주소 (내비/관제용)
-                fullAddress: fullAddress, // 명세서 인쇄용 원본 전체 주소
-                storeName: storeName || '상호 미상', // 상호명이 우선순위가 높도록 조정
+                address: address,
+                fullAddress: fullAddress, 
+                storeName: storeName || '상호 미상', 
                 phone: phone,
                 itemName: itemName,
                 unit: unit || '개',

@@ -54,9 +54,61 @@ export function exportToInvoiceModal() {
 
     populateSenderFilterDropdown();
     initTemplatePdfDropZone();
+    initInvoiceResizer(); // 🌟 목록 패널 폭 조절 리사이저 초기화
     loadSavedForms(); 
     renderInvoiceOrderList();
     previewInvoiceRow(0); 
+}
+
+// 🌟 주문서 목록 폭 조절(드래그) 리사이저 엔진
+export function initInvoiceResizer() {
+    const resizer = document.getElementById('invoice-panel-resizer');
+    const listPanel = document.getElementById('invoice-list-panel');
+    if (!resizer || !listPanel) return;
+
+    // 이전에 설정한 폭이 있으면 복원
+    const savedWidth = localStorage.getItem('deliveryPro_invoiceListWidth');
+    if (savedWidth) {
+        listPanel.style.width = `${savedWidth}px`;
+    }
+
+    if (resizer.dataset.bound === 'true') return;
+
+    let isDragging = false;
+    let startX = 0;
+    let startWidth = 0;
+
+    resizer.addEventListener('mousedown', (e) => {
+        isDragging = true;
+        startX = e.clientX;
+        startWidth = listPanel.offsetWidth;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+    });
+
+    document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const delta = e.clientX - startX;
+        let newWidth = startWidth + delta;
+        
+        // 최소/최대 폭 제한 설정 (너무 좁아지거나 중앙 에디터를 덮지 않도록)
+        if (newWidth < 260) newWidth = 260;
+        if (newWidth > 650) newWidth = 650;
+
+        listPanel.style.width = `${newWidth}px`;
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (isDragging) {
+            isDragging = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            // 조절 완료 후 현재 폭 저장
+            localStorage.setItem('deliveryPro_invoiceListWidth', listPanel.offsetWidth);
+        }
+    });
+
+    resizer.dataset.bound = 'true';
 }
 
 export function populateSenderFilterDropdown() {
@@ -821,3 +873,4 @@ window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
 window.sortPrintList = sortPrintList;
+window.initInvoiceResizer = initInvoiceResizer;

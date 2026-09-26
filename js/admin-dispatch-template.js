@@ -48,7 +48,6 @@ export async function parsePdfToEditableDocument(file) {
         else if (/출고전표/i.test(rawText)) docTitle = '출고전표';
         else if (/발주서/i.test(rawText)) docTitle = '발주서';
 
-        // 공급자(화주/본사) 정보 감지 (기본 서식에 영구 고정)
         let provRegno = '';
         let provName = '';
         let provAddr = '';
@@ -58,8 +57,14 @@ export async function parsePdfToEditableDocument(file) {
         const bizMatch = rawText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/);
         if (bizMatch) provRegno = bizMatch[0].replace(/\s+/g, '-');
 
-        const storeMatch = rawText.match(/(?:상호|상호\(법인명\)|법인명|상호명|공급자)\s*[:|]?\s*([가-힣A-Za-z0-9\(\)\s]{2,20})/);
-        if (storeMatch) provName = storeMatch[1].trim();
+        // 🌟 1. 공급자 상호명(법인명) 정밀 파싱 오류 수정
+        // "보관용)", "구매자명" 등의 주변 텍스트가 딸려오는 문제를 완벽히 차단합니다.
+        const storeMatch = rawText.match(/(?:상호\(법인명\)|상호명|상호|법인명|공급자)[\s:|]*([가-힣A-Za-z0-9\(\)주식회사]+)/);
+        if (storeMatch) {
+            let val = storeMatch[1].trim();
+            val = val.split(/(?:구매자|주문자|보관용|공급받는|주문일자)/)[0].trim();
+            provName = val.replace(/^[)|\]}>\s]+/, '').trim(); // 앞부분 쓰레기 특수문자 제거
+        }
 
         const addrMatch = rawText.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*?(?:로|길|동|읍|면|가)\s*[\d\-]+(?:\s*[가-힣0-9\(\)\,\-\.]*)?/);
         if (addrMatch) provAddr = addrMatch[0].trim();
@@ -188,6 +193,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </div>
         </div>
 
+        <!-- 🌟 2. 공급받는자 위치에 "구매자명" 완벽 원상 복구 적용 -->
         <table class="doc-table party-table" style="width: 100%; border-collapse: collapse; border: 2px solid #000; font-size: 10px; margin-bottom: 4px; table-layout: fixed;">
             <colgroup>
                 <col style="width: 4%;">
@@ -209,8 +215,8 @@ function generateSingleInvoiceBlock(cfg, partName) {
                 <tr>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">상호(법인명)</td>
                     <td style="border: 1px solid #000; padding: 3px 5px;" contenteditable="true" spellcheck="false">${cfg.provName || ''}</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">공 급 자</td>
-                    <td style="border: 1px solid #000; padding: 3px 5px; font-weight: bold; background: #f0fdf4;" contenteditable="true">{{공급자}}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">구 매 자 명</td>
+                    <td style="border: 1px solid #000; padding: 3px 5px; font-weight: bold; background: #f0fdf4;" contenteditable="true">{{구매자명}}</td>
                 </tr>
                 <tr style="height: 38px;">
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 3px;" contenteditable="true">주 소</td>
@@ -303,7 +309,8 @@ export function renderEditableDocument(htmlContent) {
                 </span>
                 <span class="text-[11px] text-gray-400 font-bold ml-1">| 태그 삽입:</span>
                 <button type="button" onclick="window.insertDocTag('{{상호명}}')" class="px-2 py-0.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded text-[11px] font-black transition active:scale-95">+ 상호</button>
-                <button type="button" onclick="window.insertDocTag('{{공급자}}')" class="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[11px] font-black transition active:scale-95">+ 공급자</button>
+                <button type="button" onclick="window.insertDocTag('{{구매자명}}')" class="px-2 py-0.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 rounded text-[11px] font-black transition active:scale-95">+ 구매자</button>
+                <button type="button" onclick="window.insertDocTag('{{공급자}}')" class="px-2 py-0.5 bg-gray-100 hover:bg-gray-200 text-gray-800 border border-gray-300 rounded text-[11px] font-black transition active:scale-95">+ 공급자</button>
                 <button type="button" onclick="window.insertDocTag('{{배송지주소}}')" class="px-2 py-0.5 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 rounded text-[11px] font-black transition active:scale-95">+ 주소</button>
                 <button type="button" onclick="window.insertDocTag('{{고객연락처}}')" class="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 rounded text-[11px] font-black transition active:scale-95">+ 전화번호</button>
             </div>
@@ -342,7 +349,7 @@ export function insertDocTag(tagStr) {
 }
 
 // ==========================================
-// 🌟 4. [핵심] 다중 품목 동적 렌더링 엔진 (주문 데이터 서식 완벽 치환)
+// 4. [핵심] 다중 품목 동적 렌더링 엔진 (주문 데이터 서식 완벽 치환)
 // ==========================================
 export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     if (!baseTemplateHtml || !order) return '';
@@ -353,6 +360,8 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const bizNo = order.bizNo || '';
     const storeName = order.storeName || order.senderName || '-';
     const senderName = order.senderName || order.storeName || '-';
+    // 구매자명(buyerName)이 없으면 안전하게 상호명으로 대체
+    const buyerName = order.buyerName || order.storeName || '-'; 
     const address = order.fullAddress || order.address || '-';
     const phone = order.phone || '';
     const memo = order.memo || '';
@@ -367,13 +376,13 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     const totalQty = order.qty ? `${formatNumber(order.qty)}개` : '1개';
     const grandTotal = order.total ? `${formatNumber(order.total)}원` : '';
 
-    // 1. 단일 필드 태그 치환 (대소문자/공백 무관 정규식)
-    // 이전 버전 호환을 위해 {{발송자}} 태그도 함께 처리합니다.
+    // 1. 단일 필드 태그 치환
     html = html.replace(/\{\{\s*주문일자\s*\}\}/g, today)
                .replace(/\{\{\s*주문번호\s*\}\}/g, orderNo)
                .replace(/\{\{\s*사업자번호\s*\}\}/g, bizNo)
                .replace(/\{\{\s*상호명\s*\}\}/g, storeName)
-               .replace(/\{\{\s*공급자\s*\}\}/g, senderName)
+               .replace(/\{\{\s*구매자명\s*\}\}/g, buyerName) 
+               .replace(/\{\{\s*공급자\s*\}\}/g, senderName) 
                .replace(/\{\{\s*발송자\s*\}\}/g, senderName) 
                .replace(/\{\{\s*배송지주소\s*\}\}/g, address)
                .replace(/\{\{\s*고객연락처\s*\}\}/g, phone)
@@ -382,7 +391,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
                .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
 
-    // 2. 🌟 다중 품목 테이블 지능형 동적 생성
+    // 2. 다중 품목 테이블 지능형 동적 생성
     const items = (order.items && order.items.length > 0) ? order.items : [{
         name: order.itemName || '상품명 미지정',
         qty: order.qty || 1,
