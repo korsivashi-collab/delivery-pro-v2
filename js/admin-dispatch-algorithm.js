@@ -162,8 +162,12 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
         const centerAddr = d.territory1 || (companyBase ? companyBase.address : '') || '';
 
         return {
+            driver: d,
             devId,
             phone: d.phone || devId,
+            weight: w,
+            zones: Array.isArray(d.territoryZones) ? d.territoryZones : [],
+            legacyAddr: d.territory1 || '',
             exactCap,
             targetCap: Math.floor(exactCap),
             remainder: exactCap - Math.floor(exactCap),
@@ -187,7 +191,40 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 }
 
 // ==========================================
-// 4. [핵심 알고리즘] Regret 기반 권역 밀착 배분 알고리즘
+// 4. 행정구역(구/동) 매칭 및 중복 구역 선발 헬퍼
+// ==========================================
+
+export function isAddressInZone(fullAddr, zone) {
+    if (!fullAddr || !zone) return false;
+    const addr = fullAddr.trim();
+
+    if (zone.type === 'dong' && zone.dong) {
+        const hasDong = addr.includes(zone.dong) || (zone.dong.endsWith('동') && addr.includes(zone.dong.slice(0, -1)));
+        const hasSigungu = !zone.sigungu || addr.includes(zone.sigungu);
+        return hasDong && hasSigungu;
+    } else if (zone.type === 'gu' && zone.sigungu) {
+        return addr.includes(zone.sigungu);
+    }
+    return false;
+}
+
+function pickBestDriverFromCandidates(candidates) {
+    if (!candidates || candidates.length === 0) return null;
+    if (candidates.length === 1) return candidates[0];
+
+    // 가중치를 고려한 부하 점수(loadScore)가 가장 적은 기사 선발
+    return candidates.reduce((best, curr) => {
+        const bestScore = best.assignedCount - (best.weight || 0);
+        const currScore = curr.assignedCount - (curr.weight || 0);
+
+        if (currScore < bestScore) return curr;
+        if (currScore === bestScore && curr.assignedCount < best.assignedCount) return curr;
+        return best;
+    });
+}
+
+// ==========================================
+// 5. [핵심 엔진] 행정구역 스마트 매칭 + Regret 하이브리드 자동할당
 // ==========================================
 export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null }) {
     if (!targetOrders || targetOrders.length === 0) {
@@ -200,31 +237,70 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     const totalOrders = targetOrders.length;
     const driverStats = calculateDriverCapacities(activeDrivers, totalOrders, weights, companyBase);
 
-    // 아직 배정되지 않은 주문 풀
-    let unassigned = [...targetOrders];
+    let countDongMatched = 0;
+    let countGuMatched = 0;
+    let countFallback = 0;
 
-    // 모든 주문이 배정될 때까지 반복
-    while (unassigned.length > 0) {
-        // 정원이 남아있는 활성 기사 목록 추출
-        const availableDrivers = driverStats.filter(ds => ds.assignedCount < ds.targetCap);
+    // 미배정 주문 리스트 풀
+    const unassignedOrders = [];
 
-        // 만약 모든 기사의 정원이 찼다면(예외 상황), 전체 기사 중 절대 최단거리 기사로 Fallback
-        if (availableDrivers.length === 0) {
-            unassigned.forEach(order => {
-                let bestDriver = null;
-                let minDist = Infinity;
-                driverStats.forEach(ds => {
-                    const d = calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr);
-                    if (d < minDist) { minDist = d; bestDriver = ds; }
-                });
-                bestDriver.assignedCount++;
-                order.assignedDriver = bestDriver.phone;
-            });
-            break;
+    // [1단계] 행정구역(동/구) 권역 매칭 우선 처리
+    targetOrders.forEach(order => {
+        const fullAddr = (order.fullAddress || order.address || '').trim();
+
+        // 1-1. 상세 일치: 동(Dong) 단위 권역을 만족하는 기사 탐색
+        const dongCandidates = driverStats.filter(ds => 
+            ds.zones.some(z => z.type === 'dong' && isAddressInZone(fullAddr, z))
+        );
+
+        if (dongCandidates.length > 0) {
+            const chosen = pickBestDriverFromCandidates(dongCandidates);
+            chosen.assignedCount++;
+            order.assignedDriver = chosen.phone;
+            countDongMatched++;
+            return;
         }
 
-        // 남아있는 각 배송지에 대해:
-        // 정원이 남은 기사들과의 거리 중 1순위 기사(최소 거리)와 2순위 기사를 찾아 차이(Regret)를 계산
+        // 1-2. 광역 일치: 구(Gu) 단위 권역을 만족하는 기사 탐색
+        const guCandidates = driverStats.filter(ds => 
+            ds.zones.some(z => z.type === 'gu' && isAddressInZone(fullAddr, z))
+        );
+
+        if (guCandidates.length > 0) {
+            const chosen = pickBestDriverFromCandidates(guCandidates);
+            chosen.assignedCount++;
+            order.assignedDriver = chosen.phone;
+            countGuMatched++;
+            return;
+        }
+
+        // 1-3. 레거시(구버전 텍스트 주소) 권역 호환 검사
+        const legacyCandidates = driverStats.filter(ds => 
+            ds.legacyAddr && ds.legacyAddr !== '상세 주소 확인 불가' && fullAddr.includes(ds.legacyAddr.split(' ')[0])
+        );
+
+        if (legacyCandidates.length > 0) {
+            const chosen = pickBestDriverFromCandidates(legacyCandidates);
+            chosen.assignedCount++;
+            order.assignedDriver = chosen.phone;
+            countGuMatched++;
+            return;
+        }
+
+        // 어느 권역에도 속하지 않는 주문은 2단계(Regret 알고리즘)로 이관
+        unassignedOrders.push(order);
+    });
+
+    // [2단계] 권역 외 잔여 주문: Regret 기반 지형/거리 최적화 분배
+    let unassigned = [...unassignedOrders];
+
+    while (unassigned.length > 0) {
+        // 정원이 남아있는 기사 우선 추출 (없으면 전체 기사 대상)
+        let availableDrivers = driverStats.filter(ds => ds.assignedCount < ds.targetCap);
+        if (availableDrivers.length === 0) {
+            availableDrivers = driverStats;
+        }
+
         let bestCandidate = null;
         let maxRegret = -Infinity;
         let bestCandidateDriver = null;
@@ -233,17 +309,18 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
         for (let i = 0; i < unassigned.length; i++) {
             const order = unassigned[i];
 
-            // 사용 가능한 기사들과의 페널티 거리 계산 및 정렬
             const driverDistances = availableDrivers.map(ds => ({
                 driver: ds,
-                dist: calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr)
+                dist: calculateGeoPenalizedDist(
+                    order.lat, order.lng, 
+                    ds.tLat, ds.tLng, 
+                    order.fullAddress || order.address, 
+                    ds.tAddr
+                )
             })).sort((a, b) => a.dist - b.dist);
 
             const closest = driverDistances[0];
             const secondClosest = driverDistances.length > 1 ? driverDistances[1] : null;
-
-            // 외곽 배송지일수록 1순위와 2순위 간의 거리 차이(Regret)가 수십 km에 달함
-            // 남은 기사가 1명이면 그 기사와 가까운 순서대로 처리
             const regret = secondClosest ? (secondClosest.dist - closest.dist) : (1000 - closest.dist);
 
             if (regret > maxRegret) {
@@ -254,22 +331,26 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
             }
         }
 
-        // 대체 불가능한 외곽 배송지부터 해당 기사에게 즉시 확정 배정
         if (bestCandidate && bestCandidateDriver && bestCandidateIndex !== -1) {
             bestCandidateDriver.assignedCount++;
             bestCandidate.assignedDriver = bestCandidateDriver.phone;
             unassigned.splice(bestCandidateIndex, 1);
+            countFallback++;
         } else {
-            // 안전장치: 예외 발생 시 순차 처리
             const order = unassigned.shift();
-            availableDrivers[0].assignedCount++;
-            order.assignedDriver = availableDrivers[0].phone;
+            const fallbackDriver = pickBestDriverFromCandidates(availableDrivers);
+            fallbackDriver.assignedCount++;
+            order.assignedDriver = fallbackDriver.phone;
+            countFallback++;
         }
     }
 
     return {
         success: true,
         totalOrders,
+        countDongMatched,
+        countGuMatched,
+        countFallback,
         driverStats,
         allocatedCount: targetOrders.length
     };

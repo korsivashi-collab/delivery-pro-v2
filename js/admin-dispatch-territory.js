@@ -4,68 +4,667 @@ import { db } from "./admin-api.js";
 import { state } from "./admin-state.js";
 import { map } from "./admin-map.js";
 import { getAddressFromCoords } from "./admin-utils.js";
-import { doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, updateDoc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
-// 지역(권역) 지도 관리를 위한 로컬 상태 변수
+// ==========================================
+// 0. 행정구역 디렉토리 & GeoJSON 설정
+// ==========================================
+
+// 시/도별 주요 구/군 디렉토리 목록
+const ADMINISTRATIVE_DISTRICTS = {
+    "서울": [
+        "강남구", "강동구", "강북구", "강서구", "관악구", "광진구", "구로구", "금천구",
+        "노원구", "도봉구", "동대문구", "동작구", "마포구", "서대문구", "서초구", "성동구",
+        "성북구", "송파구", "양천구", "영등포구", "용산구", "은평구", "종로구", "중구", "중랑구"
+    ],
+    "경기": [
+        "수원시", "성남시", "고양시", "용인시", "부천시", "안산시", "안양시", "남양주시",
+        "화성시", "평택시", "의정부시", "시흥시", "파주시", "광명시", "김포시", "군포시",
+        "광주시", "이천시", "양주시", "오산시", "구리시", "안성시", "포천시", "의왕시",
+        "하남시", "여주시", "동두천시", "과천시", "연천군", "가평군", "양평군"
+    ],
+    "인천": [
+        "중구", "동구", "미추홀구", "연수구", "남동구", "부평구", "계양구", "서구", "강화군", "옹진군"
+    ]
+};
+
+// 서울시 25개 자치구 행정코드 5자리 매핑 테이블
+const SEOUL_GU_CODE_MAP = {
+    "종로구": "11010", "중구": "11020", "용산구": "11030", "성동구": "11040", "광진구": "11050",
+    "동대문구": "11060", "중랑구": "11070", "성북구": "11080", "강북구": "11090", "도봉구": "11100",
+    "노원구": "11110", "은평구": "11120", "서대문구": "11130", "마포구": "11140", "양천구": "11150",
+    "강서구": "11160", "구로구": "11170", "금천구": "11180", "영등포구": "11190", "동작구": "11200",
+    "관악구": "11210", "서초구": "11220", "강남구": "11230", "송파구": "11240", "강동구": "11250"
+};
+
+// 서울시 동 경계 오픈소스 경량 GeoJSON
+const SEOUL_DONG_GEOJSON_URL = "https://cdn.jsdelivr.net/gh/southkorea/seoul-maps/kostat/2013/json/seoul_submunicipalities_geo_simple.json";
+
+// 메모리 캐시 및 지도 제어 변수
+let seoulDongGeoData = null;
 let territoryMap = null;
-let territoryMarker = null;
-let territoryCircles = [];
-let otherTerritoryOverlays = [];
+let currentSido = "서울";
+let currentSigungu = "강남구";
+let currentSelectedZones = []; // 현재 모달 장바구니에 담긴 권역 배열 [{ id, type, sido, sigungu, dong, name }]
+let activePolygons = [];       // 현재 지도에 그려진 카카오 Polygon 인스턴스 목록
+let activeOverlayLabels = [];  // 현재 지도에 표시된 동 이름 라벨 목록
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
-let currentTerritorySize = 100; // 현재 모달에서 조작 중인 권역 크기(%)
-let lastCenterUpdateTime = 0;   // 🌟 렉 방지용 이벤트 중복 실행 가드
 
-// 핀 근처만 가도 손 모양 커서가 뜨며 넓은 영역에서 드래그 가능하도록 반경이 넓은 커스텀 마커 이미지 생성
-const pinSvg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
-<svg xmlns="http://www.w3.org/2000/svg" width="60" height="70" viewBox="0 0 60 70">
-  <ellipse cx="30" cy="32" rx="26" ry="26" fill="rgba(37,99,235,0.12)" stroke="rgba(37,99,235,0.35)" stroke-width="1.5" stroke-dasharray="3,3"/>
-  <path d="M30 12 C21.16 12 14 19.16 14 28 C14 39.5 30 58 30 58 C30 58 46 39.5 46 28 C46 19.16 38.84 12 30 12 Z" fill="#2563eb" stroke="#ffffff" stroke-width="2.5"/>
-  <circle cx="30" cy="27" r="5.5" fill="#ffffff"/>
-</svg>`);
+// ==========================================
+// 1. GeoJSON 로드 & 폴리곤 파싱 엔진
+// ==========================================
 
-function getTerritoryMarkerImage() {
-    return new kakao.maps.MarkerImage(pinSvg, new kakao.maps.Size(60, 70), {
-        offset: new kakao.maps.Point(30, 58)
+async function loadSeoulDongGeoJSON() {
+    if (seoulDongGeoData) return seoulDongGeoData;
+    try {
+        const res = await fetch(SEOUL_DONG_GEOJSON_URL);
+        if (!res.ok) throw new Error("GeoJSON 로드 실패");
+        seoulDongGeoData = await res.json();
+        return seoulDongGeoData;
+    } catch (e) {
+        console.warn("서울 동 GeoJSON 로딩 실패:", e);
+        return null;
+    }
+}
+
+// 지도 위의 기존 폴리곤 및 라벨 제거
+function clearTerritoryMapPolygons() {
+    activePolygons.forEach(p => p.setMap(null));
+    activePolygons = [];
+    activeOverlayLabels.forEach(lbl => lbl.setMap(null));
+    activeOverlayLabels = [];
+}
+
+// 카카오맵 폴리곤 경로 변환 헬퍼 (GeoJSON [lng, lat] -> kakao.maps.LatLng)
+function convertGeoJsonCoordsToKakao(coordinates, type) {
+    if (type === "Polygon") {
+        return coordinates.map(ring => ring.map(c => new kakao.maps.LatLng(c[1], c[0])));
+    } else if (type === "MultiPolygon") {
+        return coordinates.map(polygon => polygon.map(ring => ring.map(c => new kakao.maps.LatLng(c[1], c[0]))));
+    }
+    return [];
+}
+
+// 폴리곤 중심점(무게중심) 계산 헬퍼
+function calculatePolygonCentroid(paths) {
+    let latSum = 0;
+    let lngSum = 0;
+    let totalPoints = 0;
+
+    const flattenPoints = (arr) => {
+        arr.forEach(item => {
+            if (Array.isArray(item)) {
+                flattenPoints(item);
+            } else if (item.getLat && item.getLng) {
+                latSum += item.getLat();
+                lngSum += item.getLng();
+                totalPoints++;
+            }
+        });
+    };
+
+    flattenPoints(paths);
+    if (totalPoints === 0) return null;
+    return new kakao.maps.LatLng(latSum / totalPoints, lngSum / totalPoints);
+}
+
+// ==========================================
+// 2. 권역 모달 초기화 및 드릴다운 렌더링
+// ==========================================
+
+export async function openDriverTerritoryModal(devId, phone) {
+    try { if (window.event) window.event.stopPropagation(); } catch (e) {}
+
+    const modal = document.getElementById('driver-territory-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    document.getElementById('territory-target-devid').value = devId;
+    document.getElementById('territory-target-phone').innerText = phone;
+    const searchInput = document.getElementById('territory-address-search');
+    if (searchInput) searchInput.value = '';
+
+    // 기사의 기존 저장된 권역 장바구니 데이터 복원
+    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (targetLic && Array.isArray(targetLic.territoryZones)) {
+        currentSelectedZones = JSON.parse(JSON.stringify(targetLic.territoryZones));
+    } else if (targetLic && targetLic.territory1 && targetLic.territory1 !== '상세 주소 확인 불가') {
+        // 기존 반경 방식 데이터에서 주소 텍스트가 있을 경우 첫 항목으로 매핑
+        currentSelectedZones = [{
+            id: `legacy_${Date.now()}`,
+            type: 'dong',
+            sido: '서울',
+            sigungu: targetLic.territory1.split(' ')[1] || '강남구',
+            dong: targetLic.territory1.split(' ')[2] || targetLic.territory1,
+            name: targetLic.territory1
+        }];
+    } else {
+        currentSelectedZones = [];
+    }
+
+    renderTerritoryBasketChips();
+
+    // 초기 시/도 및 구/군 설정
+    currentSido = "서울";
+    const sidoSelect = document.getElementById('territory-select-sido');
+    if (sidoSelect) sidoSelect.value = currentSido;
+    populateSigunguDropdown(currentSido);
+
+    // 장바구니에 이미 담긴 구역이 있다면 그곳으로 지도 시작점 이동
+    if (currentSelectedZones.length > 0) {
+        const firstZone = currentSelectedZones[0];
+        if (firstZone.sido) {
+            currentSido = firstZone.sido;
+            if (sidoSelect) sidoSelect.value = currentSido;
+            populateSigunguDropdown(currentSido);
+        }
+        if (firstZone.sigungu) {
+            currentSigungu = firstZone.sigungu;
+            const sigunguSelect = document.getElementById('territory-select-sigungu');
+            if (sigunguSelect) sigunguSelect.value = currentSigungu;
+        }
+    } else {
+        currentSigungu = "강남구";
+        const sigunguSelect = document.getElementById('territory-select-sigungu');
+        if (sigunguSelect) sigunguSelect.value = currentSigungu;
+    }
+
+    updateEntireSigunguButtonUI();
+
+    // 카카오 지도 초기화 및 폴리곤 로드
+    setTimeout(async () => {
+        const container = document.getElementById('territory-map-container');
+        if (!territoryMap) {
+            territoryMap = new kakao.maps.Map(container, {
+                center: new kakao.maps.LatLng(37.566826, 126.978656),
+                level: 6
+            });
+        }
+        territoryMap.relayout();
+        await renderCurrentSigunguPolygons(currentSido, currentSigungu);
+    }, 200);
+}
+
+export function closeDriverTerritoryModal() {
+    document.getElementById('driver-territory-modal')?.classList.add('hidden');
+    clearTerritoryMapPolygons();
+}
+
+// 시/군/구 드롭다운 옵션 동적 생성
+function populateSigunguDropdown(sido) {
+    const select = document.getElementById('territory-select-sigungu');
+    if (!select) return;
+
+    const list = ADMINISTRATIVE_DISTRICTS[sido] || [];
+    select.innerHTML = list.map(gu => `<option value="${gu}">${gu}</option>`).join('');
+    if (list.length > 0) {
+        currentSigungu = list[0];
+        select.value = currentSigungu;
+    }
+}
+
+export async function onTerritorySidoChange(sido) {
+    currentSido = sido;
+    populateSigunguDropdown(sido);
+    updateEntireSigunguButtonUI();
+    await renderCurrentSigunguPolygons(currentSido, currentSigungu);
+}
+
+export async function onTerritorySigunguChange(sigungu) {
+    currentSigungu = sigungu;
+    updateEntireSigunguButtonUI();
+    await renderCurrentSigunguPolygons(currentSido, currentSigungu);
+}
+
+// ==========================================
+// 3. 지도 위에 '동' 폴리곤 경계선 렌더링 & 클릭 토글
+// ==========================================
+
+async function renderCurrentSigunguPolygons(sido, sigungu) {
+    if (!territoryMap) return;
+    clearTerritoryMapPolygons();
+
+    const currentDevId = document.getElementById('territory-target-devid')?.value;
+    const allDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
+
+    // 타 기사들이 선점한 권역 맵핑 (중복 여부 안내용)
+    const otherDriverZoneMap = new Map();
+    allDrivers.forEach(d => {
+        const dId = d.deviceId || d.key;
+        if (dId === currentDevId) return;
+        if (Array.isArray(d.territoryZones)) {
+            d.territoryZones.forEach(z => {
+                otherDriverZoneMap.set(z.id, d.phone || d.key);
+            });
+        }
     });
-}
 
-// 🌟 과학적 배송 지리 기반 기본 정적 반경 (단위: 미터)
-function getDefaultRadius(scale) {
-    if (scale === 'gu') return 4500;   // 구/군: 반경 4.5km (지름 9km, 1개 자치구 완벽 커버)
-    if (scale === 'si') return 13000;  // 시/도: 반경 13km (지름 26km, 특별시/광역시 전역 커버)
-    return 1500;                      // 동/읍/면: 반경 1.5km (지름 3km, 배송동+인접생활권 밀착)
-}
+    const bounds = new kakao.maps.LatLngBounds();
+    let hasPoints = false;
 
-// 🌟 권역 원이 지도 화면 위아래에 알맞게 차도록 시원하게 줌 레벨 맞춤
-function fitMapToTerritory(latLng, scale, sizePercent) {
-    if (!territoryMap || !latLng) return;
-    let r = getDefaultRadius(scale);
+    // 1) 서울 지역: GeoJSON 기반 실제 '동' 폴리곤 정밀 렌더링
+    if (sido === "서울") {
+        const geojson = await loadSeoulDongGeoJSON();
+        const guCode = SEOUL_GU_CODE_MAP[sigungu];
 
-    const sizeRatio = (sizePercent || currentTerritorySize) / 100;
-    r *= sizeRatio;
+        if (geojson && guCode) {
+            const filteredFeatures = geojson.features.filter(f => f.properties.code && f.properties.code.startsWith(guCode));
 
-    const lat = latLng.getLat();
-    const lng = latLng.getLng();
-    
-    // 화면 상하 여백에 편안하게 들어오도록 1.18배 마진 적용
-    const marginFactor = 1.18;
-    const latDelta = (r * marginFactor) / 111000;
-    const lngDelta = (r * marginFactor) / (111000 * Math.cos(lat * Math.PI / 180));
+            filteredFeatures.forEach(feature => {
+                const dongName = feature.properties.name || "미확인";
+                const zoneId = `dong_${sido}_${sigungu}_${dongName}`;
+                const guZoneId = `gu_${sido}_${sigungu}`;
 
-    const sw = new kakao.maps.LatLng(lat - latDelta, lng - lngDelta);
-    const ne = new kakao.maps.LatLng(lat + latDelta, lng + lngDelta);
-    const bounds = new kakao.maps.LatLngBounds(sw, ne);
-    territoryMap.setBounds(bounds);
+                // 현재 기사 선택 여부 (동 개별 선택 또는 구 전체 선택)
+                const isSelected = currentSelectedZones.some(z => z.id === zoneId || z.id === guZoneId);
+                const assignedOtherDriver = otherDriverZoneMap.get(zoneId) || otherDriverZoneMap.get(guZoneId);
+
+                const paths = convertGeoJsonCoordsToKakao(feature.geometry.coordinates, feature.geometry.type);
+
+                // 폴리곤 스타일 결정 (내 권역: 블루 / 미선택: 화이트-슬레이트 / 타기사: 연회색)
+                let strokeColor = isSelected ? '#1d4ed8' : '#94a3b8';
+                let fillColor = isSelected ? '#3b82f6' : (assignedOtherDriver ? '#cbd5e1' : '#ffffff');
+                let fillOpacity = isSelected ? 0.65 : (assignedOtherDriver ? 0.45 : 0.35);
+                let strokeWeight = isSelected ? 2.5 : 1.2;
+
+                const polygon = new kakao.maps.Polygon({
+                    path: paths,
+                    strokeWeight: strokeWeight,
+                    strokeColor: strokeColor,
+                    strokeOpacity: 0.9,
+                    strokeStyle: 'solid',
+                    fillColor: fillColor,
+                    fillOpacity: fillOpacity
+                });
+
+                polygon.setMap(territoryMap);
+                activePolygons.push(polygon);
+
+                // 지도 바운드 확장
+                const extendBounds = (coords) => {
+                    coords.forEach(pt => {
+                        if (Array.isArray(pt)) extendBounds(pt);
+                        else { bounds.extend(pt); hasPoints = true; }
+                    });
+                };
+                extendBounds(paths);
+
+                // 동 이름 텍스트 오버레이 라벨
+                const centroid = calculatePolygonCentroid(paths);
+                if (centroid) {
+                    const labelContent = document.createElement('div');
+                    labelContent.className = 'select-none pointer-events-none text-center';
+                    labelContent.innerHTML = `
+                        <div class="px-2 py-0.5 rounded-md text-[11px] font-black shadow-xs border ${
+                            isSelected 
+                                ? 'bg-blue-600 text-white border-blue-700' 
+                                : (assignedOtherDriver ? 'bg-slate-200 text-gray-600 border-slate-300' : 'bg-white/90 text-gray-800 border-gray-300')
+                        }">
+                            ${dongName}
+                            ${assignedOtherDriver ? `<span class="block text-[9px] font-normal text-slate-500">담당: ${assignedOtherDriver}</span>` : ''}
+                        </div>`;
+
+                    const overlay = new kakao.maps.CustomOverlay({
+                        position: centroid,
+                        content: labelContent,
+                        yAnchor: 0.5
+                    });
+                    overlay.setMap(territoryMap);
+                    activeOverlayLabels.push(overlay);
+                }
+
+                // 마우스 호버 효과
+                kakao.maps.event.addListener(polygon, 'mouseover', () => {
+                    if (!isSelected) {
+                        polygon.setOptions({ fillColor: '#93c5fd', fillOpacity: 0.55 });
+                    }
+                });
+                kakao.maps.event.addListener(polygon, 'mouseout', () => {
+                    if (!isSelected) {
+                        polygon.setOptions({ fillColor: fillColor, fillOpacity: fillOpacity });
+                    }
+                });
+
+                // 클릭 시 장바구니 토글
+                kakao.maps.event.addListener(polygon, 'click', () => {
+                    toggleDongZone(sido, sigungu, dongName);
+                });
+            });
+
+            if (hasPoints) {
+                territoryMap.setBounds(bounds);
+            }
+            return;
+        }
+    }
+
+    // 2) 경기/인천 또는 외부 데이터: 카카오 주소 검색 기반 구 중심 확대 및 포커스
+    if (window.kakao && kakao.maps && kakao.maps.services) {
+        const geocoder = new kakao.maps.services.Geocoder();
+        const searchAddr = `${sido} ${sigungu}`;
+
+        geocoder.addressSearch(searchAddr, (result, status) => {
+            if (status === kakao.maps.services.Status.OK && result[0]) {
+                const centerPos = new kakao.maps.LatLng(parseFloat(result[0].y), parseFloat(result[0].x));
+                territoryMap.setLevel(5);
+                territoryMap.panTo(centerPos);
+
+                // 해당 구 안내 마커 표시
+                const marker = new kakao.maps.Marker({ position: centerPos });
+                marker.setMap(territoryMap);
+                activePolygons.push(marker);
+
+                const label = new kakao.maps.CustomOverlay({
+                    position: centerPos,
+                    content: `<div class="bg-indigo-600 text-white font-black text-xs px-3 py-1.5 rounded-xl shadow-md border border-white mb-8">${sigungu} (상단에서 '구 전체'를 담거나 검색하세요)</div>`,
+                    yAnchor: 1
+                });
+                label.setMap(territoryMap);
+                activeOverlayLabels.push(label);
+            }
+        });
+    }
 }
 
 // ==========================================
-// 1. 실시간 위치 관제 사이드바
+// 4. 장바구니 제어 (구/동 추가, 삭제, UI 동기화)
 // ==========================================
+
+// 개별 '동' 토글
+export function toggleDongZone(sido, sigungu, dong) {
+    const zoneId = `dong_${sido}_${sigungu}_${dong}`;
+    const guZoneId = `gu_${sido}_${sigungu}`;
+
+    // 만약 이미 해당 구 전체가 선택되어 있다면 동 단위로 세분화 전환
+    const guIndex = currentSelectedZones.findIndex(z => z.id === guZoneId);
+    if (guIndex !== -1) {
+        currentSelectedZones.splice(guIndex, 1);
+    }
+
+    const existingIdx = currentSelectedZones.findIndex(z => z.id === zoneId);
+    if (existingIdx !== -1) {
+        currentSelectedZones.splice(existingIdx, 1);
+    } else {
+        currentSelectedZones.push({
+            id: zoneId,
+            type: 'dong',
+            sido: sido,
+            sigungu: sigungu,
+            dong: dong,
+            name: `${sigungu} ${dong}`
+        });
+    }
+
+    renderTerritoryBasketChips();
+    updateEntireSigunguButtonUI();
+    renderCurrentSigunguPolygons(currentSido, currentSigungu);
+}
+
+// '현재 구 전체' 원클릭 토글
+export function toggleEntireSigungu() {
+    const guZoneId = `gu_${currentSido}_${currentSigungu}`;
+    const guIndex = currentSelectedZones.findIndex(z => z.id === guZoneId);
+
+    if (guIndex !== -1) {
+        // 이미 구 전체가 담겨있으면 해제
+        currentSelectedZones.splice(guIndex, 1);
+    } else {
+        // 해당 구에 속한 개별 동들을 모두 지우고 '구 전체' 1개로 깔끔하게 치환
+        currentSelectedZones = currentSelectedZones.filter(z => !(z.sido === currentSido && z.sigungu === currentSigungu));
+        currentSelectedZones.push({
+            id: guZoneId,
+            type: 'gu',
+            sido: currentSido,
+            sigungu: currentSigungu,
+            name: `${currentSigungu} 전체`
+        });
+    }
+
+    renderTerritoryBasketChips();
+    updateEntireSigunguButtonUI();
+    renderCurrentSigunguPolygons(currentSido, currentSigungu);
+}
+
+// 장바구니에서 개별 칩 삭제 (✕ 버튼 클릭)
+export function removeTerritoryZone(zoneId) {
+    currentSelectedZones = currentSelectedZones.filter(z => z.id !== zoneId);
+    renderTerritoryBasketChips();
+    updateEntireSigunguButtonUI();
+    renderCurrentSigunguPolygons(currentSido, currentSigungu);
+}
+
+// 장바구니 전체 비우기
+export function clearTerritoryBasket() {
+    if (currentSelectedZones.length === 0) return;
+    if (!confirm("선택된 모든 권역을 장바구니에서 비우시겠습니까?")) return;
+    currentSelectedZones = [];
+    renderTerritoryBasketChips();
+    updateEntireSigunguButtonUI();
+    renderCurrentSigunguPolygons(currentSido, currentSigungu);
+}
+
+// 장바구니 UI 칩 렌더링
+function renderTerritoryBasketChips() {
+    const container = document.getElementById('territory-selected-chips');
+    const countBadge = document.getElementById('territory-selected-count');
+    if (!container) return;
+
+    if (countBadge) {
+        countBadge.innerText = `${currentSelectedZones.length}개 구역`;
+    }
+
+    if (currentSelectedZones.length === 0) {
+        container.innerHTML = `
+            <div class="text-center text-gray-400 py-12 text-xs font-bold w-full">
+                지도에서 동을 클릭하거나<br>상단에서 '구 전체'를 담아보세요.
+            </div>`;
+        return;
+    }
+
+    container.innerHTML = currentSelectedZones.map(zone => {
+        const isGu = zone.type === 'gu';
+        return `
+        <div class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-black shadow-2xs transition ${
+            isGu ? 'bg-indigo-50 text-indigo-900 border border-indigo-200' : 'bg-blue-50 text-blue-900 border border-blue-200'
+        }">
+            <span class="text-[9px] px-1 py-0.5 rounded font-black ${isGu ? 'bg-indigo-600 text-white' : 'bg-blue-600 text-white'}">
+                ${isGu ? '구 전체' : '동'}
+            </span>
+            <span>${zone.name}</span>
+            <button type="button" onclick="window.removeTerritoryZone('${zone.id}')" class="text-gray-400 hover:text-red-500 ml-0.5 text-xs font-bold transition">✕</button>
+        </div>`;
+    }).join('');
+}
+
+// '현재 구 전체' 버튼 텍스트/스타일 동기화
+function updateEntireSigunguButtonUI() {
+    const btnText = document.getElementById('btn-toggle-sigungu-text');
+    const btn = document.getElementById('btn-toggle-entire-sigungu');
+    if (!btnText || !btn) return;
+
+    const guZoneId = `gu_${currentSido}_${currentSigungu}`;
+    const isGuSelected = currentSelectedZones.some(z => z.id === guZoneId);
+
+    if (isGuSelected) {
+        btnText.innerText = `${currentSigungu} 전체 담김 (클릭 시 해제)`;
+        btn.className = "flex-1 bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-700 py-1.5 rounded-lg text-xs font-black transition active:scale-95 flex items-center justify-center gap-1 shadow-2xs";
+    } else {
+        btnText.innerText = `${currentSigungu} 전체 담기`;
+        btn.className = "flex-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 py-1.5 rounded-lg text-xs font-black transition active:scale-95 flex items-center justify-center gap-1";
+    }
+}
+
+// 빠른 주소/동 검색창
+export function searchTerritoryAddress() {
+    const inputEl = document.getElementById('territory-address-search');
+    const query = inputEl ? inputEl.value.trim() : '';
+    if (!query) { alert("검색할 동 또는 구 이름을 입력하세요."); inputEl?.focus(); return; }
+
+    if (window.kakao && kakao.maps && kakao.maps.services) {
+        const geocoder = new kakao.maps.services.Geocoder();
+        geocoder.addressSearch(query, (result, status) => {
+            if (status === kakao.maps.services.Status.OK && result[0]) {
+                const addr = result[0].address;
+                const r1 = addr.region_1depth_name.replace(/특별|광역|자치/g, '').slice(0, 2);
+                const r2 = addr.region_2depth_name;
+                const r3 = addr.region_3depth_name;
+
+                // 시/도 및 시/군/구 자동 이동
+                if (ADMINISTRATIVE_DISTRICTS[r1]) {
+                    currentSido = r1;
+                    const sidoSelect = document.getElementById('territory-select-sido');
+                    if (sidoSelect) sidoSelect.value = currentSido;
+                    populateSigunguDropdown(currentSido);
+
+                    if (r2) {
+                        currentSigungu = r2;
+                        const sigunguSelect = document.getElementById('territory-select-sigungu');
+                        if (sigunguSelect) sigunguSelect.value = currentSigungu;
+                    }
+                }
+
+                // 동 단위까지 특정되면 장바구니 자동 추가
+                if (r3) {
+                    toggleDongZone(currentSido, currentSigungu, r3);
+                } else {
+                    renderCurrentSigunguPolygons(currentSido, currentSigungu);
+                }
+            } else {
+                alert("해당 지역의 주소를 찾을 수 없습니다. 정확한 동이나 구 이름을 입력해 주세요.");
+            }
+        });
+    }
+}
+
+// ==========================================
+// 5. Firebase Firestore 저장 엔진
+// ==========================================
+
+export async function saveDriverTerritory() {
+    const devId = document.getElementById('territory-target-devid')?.value;
+    if (!devId) return;
+
+    if (currentSelectedZones.length === 0) {
+        alert("최소 1개 이상의 구 또는 동을 장바구니에 담아주세요.");
+        return;
+    }
+
+    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    if (!targetLic) return;
+
+    // 요약 명칭 생성 (예: "양천구 전체", "강서구 화곡1동 외 2곳")
+    let summaryText = currentSelectedZones[0].name;
+    if (currentSelectedZones.length > 1) {
+        summaryText = `${currentSelectedZones[0].name} 외 ${currentSelectedZones.length - 1}곳`;
+    }
+
+    // 지도 중심 좌표 산출을 위한 기준 좌표 가져오기
+    let centerLat = 37.566826;
+    let centerLng = 126.978656;
+    if (territoryMap) {
+        const c = territoryMap.getCenter();
+        centerLat = c.getLat();
+        centerLng = c.getLng();
+    }
+
+    try {
+        await updateDoc(doc(db, "licenses", targetLic.key), {
+            territoryZones: currentSelectedZones, // 구+동 혼합 배열
+            territoryScale: 'zone',
+            territory1: summaryText,              // 기존 UI 호환 텍스트
+            territory2: `${currentSelectedZones.length}개 구역 지정`,
+            territoryLat: centerLat,
+            territoryLng: centerLng,
+            updatedAt: Date.now()
+        });
+
+        alert(`[권역 저장 완료]\n\n${summaryText}이(가) 기사님의 담당 배송 권역으로 성공적으로 저장되었습니다.`);
+        closeDriverTerritoryModal();
+        if (window.renderDispatchDriverList) window.renderDispatchDriverList();
+    } catch (e) {
+        alert("권역 저장 중 오류가 발생했습니다: " + e.message);
+    }
+}
+
+// ==========================================
+// 6. 전체 기사 권역 설정 현황 지도 모달
+// ==========================================
+
+export function openAllTerritoriesMap() {
+    const modal = document.getElementById('all-territories-modal');
+    if (!modal) return;
+    modal.classList.remove('hidden');
+
+    setTimeout(() => {
+        const container = document.getElementById('all-territories-map-container');
+        if (!allTerritoriesMap) {
+            allTerritoriesMap = new kakao.maps.Map(container, {
+                center: new kakao.maps.LatLng(37.566826, 126.978656),
+                level: 8
+            });
+        }
+        allTerritoriesMap.relayout();
+        allTerritoriesOverlays.forEach(ov => ov.setMap(null));
+        allTerritoriesOverlays = [];
+
+        const allDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
+        let bounds = new kakao.maps.LatLngBounds();
+        let hasValidPoint = false;
+
+        allDrivers.forEach(d => {
+            const zones = d.territoryZones || [];
+            const dName = d.phone || d.key;
+
+            if (zones.length > 0 && d.territoryLat && d.territoryLng) {
+                hasValidPoint = true;
+                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
+                bounds.extend(pos);
+
+                const marker = new kakao.maps.Marker({ position: pos });
+                marker.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(marker);
+
+                const zoneSummary = zones.map(z => z.name).slice(0, 3).join(', ') + (zones.length > 3 ? ` 외 ${zones.length - 3}곳` : '');
+                const label = new kakao.maps.CustomOverlay({
+                    position: pos,
+                    content: `
+                    <div class="bg-slate-900 text-white text-xs px-3 py-1.5 rounded-xl shadow-lg border border-indigo-400 mb-8 max-w-[200px] text-center">
+                        <span class="font-black text-amber-300 block mb-0.5"><i class="fa-solid fa-truck text-xs mr-1"></i>${dName}</span>
+                        <span class="text-[10px] text-gray-300 block truncate">${zoneSummary}</span>
+                    </div>`,
+                    yAnchor: 1
+                });
+                label.setMap(allTerritoriesMap);
+                allTerritoriesOverlays.push(label);
+            }
+        });
+
+        if (hasValidPoint) {
+            allTerritoriesMap.setBounds(bounds);
+        }
+    }, 200);
+}
+
+export function closeAllTerritoriesMap() {
+    document.getElementById('all-territories-modal')?.classList.add('hidden');
+}
+
+// ==========================================
+// 7. 실시간 기사 GPS 위치 추적 & 사이드바 (기존 기능 100% 보존)
+// ==========================================
+
+function isAllowedWorkingHours() {
+    const now = new Date();
+    const day = now.getDay();
+    const hour = now.getHours();
+    return (day >= 1 && day <= 5) && (hour >= 9 && hour < 17);
+}
+
 export function renderLocationSidebar() {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const visibleLicenses = window.getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-tower-broadcast text-blue-600"></i> 실시간 위치 관제 (<span class="text-blue-600">${visibleLicenses.length}</span>대)</h2>
@@ -73,7 +672,7 @@ export function renderLocationSidebar() {
     `;
 
     if (visibleLicenses.length === 0) {
-        contentEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">위치를 확인할 기사가 없습니다.</div>`; 
+        contentEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">위치를 확인할 기사가 없습니다.</div>`;
         return;
     }
 
@@ -83,7 +682,7 @@ export function renderLocationSidebar() {
         const phone = lic.phone || '연락처 미등록';
         const driver = state.activeRoutes[devId];
         const driverComps = state.allCompletions.filter(c => c.deviceId === devId || (c.phone && c.phone === lic.phone)).sort((a,b) => b.completedAt - a.completedAt);
-        
+
         let previewAddress = "최근 위치 데이터 대기중";
         let previewTime = "";
         if (driverComps.length > 0 && driverComps[0].address) {
@@ -114,18 +713,8 @@ export function renderLocationSidebar() {
 }
 
 export function jumpToDriverDelivery(devId) {
-    window.setDispatchMode('DELIVERY');
-    window.selectDriver(devId);
-}
-
-// ==========================================
-// 2. 실시간 지도 위치 추적
-// ==========================================
-function isAllowedWorkingHours() {
-    const now = new Date();
-    const day = now.getDay();
-    const hour = now.getHours();
-    return (day >= 1 && day <= 5) && (hour >= 9 && hour < 17);
+    if (window.setDispatchMode) window.setDispatchMode('DELIVERY');
+    if (window.selectDriver) window.selectDriver(devId);
 }
 
 export async function focusDriverLocationOnMap(devId) {
@@ -141,14 +730,14 @@ export async function focusDriverLocationOnMap(devId) {
     closeCurrentLocationOverlay();
 
     const reqTime = Date.now();
-    try { await setDoc(doc(db, "gps_requests", devId), { deviceId: devId, requestedAt: reqTime }); } catch(e) {}
+    try { await setDoc(doc(db, "gps_requests", devId), { deviceId: devId, requestedAt: reqTime }); } catch (e) {}
     let isResolved = false;
 
     const unsub = onSnapshot(doc(db, "gps_reports", devId), async (snap) => {
         if (snap.exists()) {
             const data = snap.data();
             if (data.updatedAt && data.updatedAt >= reqTime) {
-                isResolved = true; unsub(); 
+                isResolved = true; unsub();
                 const lat = data.lat; const lng = data.lng;
                 const pos = new kakao.maps.LatLng(lat, lng);
                 map.setLevel(3); map.panTo(pos);
@@ -167,7 +756,7 @@ export async function focusDriverLocationOnMap(devId) {
                         <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
                     </div>`;
                 window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
-                window.currentLocationOverlay.setMap(map); 
+                window.currentLocationOverlay.setMap(map);
                 if (window.myMapOverlays) window.myMapOverlays.push(window.currentLocationOverlay);
 
                 const resolvedAddr = await getAddressFromCoords(lat, lng);
@@ -214,7 +803,7 @@ export async function showFallbackLocation(devId) {
             <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-sky-400"></div>
         </div>`;
     window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
-    window.currentLocationOverlay.setMap(map); 
+    window.currentLocationOverlay.setMap(map);
     if (window.myMapOverlays) window.myMapOverlays.push(window.currentLocationOverlay);
 
     const resolvedAddr = await getAddressFromCoords(lat, lng);
@@ -224,395 +813,72 @@ export async function showFallbackLocation(devId) {
 }
 
 export function closeCurrentLocationOverlay() {
-    if (window.currentLocationOverlay) { 
-        window.currentLocationOverlay.setMap(null); 
-        window.currentLocationOverlay = null; 
+    if (window.currentLocationOverlay) {
+        window.currentLocationOverlay.setMap(null);
+        window.currentLocationOverlay = null;
     }
 }
 
 export function drawAllDriversOnMap() {
     if (window.forceClearMap) window.forceClearMap();
     if (!map) return;
-    const visibleLicenses = window.getFilteredVisibleDrivers();
+    const visibleLicenses = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
     const bounds = new kakao.maps.LatLngBounds();
     let hasPoints = false;
-    
+
     visibleLicenses.forEach(lic => {
-        const devId = lic.deviceId || lic.key; 
+        const devId = lic.deviceId || lic.key;
         const driver = state.activeRoutes[devId];
         let pos = null;
         const driverComps = state.allCompletions.filter(c => c.deviceId === devId || (c.phone && c.phone === lic.phone)).sort((a,b) => b.completedAt - a.completedAt);
-        
+
         if (driverComps.length > 0 && driverComps[0].lat) pos = new kakao.maps.LatLng(driverComps[0].lat, driverComps[0].lng);
         else if (driver && driver.destinations && driver.destinations.length > 0 && driver.destinations[0].lat) pos = new kakao.maps.LatLng(driver.destinations[0].lat, driver.destinations[0].lng);
-        
+
         if (pos) {
             bounds.extend(pos); hasPoints = true;
             const content = document.createElement('div'); content.className = 'driver-pin';
             content.innerHTML = `<i class="fa-solid fa-truck text-sky-400 text-xs"></i><span>${lic.phone || '기사'}</span>`;
-            content.onclick = () => { window.jumpToDriverDelivery(devId); };
+            content.onclick = () => { jumpToDriverDelivery(devId); };
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.3, zIndex: 30 });
-            overlay.setMap(map); 
+            overlay.setMap(map);
             if (window.myMapOverlays) window.myMapOverlays.push(overlay);
         }
     });
     if (hasPoints) map.setBounds(bounds);
 }
 
-export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
+export function fitMapToAllDrivers() {
+    drawAllDriversOnMap();
+}
 
 // ==========================================
-// 3. 기사 권역(Territory) 설정 모달 (지도 및 검색)
+// 8. 전역 Window 객체 바인딩
 // ==========================================
-
-export function toggleTerritoryPinMode() {
-    // 핀 이동 ON/OFF 모드를 제거하고 상시 이동 가능하도록 유지 (호환성을 위한 빈 함수)
-}
-
-export function searchTerritoryAddress() {
-    const inputEl = document.getElementById('territory-address-search');
-    const query = inputEl ? inputEl.value.trim() : '';
-    
-    if (!query) { 
-        alert("검색할 주소를 입력해 주세요."); 
-        inputEl?.focus();
-        return; 
-    }
-
-    if (window.kakao && kakao.maps && kakao.maps.services) {
-        const geocoder = new kakao.maps.services.Geocoder();
-        geocoder.addressSearch(query, (result, status) => {
-            if (status === kakao.maps.services.Status.OK && result[0]) {
-                const pos = new kakao.maps.LatLng(parseFloat(result[0].y), parseFloat(result[0].x));
-                setTerritoryCenter(pos);
-                fitMapToTerritory(pos, state.currentTerritoryScale, currentTerritorySize);
-            } else {
-                alert("주소를 찾을 수 없습니다. 정확한 도로명이나 지번 주소를 다시 입력해 주세요.");
-            }
-        });
-    } else {
-        alert("지도 API가 아직 로드되지 않았습니다.");
-    }
-}
-
-export function adjustModalTerritorySize(delta) {
-    currentTerritorySize += delta;
-    if (currentTerritorySize < 50) currentTerritorySize = 50;
-    if (currentTerritorySize > 300) currentTerritorySize = 300;
-    
-    const displayEl = document.getElementById('modal-territory-size-display');
-    if (displayEl) displayEl.innerText = currentTerritorySize + '%';
-    
-    if (territoryMarker) {
-        setTerritoryCenter(territoryMarker.getPosition());
-        fitMapToTerritory(territoryMarker.getPosition(), state.currentTerritoryScale, currentTerritorySize);
-    }
-}
-
-export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
-    try { if (window.event) window.event.stopPropagation(); } catch(e) {}
-    document.getElementById('territory-target-devid').value = devId;
-    document.getElementById('territory-target-phone').innerText = phone;
-    
-    const searchInput = document.getElementById('territory-address-search');
-    if (searchInput) searchInput.value = '';
-    
-    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    currentTerritorySize = targetLic?.territorySize || 100;
-    const sizeDisp = document.getElementById('modal-territory-size-display');
-    if (sizeDisp) sizeDisp.innerText = currentTerritorySize + '%';
-
-    const modal = document.getElementById('driver-territory-modal');
-    if(!modal) return; 
-    modal.classList.remove('hidden');
-    
-    state.currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
-    
-    ['dong', 'gu', 'si'].forEach(s => {
-        const btn = document.getElementById(`btn-scale-${s}`);
-        if (!btn) return;
-        if (s === state.currentTerritoryScale) btn.className = "px-5 py-2.5 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95";
-        else btn.className = "px-5 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
-    });
-
-    setTimeout(() => {
-        const container = document.getElementById('territory-map-container');
-        if (!territoryMap) {
-            territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
-            
-            kakao.maps.event.addListener(territoryMap, 'click', function(mouseEvent) { 
-                setTerritoryCenter(mouseEvent.latLng);
-            });
-        }
-        
-        territoryMap.setDraggable(true);
-        territoryMap.relayout(); 
-        
-        if (territoryMarker) {
-            territoryMarker.setMap(null);
-            territoryMarker = null;
-        }
-        territoryCircles.forEach(c => c.setMap(null)); 
-        territoryCircles = [];
-        otherTerritoryOverlays.forEach(ov => ov.setMap(null)); 
-        otherTerritoryOverlays = [];
-
-        let centerPos = new kakao.maps.LatLng(37.566826, 126.978656);
-
-        if (lat && lng && lat !== 'undefined' && lng !== 'undefined' && lat !== '' && lng !== '') {
-            centerPos = new kakao.maps.LatLng(parseFloat(lat), parseFloat(lng));
-        } else {
-            const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) {
-                const baseData = JSON.parse(savedBase);
-                if (baseData.lat && baseData.lng) {
-                    centerPos = new kakao.maps.LatLng(baseData.lat, baseData.lng);
-                }
-            }
-            const addrDisplayEl = document.getElementById('territory-selected-address');
-            if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
-        }
-        
-        // 🌟 타 기사 권역: 지도를 가리지 않는 은은한 투명도(0.04)와 정적 반경 적용
-        const allDrivers = window.getFilteredVisibleDrivers();
-        allDrivers.forEach(d => {
-            const dId = d.deviceId || d.key;
-            if (dId === devId) return; 
-            if (d.territoryLat && d.territoryLng) {
-                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
-                const marker = new kakao.maps.Marker({ 
-                    position: pos, 
-                    image: new kakao.maps.MarkerImage('https://t1.daumcdn.net/localimg/localimages/07/mapapidoc/markerStar.png', new kakao.maps.Size(24, 35)) 
-                });
-                marker.setMap(territoryMap); 
-                otherTerritoryOverlays.push(marker);
-
-                const label = new kakao.maps.CustomOverlay({ 
-                    position: pos, 
-                    content: `<div class="bg-gray-800 text-white text-[10px] px-2 py-0.5 rounded shadow-sm font-bold mb-8">${d.phone || d.key}</div>`, 
-                    yAnchor: 1 
-                });
-                label.setMap(territoryMap); 
-                otherTerritoryOverlays.push(label);
-                
-                const rMax = getDefaultRadius(d.territoryScale || 'dong');
-                const otherSizeRatio = (d.territorySize || 100) / 100;
-                const circle = new kakao.maps.Circle({ 
-                    center: pos, 
-                    radius: rMax * otherSizeRatio, 
-                    strokeWeight: 1, 
-                    strokeColor: '#9ca3af', 
-                    strokeOpacity: 0.35, 
-                    strokeStyle: 'dashed',
-                    fillColor: '#9ca3af', 
-                    fillOpacity: 0.04 
-                });
-                circle.setMap(territoryMap); 
-                otherTerritoryOverlays.push(circle);
-            }
-        });
-
-        setTerritoryCenter(centerPos);
-
-        // 🌟 지도의 상하 여백에 거의 닿을 정도로 꽉 차게 줌 레벨 자동 맞춤
-        setTimeout(() => { 
-            if (territoryMap) {
-                territoryMap.relayout(); 
-                fitMapToTerritory(centerPos, state.currentTerritoryScale, currentTerritorySize);
-            }
-        }, 300);
-    }, 200);
-}
-
-export function closeDriverTerritoryModal() { 
-    document.getElementById('driver-territory-modal')?.classList.add('hidden'); 
-}
-
-// 🌟 동/구/시 선택 시 화면 위아래 끝에 원이 거의 닿도록 타이트하게 자동 줌 맞춤
-export function setTerritoryScale(scale, skipRedraw = false) {
-    state.currentTerritoryScale = scale;
-    const scaleInput = document.getElementById('input-territory-scale');
-    if(scaleInput) scaleInput.value = scale;
-
-    ['dong', 'gu', 'si'].forEach(s => {
-        const btn = document.getElementById(`btn-scale-${s}`);
-        if (!btn) return;
-        if (s === scale) btn.className = "px-5 py-2.5 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95";
-        else btn.className = "px-5 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95";
-    });
-
-    if (territoryMarker) {
-        setTerritoryCenter(territoryMarker.getPosition());
-        fitMapToTerritory(territoryMarker.getPosition(), scale, currentTerritorySize);
-    }
-}
-
-// 🌟 렉(버벅임) 완전 제거: 중복 이벤트 차단 및 기존 마커/원 위치 재활용
-export function setTerritoryCenter(latLng) {
-    if (!latLng) return;
-
-    // 50ms 이내 중복 트리거 차단 (원 클릭 + 지도 클릭 동시 발화 렉 방지)
-    const now = Date.now();
-    if (now - lastCenterUpdateTime < 60) return;
-    lastCenterUpdateTime = now;
-
-    document.getElementById('input-territory-lat').value = latLng.getLat();
-    document.getElementById('input-territory-lng').value = latLng.getLng();
-
-    const geocoder = new kakao.maps.services.Geocoder();
-    geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
-        let displayAddr = "주소를 찾을 수 없는 지역입니다";
-        if (status === kakao.maps.services.Status.OK) {
-            let fullAddress = result[0].address.address_name;
-            if (result[0].road_address) fullAddress = result[0].road_address.address_name;
-            document.getElementById('input-territory-1').value = fullAddress; 
-            document.getElementById('input-territory-2').value = ''; 
-            displayAddr = fullAddress;
-        }
-        const addrDisplayEl = document.getElementById('territory-selected-address');
-        if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
-    });
-
-    // 마커가 없으면 생성, 있으면 위치만 업데이트 (메모리 누수 및 재렌더링 렉 방지)
-    if (!territoryMarker) {
-        territoryMarker = new kakao.maps.Marker({ 
-            position: latLng,
-            image: getTerritoryMarkerImage(),
-            draggable: true
-        });
-        territoryMarker.setMap(territoryMap);
-
-        kakao.maps.event.addListener(territoryMarker, 'dragend', function() {
-            setTerritoryCenter(territoryMarker.getPosition());
-        });
-    } else {
-        territoryMarker.setPosition(latLng);
-    }
-
-    let r = getDefaultRadius(state.currentTerritoryScale);
-    const sizeRatio = currentTerritorySize / 100;
-    r *= sizeRatio; 
-
-    // 원(Circle) 역시 재활용하여 부드럽게 크기와 중심점만 갱신
-    if (territoryCircles.length === 0 || !territoryCircles[0]) {
-        const c1 = new kakao.maps.Circle({ 
-            center: latLng, 
-            radius: r, 
-            strokeWeight: 2.5, 
-            strokeColor: '#2563eb', 
-            strokeOpacity: 0.95, 
-            strokeStyle: 'solid',
-            fillColor: '#3b82f6', 
-            fillOpacity: 0.20 
-        });
-
-        kakao.maps.event.addListener(c1, 'click', function(mouseEvent) {
-            setTerritoryCenter(mouseEvent.latLng);
-        });
-
-        c1.setMap(territoryMap);
-        territoryCircles = [c1];
-    } else {
-        territoryCircles[0].setPosition(latLng);
-        territoryCircles[0].setRadius(r);
-    }
-}
-
-export async function saveDriverTerritory() {
-    const devId = document.getElementById('territory-target-devid').value;
-    const lat = document.getElementById('input-territory-lat').value;
-    const lng = document.getElementById('input-territory-lng').value;
-    const scale = document.getElementById('input-territory-scale').value;
-    const t1 = document.getElementById('input-territory-1').value || '상세 주소 확인 불가'; 
-    const t2 = document.getElementById('input-territory-2').value || '';
-
-    if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
-
-    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    if (!targetLic) return;
-
-    try {
-        await updateDoc(doc(db, "licenses", targetLic.key), {
-            territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
-            territoryScale: scale, territory1: t1, territory2: t2,
-            territorySize: currentTerritorySize
-        });
-        alert("기사 권역이 저장되었습니다.");
-        closeDriverTerritoryModal();
-        if (window.renderDispatchDriverList) window.renderDispatchDriverList();
-    } catch(e) { alert("저장 오류: " + e.message); }
-}
-
-export function openAllTerritoriesMap() {
-    const modal = document.getElementById('all-territories-modal');
-    if (!modal) return; 
-    modal.classList.remove('hidden');
-
-    setTimeout(() => {
-        const container = document.getElementById('all-territories-map-container');
-        if (!allTerritoriesMap) { 
-            allTerritoriesMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 8 }); 
-        }
-        allTerritoriesMap.relayout();
-        allTerritoriesOverlays.forEach(ov => ov.setMap(null)); 
-        allTerritoriesOverlays = [];
-
-        const allDrivers = window.getFilteredVisibleDrivers();
-        let bounds = new kakao.maps.LatLngBounds();
-        let hasValidPoint = false;
-
-        allDrivers.forEach(d => {
-            if (d.territoryLat && d.territoryLng) {
-                hasValidPoint = true;
-                const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
-                bounds.extend(pos);
-
-                const marker = new kakao.maps.Marker({ position: pos });
-                marker.setMap(allTerritoriesMap); 
-                allTerritoriesOverlays.push(marker);
-
-                const label = new kakao.maps.CustomOverlay({ 
-                    position: pos, 
-                    content: `<div class="bg-blue-600 text-white text-[11px] px-2 py-0.5 rounded shadow-sm font-black mb-8">${d.phone || d.key}</div>`, 
-                    yAnchor: 1 
-                });
-                label.setMap(allTerritoriesMap); 
-                allTerritoriesOverlays.push(label);
-
-                const r = getDefaultRadius(d.territoryScale || 'dong');
-                const sizeRatio = (d.territorySize || 100) / 100;
-
-                const c1 = new kakao.maps.Circle({ 
-                    center: pos, 
-                    radius: r * sizeRatio, 
-                    strokeWeight: 1.5, 
-                    strokeColor: '#2563eb', 
-                    strokeOpacity: 0.85, 
-                    fillColor: '#3b82f6', 
-                    fillOpacity: 0.15 
-                });
-
-                c1.setMap(allTerritoriesMap);
-                allTerritoriesOverlays.push(c1);
-            }
-        });
-
-        if (hasValidPoint) allTerritoriesMap.setBounds(bounds);
-        else {
-            const savedBase = localStorage.getItem('deliveryProCompanyBase');
-            if (savedBase) { 
-                const baseData = JSON.parse(savedBase); 
-                if (baseData.lat && baseData.lng) allTerritoriesMap.setCenter(new kakao.maps.LatLng(baseData.lat, baseData.lng)); 
-            }
-        }
-    }, 200);
-}
-
-export function closeAllTerritoriesMap() { 
-    document.getElementById('all-territories-modal')?.classList.add('hidden'); 
-}
-
-// 전역 window 객체 바인딩
-window.toggleTerritoryPinMode = toggleTerritoryPinMode;
+window.openDriverTerritoryModal = openDriverTerritoryModal;
+window.closeDriverTerritoryModal = closeDriverTerritoryModal;
+window.onTerritorySidoChange = onTerritorySidoChange;
+window.onTerritorySigunguChange = onTerritorySigunguChange;
+window.toggleDongZone = toggleDongZone;
+window.toggleEntireSigungu = toggleEntireSigungu;
+window.removeTerritoryZone = removeTerritoryZone;
+window.clearTerritoryBasket = clearTerritoryBasket;
 window.searchTerritoryAddress = searchTerritoryAddress;
-window.adjustModalTerritorySize = adjustModalTerritorySize;
+window.saveDriverTerritory = saveDriverTerritory;
+window.openAllTerritoriesMap = openAllTerritoriesMap;
+window.closeAllTerritoriesMap = closeAllTerritoriesMap;
+
+// 실시간 위치 관제 관련 바인딩
+window.renderLocationSidebar = renderLocationSidebar;
+window.jumpToDriverDelivery = jumpToDriverDelivery;
+window.focusDriverLocationOnMap = focusDriverLocationOnMap;
+window.showFallbackLocation = showFallbackLocation;
+window.closeCurrentLocationOverlay = closeCurrentLocationOverlay;
+window.drawAllDriversOnMap = drawAllDriversOnMap;
+window.fitMapToAllDrivers = fitMapToAllDrivers;
+
+// 하위 호환성 빈 함수 바인딩
+window.toggleTerritoryPinMode = () => {};
+window.adjustModalTerritorySize = () => {};
+window.setTerritoryScale = () => {};
+window.setTerritoryCenter = () => {};
