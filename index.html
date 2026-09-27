@@ -15,6 +15,8 @@
     <!-- 웹 앱 매니페스트 및 앱 아이콘 연결 -->
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
     
     <title>배송 경로 PRO</title>
     
@@ -63,12 +65,12 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* Safe-Area 안전 여백 (iOS 노치 및 안드로이드 제스처 바 대응) */
+        /* Safe-Area 안전 여백 (iOS 노치 및 안드로이드 하단 제스처 바 완벽 대응) */
         .pt-safe { 
             padding-top: max(0.6rem, env(safe-area-inset-top, 0px)); 
         }
         .pb-safe { 
-            padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)); 
+            padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 16px)); 
         }
         .px-safe {
             padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
@@ -81,6 +83,19 @@
         @keyframes slideUp {
             from { transform: translateY(20px); opacity: 0; }
             to { transform: translateY(0); opacity: 1; }
+        }
+
+        /* 슬라이더 텍스트 쉬머(Shimmer) 애니메이션 */
+        @keyframes shimmerGlow {
+            0% { background-position: -200% 0; }
+            100% { background-position: 200% 0; }
+        }
+        .shimmer-text {
+            background: linear-gradient(90deg, #1d4ed8 0%, #60a5fa 45%, #ffffff 50%, #60a5fa 55%, #1d4ed8 100%);
+            background-size: 200% 100%;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            animation: shimmerGlow 3s infinite linear;
         }
     </style>
 
@@ -233,39 +248,39 @@
     <div id="main-app" class="hidden flex-col h-full w-full">
         <header class="bg-white px-3 sm:px-4 pt-safe pb-2 shadow-[0_2px_10px_-1px_rgba(0,0,0,0.05)] z-20 flex-none border-b border-gray-100 relative w-full">
             <div class="flex flex-col gap-1.5 w-full">
-                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 (모바일 360px 완벽 대응) -->
-                <div class="flex items-center justify-between gap-1 w-full">
-                    <h1 class="text-base sm:text-lg font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink min-w-0">
-                        <i class="fa-solid fa-route text-blue-600 text-sm sm:text-base shrink-0"></i>
-                        <span class="truncate">배송 경로 PRO</span>
+                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 (글자 잘림 현상 원천 방지) -->
+                <div class="flex items-center justify-between gap-1.5 w-full">
+                    <h1 class="text-[15px] sm:text-base font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <i class="fa-solid fa-route text-blue-600 text-sm shrink-0"></i>
+                        <span>배송 경로 PRO</span>
                     </h1>
                     
                     <div class="flex items-center gap-1 shrink-0">
-                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1" title="연결설정">
+                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-700 border border-gray-200 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap" title="연결설정">
                             <i class="fa-solid fa-gear text-[11px] text-gray-500"></i>
                             <span>설정</span>
                         </button>
                         
-                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1" title="알림 보관함">
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap" title="알림 보관함">
                             <i class="fa-solid fa-bell text-[11px] text-blue-600"></i>
                             <span>알림</span>
                             <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
                         </button>
                         
-                        <button onclick="window.logout()" class="text-[11px] text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-2 py-1.5 rounded-lg font-bold active:bg-gray-200 transition shadow-2xs">
+                        <button onclick="window.logout()" class="text-[11px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 px-2 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
                             로그아웃
                         </button>
                     </div>
                 </div>
                 
-                <!-- 2열: 사용기한 뱃지 & 지난배송 버튼 (줄바꿈 방지) -->
-                <div class="flex justify-between items-center mt-0.5 gap-2 w-full">
-                    <span class="text-[10px] text-gray-400 font-medium tracking-tight shrink min-w-0 truncate">물류 전문 라스트마일</span>
+                <!-- 2열: 사용기한 뱃지 & 서브텍스트 & 지난배송 버튼 -->
+                <div class="flex justify-between items-center mt-0.5 gap-1.5 w-full">
+                    <span class="text-[10px] text-gray-400 font-bold tracking-tight shrink-0 whitespace-nowrap">물류 라스트마일</span>
                     <div class="flex gap-1.5 items-center shrink-0">
-                        <span id="license-expire-badge" class="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md font-bold whitespace-nowrap shadow-2xs">
+                        <span id="license-expire-badge" class="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md font-extrabold whitespace-nowrap shadow-2xs">
                             사용기한: 확인중...
                         </span>
-                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 text-gray-700 px-2 py-1 rounded-md font-bold border border-gray-200 active:bg-gray-200 flex items-center gap-1 shadow-2xs transition whitespace-nowrap">
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-1 rounded-md font-bold border border-gray-200 active:bg-gray-300 flex items-center gap-1 shadow-2xs transition whitespace-nowrap">
                             <i class="fa-solid fa-clock-rotate-left text-[10px]"></i> 지난배송
                         </button>
                     </div>
@@ -298,20 +313,24 @@
             </ul>
         </main>
 
-        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
+        <!-- 하단 푸터: 스캔 버튼 & 밀어서 경로 최적화 (슬라이더 트랙 UI 완벽 최적화) -->
+        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2.5 pb-safe z-20 flex-none shadow-[0_-4px_12px_rgba(0,0,0,0.06)] w-full">
             <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
-                <button onclick="document.getElementById('camera-input').click()" class="w-[85px] sm:w-[100px] h-[48px] bg-gray-900 text-white font-black rounded-xl shadow active:bg-gray-800 transition text-sm flex items-center justify-center gap-1.5 shrink-0">
-                    <i class="fa-solid fa-camera text-sm"></i>
-                    <span>스캔</span>
+                <button onclick="document.getElementById('camera-input').click()" class="h-[52px] px-4 bg-slate-900 hover:bg-slate-800 active:bg-slate-950 text-white font-black rounded-2xl shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 shrink-0 border border-slate-700/50">
+                    <i class="fa-solid fa-camera text-base text-blue-400"></i>
+                    <span class="text-[13px] tracking-tight">스캔</span>
                 </button>
                 
-                <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[48px]">
-                    <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[12px] sm:text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
-                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 animate-pulse"></i>
+                <!-- 프리미엄 스와이프 슬라이더 트랙 -->
+                <div id="swipe-container" class="flex-1 min-w-0 bg-gradient-to-r from-blue-50/90 via-sky-50 to-blue-100/80 rounded-2xl relative overflow-hidden flex items-center justify-center border border-blue-200/90 h-[52px] shadow-inner select-none">
+                    <!-- 유려한 빛 흐림 쉬머 텍스트 -->
+                    <div class="absolute inset-0 flex items-center justify-center pl-8 pr-3 text-blue-600 font-extrabold text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap shimmer-text">
+                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1.5 text-blue-500 animate-pulse"></i>
                     </div>
-                    <div id="swipe-btn" class="absolute left-1 w-[40px] h-[40px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
-                        <i class="fa-solid fa-angles-right text-base"></i>
+                    <!-- 제어 손잡이 (스와이프 버튼) -->
+                    <div id="swipe-btn" class="absolute left-1.5 w-[42px] h-[42px] bg-gradient-to-br from-blue-500 to-blue-700 hover:from-blue-600 hover:to-blue-800 rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-500/30 z-10 cursor-pointer touch-none active:scale-95 transition-transform duration-75">
+                        <i class="fa-solid fa-angles-right text-base drop-shadow-xs"></i>
                     </div>
                 </div>
             </div>
