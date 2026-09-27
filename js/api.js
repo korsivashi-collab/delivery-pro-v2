@@ -18,7 +18,7 @@ import {
     increment, 
     setDoc, 
     deleteDoc, 
-    orderBy,
+    orderBy, 
     limit 
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
@@ -277,7 +277,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (기기ID & 전화번호 통합 실시간 감시)
+// 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (문서 삭제 및 빈 목록 완벽 대응)
 export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let phone = "";
     let onRoutesReceived = null;
@@ -299,8 +299,13 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let lastHandledTime = 0;
 
     const handleRouteData = (data, sourceKey) => {
-        if (!data || !data.destinations || !Array.isArray(data.destinations)) {
-            return false;
+        // 관제에서 초기화되었거나 배송지가 비어있는 경우 즉시 전체 비우기 실행
+        if (!data || !data.destinations || !Array.isArray(data.destinations) || data.destinations.length === 0) {
+            lastHandledTime = Date.now();
+            if (typeof onRoutesCleared === 'function') {
+                onRoutesCleared();
+            }
+            return true;
         }
         
         // 동일 데이터 중복 처리 방지 및 최신성 검증
@@ -310,7 +315,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
         }
         lastHandledTime = updateTime;
 
-        if (onRoutesReceived) {
+        if (typeof onRoutesReceived === 'function') {
             onRoutesReceived(data.destinations, data);
         }
         return true;
@@ -322,12 +327,17 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
         const unsubDev = onSnapshot(devRef, (docSnap) => {
             if (docSnap.exists()) {
                 handleRouteData(docSnap.data(), deviceId);
+            } else {
+                // 관제에서 문서를 삭제(할당 초기화)한 경우 즉시 앱 화면도 비움
+                if (typeof onRoutesCleared === 'function') {
+                    onRoutesCleared();
+                }
             }
         }, (err) => console.warn("deviceId 동선 감시 오류:", err));
         unsubs.push(unsubDev);
     }
 
-    // 2) phone 기준 실시간 리스너 (숫자만 있는 cleanPhone 및 원본 형태)
+    // 2) phone 기준 실시간 리스너 (숫자 형태 및 원본 형태 동시 감시)
     if (phone) {
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         if (cleanPhone && cleanPhone !== deviceId) {
@@ -335,6 +345,10 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
             const unsubPhone = onSnapshot(phoneRef, (docSnap) => {
                 if (docSnap.exists()) {
                     handleRouteData(docSnap.data(), cleanPhone);
+                } else {
+                    if (typeof onRoutesCleared === 'function') {
+                        onRoutesCleared();
+                    }
                 }
             }, (err) => console.warn("cleanPhone 동선 감시 오류:", err));
             unsubs.push(unsubPhone);
@@ -345,6 +359,10 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
             const unsubRawPhone = onSnapshot(rawPhoneRef, (docSnap) => {
                 if (docSnap.exists()) {
                     handleRouteData(docSnap.data(), phone);
+                } else {
+                    if (typeof onRoutesCleared === 'function') {
+                        onRoutesCleared();
+                    }
                 }
             }, (err) => console.warn("rawPhone 동선 감시 오류:", err));
             unsubs.push(unsubRawPhone);
@@ -358,7 +376,29 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     };
 }
 
-// startAssignedRouteListener 별칭 완벽 호환 제공
+// 4-2. 포그라운드 복귀 시(화면 켰을 때) 최신 동선 1회 단발성 즉시 동기화 함수
+export async function fetchActiveRouteOnce(deviceId, phone) {
+    try {
+        const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
+        if (deviceId) {
+            const devSnap = await getDoc(doc(db, "routes", deviceId));
+            if (devSnap.exists()) return devSnap.data();
+        }
+        if (cleanPhone) {
+            const phoneSnap = await getDoc(doc(db, "routes", cleanPhone));
+            if (phoneSnap.exists()) return phoneSnap.data();
+        }
+        if (phone && phone !== cleanPhone) {
+            const rawPhoneSnap = await getDoc(doc(db, "routes", phone));
+            if (rawPhoneSnap.exists()) return rawPhoneSnap.data();
+        }
+        return null;
+    } catch (e) {
+        console.warn("최신 동선 단발 조회 오류:", e);
+        return null;
+    }
+}
+
 export const startAssignedRouteListener = listenToActiveRoutes;
 
 // 5. 관제 메시지 리스너 (최신 5건 한정 구독)
@@ -706,10 +746,7 @@ export async function firebaseSetTmsPermission(key, isAllowed) {
     }
 }
 
-// =================================================================
 // 10. 개인 메모 기기변경 임시 금고 (12시간 자동 파기 및 암호화 보관)
-// =================================================================
-
 export async function firebaseUploadTempMemoBackup(cleanKey, encryptedPayload, count) {
     if (!cleanKey) throw new Error("라이선스 식별자가 올바르지 않습니다.");
     const now = Date.now();

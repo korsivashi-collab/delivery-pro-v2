@@ -5,7 +5,7 @@
 // =================================================================
 
 import { calculateOptimizedRoute } from './optimizer.js';
-import { saveRouteToFirestore } from './api.js';
+import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state } from './state.js';
@@ -194,10 +194,32 @@ export async function initApp() {
         // 관리자로부터 신규 배송지 할당 시 진동 알림
         if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
     }, () => {
-        // 관제 센터에서 전체 초기화(삭제)가 진행된 경우
+        // 🌟 관제 센터에서 전체 초기화(삭제)가 진행된 경우 즉각 클리어
         state.setDestinations([]);
+        state.setStartLocation(null);
         state.saveActiveData();
         renderList();
+    });
+
+    // 🌟 앱 화면 복귀(화면 켜짐/포그라운드 전환) 시 관제 최신 상태 자동 대조
+    document.addEventListener('visibilitychange', async () => {
+        if (document.visibilityState === 'visible') {
+            const deviceId = getOrCreateDeviceId();
+            const phone = localStorage.getItem('deliveryProUserPhone') || "";
+            if (deviceId || phone) {
+                const latestRoute = await fetchActiveRouteOnce(deviceId, phone);
+                if (!latestRoute || !latestRoute.destinations || latestRoute.destinations.length === 0) {
+                    const currentDests = state.getDestinations();
+                    // 관제에는 비어있는데 기기 화면에만 남아있는 경우 즉시 초기화
+                    if (currentDests.length > 0) {
+                        state.setDestinations([]);
+                        state.setStartLocation(null);
+                        state.saveActiveData();
+                        renderList();
+                    }
+                }
+            }
+        }
     });
 
     // 지난 배송 복원 콜백 등록
