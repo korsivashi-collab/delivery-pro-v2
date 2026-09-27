@@ -8,6 +8,31 @@ import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18
 import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
 
 // ==========================================
+// 0. 물량 가중치 영구 저장소(LocalStorage) 관리 헬퍼
+// ==========================================
+function getWeightsStorageKey() {
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
+    return `deliveryPro_driverWeights_${dispatchKey}`;
+}
+
+function loadSavedDriverWeights() {
+    try {
+        const stored = localStorage.getItem(getWeightsStorageKey());
+        return stored ? JSON.parse(stored) : {};
+    } catch (e) {
+        return {};
+    }
+}
+
+function saveDriverWeights(weights) {
+    try {
+        localStorage.setItem(getWeightsStorageKey(), JSON.stringify(weights));
+    } catch (e) {
+        console.warn("가중치 로컬 저장 오류:", e);
+    }
+}
+
+// ==========================================
 // 1. 본사 거점 설정 및 UI 동기화
 // ==========================================
 export function saveCompanyBaseAddress() {
@@ -112,11 +137,11 @@ export function initDispatchResizer() {
 }
 
 // ==========================================
-// 3. 자동할당 기사 목록 및 가중치 / 전체선택 제어
+// 3. 자동할당 기사 목록 및 가중치 영구보존 / 배정수량 실시간 표시
 // ==========================================
 export const autoDispatchState = {
     selectedDrivers: new Set(),
-    weights: {},
+    weights: loadSavedDriverWeights(), // 🌟 저장된 가중치 불러오기
     isInit: false
 };
 
@@ -155,6 +180,11 @@ export function renderDispatchDriverList() {
         listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-[10px] font-bold">등록된 운행 기사가 없습니다.</div>`; 
         return;
     }
+
+    // 최신 가중치 저장값 동기화
+    if (!autoDispatchState.weights || Object.keys(autoDispatchState.weights).length === 0) {
+        autoDispatchState.weights = loadSavedDriverWeights();
+    }
     
     let html = '';
     drivers.forEach((d) => {
@@ -167,6 +197,16 @@ export function renderDispatchDriverList() {
         const t1 = d.territory1 || ''; 
         const t2 = d.territory2 || '';
         
+        // 🌟 해당 기사에게 현재 배정된 실제 주문 건수 계산
+        const assignedOrders = (state.parsedExcelList || []).filter(o => 
+            o.assignedDriver && (
+                o.assignedDriver === phoneDisplay || 
+                o.assignedDriver === licKey || 
+                o.assignedDriver === devId
+            )
+        );
+        const assignedCount = assignedOrders.length;
+
         let territoryBadge = '';
         if (tLat && tLng) {
             let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
@@ -194,15 +234,21 @@ export function renderDispatchDriverList() {
         const weight = autoDispatchState.weights[devId] || 0;
         const weightText = weight > 0 ? `+${weight}` : weight;
 
+        // 🌟 기사 카드 내에 [배정 건수 뱃지] 및 [하단 배정 물량 표시] 추가
         html += `
         <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-2 ring-blue-300 bg-blue-50/30' : 'border-gray-200 hover:border-blue-400'} p-3 rounded-2xl flex flex-col gap-2.5 shadow-xs transition mb-2.5">
             <div class="flex items-start justify-between gap-2">
                 <div class="flex items-center gap-2.5 mt-1 flex-1 min-w-0">
                     <input type="checkbox" onclick="event.stopPropagation()" onchange="window.toggleDispatchDriver('${devId}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shrink-0">
                     <div class="min-w-0 select-none">
-                        <span class="font-black text-[13px] ${isFocus ? 'text-blue-700' : 'text-gray-900'} block truncate leading-tight">
-                            <i class="fa-solid fa-truck ${isFocus ? 'text-blue-600' : 'text-gray-400'} mr-1 text-xs"></i>${phoneDisplay}
-                        </span>
+                        <div class="flex items-center gap-1.5 flex-wrap">
+                            <span class="font-black text-[13px] ${isFocus ? 'text-blue-700' : 'text-gray-900'} truncate leading-tight">
+                                <i class="fa-solid fa-truck ${isFocus ? 'text-blue-600' : 'text-gray-400'} mr-1 text-xs"></i>${phoneDisplay}
+                            </span>
+                            <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${assignedCount > 0 ? 'bg-blue-600 text-white shadow-2xs' : 'bg-gray-100 text-gray-400'}">
+                                ${assignedCount > 0 ? `${assignedCount}건 배정` : '0건'}
+                            </span>
+                        </div>
                         <span class="text-[10px] text-gray-400 font-mono block mt-0.5">ID: ${licKey}</span>
                     </div>
                 </div>
@@ -210,13 +256,19 @@ export function renderDispatchDriverList() {
             </div>
             
             <div class="flex items-center justify-between bg-gray-50 p-2 rounded-xl border border-gray-100" onclick="event.stopPropagation()">
-                <span class="text-[11px] font-black text-gray-600 flex items-center gap-1">
-                    <i class="fa-solid fa-scale-balanced text-gray-400 text-xs"></i> 물량 가중치
-                </span>
-                <div class="flex items-center bg-white border border-gray-200 rounded-lg shadow-2xs">
-                    <button onclick="window.adjustDriverWeight('${devId}', -1)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-r border-gray-200 transition active:scale-95" title="가중치 1건 감소">-</button>
-                    <span class="w-10 text-center text-xs font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
-                    <button onclick="window.adjustDriverWeight('${devId}', 1)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-l border-gray-200 transition active:scale-95" title="가중치 1건 증가">+</button>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-[11px] font-black text-gray-700 flex items-center gap-1">
+                        <i class="fa-solid fa-boxes-stacked text-blue-500 text-xs"></i> 배정 물량:
+                    </span>
+                    <span class="text-xs font-black ${assignedCount > 0 ? 'text-blue-600' : 'text-gray-400'}">${assignedCount}건</span>
+                </div>
+                <div class="flex items-center gap-1.5">
+                    <span class="text-[10px] font-bold text-gray-500">가중치</span>
+                    <div class="flex items-center bg-white border border-gray-200 rounded-lg shadow-2xs">
+                        <button onclick="window.adjustDriverWeight('${devId}', -1)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-r border-gray-200 transition active:scale-95" title="가중치 1건 감소">-</button>
+                        <span class="w-10 text-center text-xs font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
+                        <button onclick="window.adjustDriverWeight('${devId}', 1)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-l border-gray-200 transition active:scale-95" title="가중치 1건 증가">+</button>
+                    </div>
                 </div>
             </div>
         </div>`;
@@ -231,9 +283,12 @@ export function toggleDispatchDriver(devId) {
 }
 
 export function adjustDriverWeight(devId, delta) {
+    if (!autoDispatchState.weights) autoDispatchState.weights = loadSavedDriverWeights();
     let w = autoDispatchState.weights[devId] || 0;
     w += delta;
     autoDispatchState.weights[devId] = w;
+    // 🌟 가중치 변경 시 LocalStorage에 영구 저장
+    saveDriverWeights(autoDispatchState.weights);
     renderDispatchDriverList();
 }
 
@@ -247,7 +302,6 @@ export function selectDispatchDriver(devId) {
 // 4. 기사별 할당 상세 내역 (2-opt 최적화 순번 순 정렬 연동)
 // ==========================================
 
-// 주소지별 정렬 상태 변수 ('none', 'asc', 'desc')
 let detailAddressSortState = 'none';
 
 export function sortDetailByAddress() {
@@ -265,7 +319,6 @@ export function renderDispatchDriverDetail() {
     const tbody = document.getElementById('detail-driver-tbody');
     const badge = document.getElementById('detail-driver-count-badge');
     
-    // 기사가 선택되지 않았을 때
     if (!state.selectedDispatchDriverId) {
         if (header) header.classList.remove('hidden'); 
         if (table) table.classList.add('hidden'); 
@@ -290,7 +343,6 @@ export function renderDispatchDriverDetail() {
         return;
     }
 
-    // 주소지별 정렬이 켜져 있으면 가나다순, 기본 상태('none')면 2-opt 순번(displayNumber) 순 정렬
     if (detailAddressSortState !== 'none') {
         assignedItems = [...assignedItems].sort((a, b) => {
             const addrA = (a.address || a.fullAddress || '').trim();
@@ -305,7 +357,6 @@ export function renderDispatchDriverDetail() {
         assignedItems = [...assignedItems].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
     }
 
-    // 테이블 헤더 정렬 화살표 갱신
     const arrowSymbol = detailAddressSortState === 'asc' ? ' ▲' : (detailAddressSortState === 'desc' ? ' ▼' : ' ↕');
     const theadAddressTh = table ? table.querySelector('thead tr th:nth-child(2)') : null;
     if (theadAddressTh) {
@@ -353,7 +404,6 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 
     item.assignedDriver = newDriverPhone || null;
     
-    // 수동 변경 시 해당 기사의 배송 순번 자동 부여
     if (newDriverPhone) {
         const driverOrders = state.parsedExcelList.filter(o => o.assignedDriver === newDriverPhone);
         item.displayNumber = driverOrders.length;
@@ -438,11 +488,10 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 🌟 사용자가 화면에 등록한 본사 거점 주소/좌표 동적 취득
     const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
     const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
 
-    // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 배차 실행
+    // 🌟 저장된 가중치를 전달하여 외곽 우선 하버사인 배차 수행
     const result = executeAutoDispatch({
         targetOrders,
         activeDrivers,
@@ -455,13 +504,13 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 화면 갱신 및 Firebase 비동기 저장
+    // 🌟 화면 갱신 (좌측 기사 목록의 배정 수량 즉시 업데이트)
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료]\n거점 기준 외곽 우선 하버사인 클러스터링 및 2-opt 동선 최적화가 완료되었습니다.\n(총 ${result.totalOrders}건이 ${activeDrivers.length}명의 기사에게 스마트하게 배분되었습니다.)\n\n내역 검토 후 이상이 없으면 [동선 전송] 버튼을 눌러주세요.`);
+    alert(`[자동할당 배분 완료]\n거점 기준 외곽 우선 하버사인 클러스터링 및 2-opt 동선 최적화가 완료되었습니다.\n(총 ${result.totalOrders}건이 ${activeDrivers.length}명의 기사에게 스마트하게 배분되었습니다.)\n\n좌측 기사 목록에서 기사별 배정 건수를 확인하신 후 [동선 전송]을 진행해 주세요.`);
 }
 
 // ==========================================
@@ -495,7 +544,6 @@ export async function sendRoutesToDrivers() {
         );
 
         if (orders.length > 0) {
-            // 🌟 2-opt 최적화 순번(displayNumber) 순으로 정렬하여 기사 앱에 전달
             orders.sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
             driverMap[devId] = { driver: d, orders };
         }
