@@ -1,7 +1,7 @@
 // js/admin-app.js
 
 import { db } from "./admin-api.js";
-import { doc, getDoc, onSnapshot, collection, query, orderBy, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 import { renderPaginationControls } from "./admin-ui.js";
@@ -71,20 +71,29 @@ import {
     toggleRowCheckbox, deleteExcelRow, deleteSelectedExcelRows, clearAllExcelRows
 } from "./admin-dispatch-excel.js";
 
+// 🌟 [관제 인쇄 메인 모듈 (슬림화 버전)]
 import {
-    exportToInvoiceModal, previewInvoiceRow, syncPreviewData, loadSavedForms,
-    executeBatchPrint, setAsDefaultForm,
-    cancelProviderFormEdit, saveProviderForm, deleteSavedForm,
-    updateLivePreview, previewSavedForm, toggleSelectForm, applySavedForm,
+    exportToInvoiceModal, previewInvoiceRow, executeBatchPrint,
     filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
     handleHeaderCheckAll, renderInvoiceOrderList, initTemplatePdfDropZone,
     populateSenderFilterDropdown, filterBySender,
-    openPickingDriverModal, closePickingDriverModal,
-    toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint,
     sortPrintList, initInvoiceResizer
 } from "./admin-dispatch-print.js";
 
-// 🌟 서식 빌더 모듈
+// 🌟 [신규 분리 1: 서식/폼 관리 모듈]
+import {
+    loadSavedForms, setAsDefaultForm, toggleSelectForm,
+    previewSavedForm, applySavedForm, saveProviderForm,
+    deleteSavedForm, cancelProviderFormEdit, updateLivePreview, syncPreviewData
+} from "./admin-dispatch-forms.js";
+
+// 🌟 [신규 분리 2: 창고 피킹 리스트 모듈]
+import {
+    openPickingDriverModal, closePickingDriverModal,
+    toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint
+} from "./admin-dispatch-picking.js";
+
+// 서식 빌더 모듈
 import {
     parsePdfToEditableDocument, renderEditableDocument,
     saveCurrentDocumentTemplate
@@ -356,8 +365,8 @@ window.initMasterDataSync = function() {
         }
     });
 
-    // 6. 메시지 실시간 동기화
-    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc")), (snapshot) => {
+    // 6. 메시지 실시간 동기화 (최신 50건으로 제한하여 읽기 비용 및 부하 절감)
+    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
         if (typeof renderMessageFeed === 'function') renderMessageFeed(); 
@@ -699,18 +708,22 @@ window.deleteExcelRow = deleteExcelRow;
 window.deleteSelectedExcelRows = deleteSelectedExcelRows;
 window.clearAllExcelRows = clearAllExcelRows;
 
-// [관제 인쇄(Print)]
+// 🌟 [관제 인쇄(Print) - 슬림화]
 window.exportToInvoiceModal = exportToInvoiceModal;
 window.filterInvoicePrintList = filterInvoicePrintList;
-window.handleHeaderCheckAll = handleHeaderCheckAll; // 🌟 스마트 전체 온/오프 핸들러
+window.handleHeaderCheckAll = handleHeaderCheckAll;
 window.toggleAllInvoiceSelection = toggleAllInvoiceSelection;
 window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
 window.previewInvoiceRow = previewInvoiceRow;
-window.syncPreviewData = syncPreviewData;
-window.loadSavedForms = loadSavedForms;
 window.executeBatchPrint = executeBatchPrint;
 window.initTemplatePdfDropZone = initTemplatePdfDropZone;
+window.filterBySender = filterBySender;
+window.sortPrintList = sortPrintList;
+window.initInvoiceResizer = initInvoiceResizer;
+
+// 🌟 [관제 서식 관리(Forms) - 신규 분리]
+window.loadSavedForms = loadSavedForms;
 window.setAsDefaultForm = setAsDefaultForm;
 window.cancelProviderFormEdit = cancelProviderFormEdit;
 window.saveProviderForm = saveProviderForm;
@@ -719,17 +732,17 @@ window.updateLivePreview = updateLivePreview;
 window.previewSavedForm = previewSavedForm;
 window.toggleSelectForm = toggleSelectForm;
 window.applySavedForm = applySavedForm;
-window.filterBySender = filterBySender;
+window.syncPreviewData = syncPreviewData;
+
+// 🌟 [관제 창고 피킹 리스트(Picking) - 신규 분리]
 window.openPickingDriverModal = openPickingDriverModal;
 window.closePickingDriverModal = closePickingDriverModal;
 window.toggleAllPickingDrivers = toggleAllPickingDrivers;
 window.togglePickingDriver = togglePickingDriver;
 window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
-window.sortPrintList = sortPrintList;
-window.initInvoiceResizer = initInvoiceResizer; // 🌟 주문서 목록 폭 조절 리사이저
 
-// 🌟 [관제 신규 서식 빌더/에디터(Template)]
+// [관제 신규 서식 빌더/에디터(Template)]
 window.parsePdfToEditableDocument = parsePdfToEditableDocument;
 window.renderEditableDocument = renderEditableDocument;
 window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
