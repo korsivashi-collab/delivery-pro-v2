@@ -277,7 +277,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 4-1. 관제 센터 실시간 자동할당 동선 수신 리스너 (기기ID 및 전화번호 통합 지원)
+// 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (기기ID & 전화번호 통합 실시간 감시)
 export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let phone = "";
     let onRoutesReceived = null;
@@ -295,37 +295,71 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
     if (!deviceId && !phone) return () => {};
 
-    const primaryKey = deviceId || phone;
-    const routeDocRef = doc(db, "routes", primaryKey);
+    const unsubs = [];
+    let lastHandledTime = 0;
 
-    return onSnapshot(routeDocRef, (docSnap) => {
-        if (docSnap.exists()) {
-            const data = docSnap.data();
-            if (onRoutesReceived) {
-                onRoutesReceived(data.destinations || [], data);
-            }
-        } else {
-            // deviceId 문서가 없는 경우 전화번호 문서 백업 확인
-            if (phone && phone !== primaryKey) {
-                const cleanPhone = phone.replace(/[^0-9]/g, '');
-                getDoc(doc(db, "routes", cleanPhone)).then((pSnap) => {
-                    if (pSnap.exists()) {
-                        const pData = pSnap.data();
-                        if (onRoutesReceived) onRoutesReceived(pData.destinations || [], pData);
-                    } else if (onRoutesCleared) {
-                        onRoutesCleared();
-                    }
-                }).catch(() => {
-                    if (onRoutesCleared) onRoutesCleared();
-                });
-            } else if (onRoutesCleared) {
-                onRoutesCleared();
-            }
+    const handleRouteData = (data, sourceKey) => {
+        if (!data || !data.destinations || !Array.isArray(data.destinations)) {
+            return false;
         }
-    }, (error) => {
-        console.error("관제 동선 실시간 수신 오류:", error);
-    });
+        
+        // 동일 데이터 중복 처리 방지 및 최신성 검증
+        const updateTime = data.updatedAt || Date.now();
+        if (updateTime < lastHandledTime && (lastHandledTime - updateTime > 2000)) {
+            return false;
+        }
+        lastHandledTime = updateTime;
+
+        if (onRoutesReceived) {
+            onRoutesReceived(data.destinations, data);
+        }
+        return true;
+    };
+
+    // 1) deviceId 기준 실시간 리스너
+    if (deviceId) {
+        const devRef = doc(db, "routes", deviceId);
+        const unsubDev = onSnapshot(devRef, (docSnap) => {
+            if (docSnap.exists()) {
+                handleRouteData(docSnap.data(), deviceId);
+            }
+        }, (err) => console.warn("deviceId 동선 감시 오류:", err));
+        unsubs.push(unsubDev);
+    }
+
+    // 2) phone 기준 실시간 리스너 (숫자만 있는 cleanPhone 및 원본 형태)
+    if (phone) {
+        const cleanPhone = phone.replace(/[^0-9]/g, '');
+        if (cleanPhone && cleanPhone !== deviceId) {
+            const phoneRef = doc(db, "routes", cleanPhone);
+            const unsubPhone = onSnapshot(phoneRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    handleRouteData(docSnap.data(), cleanPhone);
+                }
+            }, (err) => console.warn("cleanPhone 동선 감시 오류:", err));
+            unsubs.push(unsubPhone);
+        }
+
+        if (phone !== cleanPhone && phone !== deviceId) {
+            const rawPhoneRef = doc(db, "routes", phone);
+            const unsubRawPhone = onSnapshot(rawPhoneRef, (docSnap) => {
+                if (docSnap.exists()) {
+                    handleRouteData(docSnap.data(), phone);
+                }
+            }, (err) => console.warn("rawPhone 동선 감시 오류:", err));
+            unsubs.push(unsubRawPhone);
+        }
+    }
+
+    return () => {
+        unsubs.forEach(unsub => {
+            try { if (typeof unsub === 'function') unsub(); } catch (e) {}
+        });
+    };
 }
+
+// startAssignedRouteListener 별칭 완벽 호환 제공
+export const startAssignedRouteListener = listenToActiveRoutes;
 
 // 5. 관제 메시지 리스너 (최신 5건 한정 구독)
 export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessageReceived) {

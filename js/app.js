@@ -94,7 +94,7 @@ function sanitizePhoneNumber(rawVal) {
 }
 
 // ==========================================
-// 0-2. 상호명 분리 및 주소 원본 보존 헬퍼 (주소 절삭 금지)
+// 0-2. 상호명 분리 및 주소 원본 보존 헬퍼 (주소 절삭 방지)
 // ==========================================
 function formatDisplayAddress(rawAddress, storeName = "") {
     let extractedStore = storeName ? String(storeName).trim() : "";
@@ -112,7 +112,6 @@ function formatDisplayAddress(rawAddress, storeName = "") {
         cleanAddr = cleanAddr.substring(extractedStore.length).trim();
     }
 
-    // 3. Admin에서 정제되어 넘어온 도로명/지번 주소 원본 100% 보존
     return {
         storeName: extractedStore,
         cleanAddr: cleanAddr,
@@ -141,24 +140,51 @@ export async function initApp() {
     setRemoteRoutesHandler((newDestinations, routeData) => {
         if (!newDestinations || !Array.isArray(newDestinations)) return;
 
-        // 관제에서 전송된 배송지 데이터 정규화
-        const formattedList = newDestinations.map((d, idx) => {
-            const rawPhone = d.phone || d.customerPhone || d.tel || d.contact || d.hp || "";
-            const validPhone = sanitizePhoneNumber(rawPhone);
-
-            return {
-                id: d.id || (Date.now() + idx),
-                displayNumber: d.displayNumber || (idx + 1),
-                address: d.address || "",
-                lat: d.lat || 0,
-                lng: d.lng || 0,
-                phone: validPhone,
-                storeName: d.storeName || "",
-                orderNo: d.orderNo || "", // 실시간 추적용 주문번호 보존
-                memo: d.memo || "",
-                items: d.items || []
-            };
+        // 당일 이미 완료/취소된 이력이 있다면 중복 노출 방지 필터링
+        const history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+        const todayStart = new Date().setHours(0, 0, 0, 0);
+        const completedIdsOrAddrs = new Set();
+        history.forEach(h => {
+            if (h.timestamp >= todayStart) {
+                if (h.id) completedIdsOrAddrs.add(String(h.id));
+                if (h.orderNo) completedIdsOrAddrs.add(String(h.orderNo));
+                if (h.address) completedIdsOrAddrs.add(h.address.trim());
+            }
         });
+
+        // 관제에서 전송된 배송지 데이터 정규화
+        const formattedList = newDestinations
+            .filter(d => {
+                if (d.id && completedIdsOrAddrs.has(String(d.id))) return false;
+                if (d.orderNo && completedIdsOrAddrs.has(String(d.orderNo))) return false;
+                return true;
+            })
+            .map((d, idx) => {
+                const rawPhone = d.phone || d.customerPhone || d.tel || d.contact || d.hp || "";
+                const validPhone = sanitizePhoneNumber(rawPhone);
+
+                return {
+                    id: d.id || (Date.now() + idx),
+                    displayNumber: d.displayNumber || (idx + 1),
+                    address: d.address || "",
+                    lat: typeof d.lat === 'number' ? d.lat : (parseFloat(d.lat) || 0),
+                    lng: typeof d.lng === 'number' ? d.lng : (parseFloat(d.lng) || 0),
+                    phone: validPhone,
+                    storeName: d.storeName || "",
+                    orderNo: d.orderNo || "", // 실시간 추적용 주문번호 보존
+                    memo: d.memo || "",
+                    items: d.items || []
+                };
+            });
+
+        // 시작 지점이 아직 없다면 첫 번째 목적지를 기본 시작점으로 자동 고려
+        if (formattedList.length > 0 && (!state.getStartLocation() || !state.getStartLocation().lat)) {
+            state.setStartLocation({
+                lat: formattedList[0].lat,
+                lng: formattedList[0].lng,
+                address: formattedList[0].address
+            });
+        }
 
         state.setDestinations(formattedList);
         state.updateDisplayNumbers();
@@ -211,7 +237,7 @@ function initSwipeButton() {
     
     let isDragging = false;
     let startX = 0; 
-    let btnLeft = 4;
+    let btnLeft = 6;
     
     function startDrag(e) {
         isDragging = true;
@@ -224,17 +250,17 @@ function initSwipeButton() {
         const currentX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         let moveX = currentX - startX;
         let newLeft = btnLeft + moveX;
-        let maxW = swipeContainer.offsetWidth - swipeBtn.offsetWidth - 4;
+        let maxW = swipeContainer.offsetWidth - swipeBtn.offsetWidth - 6;
         
-        if (newLeft < 4) newLeft = 4;
+        if (newLeft < 6) newLeft = 6;
         if (newLeft > maxW) newLeft = maxW;
         
-        swipeBtn.style.transform = `translateX(${newLeft - 4}px)`;
+        swipeBtn.style.transform = `translateX(${newLeft - 6}px)`;
         
         if (newLeft >= maxW - 2) {
             isDragging = false;
             swipeBtn.style.transform = `translateX(0px)`;
-            swipeBtn.style.transition = 'transform 0.3s ease';
+            swipeBtn.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
             openStartSelectionModal();
         }
     }
@@ -242,7 +268,7 @@ function initSwipeButton() {
     function endDrag() {
         if (!isDragging) return;
         isDragging = false;
-        swipeBtn.style.transition = 'transform 0.3s ease';
+        swipeBtn.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
         swipeBtn.style.transform = `translateX(0px)`;
     }
     
@@ -260,7 +286,7 @@ function initSwipeButton() {
 export function openStartSelectionModal() {
     const destinations = state.getDestinations();
     if (destinations.length === 0) { 
-        alert("스캔된 배송지가 최소 1곳 이상 있어야 합니다."); 
+        alert("스캔되거나 관제에서 전송된 배송지가 최소 1곳 이상 있어야 합니다."); 
         return; 
     }
     const listEl = document.getElementById('start-select-list');
@@ -419,9 +445,9 @@ export function renderList() {
     if (destinations.length === 0) {
         if (listEl) {
             listEl.innerHTML = `
-                <li class="text-center text-gray-400 py-12 border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
+                <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-2xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
-                    <p class="font-medium text-xs">주소지를 스캔하거나 관제에서 전송되면 동선이 생성됩니다.</p>
+                    <p class="font-bold text-xs text-gray-500 leading-relaxed">주소지를 스캔하거나 관제에서 전송되면<br>동선이 생성됩니다.</p>
                 </li>`;
         }
         return;
@@ -432,7 +458,7 @@ export function renderList() {
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
-            // 실시간 추적 고도화용: 주문번호를 화면에 텍스트로 노출하지 않고 엘리먼트 속성에 보관
+            // 실시간 추적용 주문번호 보존
             if (dest.orderNo) {
                 li.setAttribute('data-orderno', dest.orderNo);
             }
@@ -449,7 +475,7 @@ export function renderList() {
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
 
-            // 🌟 주소지 표시: 잘림 없이 원본 도로명 주소 전체 표시
+            // 주소지 표시 (상호명 배지와 도로명 주소 원본 보존)
             const formatted = formatDisplayAddress(dest.address, dest.storeName);
             let displayAddressHTML = "";
             
@@ -462,7 +488,7 @@ export function renderList() {
                 displayAddressHTML = `<span class="block leading-tight text-gray-800 break-keep font-bold">${formatted.cleanAddr}</span>`;
             }
 
-            // 네비게이션 앱 연동 명칭 (상호명 우선, 없으면 주소 전체)
+            // 내비게이션 앱 목적지 명칭
             let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
 
             const isFirst = index === 0;
@@ -470,7 +496,7 @@ export function renderList() {
 
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-1">
-                    <!-- 위/아래 수직 배치 및 간격 확보 -->
+                    <!-- 위/아래 순서 변경 버튼 -->
                     <div class="flex flex-col items-center justify-center gap-1.5 shrink-0 -ml-1 mr-0.5">
                         <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[18px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>

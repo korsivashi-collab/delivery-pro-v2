@@ -28,6 +28,7 @@ let activeRoutesWatcherUnsub = null;
 
 let onRemoteRoutesReceivedCallback = null;
 let onRemoteRoutesClearedCallback = null;
+let cachedRemoteRoutes = null;
 
 // ==========================================
 // 0. 관제 자동할당 동선 수신 핸들러 등록 (app.js 연동용)
@@ -35,6 +36,11 @@ let onRemoteRoutesClearedCallback = null;
 export function setRemoteRoutesHandler(onReceived, onCleared) {
     onRemoteRoutesReceivedCallback = onReceived;
     onRemoteRoutesClearedCallback = onCleared;
+
+    // 리스너가 이미 데이터를 먼저 받아놓은 경우 등록 즉시 지연 없이 전달
+    if (cachedRemoteRoutes && typeof onRemoteRoutesReceivedCallback === 'function') {
+        onRemoteRoutesReceivedCallback(cachedRemoteRoutes.destinations, cachedRemoteRoutes.data);
+    }
 }
 
 // ==========================================
@@ -122,7 +128,7 @@ export function unlockApp() {
 }
 
 // ==========================================
-// 5. 라이선스 상태 감시 (부하 없는 단발성 1회 검증 연동)
+// 5. 라이선스 상태 감시 (단발성 getDoc 최적화 감시 연동)
 // ==========================================
 export function startLicenseRealtimeWatcher(key) {
     if (licenseWatcherUnsub) licenseWatcherUnsub();
@@ -168,18 +174,20 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     if (gpsRequestWatcherUnsub) gpsRequestWatcherUnsub();
     gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phone, key, getDeviceRealGPS);
 
-    // 관제 센터 실시간 자동할당 동선 감시 (기기ID 및 휴대폰 번호 동시 대응)
+    // 관제 센터 실시간 자동할당 동선 감시 (기기ID 및 휴대폰 번호 다중 감시)
     if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
     activeRoutesWatcherUnsub = listenToActiveRoutes(
         deviceId, 
         phone,
         (destinations, data) => {
-            if (onRemoteRoutesReceivedCallback) {
+            cachedRemoteRoutes = { destinations, data };
+            if (typeof onRemoteRoutesReceivedCallback === 'function') {
                 onRemoteRoutesReceivedCallback(destinations, data);
             }
         }, 
         () => {
-            if (onRemoteRoutesClearedCallback) {
+            cachedRemoteRoutes = null;
+            if (typeof onRemoteRoutesClearedCallback === 'function') {
                 onRemoteRoutesClearedCallback();
             }
         }
