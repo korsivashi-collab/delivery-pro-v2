@@ -1,163 +1,35 @@
 // js/admin-dispatch-algorithm.js
 
 // ==========================================
-// 1. 전국 주요 지형지물(강, 산, 행정구역) 가상 페널티 설정
+// 1. 하버사인(Haversine) 구면 거리 계산 엔진
 // ==========================================
 
-// 전국 대표 강줄기 가상 차단선 (한강, 낙동강, 금강, 영산강)
-export const RIVER_BARRIER_LINES = [
-    // 1. 한강 (일산/김포 ~ 여의도 ~ 잠실 ~ 팔당)
-    [
-        { lat: 37.605, lng: 126.745 }, { lat: 37.585, lng: 126.815 },
-        { lat: 37.558, lng: 126.865 }, { lat: 37.534, lng: 126.935 },
-        { lat: 37.518, lng: 126.985 }, { lat: 37.530, lng: 127.050 },
-        { lat: 37.532, lng: 127.100 }, { lat: 37.565, lng: 127.155 },
-        { lat: 37.545, lng: 127.240 }
-    ],
-    // 2. 낙동강 (부산 강서구와 사상/사하/북구 분리)
-    [
-        { lat: 35.320, lng: 128.990 }, { lat: 35.285, lng: 128.985 },
-        { lat: 35.215, lng: 128.980 }, { lat: 35.155, lng: 128.960 },
-        { lat: 35.095, lng: 128.940 }, { lat: 35.030, lng: 128.930 }
-    ],
-    // 3. 금강 (세종/대전/공주 분리 라인)
-    [
-        { lat: 36.560, lng: 127.180 }, { lat: 36.520, lng: 127.260 },
-        { lat: 36.480, lng: 127.350 }, { lat: 36.440, lng: 127.420 }
-    ],
-    // 4. 영산강 (광주/나주 분리 라인)
-    [
-        { lat: 35.230, lng: 126.780 }, { lat: 35.160, lng: 126.820 },
-        { lat: 35.080, lng: 126.750 }
-    ]
-];
-
-// 🌟 신규 추가: 주요 산맥 및 도심 산 가상 차단선 (북한산, 관악산, 남산 등)
-export const MOUNTAIN_BARRIER_LINES = [
-    // 1. 북한산/도봉산 라인 (서울 북부 단절)
-    [ { lat: 37.680, lng: 126.930 }, { lat: 37.660, lng: 126.990 }, { lat: 37.630, lng: 127.010 } ],
-    // 2. 관악산 라인 (서울 남부/과천 안양 단절)
-    [ { lat: 37.460, lng: 126.930 }, { lat: 37.430, lng: 126.980 }, { lat: 37.440, lng: 127.010 } ],
-    // 3. 남산 라인 (서울 도심부 남북 단절)
-    [ { lat: 37.555, lng: 126.975 }, { lat: 37.545, lng: 127.000 } ],
-    // 4. 수락산/불암산 라인 (서울 노원/경기 남양주 단절)
-    [ { lat: 37.680, lng: 127.080 }, { lat: 37.650, lng: 127.090 }, { lat: 37.620, lng: 127.100 } ]
-];
-
-// 서울 강북 14개 구 및 강남 11개 구 목록
-export const SEOUL_GANGBUK_GU = ['종로구', '중구', '용산구', '성동구', '광진구', '동대문구', '중랑구', '성북구', '강북구', '도봉구', '노원구', '은평구', '서대문구', '마포구'];
-export const SEOUL_GANGNAM_GU = ['양천구', '강서구', '구로구', '금천구', '영등포구', '동작구', '관악구', '서초구', '강남구', '송파구', '강동구'];
-
-// ==========================================
-// 2. 기하 및 거리 연산 함수 (순수 연산 엔진)
-// ==========================================
-
-// 수학적 선분 교차 검사 함수 (CCW 알고리즘)
-function ccw(p1, p2, p3) {
-    const cross = (p2.lng - p1.lng) * (p3.lat - p1.lat) - (p2.lat - p1.lat) * (p3.lng - p1.lng);
-    if (Math.abs(cross) < 1e-9) return 0;
-    return cross > 0 ? 1 : -1;
-}
-
-function linesIntersect(p1, p2, p3, p4) {
-    const d1 = ccw(p3, p4, p1);
-    const d2 = ccw(p3, p4, p2);
-    const d3 = ccw(p1, p2, p3);
-    const d4 = ccw(p1, p2, p4);
-    return (d1 * d2 < 0) && (d3 * d4 < 0);
-}
-
-// 🌟 강줄기 및 산맥 횡단 여부 통합 검사
-export function checkGeoBarriers(p1, p2) {
-    let crossesRiver = false;
-    let crossesMountain = false;
-
-    for (const river of RIVER_BARRIER_LINES) {
-        for (let i = 0; i < river.length - 1; i++) {
-            if (linesIntersect(p1, p2, river[i], river[i + 1])) crossesRiver = true;
-        }
-    }
-    for (const mountain of MOUNTAIN_BARRIER_LINES) {
-        for (let i = 0; i < mountain.length - 1; i++) {
-            if (linesIntersect(p1, p2, mountain[i], mountain[i + 1])) crossesMountain = true;
-        }
-    }
-    return { crossesRiver, crossesMountain };
-}
-
-// 주소 문자열에서 시/도, 시/군/구 및 한강 강남/강북 특성 추출
-export function parseAreaInfo(addr) {
-    if (!addr || typeof addr !== 'string') {
-        return { sido: '', sigungu: '', isSeoulGangbuk: false, isSeoulGangnam: false };
-    }
-    const clean = addr.trim();
-    const match = clean.match(/(서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별(?:시|자치시)|광역(?:시)|(?:특별)?자치도|도)?\s*([가-힣]+(?:시|군|구))?(?:\s*([가-힣]+구))?/);
-
-    let sido = match ? (match[1] || '') : '';
-    let sigungu = '';
-    if (match) {
-        const p1 = match[2] || '';
-        const p2 = match[3] || '';
-        sigungu = (p1 + (p2 ? ' ' + p2 : '')).trim();
-    }
-
-    const isSeoulGangbuk = sido === '서울' && SEOUL_GANGBUK_GU.some(gu => clean.includes(gu));
-    const isSeoulGangnam = sido === '서울' && SEOUL_GANGNAM_GU.some(gu => clean.includes(gu));
-
-    return { sido, sigungu, isSeoulGangbuk, isSeoulGangnam };
-}
-
-// 기본 직선거리 (Haversine 공식, 단위: km)
+/**
+ * 두 좌표 간의 실제 구면 거리 계산 (단위: km)
+ */
 export function getBaseDist(lat1, lon1, lat2, lon2) {
-    if (!lat1 || !lon1 || !lat2 || !lon2) return 999999;
-    const R = 6371; 
-    const dLat = (lat2 - lat1) * Math.PI / 180; 
+    if (lat1 === null || lat1 === undefined || isNaN(lat1) ||
+        lon1 === null || lon1 === undefined || isNaN(lon1) ||
+        lat2 === null || lat2 === undefined || isNaN(lat2) ||
+        lon2 === null || lon2 === undefined || isNaN(lon2)) {
+        return Infinity;
+    }
+    const R = 6371; // 지구 반지름 (km)
+    const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + 
-              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
               Math.sin(dLon / 2) * Math.sin(dLon / 2);
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 🌟 지형지물(강, 산, 행정구역) 가상 페널티 결합 실질 거리 연산
-export function calculateGeoPenalizedDist(lat1, lon1, lat2, lon2, addr1 = '', addr2 = '') {
-    const baseDistance = getBaseDist(lat1, lon1, lat2, lon2);
-    if (baseDistance >= 999999) return baseDistance;
-
-    let penalty = 0;
-    const p1 = { lat: lat1, lng: lon1 };
-    const p2 = { lat: lat2, lng: lon2 };
-
-    // 1. 산맥/하천 가상 차단선 통과 시 페널티 대폭 강화
-    const barriers = checkGeoBarriers(p1, p2);
-    if (barriers.crossesRiver) penalty += 60;    // 강 도하 페널티 60km 추가
-    if (barriers.crossesMountain) penalty += 50; // 산맥 관통 페널티 50km 추가
-
-    // 2. 주소 기반 행정구역 분리 페널티 검사
-    const area1 = parseAreaInfo(addr1);
-    const area2 = parseAreaInfo(addr2);
-
-    if (area1.sido && area2.sido) {
-        // 서울 강남 ↔ 강북 교차 배정 강력 차단
-        if ((area1.isSeoulGangbuk && area2.isSeoulGangnam) || (area1.isSeoulGangnam && area2.isSeoulGangbuk)) {
-            penalty += 80;
-        }
-        // 광역 시/도가 서로 다른 경우 (예: 서울 ↔ 경기 등)
-        else if (area1.sido !== area2.sido) {
-            penalty += 35;
-        }
-        // 같은 시/도 내에서 시·군·구가 다른 경우
-        else if (area1.sigungu && area2.sigungu && area1.sigungu !== area2.sigungu) {
-            penalty += 12;
-        }
-    }
-
-    return baseDistance + penalty;
-}
-
 // ==========================================
-// 3. 기사별 목표 수량(Cap) 및 가중치 균등 분배 산정
+// 2. 가중치 기반 기사별 목표 할당량(Cap) 산출
 // ==========================================
+
+/**
+ * 관리자가 화면에서 설정한 가중치(weights)를 반영하여 기사별 쿼터를 정확히 분배
+ */
 export function calculateDriverCapacities(activeDrivers, totalOrders, weights = {}, companyBase = null) {
     const numDrivers = activeDrivers.length;
     if (numDrivers === 0) return [];
@@ -174,8 +46,9 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 
         // 가중치에 따른 물량 Cap 조정
         let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
-        if (exactCap < 0) exactCap = 0;
+        if (exactCap < 1) exactCap = 1;
 
+        // 기사의 반고정 권역 중심 좌표 (미설정 시 거점 좌표 참조)
         const centerLat = d.territoryLat || (companyBase ? companyBase.lat : null);
         const centerLng = d.territoryLng || (companyBase ? companyBase.lng : null);
         const centerAddr = d.territory1 || (companyBase ? companyBase.address : '') || '';
@@ -187,8 +60,9 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
             targetCap: Math.floor(exactCap),
             remainder: exactCap - Math.floor(exactCap),
             assignedCount: 0,
-            tLat: centerLat,
-            tLng: centerLng,
+            assignedOrders: [],
+            tLat: centerLat ? parseFloat(centerLat) : null,
+            tLng: centerLng ? parseFloat(centerLng) : null,
             tAddr: centerAddr
         };
     });
@@ -206,8 +80,107 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 }
 
 // ==========================================
-// 4. [핵심 알고리즘] Regret 기반 권역 밀착 배분 알고리즘
+// 3. 2-opt 기반 동선 순서 최적화 엔진 (꼬인 선 풀기)
 // ==========================================
+
+/**
+ * 기사에게 배정된 배송지들을 거점에서 출발하여 순차적으로 이어지도록 정렬하고 번호 부여
+ */
+export function optimizeRoute2Opt(orderList, basePos = null) {
+    if (!orderList || orderList.length === 0) return orderList;
+
+    // 유효한 좌표가 있는 주문과 없는 주문 분리
+    const validOrders = orderList.filter(o => o.lat && o.lng && !isNaN(o.lat) && !isNaN(o.lng));
+    const noCoordOrders = orderList.filter(o => !o.lat || !o.lng || isNaN(o.lat) || isNaN(o.lng));
+
+    if (validOrders.length <= 1) {
+        orderList.forEach((ord, idx) => { ord.displayNumber = idx + 1; });
+        return orderList;
+    }
+
+    // 1단계: 거점(또는 첫 배송지)에서 가장 가까운 주문을 1번으로 시작
+    const unvisited = [...validOrders];
+    let firstOrder = null;
+
+    if (basePos && basePos.lat && basePos.lng) {
+        let minDist = Infinity;
+        let minIdx = 0;
+        unvisited.forEach((ord, i) => {
+            const d = getBaseDist(basePos.lat, basePos.lng, ord.lat, ord.lng);
+            if (d < minDist) { minDist = d; minIdx = i; }
+        });
+        firstOrder = unvisited.splice(minIdx, 1)[0];
+    } else {
+        firstOrder = unvisited.shift();
+    }
+
+    // 최근접 이웃(Nearest Neighbor) 기본 연결
+    const route = [firstOrder];
+    while (unvisited.length > 0) {
+        const curr = route[route.length - 1];
+        let bestIdx = 0;
+        let minDist = Infinity;
+
+        for (let i = 0; i < unvisited.length; i++) {
+            const d = getBaseDist(curr.lat, curr.lng, unvisited[i].lat, unvisited[i].lng);
+            if (d < minDist) {
+                minDist = d;
+                bestIdx = i;
+            }
+        }
+        route.push(unvisited.splice(bestIdx, 1)[0]);
+    }
+
+    // 2단계: 2-opt 교차 선분 풀기 알고리즘
+    const n = route.length;
+    let improved = true;
+    let iterations = 0;
+    const maxIterations = 50;
+
+    while (improved && iterations < maxIterations) {
+        improved = false;
+        iterations++;
+
+        for (let i = 0; i < n - 1; i++) {
+            for (let j = i + 2; j < n; j++) {
+                const pA = route[i];
+                const pB = route[i + 1];
+                const pC = route[j];
+                const pD = (j + 1 < n) ? route[j + 1] : null;
+
+                const currentDist = getBaseDist(pA.lat, pA.lng, pB.lat, pB.lng) +
+                                    (pD ? getBaseDist(pC.lat, pC.lng, pD.lat, pD.lng) : 0);
+
+                const newDist = getBaseDist(pA.lat, pA.lng, pC.lat, pC.lng) +
+                                (pD ? getBaseDist(pB.lat, pB.lng, pD.lat, pD.lng) : 0);
+
+                if (newDist < currentDist - 0.001) {
+                    const reversedSegment = route.slice(i + 1, j + 1).reverse();
+                    route.splice(i + 1, reversedSegment.length, ...reversedSegment);
+                    improved = true;
+                }
+            }
+        }
+    }
+
+    // 좌표가 없는 주문은 맨 뒤로 배치
+    const finalRoute = [...route, ...noCoordOrders];
+    finalRoute.forEach((ord, idx) => {
+        ord.displayNumber = idx + 1;
+    });
+
+    return finalRoute;
+}
+
+// ==========================================
+// 4. [메인 배차 알고리즘] 외곽 최원거리 우선 하버사인 클러스터링
+// ==========================================
+
+/**
+ * 1) 거점에서 가장 먼 배송지를 확인
+ * 2) 해당 배송지 기준 하버사인 최근접 주문들을 모아 가장 가까운 가용 기사의 쿼터만큼 배정
+ * 3) 거점 주변 잔여 물량까지 자연스럽게 내부 기사에게 순차 할당
+ */
 export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null }) {
     if (!targetOrders || targetOrders.length === 0) {
         return { success: false, message: "할당할 배송 데이터가 없습니다." };
@@ -217,73 +190,113 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     }
 
     const totalOrders = targetOrders.length;
+
+    // 1. 본사 거점 좌표 동적 바인딩 (주소 하드코딩 금지, 사용자 등록 거점 우선 반영)
+    let baseLat = companyBase && companyBase.lat ? parseFloat(companyBase.lat) : null;
+    let baseLng = companyBase && companyBase.lng ? parseFloat(companyBase.lng) : null;
+
+    // 등록된 거점이 없을 경우 전체 유효 배송지의 중심점을 동적 거점으로 활용
+    if (!baseLat || !baseLng) {
+        const validCoords = targetOrders.filter(o => o.lat && o.lng && !isNaN(o.lat) && !isNaN(o.lng));
+        if (validCoords.length > 0) {
+            baseLat = validCoords.reduce((sum, o) => sum + parseFloat(o.lat), 0) / validCoords.length;
+            baseLng = validCoords.reduce((sum, o) => sum + parseFloat(o.lng), 0) / validCoords.length;
+        }
+    }
+
+    // 2. 가중치가 반영된 기사별 목표 쿼터 산출
     const driverStats = calculateDriverCapacities(activeDrivers, totalOrders, weights, companyBase);
 
-    // 아직 배정되지 않은 주문 풀
+    // 각 주문의 거점 대비 거리 사전 계산 (좌표 없는 건은 최후순위인 -1 처리)
+    targetOrders.forEach(o => {
+        if (o.lat && o.lng && baseLat && baseLng) {
+            o._distFromBase = getBaseDist(baseLat, baseLng, parseFloat(o.lat), parseFloat(o.lng));
+        } else {
+            o._distFromBase = -1;
+        }
+    });
+
+    // 미배정 주문 풀
     let unassigned = [...targetOrders];
 
-    // 모든 주문이 배정될 때까지 반복
+    // 3. 외곽 우선 하버사인 클러스터링 반복 루프
     while (unassigned.length > 0) {
-        // 정원이 남아있는 활성 기사 목록 추출
         const availableDrivers = driverStats.filter(ds => ds.assignedCount < ds.targetCap);
 
-        // 정원이 모두 찼을 경우 잔여 물량은 가장 가까운 기사에게 강제 오버부킹(Fallback)
+        // 모든 기사의 정원이 찼으나 남은 주문이 있는 경우 (좌표 누락 등), 가장 적합한 기사에게 수용
         if (availableDrivers.length === 0) {
             unassigned.forEach(order => {
-                let bestDriver = null;
+                let bestDriver = driverStats[0];
                 let minDist = Infinity;
                 driverStats.forEach(ds => {
-                    const d = calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr);
+                    const d = (order.lat && order.lng && ds.tLat && ds.tLng)
+                        ? getBaseDist(parseFloat(order.lat), parseFloat(order.lng), ds.tLat, ds.tLng)
+                        : ds.assignedCount;
                     if (d < minDist) { minDist = d; bestDriver = ds; }
                 });
                 bestDriver.assignedCount++;
+                bestDriver.assignedOrders.push(order);
                 order.assignedDriver = bestDriver.phone;
             });
             break;
         }
 
-        // 🌟 Regret(후회 비용) 탐색: 
-        // 각 배송지에 대해 1순위(최단거리) 기사와 2순위 기사 간의 페널티 거리 차이를 계산
-        let bestCandidate = null;
-        let maxRegret = -Infinity;
-        let bestCandidateDriver = null;
-        let bestCandidateIndex = -1;
+        // 🌟 [원칙 1] 거점에서 가장 먼 배송지 탐색 (외곽 배송지 우선)
+        let farthestOrder = unassigned[0];
+        let maxDist = -Infinity;
 
-        for (let i = 0; i < unassigned.length; i++) {
-            const order = unassigned[i];
-
-            // 남은 기사들과 해당 배송지의 페널티 거리를 계산 후 정렬
-            const driverDistances = availableDrivers.map(ds => ({
-                driver: ds,
-                dist: calculateGeoPenalizedDist(order.lat, order.lng, ds.tLat, ds.tLng, order.fullAddress || order.address, ds.tAddr)
-            })).sort((a, b) => a.dist - b.dist);
-
-            const closest = driverDistances[0];
-            const secondClosest = driverDistances.length > 1 ? driverDistances[1] : null;
-
-            // 외곽 배송지이거나 강/산을 건너야 하는 경우 1순위와 2순위 간의 거리 차이(Regret)가 매우 큼
-            const regret = secondClosest ? (secondClosest.dist - closest.dist) : (1000 - closest.dist);
-
-            if (regret > maxRegret) {
-                maxRegret = regret;
-                bestCandidate = order;
-                bestCandidateDriver = closest.driver;
-                bestCandidateIndex = i;
+        unassigned.forEach(o => {
+            if (o._distFromBase > maxDist) {
+                maxDist = o._distFromBase;
+                farthestOrder = o;
             }
-        }
+        });
 
-        // 가장 아쉬움(Regret)이 큰, 즉 대체 불가능한 배송지부터 해당 1순위 기사에게 확정 배정
-        if (bestCandidate && bestCandidateDriver && bestCandidateIndex !== -1) {
-            bestCandidateDriver.assignedCount++;
-            bestCandidate.assignedDriver = bestCandidateDriver.phone;
-            unassigned.splice(bestCandidateIndex, 1);
-        } else {
-            // 안전장치: 예외 발생 시 순차 처리
-            const order = unassigned.shift();
-            availableDrivers[0].assignedCount++;
-            order.assignedDriver = availableDrivers[0].phone;
-        }
+        // 🌟 [원칙 2] 이 외곽 배송지와 가장 가까운 가용 기사 매칭 (반고정식 권역 반영)
+        let bestDriver = availableDrivers[0];
+        let minDriverDist = Infinity;
+
+        availableDrivers.forEach(ds => {
+            const d = (farthestOrder.lat && farthestOrder.lng && ds.tLat && ds.tLng)
+                ? getBaseDist(parseFloat(farthestOrder.lat), parseFloat(farthestOrder.lng), ds.tLat, ds.tLng)
+                : 999999;
+            if (d < minDriverDist) {
+                minDriverDist = d;
+                bestDriver = ds;
+            }
+        });
+
+        // 해당 기사가 더 채워야 할 수량 (가중치 적용된 남은 쿼터)
+        const neededCount = Math.max(1, bestDriver.targetCap - bestDriver.assignedCount);
+
+        // 🌟 [원칙 2-2] 외곽 배송지를 중심으로 하버사인 최근접 배송지들을 필요한 수량만큼 묶음
+        unassigned.sort((a, b) => {
+            const distA = (farthestOrder.lat && farthestOrder.lng && a.lat && a.lng)
+                ? getBaseDist(parseFloat(farthestOrder.lat), parseFloat(farthestOrder.lng), parseFloat(a.lat), parseFloat(a.lng))
+                : 999999;
+            const distB = (farthestOrder.lat && farthestOrder.lng && b.lat && b.lng)
+                ? getBaseDist(parseFloat(farthestOrder.lat), parseFloat(farthestOrder.lng), parseFloat(b.lat), parseFloat(b.lng))
+                : 999999;
+            return distA - distB;
+        });
+
+        const takeCount = Math.min(neededCount, unassigned.length);
+        const batch = unassigned.splice(0, takeCount);
+
+        // 묶인 배송지들을 해당 기사에게 확정 배정
+        batch.forEach(o => {
+            o.assignedDriver = bestDriver.phone;
+            bestDriver.assignedOrders.push(o);
+            bestDriver.assignedCount++;
+        });
     }
+
+    // 4. 각 기사별 배정 결과에 대해 2-opt 순서 최적화 실행 (현장 퇴근을 위한 동선 정렬)
+    driverStats.forEach(ds => {
+        if (ds.assignedOrders.length > 0) {
+            optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng });
+        }
+    });
 
     return {
         success: true,
