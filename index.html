@@ -57,7 +57,6 @@
         body { 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
             -webkit-font-smoothing: antialiased; 
-            touch-action: manipulation;
         }
 
         .hide-scrollbar::-webkit-scrollbar { display: none; }
@@ -229,7 +228,7 @@
     <div id="main-app" class="hidden flex-col h-full w-full">
         <header class="bg-white px-2.5 sm:px-3 pt-safe pb-2 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.05)] z-20 flex-none border-b border-gray-100 relative w-full">
             <div class="flex flex-col gap-1.5 w-full">
-                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 (잘림 현상 완벽 방지) -->
+                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 -->
                 <div class="flex items-center justify-between gap-1 w-full">
                     <h1 class="text-[15px] font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
                         <i class="fa-solid fa-route text-blue-600 text-sm shrink-0"></i>
@@ -294,7 +293,7 @@
             </ul>
         </main>
 
-        <!-- 하단 푸터: 스캔 버튼 & 밀어서 경로 최적화 (단정하고 균형 잡힌 원본 규격) -->
+        <!-- 하단 푸터: 스캔 버튼 & 밀어서 경로 최적화 -->
         <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
             <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
@@ -477,21 +476,29 @@
         </div>
     </div>
 
-    <!-- 연결 설정 모달 (TMS, GPS, 기기변경 개인메모 임시백업/복구 통합) -->
-    <div id="settings-modal" class="hidden fixed inset-0 bg-black/60 z-[250] flex items-center justify-center p-4 animate-slide-up backdrop-blur-sm">
-        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden">
-            <h3 class="font-black text-gray-900 text-lg mb-6 flex items-center gap-2">
-                <i class="fa-solid fa-gear text-gray-600"></i> 연결 설정
-            </h3>
+    <!-- 🌟 [연결 설정 바텀시트 모달] 검증 완료된 flex-col + overflow-hidden + min-height:0 스크롤 구조 -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/60 z-[250] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-slide-up" onclick="if(event.target===this) window.closeSettingsModal()">
+        <div class="bg-white w-full sm:max-w-md h-[82vh] max-h-[82vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl relative" style="height: 82vh; max-height: 82vh;">
             
-            <div class="space-y-5 mb-6">
+            <!-- 1. 고정 상단 헤더 -->
+            <div class="p-4 border-b border-gray-100 flex justify-between items-center bg-gray-50 flex-none">
+                <h3 class="font-bold text-gray-900 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-gear text-blue-600"></i> 연결 설정
+                </h3>
+                <button onclick="window.closeSettingsModal()" class="text-gray-400 hover:text-gray-700 active:text-gray-900 text-xl p-1 -mr-1">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <!-- 2. 부드럽게 위아래로 움직이는 스크롤 본문 -->
+            <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-white" style="min-height: 0; -webkit-overflow-scrolling: touch; touch-action: pan-y;">
                 <!-- TMS 연결 토글 -->
                 <div class="flex items-center justify-between">
                     <div>
                         <h4 class="text-sm font-bold text-gray-800">TMS 연결</h4>
-                        <p class="text-[10px] text-gray-500 mt-0.5 leading-tight">관제 계정(사무실)과의 정보 송수신을<br>허용하거나 차단합니다.</p>
+                        <p class="text-[11px] text-gray-500 mt-0.5 leading-tight">관제 계정(사무실)과의 정보 송수신을<br>허용하거나 차단합니다.</p>
                     </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
                         <input type="checkbox" id="tms-toggle" class="sr-only peer" onchange="window.toggleTMS(this.checked)" checked>
                         <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
@@ -503,9 +510,9 @@
                 <div class="flex items-center justify-between">
                     <div>
                         <h4 class="text-sm font-bold text-gray-800">GPS 위치 확인</h4>
-                        <p class="text-[10px] text-gray-500 mt-0.5 leading-tight">앱 전환 시 위치 권한 설정 및<br>백그라운드 GPS 사용 여부를 결정합니다.</p>
+                        <p class="text-[11px] text-gray-500 mt-0.5 leading-tight">앱 전환 시 위치 권한 설정 및<br>백그라운드 GPS 사용 여부를 결정합니다.</p>
                     </div>
-                    <label class="relative inline-flex items-center cursor-pointer">
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
                         <input type="checkbox" id="gps-toggle" class="sr-only peer" onchange="window.toggleGPS(this.checked)" checked>
                         <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
                     </label>
@@ -556,21 +563,26 @@
                         </button>
                     </div>
                 </div>
-            </div>
 
-            <!-- 법적 고지 및 약관 링크 -->
-            <div class="flex items-center justify-between mt-4 mb-3 px-1 border-t border-gray-100 pt-3">
-                <div class="flex items-center gap-2 text-[11px] text-gray-400 font-medium">
-                    <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
-                    <span>·</span>
-                    <a href="/privacy.html" target="_blank" class="hover:text-gray-600 underline font-bold text-gray-500 transition">개인정보</a>
-                    <span>·</span>
-                    <a href="/policy.html" target="_blank" class="hover:text-gray-600 underline transition">운영정책</a>
+                <!-- 법적 고지 및 약관 링크 -->
+                <div class="flex items-center justify-between pt-3 border-t border-gray-100 px-1">
+                    <div class="flex items-center gap-2 text-[11px] text-gray-400 font-medium">
+                        <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
+                        <span>·</span>
+                        <a href="/privacy.html" target="_blank" class="hover:text-gray-600 underline font-bold text-gray-500 transition">개인정보</a>
+                        <span>·</span>
+                        <a href="/policy.html" target="_blank" class="hover:text-gray-600 underline transition">운영정책</a>
+                    </div>
+                    <span class="text-[10px] text-gray-300 font-mono font-bold">v1.0.0</span>
                 </div>
-                <span class="text-[10px] text-gray-300 font-mono font-bold">v1.0.0</span>
             </div>
             
-            <button onclick="window.closeSettingsModal()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-3.5 rounded-xl transition text-sm active:scale-95 shadow-md">닫기</button>
+            <!-- 3. 고정 하단 닫기 버튼 영역 -->
+            <div class="p-3 bg-white border-t border-gray-100 flex-none pb-safe">
+                <button onclick="window.closeSettingsModal()" class="w-full bg-gray-900 hover:bg-gray-800 text-white font-bold py-3.5 rounded-xl transition text-sm active:scale-95 shadow-md">
+                    닫기
+                </button>
+            </div>
         </div>
     </div>
 
