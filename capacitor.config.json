@@ -1,0 +1,10 @@
+{
+  "appId": "com.deliverypro.app",
+  "appName": "배송 경로 PRO",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "https",
+    "url": "https://delivery-pro-ksco.vercel.app",
+    "cleartext": true
+  }
+}
