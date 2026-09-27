@@ -29,12 +29,19 @@
             --app-scale: 1;
         }
 
+        * {
+            box-sizing: border-box;
+        }
+
         html, body {
+            width: 100%;
+            max-width: 100vw;
+            overflow-x: hidden;
             height: 100%;
             height: -webkit-fill-available;
             height: calc(var(--vh, 1vh) * 100);
-            -webkit-text-size-adjust: 100%;
-            text-size-adjust: 100%;
+            -webkit-text-size-adjust: 100% !important;
+            text-size-adjust: 100% !important;
             overscroll-behavior-y: none;
             /* 모바일 앱 터치 조작 최적화 (텍스트 임의 드래그 방지) */
             -webkit-user-select: none;
@@ -56,16 +63,16 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* Safe-Area 안전 여백 (iOS 노치/다이내믹 아일랜드 및 하단 홈바 충돌 방지) */
+        /* Safe-Area 안전 여백 (iOS 노치 및 안드로이드 제스처 바 대응) */
         .pt-safe { 
-            padding-top: max(0.75rem, env(safe-area-inset-top, 0px)); 
+            padding-top: max(0.6rem, env(safe-area-inset-top, 0px)); 
         }
         .pb-safe { 
-            padding-bottom: max(1.25rem, env(safe-area-inset-bottom, 0px)); 
+            padding-bottom: max(1rem, env(safe-area-inset-bottom, 0px)); 
         }
         .px-safe {
-            padding-left: max(1rem, env(safe-area-inset-left, 0px));
-            padding-right: max(1rem, env(safe-area-inset-right, 0px));
+            padding-left: max(0.75rem, env(safe-area-inset-left, 0px));
+            padding-right: max(0.75rem, env(safe-area-inset-right, 0px));
         }
         
         .animate-slide-up {
@@ -188,7 +195,7 @@
                 <i class="fa-solid fa-gift"></i> 처음이신가요? 7일 무료 체험
             </button>
 
-            <!-- 스토어 심사용 개인정보처리방침 링크 (인증 화면) -->
+            <!-- 스토어 심사용 개인정보처리방침 링크 -->
             <div class="mt-4 pt-2 border-t border-gray-100 text-center">
                 <a href="/privacy.html" target="_blank" class="text-[11px] text-gray-400 hover:text-gray-600 underline font-medium transition">
                     개인정보처리방침
@@ -224,82 +231,87 @@
 
     <!-- 2. 메인 앱 영역 -->
     <div id="main-app" class="hidden flex-col h-full w-full">
-        <header class="bg-white px-4 pt-safe pb-2.5 shadow-[0_2px_10px_-1px_rgba(0,0,0,0.05)] z-20 flex-none border-b border-gray-100 relative">
-            <div class="flex flex-col gap-1.5">
-                <!-- 상단 타이틀 및 알림함/로그아웃 -->
-                <div class="flex items-center justify-between">
-                    <h1 class="text-lg font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink-0">
-                        <i class="fa-solid fa-route text-blue-600 text-base"></i> 배송 경로 PRO
+        <header class="bg-white px-3 sm:px-4 pt-safe pb-2 shadow-[0_2px_10px_-1px_rgba(0,0,0,0.05)] z-20 flex-none border-b border-gray-100 relative w-full">
+            <div class="flex flex-col gap-1.5 w-full">
+                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 (모바일 360px 완벽 대응) -->
+                <div class="flex items-center justify-between gap-1 w-full">
+                    <h1 class="text-base sm:text-lg font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink min-w-0">
+                        <i class="fa-solid fa-route text-blue-600 text-sm sm:text-base shrink-0"></i>
+                        <span class="truncate">배송 경로 PRO</span>
                     </h1>
                     
-                    <div class="flex items-center gap-1.5 shrink-0">
-                        <button onclick="window.openSettingsModal()" class="relative bg-gray-50 hover:bg-gray-100 text-gray-600 border border-gray-200 px-2.5 py-1.5 rounded-xl text-xs font-black shadow-xs transition active:scale-95 flex items-center gap-1.5" title="연결설정">
-                            <i class="fa-solid fa-gear text-xs"></i>
-                            <span>연결설정</span>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 text-gray-700 border border-gray-200 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1" title="연결설정">
+                            <i class="fa-solid fa-gear text-[11px] text-gray-500"></i>
+                            <span>설정</span>
                         </button>
                         
-                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200 px-2.5 py-1.5 rounded-xl text-xs font-black shadow-xs transition active:scale-95 flex items-center gap-1.5" title="알림 보관함">
-                            <i class="fa-solid fa-bell text-xs"></i>
-                            <span>알림함</span>
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 px-2 py-1.5 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1" title="알림 보관함">
+                            <i class="fa-solid fa-bell text-[11px] text-blue-600"></i>
+                            <span>알림</span>
                             <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
                         </button>
-                        <button onclick="window.logout()" class="text-xs text-gray-500 bg-gray-50 border border-gray-200 px-2.5 py-1.5 rounded-xl font-bold active:bg-gray-100 transition shadow-2xs">로그아웃</button>
-                    </div>
-                </div>
-                
-                <!-- 사용기한 뱃지 & 지난배송 버튼 배치 -->
-                <div class="flex justify-between items-center mt-0.5">
-                    <span class="text-[11px] text-gray-400 font-semibold pl-0.5 tracking-tight">물류 전문 라스트마일</span>
-                    <div class="flex gap-1.5 items-center">
-                        <span id="license-expire-badge" class="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg font-black shadow-xs">
-                            사용기한: 확인중...
-                        </span>
-                        <button onclick="window.openHistoryModal()" class="text-xs bg-gray-100 text-gray-700 px-3 py-1.5 rounded-lg font-bold border border-gray-200 active:bg-gray-200 flex items-center gap-1 shadow-sm transition">
-                            <i class="fa-solid fa-clock-rotate-left"></i> 지난배송
+                        
+                        <button onclick="window.logout()" class="text-[11px] text-gray-600 bg-gray-50 hover:bg-gray-100 border border-gray-200 px-2 py-1.5 rounded-lg font-bold active:bg-gray-200 transition shadow-2xs">
+                            로그아웃
                         </button>
                     </div>
                 </div>
                 
-                <!-- 종료 지점 바 -->
-                <div class="bg-red-50 border border-red-100 rounded-lg p-1.5 flex items-center justify-between gap-2 shadow-sm mt-0.5">
-                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span class="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0">종료 지점</span>
+                <!-- 2열: 사용기한 뱃지 & 지난배송 버튼 (줄바꿈 방지) -->
+                <div class="flex justify-between items-center mt-0.5 gap-2 w-full">
+                    <span class="text-[10px] text-gray-400 font-medium tracking-tight shrink min-w-0 truncate">물류 전문 라스트마일</span>
+                    <div class="flex gap-1.5 items-center shrink-0">
+                        <span id="license-expire-badge" class="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md font-bold whitespace-nowrap shadow-2xs">
+                            사용기한: 확인중...
+                        </span>
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 text-gray-700 px-2 py-1 rounded-md font-bold border border-gray-200 active:bg-gray-200 flex items-center gap-1 shadow-2xs transition whitespace-nowrap">
+                            <i class="fa-solid fa-clock-rotate-left text-[10px]"></i> 지난배송
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 3열: 종료 지점 바 -->
+                <div class="bg-red-50 border border-red-100 rounded-lg p-1.5 flex items-center justify-between gap-1.5 shadow-2xs mt-0.5 w-full">
+                    <div class="flex items-center gap-1 min-w-0 flex-1">
+                        <span class="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">종료지점</span>
                         <span id="header-end-address" class="text-[11px] font-bold text-red-700 truncate flex-1 leading-tight">설정 안 함</span>
                     </div>
                     <div class="flex gap-1 shrink-0">
-                        <button onclick="window.setEndLocationGPS()" class="text-[10px] bg-white text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded shadow-sm font-bold active:bg-emerald-50 flex items-center gap-0.5"><i class="fa-solid fa-crosshairs"></i> 현위치</button>
-                        <button onclick="window.toggleHeaderEndEdit()" class="text-[10px] bg-white text-red-600 border border-red-200 px-1.5 py-0.5 rounded shadow-sm font-bold active:bg-emerald-50 flex items-center gap-0.5"><i class="fa-solid fa-pen"></i> 직접입력</button>
+                        <button onclick="window.setEndLocationGPS()" class="text-[10px] bg-white text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded shadow-2xs font-bold active:bg-emerald-50 flex items-center gap-0.5 whitespace-nowrap"><i class="fa-solid fa-crosshairs text-[9px]"></i> 현위치</button>
+                        <button onclick="window.toggleHeaderEndEdit()" class="text-[10px] bg-white text-red-600 border border-red-200 px-1.5 py-0.5 rounded shadow-2xs font-bold active:bg-red-50 flex items-center gap-0.5 whitespace-nowrap"><i class="fa-solid fa-pen text-[9px]"></i> 직접입력</button>
                     </div>
                 </div>
-                <div id="header-end-edit-area" class="hidden flex gap-1.5 mt-0.5">
-                    <input type="text" id="header-inline-end-input" class="flex-1 border border-red-200 rounded-lg px-2.5 py-1 text-xs outline-none focus:border-red-500 shadow-inner" placeholder="종료지 입력 (비우면 취소)">
-                    <button onclick="window.applyHeaderCustomEnd()" class="bg-red-600 text-white px-3 py-1 text-xs rounded-lg font-bold shadow-sm">적용</button>
+                <div id="header-end-edit-area" class="hidden flex gap-1.5 mt-0.5 w-full">
+                    <input type="text" id="header-inline-end-input" class="flex-1 min-w-0 border border-red-200 rounded-lg px-2.5 py-1 text-xs outline-none focus:border-red-500 shadow-inner" placeholder="종료지 입력 (비우면 취소)">
+                    <button onclick="window.applyHeaderCustomEnd()" class="bg-red-600 text-white px-3 py-1 text-xs rounded-lg font-bold shadow-2xs shrink-0">적용</button>
                 </div>
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto px-4 py-3 hide-scrollbar bg-gray-100 relative">
-            <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px]">
-                <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-xl my-2 bg-gray-50/50">
+        <main class="flex-1 overflow-y-auto px-3 sm:px-4 py-3 hide-scrollbar bg-gray-100 relative w-full">
+            <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px] w-full">
+                <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-2xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
-                    <p class="font-medium text-xs">주소지를 스캔하면 경로가 생성됩니다.</p>
+                    <p class="font-bold text-xs text-gray-500 leading-relaxed">주소지를 스캔하거나 관제에서 전송되면<br>동선이 생성됩니다.</p>
                 </li>
             </ul>
         </main>
 
-        <footer class="bg-white border-t border-gray-200 px-4 pt-2.5 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)]">
-            <div class="flex space-x-2 relative">
+        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
+            <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
-                <button onclick="document.getElementById('camera-input').click()" class="w-1/3 bg-gray-900 text-white font-bold py-3.5 rounded-xl shadow active:bg-gray-800 transition text-sm flex items-center justify-center gap-2 shrink-0">
-                    <i class="fa-solid fa-camera text-base"></i> 스캔
+                <button onclick="document.getElementById('camera-input').click()" class="w-[85px] sm:w-[100px] h-[48px] bg-gray-900 text-white font-black rounded-xl shadow active:bg-gray-800 transition text-sm flex items-center justify-center gap-1.5 shrink-0">
+                    <i class="fa-solid fa-camera text-sm"></i>
+                    <span>스캔</span>
                 </button>
                 
-                <div id="swipe-container" class="flex-1 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[52px]">
-                    <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[13px] z-0 select-none pointer-events-none tracking-tight">
-                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1.5 animate-pulse"></i>
+                <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[48px]">
+                    <div class="absolute inset-0 flex items-center justify-center text-blue-500 font-bold text-[12px] sm:text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
+                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 animate-pulse"></i>
                     </div>
-                    <div id="swipe-btn" class="absolute left-1 w-[44px] h-[44px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
-                        <i class="fa-solid fa-angles-right text-lg"></i>
+                    <div id="swipe-btn" class="absolute left-1 w-[40px] h-[40px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
+                        <i class="fa-solid fa-angles-right text-base"></i>
                     </div>
                 </div>
             </div>
@@ -428,7 +440,7 @@
                     </div>
                 </div>
 
-                <!-- 3. 아랫단에 배치된 내 폰 전용 개인 메모 (출입문 비밀번호 등) -->
+                <!-- 3. 아랫단에 배치된 내 폰 전용 개인 메모 -->
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-emerald-300">
                     <div class="mb-2.5">
                         <div class="flex items-center justify-between">
@@ -501,7 +513,7 @@
 
                 <div class="w-full h-px bg-gray-100"></div>
 
-                <!-- 내 기여 활동 현황 (공용 주차정보 / 개인메모 카운트) -->
+                <!-- 내 기여 활동 현황 -->
                 <div class="bg-gray-50 border border-gray-200 rounded-2xl p-3.5 shadow-2xs">
                     <div class="flex items-center justify-between mb-2">
                         <h4 class="text-xs font-black text-gray-800 flex items-center gap-1.5">
@@ -524,7 +536,7 @@
 
                 <div class="w-full h-px bg-gray-100"></div>
 
-                <!-- 기기변경 개인메모 이전 블록 (12시간 암호화 임시 금고) -->
+                <!-- 기기변경 개인메모 이전 블록 -->
                 <div>
                     <div class="flex items-center justify-between mb-1">
                         <h4 class="text-sm font-bold text-gray-800 flex items-center gap-1.5">
@@ -546,7 +558,7 @@
                 </div>
             </div>
 
-            <!-- 법적 고지 및 약관 링크 (설정 모달 내부 하단) -->
+            <!-- 법적 고지 및 약관 링크 -->
             <div class="flex items-center justify-between mt-4 mb-3 px-1 border-t border-gray-100 pt-3">
                 <div class="flex items-center gap-2 text-[11px] text-gray-400 font-medium">
                     <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
