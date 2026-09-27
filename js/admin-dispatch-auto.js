@@ -4,7 +4,7 @@ import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
-// 🌟 1단계에서 분리 생성한 순수 연산 엔진 모듈 임포트
+// 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
 import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
 
 // ==========================================
@@ -214,9 +214,9 @@ export function renderDispatchDriverList() {
                     <i class="fa-solid fa-scale-balanced text-gray-400 text-xs"></i> 물량 가중치
                 </span>
                 <div class="flex items-center bg-white border border-gray-200 rounded-lg shadow-2xs">
-                    <button onclick="window.adjustDriverWeight('${devId}', -0.5)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-r border-gray-200 transition active:scale-95" title="가중치 감소">-</button>
+                    <button onclick="window.adjustDriverWeight('${devId}', -1)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-r border-gray-200 transition active:scale-95" title="가중치 1건 감소">-</button>
                     <span class="w-10 text-center text-xs font-black ${weight > 0 ? 'text-blue-600' : (weight < 0 ? 'text-red-500' : 'text-gray-700')}">${weightText}</span>
-                    <button onclick="window.adjustDriverWeight('${devId}', 0.5)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-l border-gray-200 transition active:scale-95" title="가중치 증가">+</button>
+                    <button onclick="window.adjustDriverWeight('${devId}', 1)" class="px-2.5 py-1 hover:bg-gray-100 text-gray-700 font-black text-xs border-l border-gray-200 transition active:scale-95" title="가중치 1건 증가">+</button>
                 </div>
             </div>
         </div>`;
@@ -225,7 +225,7 @@ export function renderDispatchDriverList() {
 }
 
 export function toggleDispatchDriver(devId) {
-    if(autoDispatchState.selectedDrivers.has(devId)) autoDispatchState.selectedDrivers.delete(devId);
+    if (autoDispatchState.selectedDrivers.has(devId)) autoDispatchState.selectedDrivers.delete(devId);
     else autoDispatchState.selectedDrivers.add(devId);
     renderDispatchDriverList();
 }
@@ -244,7 +244,7 @@ export function selectDispatchDriver(devId) {
 }
 
 // ==========================================
-// 4. 기사별 할당 상세 내역 및 수동 기사 재배정 UI (주소지별 정렬 탑재)
+// 4. 기사별 할당 상세 내역 (2-opt 최적화 순번 순 정렬 연동)
 // ==========================================
 
 // 주소지별 정렬 상태 변수 ('none', 'asc', 'desc')
@@ -275,7 +275,7 @@ export function renderDispatchDriverDetail() {
 
     const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
-    let assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
+    let assignedItems = (state.parsedExcelList || []).filter(item => item.assignedDriver === driverName);
     const visibleDrivers = getFilteredVisibleDrivers();
 
     if (header) header.classList.add('hidden'); 
@@ -290,7 +290,7 @@ export function renderDispatchDriverDetail() {
         return;
     }
 
-    // 주소지별 가나다순 정렬 적용
+    // 주소지별 정렬이 켜져 있으면 가나다순, 기본 상태('none')면 2-opt 순번(displayNumber) 순 정렬
     if (detailAddressSortState !== 'none') {
         assignedItems = [...assignedItems].sort((a, b) => {
             const addrA = (a.address || a.fullAddress || '').trim();
@@ -301,6 +301,8 @@ export function renderDispatchDriverDetail() {
                 return addrB.localeCompare(addrA, 'ko');
             }
         });
+    } else {
+        assignedItems = [...assignedItems].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
     }
 
     // 테이블 헤더 정렬 화살표 갱신
@@ -309,7 +311,7 @@ export function renderDispatchDriverDetail() {
     if (theadAddressTh) {
         theadAddressTh.className = "font-black cursor-pointer hover:bg-gray-100 select-none transition py-2 px-2 text-blue-700";
         theadAddressTh.onclick = () => window.sortDetailByAddress();
-        theadAddressTh.title = "클릭 시 주소지(지역별) 가나다순으로 정렬합니다";
+        theadAddressTh.title = "클릭 시 주소지 가나다순 정렬 (기본: 2-opt 배송 코스순)";
         theadAddressTh.innerHTML = `배송지 주소 / 고객 정보 <span class="text-[10px] text-blue-600 font-bold">${arrowSymbol}</span>`;
     }
 
@@ -322,10 +324,11 @@ export function renderDispatchDriverDetail() {
         });
 
         const tooltipAddress = item.fullAddress || item.address || '';
+        const courseNum = item.displayNumber || (idx + 1);
 
         html += `
         <tr class="hover:bg-blue-50/50 transition">
-            <td class="text-center font-bold text-gray-500 w-12">${item.displayNumber || idx + 1}</td>
+            <td class="text-center font-bold text-gray-600 w-12 font-mono">${courseNum}</td>
             <td class="font-bold text-gray-800 whitespace-normal break-keep" title="${tooltipAddress}">
                 ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
                 ${item.address || '-'}
@@ -349,6 +352,15 @@ export function changeOrderDriver(itemId, newDriverPhone) {
     if (!item) return;
 
     item.assignedDriver = newDriverPhone || null;
+    
+    // 수동 변경 시 해당 기사의 배송 순번 자동 부여
+    if (newDriverPhone) {
+        const driverOrders = state.parsedExcelList.filter(o => o.assignedDriver === newDriverPhone);
+        item.displayNumber = driverOrders.length;
+    } else {
+        delete item.displayNumber;
+    }
+
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderExcelTable) window.renderExcelTable();
@@ -370,6 +382,7 @@ export async function revertAutoDispatch() {
 
     state.parsedExcelList.forEach(item => {
         item.assignedDriver = null;
+        delete item.displayNumber;
     });
 
     if (window.renderExcelTable) window.renderExcelTable();
@@ -394,7 +407,7 @@ export async function revertAutoDispatch() {
 }
 
 // ==========================================
-// 🌟 6. 자동할당 알고리즘 실행 (분리된 연산 엔진 모듈 호출로 간결화)
+// 6. 자동할당 알고리즘 실행
 // ==========================================
 export function runAutoDispatchAlgorithm() { 
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -425,10 +438,11 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
+    // 🌟 사용자가 화면에 등록한 본사 거점 주소/좌표 동적 취득
     const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
     const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
 
-    // 🌟 분리된 순수 연산 엔진에 파라미터를 넘겨 배차 알고리즘 수행
+    // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 배차 실행
     const result = executeAutoDispatch({
         targetOrders,
         activeDrivers,
@@ -441,17 +455,17 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 화면 테이블 및 Firebase 비동기 저장 갱신
+    // 화면 갱신 및 Firebase 비동기 저장
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료]\n지형(하천/산맥) 우회 원칙에 따라 총 ${result.totalOrders}건이 ${activeDrivers.length}명의 기사에게 스마트하게 배분되었습니다.\n\n내역 검토 후 이상이 없으면 [동선 전송] 버튼을 눌러주세요.`);
+    alert(`[자동할당 배분 완료]\n거점 기준 외곽 우선 하버사인 클러스터링 및 2-opt 동선 최적화가 완료되었습니다.\n(총 ${result.totalOrders}건이 ${activeDrivers.length}명의 기사에게 스마트하게 배분되었습니다.)\n\n내역 검토 후 이상이 없으면 [동선 전송] 버튼을 눌러주세요.`);
 }
 
 // ==========================================
-// 7. 토글(체크박스) 선택 기반 직관적 동선 전송 엔진
+// 7. 토글 선택 기반 동선 전송 엔진 (2-opt 순번 순 전송)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -481,6 +495,8 @@ export async function sendRoutesToDrivers() {
         );
 
         if (orders.length > 0) {
+            // 🌟 2-opt 최적화 순번(displayNumber) 순으로 정렬하여 기사 앱에 전달
+            orders.sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
             driverMap[devId] = { driver: d, orders };
         }
     });
@@ -493,7 +509,7 @@ export async function sendRoutesToDrivers() {
 
     const totalOrdersToSend = sendTargetDevIds.reduce((sum, id) => sum + driverMap[id].orders.length, 0);
 
-    if (!confirm(`체크된 기사 총 ${sendTargetDevIds.length}명에게 ${totalOrdersToSend}건의 배송 동선을 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 배송 코스가 실시간으로 등록됩니다.`)) {
+    if (!confirm(`체크된 기사 총 ${sendTargetDevIds.length}명에게 ${totalOrdersToSend}건의 최적화된 배송 동선을 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 1번부터 차례대로 코스가 등록됩니다.`)) {
         return;
     }
 
@@ -509,7 +525,7 @@ export async function sendRoutesToDrivers() {
             const { driver: matchedLic, orders } = driverMap[devId];
 
             const destinations = orders.map((ord, idx) => ({
-                displayNumber: idx + 1,
+                displayNumber: ord.displayNumber || (idx + 1),
                 address: ord.address || '',
                 fullAddress: ord.fullAddress || ord.address || '',
                 storeName: ord.storeName || ord.senderName || '',
@@ -532,7 +548,7 @@ export async function sendRoutesToDrivers() {
             successCount++;
         }
 
-        alert(`[동선 전송 완료]\n체크된 기사 총 ${successCount}명의 스마트폰으로 배송 동선이 성공적으로 전송되었습니다.`);
+        alert(`[동선 전송 완료]\n체크된 기사 총 ${successCount}명의 스마트폰으로 2-opt 최적화 코스가 성공적으로 전송되었습니다.`);
     } catch (e) {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
@@ -544,7 +560,7 @@ export async function sendRoutesToDrivers() {
 }
 
 // ==========================================
-// 8. 선택된 기사 전용 상품 합산 피킹 리스트 (100% 온전 보존)
+// 8. 선택된 기사 전용 상품 합산 피킹 리스트
 // ==========================================
 export function printSelectedDriverItemList() {
     if (!state.selectedDispatchDriverId) {
@@ -658,7 +674,7 @@ export function printSelectedDriverItemList() {
 }
 
 // ==========================================
-// 9. 전역 Window 객체 바인딩 (100% 온전 보존)
+// 9. 전역 Window 객체 바인딩
 // ==========================================
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;
 window.clearCompanyBaseAddress = clearCompanyBaseAddress;
