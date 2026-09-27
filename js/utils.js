@@ -116,16 +116,32 @@ export function extractAddressLogic(text) {
 }
 
 // ==========================================
-// 6. 상호명 라벨 정밀 추출 로직 
+// 6. 상호명 라벨 정밀 추출 로직 (주소 교집합 로직 제거 및 라벨 집중)
 // ==========================================
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         let lines = fullText.split(/\n/);
-        const anchors = ['배송지명(간판명)', '상호(법인명)', '배송지명', '간판명', '상호명', '상호', '업체명', '법인명'];
+        
+        // 탐색 대상 라벨 키워드 (긴 복합 키워드 우선)
+        const anchors = [
+            '배송지명(간판명)', 
+            '상호(법인명)', 
+            '배송지명', 
+            '간판명', 
+            '상호명', 
+            '상호', 
+            '업체명', 
+            '법인명'
+        ];
+        
+        // 수집을 즉시 차단하는 경계선 라벨
         const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|수량|단가|총액|규격|제조사|원산지|단위|합계)/;
+        
+        // 텍스트 분리 기호
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
+        // [1차 알고리즘] 줄 단위 라벨 우측 탐색 (표 서식 대응 포함)
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
             for (let anchor of anchors) {
@@ -140,9 +156,12 @@ export function extractStoreNameLogic(fullText) {
                         if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
                         if (stopLabels.test(candidate)) break;
                         if (/^\d+$/.test(candidate)) continue;
-                        if (candidate.length >= 2) return candidate;
+                        if (candidate.length >= 2) {
+                            return candidate;
+                        }
                     }
                     
+                    // 같은 줄 우측에 내용이 없을 경우 바로 다음 줄 확인 (세로형 표 대응)
                     if (i + 1 < lines.length) {
                         let nextWords = lines[i + 1].split(breakRegex).filter(w => w.length > 0);
                         for (let w of nextWords) {
@@ -150,13 +169,16 @@ export function extractStoreNameLogic(fullText) {
                             if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
                             if (stopLabels.test(candidate)) break;
                             if (/^\d+$/.test(candidate)) continue;
-                            if (candidate.length >= 2) return candidate;
+                            if (candidate.length >= 2) {
+                                return candidate;
+                            }
                         }
                     }
                 }
             }
         }
 
+        // [2차 알고리즘] 토큰 연쇄 탐색
         let tokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
@@ -167,7 +189,9 @@ export function extractStoreNameLogic(fullText) {
                     if (anchors.some(a => cleanNext === a || cleanNext.includes(a))) continue;
                     if (stopLabels.test(cleanNext)) break;
                     if (/^\d+$/.test(cleanNext)) continue;
-                    if (cleanNext.length >= 2) return cleanNext;
+                    if (cleanNext.length >= 2) {
+                        return cleanNext;
+                    }
                 }
             }
         }
@@ -183,32 +207,24 @@ export function extractStoreNameLogic(fullText) {
 // ==========================================
 export function initResponsiveViewport() {
     function applyViewportMetrics() {
-        const screenWidth = window.innerWidth || document.documentElement.clientWidth || 360;
-        
-        // [오클릭 방지 기술] 
-        // 일반 웹 브라우저(아이폰 Safari 등) 환경에서 화면이 너무 작게 렌더링되는 것을 방지하기 위해 
-        // 안드로이드 앱과 유사한 큼직한 크기로 UI 전체를 네이티브 수준에서 '확대(zoom)' 처리합니다.
-        let scaleRatio = screenWidth / 360;
-        if (scaleRatio < 1.0) scaleRatio = 1.0; 
-        if (scaleRatio > 1.15) scaleRatio = 1.15; // 최대 15%까지만 확대되도록 제한
-
-        // 실제 화면 배율을 Body 전체에 강제 적용하여 버튼 크기 확보
-        document.body.style.zoom = scaleRatio;
-
-        // 🌟 [핵심] Zoom이 적용되어도 화면 아래쪽이 잘리거나 스크롤 레이아웃이 고장나지 않도록
-        // 전체 가용 높이(vh)를 확대 배율만큼 역산하여 완벽하게 맞춥니다.
-        const vh = (window.innerHeight / scaleRatio) * 0.01;
+        // 1. 실제 내부 가용 높이(innerHeight)를 읽어 주소창 높이 변화 보정 (--vh)
+        const vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--vh', `${vh}px`);
 
+        // 🌟 [수정됨] 2. 억지 확대/축소(scaleRatio)를 유발하던 로직을 완전히 제거했습니다.
+        // 기기 본연의 해상도(Device-width)를 1:1로 사용하여 넓은 폰에서는 UI가 커지지 않고 정보가 더 많이 표시됩니다.
+        const screenWidth = window.innerWidth || document.documentElement.clientWidth;
+
+        // 3. 360px 이하 소형 폰(아이폰 SE 등) 특화 플래그 클래스 지정
         if (screenWidth <= 360) {
             document.body.classList.add('screen-compact');
         } else {
             document.body.classList.remove('screen-compact');
         }
 
-        // 가상 키보드 팝업 시 높이 보정
+        // 4. 모바일 가상 키보드 및 다이내믹 주소창 대응 (visualViewport 지원 시)
         if (window.visualViewport) {
-            const visualHeight = (window.visualViewport.height / scaleRatio) * 0.01;
+            const visualHeight = window.visualViewport.height * 0.01;
             document.documentElement.style.setProperty('--vvh', `${visualHeight}px`);
         }
     }
@@ -216,7 +232,7 @@ export function initResponsiveViewport() {
     // 초기 1회 즉시 실행
     applyViewportMetrics();
 
-    // 화면 크기 변경 또는 회전 시 자동 재계산
+    // 화면 크기 변경 시 자동 재계산
     window.addEventListener('resize', applyViewportMetrics, { passive: true });
     window.addEventListener('orientationchange', () => {
         setTimeout(applyViewportMetrics, 100);
