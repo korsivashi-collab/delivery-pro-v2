@@ -227,60 +227,61 @@
 
     <!-- 2. 메인 앱 영역 -->
     <div id="main-app" class="hidden flex-col h-full w-full">
-        <header class="bg-white px-3 pt-safe pb-2.5 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.05)] z-20 flex-none border-b border-gray-100 relative w-full">
-            <div class="flex flex-col gap-2 w-full">
-                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 (터치 영역 및 폰트 밸런스 확장) -->
-                <div class="flex items-center justify-between gap-1.5 w-full">
-                    <h1 class="text-[16px] font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-                        <i class="fa-solid fa-route text-blue-600 text-base shrink-0"></i>
+        <!-- 🌟 [헤더 오버플로우 방지 최적화] 좌우 패딩을 px-2.5로 맞추고 너비 초과를 원천 차단 -->
+        <header class="bg-white px-2.5 pt-safe pb-2 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.05)] z-20 flex-none border-b border-gray-100 relative w-full overflow-hidden">
+            <div class="flex flex-col gap-1.5 w-full">
+                <!-- 1열: 상단 타이틀 및 우측 액션 버튼들 (잘림 없는 슬림 가로 배치) -->
+                <div class="flex items-center justify-between gap-1 w-full min-w-0">
+                    <h1 class="text-[14.5px] font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <i class="fa-solid fa-route text-blue-600 text-sm shrink-0"></i>
                         <span>배송 경로 PRO</span>
                     </h1>
                     
-                    <div class="flex items-center gap-1.5 shrink-0">
-                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-700 border border-gray-200 px-2 py-1.5 rounded-lg text-[11.5px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap" title="연결설정">
-                            <i class="fa-solid fa-gear text-[11px] text-gray-500"></i>
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-700 border border-gray-200 px-1.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap" title="연결설정">
+                            <i class="fa-solid fa-gear text-[10px] text-gray-500"></i>
                             <span>설정</span>
                         </button>
                         
-                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-2 py-1.5 rounded-lg text-[11.5px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap" title="알림 보관함">
-                            <i class="fa-solid fa-bell text-[11px] text-blue-600"></i>
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-1.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap" title="알림 보관함">
+                            <i class="fa-solid fa-bell text-[10px] text-blue-600"></i>
                             <span>알림</span>
                             <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
                         </button>
                         
-                        <button onclick="window.logout()" class="text-[11.5px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 px-2 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
+                        <button onclick="window.logout()" class="text-[11px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 px-1.5 py-1 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
                             로그아웃
                         </button>
                     </div>
                 </div>
                 
-                <!-- 2열: 사용기한 뱃지 & 서브텍스트 & 지난배송 버튼 -->
-                <div class="flex justify-between items-center gap-2 w-full">
-                    <span class="text-[11px] text-gray-400 font-bold tracking-tight shrink-0 whitespace-nowrap">물류 라스트마일</span>
-                    <div class="flex gap-1.5 items-center shrink-0">
-                        <span id="license-expire-badge" class="text-[10.5px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-md font-extrabold whitespace-nowrap shadow-2xs">
+                <!-- 2열: 사용기한 뱃지 & 서브텍스트 & 지난배송 버튼 (잘림 방지) -->
+                <div class="flex justify-between items-center gap-1 w-full min-w-0">
+                    <span class="text-[10px] text-gray-400 font-bold tracking-tight shrink-0 whitespace-nowrap">물류 라스트마일</span>
+                    <div class="flex gap-1 items-center shrink-0">
+                        <span id="license-expire-badge" class="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-md font-extrabold whitespace-nowrap shadow-2xs">
                             사용기한: 확인중...
                         </span>
-                        <button onclick="window.openHistoryModal()" class="text-[11px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2.5 py-1 rounded-md font-bold border border-gray-200 active:bg-gray-300 flex items-center gap-1 shadow-2xs transition whitespace-nowrap">
-                            <i class="fa-solid fa-clock-rotate-left text-[11px]"></i> 지난배송
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-700 px-2 py-0.5 rounded-md font-bold border border-gray-200 active:bg-gray-300 flex items-center gap-1 shadow-2xs transition whitespace-nowrap">
+                            <i class="fa-solid fa-clock-rotate-left text-[9.5px]"></i> 지난배송
                         </button>
                     </div>
                 </div>
                 
-                <!-- 3열: 종료 지점 바 (터치 편의성 확보) -->
-                <div class="bg-red-50 border border-red-100 rounded-xl p-2 flex items-center justify-between gap-2 shadow-2xs w-full">
-                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span class="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded-md shadow-2xs shrink-0 whitespace-nowrap">종료지점</span>
-                        <span id="header-end-address" class="text-[12px] font-bold text-red-700 truncate flex-1 leading-tight">설정 안 함</span>
+                <!-- 3열: 종료 지점 바 -->
+                <div class="bg-red-50 border border-red-100 rounded-lg p-1.5 flex items-center justify-between gap-1 shadow-2xs w-full min-w-0">
+                    <div class="flex items-center gap-1 min-w-0 flex-1">
+                        <span class="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">종료지점</span>
+                        <span id="header-end-address" class="text-[11.5px] font-bold text-red-700 truncate flex-1 leading-tight">설정 안 함</span>
                     </div>
-                    <div class="flex gap-1.5 shrink-0">
-                        <button onclick="window.setEndLocationGPS()" class="text-[11px] bg-white text-emerald-600 border border-emerald-200 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-emerald-50 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-crosshairs text-[10px]"></i> 현위치</button>
-                        <button onclick="window.toggleHeaderEndEdit()" class="text-[11px] bg-white text-red-600 border border-red-200 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-red-50 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-pen text-[10px]"></i> 직접입력</button>
+                    <div class="flex gap-1 shrink-0">
+                        <button onclick="window.setEndLocationGPS()" class="text-[10px] bg-white text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded shadow-2xs font-bold active:bg-emerald-50 flex items-center gap-0.5 whitespace-nowrap"><i class="fa-solid fa-crosshairs text-[9px]"></i> 현위치</button>
+                        <button onclick="window.toggleHeaderEndEdit()" class="text-[10px] bg-white text-red-600 border border-red-200 px-1.5 py-0.5 rounded shadow-2xs font-bold active:bg-red-50 flex items-center gap-0.5 whitespace-nowrap"><i class="fa-solid fa-pen text-[9px]"></i> 직접입력</button>
                     </div>
                 </div>
                 <div id="header-end-edit-area" class="hidden flex gap-1.5 mt-0.5 w-full">
-                    <input type="text" id="header-inline-end-input" class="flex-1 min-w-0 border border-red-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:border-red-500 shadow-inner" placeholder="종료지 입력 (비우면 취소)">
-                    <button onclick="window.applyHeaderCustomEnd()" class="bg-red-600 text-white px-3.5 py-1.5 text-xs rounded-xl font-bold shadow-2xs shrink-0">적용</button>
+                    <input type="text" id="header-inline-end-input" class="flex-1 min-w-0 border border-red-200 rounded-lg px-2.5 py-1 text-xs outline-none focus:border-red-500 shadow-inner" placeholder="종료지 입력 (비우면 취소)">
+                    <button onclick="window.applyHeaderCustomEnd()" class="bg-red-600 text-white px-3 py-1 text-xs rounded-lg font-bold shadow-2xs shrink-0">적용</button>
                 </div>
             </div>
         </header>
@@ -294,23 +295,23 @@
             </ul>
         </main>
 
-        <!-- 하단 푸터: 스캔 버튼 & 밀어서 경로 최적화 (높이 50px 확장으로 최적 터치감 제공) -->
-        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2.5 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
+        <!-- 하단 푸터: 스캔 버튼 & 밀어서 경로 최적화 -->
+        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
             <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
-                <button onclick="document.getElementById('camera-input').click()" class="h-[50px] px-4 bg-gray-900 hover:bg-gray-800 active:bg-black text-white font-bold rounded-xl shadow active:scale-95 transition text-[13.5px] flex items-center justify-center gap-1.5 shrink-0">
+                <button onclick="document.getElementById('camera-input').click()" class="h-[48px] px-4 bg-gray-900 hover:bg-gray-800 active:bg-black text-white font-bold rounded-xl shadow active:scale-95 transition text-[13px] flex items-center justify-center gap-1.5 shrink-0">
                     <i class="fa-solid fa-camera text-sm"></i>
                     <span>스캔</span>
                 </button>
                 
                 <!-- 슬라이더 트랙 -->
-                <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[50px]">
+                <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[48px]">
                     <!-- 선명한 파란색 텍스트 -->
-                    <div class="absolute inset-0 flex items-center justify-center pl-8 pr-2 text-blue-600 font-extrabold text-[13.5px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
-                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1.5 text-blue-500 animate-pulse"></i>
+                    <div class="absolute inset-0 flex items-center justify-center pl-8 pr-2 text-blue-600 font-extrabold text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
+                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-500 animate-pulse"></i>
                     </div>
                     <!-- 제어 손잡이 (스와이프 버튼) -->
-                    <div id="swipe-btn" class="absolute left-1 w-[42px] h-[42px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
+                    <div id="swipe-btn" class="absolute left-1 w-[40px] h-[40px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
                         <i class="fa-solid fa-angles-right text-base"></i>
                     </div>
                 </div>
