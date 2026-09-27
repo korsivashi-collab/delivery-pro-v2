@@ -151,7 +151,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     };
 }
 
-// 3. 라이선스 상태 감시 (24시간 상시 구독을 단발성 1회 getDoc으로 최적화하여 비용 절감)
+// 3. 라이선스 상태 감시 (단발성 getDoc 최적화)
 export function watchLicenseStatus(key, callback, onUpdateCallback) {
     (async () => {
         try {
@@ -191,15 +191,14 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
                 onUpdateCallback(data);
             }
         } catch (e) {
-            console.warn("라이선스 단발성 검증 네트워크 오류:", e);
+            console.warn("라이선스 검증 통신 오류:", e);
         }
     })();
 
-    // 기존 호출부(auth.js 등)의 unsubscribe 해제 함수 호환용 더미 반환
     return () => {};
 }
 
-// 🌟 [신규 추가] 주요 액션(스캔 시점 등) 단발성 1회 라이선스 유효성 검증 함수 (서버 부하 0)
+// 3-1. 주요 액션(스캔 시점 등) 단발성 1회 라이선스 유효성 검증 함수
 export async function firebaseCheckLicenseOnce(key, deviceId) {
     if (!key) return { valid: false, msg: "라이선스 키가 올바르지 않습니다." };
     try {
@@ -245,7 +244,6 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
             allowTms: data.allowTms !== false 
         };
     } catch (e) {
-        // 일시적인 오프라인/통신 지연 시에는 사용자 업무가 중단되지 않도록 통과 처리
         return { valid: true, isOffline: true };
     }
 }
@@ -279,10 +277,27 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 관제 센터 실시간 자동할당 동선 수신 리스너 (routes/{deviceId} 구독)
-export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared) {
-    if (!deviceId) return null;
-    const routeDocRef = doc(db, "routes", deviceId);
+// 4-1. 관제 센터 실시간 자동할당 동선 수신 리스너 (기기ID 및 전화번호 통합 지원)
+export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
+    let phone = "";
+    let onRoutesReceived = null;
+    let onRoutesCleared = null;
+
+    if (typeof arg2 === 'function') {
+        onRoutesReceived = arg2;
+        onRoutesCleared = arg3;
+        phone = typeof arg4 === 'string' ? arg4 : "";
+    } else if (typeof arg2 === 'string') {
+        phone = arg2;
+        onRoutesReceived = arg3;
+        onRoutesCleared = arg4;
+    }
+
+    if (!deviceId && !phone) return () => {};
+
+    const primaryKey = deviceId || phone;
+    const routeDocRef = doc(db, "routes", primaryKey);
+
     return onSnapshot(routeDocRef, (docSnap) => {
         if (docSnap.exists()) {
             const data = docSnap.data();
@@ -290,7 +305,20 @@ export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared
                 onRoutesReceived(data.destinations || [], data);
             }
         } else {
-            if (onRoutesCleared) {
+            // deviceId 문서가 없는 경우 전화번호 문서 백업 확인
+            if (phone && phone !== primaryKey) {
+                const cleanPhone = phone.replace(/[^0-9]/g, '');
+                getDoc(doc(db, "routes", cleanPhone)).then((pSnap) => {
+                    if (pSnap.exists()) {
+                        const pData = pSnap.data();
+                        if (onRoutesReceived) onRoutesReceived(pData.destinations || [], pData);
+                    } else if (onRoutesCleared) {
+                        onRoutesCleared();
+                    }
+                }).catch(() => {
+                    if (onRoutesCleared) onRoutesCleared();
+                });
+            } else if (onRoutesCleared) {
                 onRoutesCleared();
             }
         }
@@ -299,12 +327,11 @@ export function listenToActiveRoutes(deviceId, onRoutesReceived, onRoutesCleared
     });
 }
 
-// 5. 관제 메시지 리스너 (최신 5건으로 제한하여 읽기 비용 90% 이상 절감)
+// 5. 관제 메시지 리스너 (최신 5건 한정 구독)
 export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessageReceived) {
     const cleanPhone = (myPhone || '').replace(/[^0-9]/g, '');
     const cleanKeyOnly = (myKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
     
-    // 🌟 최신 5건만 구독하여 누적 메시지로 인한 비용 폭증 차단
     const q = query(
         collection(db, "dispatch_messages"), 
         orderBy("createdAt", "desc"), 

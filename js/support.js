@@ -3,7 +3,14 @@
 // [배송 동선 PRO] 보조 기능 전담 모듈 (연결 설정 / 알림함 / 지난 배송 이력)
 // =================================================================
 
-import { deleteCompletionFromFirestore, firebaseSetTmsPermission, syncMyParkingMemosFromServer } from './api.js';
+import { 
+    deleteCompletionFromFirestore, 
+    firebaseSetTmsPermission, 
+    syncMyParkingMemosFromServer, 
+    saveRouteToFirestore 
+} from './api.js';
+import { state } from './state.js';
+import { getOrCreateDeviceId } from './auth.js';
 
 // 내부 상태 변수
 let currentActiveAlertMsgId = null;
@@ -275,6 +282,7 @@ export function archiveCompletedDelivery(item, tag = "", completionDocId = null,
     localStorage.setItem('deliveryPro_history', JSON.stringify(history));
 }
 
+// 🌟 배송지 복원 시 관제 센터 서버에도 실시간 복원 동기화
 export async function restoreHistoryItem(timestamp) {
     if (!confirm("이 배송지를 다시 진행 목록으로 되돌리시겠습니까?")) return;
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
@@ -292,9 +300,21 @@ export async function restoreHistoryItem(timestamp) {
         if (!itemToRestore) {
             try {
                 const coords = await geocodeAddress(targetHistory.address);
-                itemToRestore = { id: targetHistory.id || Date.now(), address: targetHistory.address, lat: coords.lat, lng: coords.lng, phone: null };
+                itemToRestore = { 
+                    id: targetHistory.id || Date.now(), 
+                    address: targetHistory.address, 
+                    lat: coords.lat, 
+                    lng: coords.lng, 
+                    phone: null 
+                };
             } catch(e) { 
-                itemToRestore = { id: targetHistory.id || Date.now(), address: targetHistory.address, lat: 0, lng: 0, phone: null }; 
+                itemToRestore = { 
+                    id: targetHistory.id || Date.now(), 
+                    address: targetHistory.address, 
+                    lat: 0, 
+                    lng: 0, 
+                    phone: null 
+                }; 
             }
         }
         
@@ -305,6 +325,18 @@ export async function restoreHistoryItem(timestamp) {
             if (onRestoreDestinationCallback) {
                 await onRestoreDestinationCallback(itemToRestore);
             }
+
+            // 🌟 복원된 최신 배송 목록을 관제 센터 서버(routes/{deviceId})에 즉시 동기화
+            try {
+                const deviceId = getOrCreateDeviceId();
+                const phone = localStorage.getItem('deliveryProUserPhone') || "";
+                if (deviceId) {
+                    saveRouteToFirestore(deviceId, phone, state.getDestinations());
+                }
+            } catch (err) {
+                console.error("복원 동선 관제 동기화 오류:", err);
+            }
+
             openHistoryModal(); 
         }
         hideLoading();
@@ -315,11 +347,9 @@ export async function restoreHistoryItem(timestamp) {
 // 5. 연결 설정 모달 및 TMS/GPS 제어 기능
 // ==========================================
 export async function openSettingsModal() {
-    // 1. 현재 로컬 캐시 기준 즉시 화면 렌더링
     updateContributionStats();
     document.getElementById('settings-modal')?.classList.remove('hidden');
 
-    // 2. 🌟 [핵심] 마스터 센터에 등록된 전화번호/기기 기준 서버 데이터 실시간 역추적 동기화
     const phone = localStorage.getItem('deliveryProUserPhone') || '';
     const deviceId = localStorage.getItem('deliveryProDeviceId') || '';
     const key = localStorage.getItem('deliveryProKey') || '';
@@ -327,7 +357,7 @@ export async function openSettingsModal() {
     if (phone || deviceId) {
         try {
             await syncMyParkingMemosFromServer(phone, deviceId, key);
-            updateContributionStats(); // 동기화 완료 후 최신 실제 카운트로 UI 자동 갱신
+            updateContributionStats();
         } catch (e) {
             console.error("서버 기여도 동기화 실패:", e);
         }
@@ -341,15 +371,12 @@ export function closeSettingsModal() {
 // 내 기여 활동 통계 카운트 및 이벤트 프로그레스바 갱신 함수
 export function updateContributionStats() {
     try {
-        // 1. 개인 메모 건수 계산 (로컬스토리지)
         const personalMemos = JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
         const personalCount = Object.keys(personalMemos).length;
 
-        // 2. 공용 주차정보 작성 건수 계산 (서버와 동기화된 목록 기준)
         const myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
         const parkingCount = myParkingMemos.length;
 
-        // UI 엘리먼트 반영
         const parkingCountEl = document.getElementById('stat-parking-memo-count');
         const personalCountEl = document.getElementById('stat-personal-memo-count');
         const progressTextEl = document.getElementById('stat-event-progress');
@@ -358,7 +385,6 @@ export function updateContributionStats() {
         if (parkingCountEl) parkingCountEl.innerText = `${parkingCount}건`;
         if (personalCountEl) personalCountEl.innerText = `${personalCount}건`;
 
-        // 150건 이벤트 프로그레스 계산
         const targetCount = 150;
         const currentProgress = Math.min(parkingCount, targetCount);
         const percent = Math.round((currentProgress / targetCount) * 100);

@@ -38,7 +38,7 @@ export function setRemoteRoutesHandler(onReceived, onCleared) {
 }
 
 // ==========================================
-// 0-1. 🌟 로컬스토리지 기반 날짜 대조 만료 검사 (서버 호출 0회)
+// 0-1. 로컬스토리지 기반 날짜 대조 만료 검사 (서버 호출 0회)
 // ==========================================
 export function isLicenseExpiredLocally() {
     const expireDateStr = localStorage.getItem('deliveryProExpireDate');
@@ -168,10 +168,11 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     if (gpsRequestWatcherUnsub) gpsRequestWatcherUnsub();
     gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phone, key, getDeviceRealGPS);
 
-    // 관제 센터 실시간 자동할당 동선 감시 (routes/{deviceId} 구독)
+    // 관제 센터 실시간 자동할당 동선 감시 (기기ID 및 휴대폰 번호 동시 대응)
     if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
     activeRoutesWatcherUnsub = listenToActiveRoutes(
         deviceId, 
+        phone,
         (destinations, data) => {
             if (onRemoteRoutesReceivedCallback) {
                 onRemoteRoutesReceivedCallback(destinations, data);
@@ -216,7 +217,7 @@ export async function checkSavedAuth() {
         if (inputPhone) inputPhone.value = savedPhone;
     }
 
-    // 🌟 1단계 로컬 만료일 대조: 이미 유효기간이 지났다면 서버 호출 없이 즉시 만료 처리 (비용 0원)
+    // 1단계 로컬 만료일 대조: 이미 유효기간이 지났다면 서버 호출 없이 즉시 만료 처리
     if (savedExpire && isLicenseExpiredLocally()) {
         clearAuthStorage();
         const authMsg = document.getElementById('auth-message');
@@ -229,7 +230,7 @@ export async function checkSavedAuth() {
 
     const cleanDigits = (savedPhone || '').replace(/[^0-9]/g, '');
 
-    // 🌟 2단계 서버 검증: 앱 켤 때 1회 단발성 검증 (getDoc)
+    // 2단계 서버 검증: 앱 구동 시 1회 단발성 검증 (getDoc)
     if (savedKey && cleanDigits.length >= 9) {
         try {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);

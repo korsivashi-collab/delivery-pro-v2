@@ -26,7 +26,8 @@ import {
 } from './auth.js';
 import { 
     firebaseCheckLicenseOnce, 
-    checkIfDeviceBlocked 
+    checkIfDeviceBlocked,
+    saveRouteToFirestore 
 } from './api.js';
 
 const MAX_MONTHLY_SCANS = 1250; 
@@ -133,7 +134,7 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
 }
 
 // ==========================================
-// 4. 배송지 주소/전화번호 수정 액션
+// 4. 배송지 주소/전화번호 수정 액션 (관제 서버 동기화 포함)
 // ==========================================
 export async function editDestinationAddress(id) {
     const destinations = state.getDestinations();
@@ -174,6 +175,11 @@ export async function editDestinationAddress(id) {
     item.phone = newPhone; 
     state.saveActiveData(); 
     if (typeof window.renderList === 'function') window.renderList();
+
+    // 🌟 수정된 경로를 관제 센터 서버에도 즉시 동기화
+    const deviceId = getOrCreateDeviceId();
+    const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
+    saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
 }
 
 // ==========================================
@@ -253,7 +259,7 @@ export function initCameraScan() {
         const file = e.target.files[0];
         if (!file) return;
 
-        // 🌟 [보안 및 라이선스 1회 단발성 검증] 스캔 전 계정 유효성 점검 (서버 부하 0)
+        // 🌟 [보안 및 라이선스 1회 단발성 검증] 스캔 전 계정 유효성 점검
         const deviceId = getOrCreateDeviceId();
         try {
             const isBlocked = await checkIfDeviceBlocked(deviceId);
@@ -312,7 +318,7 @@ export function initCameraScan() {
             extractedPhone = result.phone;
         }
 
-        // 2. 주소 좌표 획득 (로컬 캐시 및 지수 백오프 적용)
+        // 2. 주소 좌표 획득
         let coords = null;
         while (!coords) {
             try {
@@ -355,21 +361,11 @@ export function initCameraScan() {
                         let textForRegex = rawOCRText.replace(/\n/g, ' ');
 
                         let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
-                        if (blockRegex.test(textForRegex)) {
-                            isGarbage = true;
-                        }
+                        if (blockRegex.test(textForRegex)) isGarbage = true;
+                        if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) isGarbage = true;
+                        if (extracted.length < 2 || /^\d+$/.test(extracted)) isGarbage = true;
 
-                        if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) {
-                            isGarbage = true;
-                        }
-
-                        if (extracted.length < 2 || /^\d+$/.test(extracted)) {
-                            isGarbage = true;
-                        }
-
-                        if (!isGarbage) {
-                            finalStoreName = extracted;
-                        }
+                        if (!isGarbage) finalStoreName = extracted;
                     }
                 }
             } catch (error) {
@@ -378,7 +374,7 @@ export function initCameraScan() {
             hideLoading();
         }
 
-        // 4. 배송 목록 추가 및 렌더링
+        // 4. 배송 목록 추가 및 렌더링 + 관제 센터 서버 동기화
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
             if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
@@ -395,11 +391,16 @@ export function initCameraScan() {
                 lat: coords.lat, 
                 lng: coords.lng, 
                 phone: extractedPhone, 
-                displayNumber: nextNum
+                displayNumber: nextNum,
+                storeName: finalStoreName || ""
             });
             
             state.saveActiveData(); 
             if (typeof window.renderList === 'function') window.renderList();
+
+            // 🌟 새로 스캔된 배송지를 관제 센터 서버(routes/{deviceId})에도 즉시 동기화
+            const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
+            saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
             
             setTimeout(() => { 
                 const newEl = document.querySelector(`li[data-id="${newDestId}"]`); 
