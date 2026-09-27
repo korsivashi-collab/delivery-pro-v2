@@ -110,26 +110,23 @@ export function cleanAddress(rawAddr) {
 }
 
 // ==========================================
-// 🌟 0-3. 출고지 주소/창고 기반 공급자 매핑 헬퍼 (특정 업체명 하드코딩 완전 제거)
+// 0-3. 출고지 주소/창고 기반 공급자 매핑 헬퍼
 // ==========================================
 function extractSenderFromWarehouse(warehouseAddr) {
     if (!warehouseAddr || typeof warehouseAddr !== 'string') return '';
     const clean = warehouseAddr.trim();
     if (!clean || clean === '-') return '';
 
-    // 1) 텍스트 내에 상호 패턴((주), 주식회사, 상사, 유통, 물류, 푸드 등)이 직접 포함된 경우 추출
     const corpMatch = clean.match(/(?:\(?주\)?|주식회사|\b회사\b|\b상사\b|\b유통\b|\b물류\b|\b식품\b|\b푸드\b|\b로지스\b)[가-힣A-Za-z0-9\s]+/);
     if (corpMatch) {
         return corpMatch[0].trim();
     }
 
-    // 2) [대괄호] 또는 (소괄호)로 상호가 별도 기재된 경우 (단, 우편번호나 주소 식별자 제외)
     const bracketMatch = clean.match(/[\[\(]([가-힣A-Za-z0-9\s]{2,15})[\]\)]/);
     if (bracketMatch && !/^\d+$/.test(bracketMatch[1]) && !/^(출고|배송|주소|기본|도로|지하)/.test(bracketMatch[1])) {
         return bracketMatch[1].trim();
     }
 
-    // 3) 상호가 없고 순수 주소 형태일 경우: 행정구역 기반 범용 출고지 표기
     let addrWithoutZip = clean.replace(/\[\d+\]/g, '').trim();
     const match = addrWithoutZip.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)?\s*([가-힣]+(?:시|군|구))\s*([가-힣]+(?:동|읍|면|리|가))/);
     if (match) {
@@ -144,22 +141,19 @@ function extractSenderFromWarehouse(warehouseAddr) {
 }
 
 // ==========================================
-// 🌟 0-4. 업로드 파일명 기반 공급자명 추출 헬퍼
+// 0-4. 업로드 파일명 기반 공급자명 추출 헬퍼
 // ==========================================
 function extractSenderFromFileName(fileName) {
     if (!fileName || typeof fileName !== 'string') return '';
     let name = fileName.replace(/\.[^/.]+$/, '').trim();
 
-    // 일반 관리용 파일명 제외
     if (/^(발송관리|주문관리|배송관리|주문목록|배송목록|주문서|발주서|order|delivery|orders)[\d_\-\s]*$/i.test(name)) {
         return '';
     }
 
-    // [회사명] 파일명.xlsx 형태
     const bracketMatch = name.match(/^[\[\(\{]([가-힣A-Za-z0-9\s]{2,15})[\]\}\)]/);
     if (bracketMatch) return bracketMatch[1].trim();
 
-    // 구분자 분리
     const parts = name.split(/[_\-\s]+/);
     for (const part of parts) {
         const p = part.trim();
@@ -171,7 +165,7 @@ function extractSenderFromFileName(fileName) {
 }
 
 // ==========================================
-// 1. Firebase 엑셀/주문 데이터 연동
+// 1. Firebase 엑셀/주문 데이터 연동 (다중 패널 동시 갱신)
 // ==========================================
 export async function loadExcelFromFirebase() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); 
@@ -181,6 +175,9 @@ export async function loadExcelFromFirebase() {
         const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
         state.parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
         renderExcelTable();
+        // 🌟 날짜 변경 로드시 기사별 상세 내역 및 목록도 함께 동기화
+        if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+        if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     } catch (error) {
         console.error("엑셀 데이터 로드 실패:", error);
     }
@@ -203,14 +200,13 @@ export async function autoSaveExcelToFirebase() {
 }
 
 // ==========================================
-// 2. 엑셀/주문 테이블 화면 렌더링 (실시간 건수 뱃지 동기화 탑재)
+// 2. 엑셀/주문 테이블 화면 렌더링 (코스 순번 뱃지 연동)
 // ==========================================
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); 
     const totalCountBadge = document.getElementById('excel-total-count-badge');
     if (!tbody) return;
 
-    // 🌟 실시간 전체 현황 주문 건수 뱃지 갱신
     const totalOrdersCount = state.parsedExcelList ? state.parsedExcelList.length : 0;
     if (totalCountBadge) {
         totalCountBadge.innerText = `총 ${totalOrdersCount}건`;
@@ -236,10 +232,18 @@ export function renderExcelTable() {
             driverSelectOptions += `<option value="${dName}" ${isSelected}>${dName}</option>`;
         });
 
+        // 🌟 기사 배정 및 2-opt 순번이 존재할 때 파란색 코스 순번 뱃지 표시
+        const courseBadge = (item.assignedDriver && item.displayNumber)
+            ? `<span class="bg-blue-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded font-mono shrink-0 shadow-2xs" title="${item.assignedDriver} 기사의 ${item.displayNumber}번째 배송지">${item.displayNumber}번</span>`
+            : '';
+
         const driverSelectHtml = `
-            <select onchange="window.changeOrderDriver('${item.id}', this.value)" class="w-full bg-white border ${item.assignedDriver ? 'border-blue-400 text-blue-700 bg-blue-50/40' : 'border-gray-300 text-gray-500'} hover:border-blue-500 rounded-lg py-1 px-1.5 text-[11px] font-bold outline-none shadow-2xs cursor-pointer truncate">
-                ${driverSelectOptions}
-            </select>
+            <div class="flex items-center gap-1.5 w-full">
+                <select onchange="window.changeOrderDriver('${item.id}', this.value)" class="flex-1 min-w-0 bg-white border ${item.assignedDriver ? 'border-blue-400 text-blue-700 bg-blue-50/40' : 'border-gray-300 text-gray-500'} hover:border-blue-500 rounded-lg py-1 px-1.5 text-[11px] font-bold outline-none shadow-2xs cursor-pointer truncate">
+                    ${driverSelectOptions}
+                </select>
+                ${courseBadge}
+            </div>
         `;
 
         const coordIcon = (item.lat && item.lng) 
@@ -257,8 +261,8 @@ export function renderExcelTable() {
             <td class="text-center w-8" onclick="event.stopPropagation()">
                 <input type="checkbox" class="cursor-pointer row-checkbox w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" data-idx="${idx}">
             </td>
-            <td class="text-center font-bold text-gray-500 w-10">${idx + 1}</td>
-            <td class="text-center w-36" onclick="event.stopPropagation()">
+            <td class="text-center font-bold text-gray-500 w-10 font-mono">${idx + 1}</td>
+            <td class="text-center w-40" onclick="event.stopPropagation()">
                 ${driverSelectHtml}
             </td>
             <td class="font-bold text-gray-800 break-keep leading-snug py-2.5 px-2" title="${tooltipAddress}">
@@ -289,11 +293,10 @@ export function renderExcelTable() {
             document.querySelectorAll('#invoice-excel-tbody .row-checkbox').forEach(cb => { cb.checked = isChecked; }); 
         }; 
     }
-    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail(); 
 }
 
 // ==========================================
-// 3. 범용 스마트 헤더 자동 매핑 및 주문/배송지별 품목 그룹화 파서
+// 3. 범용 스마트 헤더 자동 매핑 및 주문 그룹화 파서
 // ==========================================
 export function processExcelData(jsonData, fileName = '') {
     if (!jsonData || jsonData.length === 0) return [];
@@ -369,7 +372,7 @@ export function processExcelData(jsonData, fileName = '') {
             }
         }
 
-        // 4. 구매자명 (공급받는 자/주문자) 정밀 추출
+        // 4. 구매자명 정밀 추출
         let buyerName = '';
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
@@ -383,10 +386,8 @@ export function processExcelData(jsonData, fileName = '') {
             }
         }
 
-        // 5. 🌟 공급자 / 화주명 추출 (규칙: 1공급자 > 2출고지 > 3파일명 유추 > 정보 없음)
+        // 5. 공급자 / 화주명 추출
         let senderName = '';
-
-        // [1순위]: 엑셀 컬럼 탐색 (쿠폰/금액/포인트/코드 등의 열 배제)
         for (const k of keys) {
             const ck = k.replace(/\s+/g, '');
             if (!/쿠폰|금액|할인|포인트|비용|코드|단가|사업자/i.test(ck)) {
@@ -399,7 +400,6 @@ export function processExcelData(jsonData, fileName = '') {
             }
         }
 
-        // [2순위]: 출고지 주소/창고 컬럼 기반 자동 매핑
         if (!senderName) {
             let rawWarehouse = '';
             for (const k of keys) {
@@ -416,12 +416,10 @@ export function processExcelData(jsonData, fileName = '') {
             }
         }
 
-        // [3순위]: 업로드한 파일명에서 회사명 유추
         if (!senderName && fileName) {
             senderName = extractSenderFromFileName(fileName);
         }
 
-        // [최종 기본값]: 1~3순위 모두 없을 경우 '정보 없음'으로 통일
         if (!senderName) {
             senderName = '정보 없음';
         }
@@ -555,6 +553,7 @@ export function processExcelData(jsonData, fileName = '') {
             orderMap[orderKey] = {
                 id: Date.now() + Math.random(),
                 assignedDriver: null,
+                displayNumber: null,
                 senderName: senderName,
                 buyerName: buyerName || storeName || '고객',
                 orderNo: orderNo || `ORD-${rowIdx + 1}`,
@@ -589,7 +588,7 @@ export function processExcelData(jsonData, fileName = '') {
 }
 
 // ==========================================
-// 4. 통합 드롭존 초기화 및 업로드 처리 (누락 없는 누적 처리)
+// 4. 통합 드롭존 초기화 및 업로드 처리
 // ==========================================
 export function initExcelDropZone() {
     const dropZone = document.getElementById('excel-drop-zone');
@@ -689,7 +688,7 @@ export function processSingleExcelFile(file) {
 }
 
 // ==========================================
-// 5. 주소 -> 정밀 좌표(위/경도) 지오코딩 엔진 (캐시 우선 & 지수 백오프)
+// 5. 주소 -> 정밀 좌표 지오코딩 엔진 (캐시 및 지수 백오프)
 // ==========================================
 async function getCoordsFromAddress(address) {
     const targetAddr = cleanAddress(address);
@@ -697,7 +696,6 @@ async function getCoordsFromAddress(address) {
     const cleanKey = targetAddr.trim();
     if (!cleanKey) return null;
 
-    // 1단계: 로컬 주소 캐시 우선 확인 (카카오 호출 0회 처리)
     const cache = getGeoCache();
     if (cache[cleanKey]) {
         return cache[cleanKey];
@@ -708,7 +706,6 @@ async function getCoordsFromAddress(address) {
     }
     const geocoder = new window.kakao.maps.services.Geocoder();
 
-    // 🌟 2단계: 지수 백오프(Exponential Backoff with Jitter) 429 차단 방어 래퍼
     const queryKakaoWithRetry = async (queryStr) => {
         const maxRetries = 3;
         const delays = [200, 500, 1000];
@@ -725,7 +722,6 @@ async function getCoordsFromAddress(address) {
                         } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
                             resolve({ success: false, retryable: false });
                         } else {
-                            // ERROR: 429 Rate Limit 초과 또는 일시적 통신 오류
                             resolve({ success: false, retryable: true });
                         }
                     });
@@ -737,7 +733,6 @@ async function getCoordsFromAddress(address) {
             if (result.success) return result.data;
             if (!result.retryable || attempt === maxRetries) break;
 
-            // 지수 백오프 + 무작위 지연(Jitter 0~50ms) 부여
             const jitter = Math.floor(Math.random() * 50);
             const delay = (delays[attempt] || 1000) + jitter;
             await new Promise(r => setTimeout(r, delay));
@@ -745,10 +740,8 @@ async function getCoordsFromAddress(address) {
         return null;
     };
 
-    // 1차: 정제된 깔끔한 주소로 검색
     let coords = await queryKakaoWithRetry(cleanKey);
 
-    // 2차: 도로명+번지수 기본 패턴만으로 재검색
     if (!coords) {
         const basicMatch = cleanKey.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
         if (basicMatch && basicMatch[0] !== cleanKey) {
@@ -795,7 +788,6 @@ async function batchGeocodeExcelList(items) {
                 }
             }
 
-            // 신규 카카오 API 호출 건에만 40ms 안전 딜레이 적용 (캐시 적중 건은 즉시 패스)
             if (!isCached) {
                 await new Promise(r => setTimeout(r, 40));
             }
@@ -805,7 +797,7 @@ async function batchGeocodeExcelList(items) {
 }
 
 // ==========================================
-// 6. 테이블 데이터 삭제/초기화 기능
+// 6. 테이블 데이터 삭제/초기화 기능 (다중 뷰 실시간 동기화)
 // ==========================================
 export function toggleRowCheckbox(e, idx) {
     if (e && e.target.tagName === 'INPUT') return; 
@@ -817,6 +809,8 @@ export async function deleteExcelRow(idx) {
     if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
     state.parsedExcelList.splice(idx, 1); 
     renderExcelTable(); 
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     await autoSaveExcelToFirebase();
 }
 
@@ -830,6 +824,8 @@ export async function deleteSelectedExcelRows() {
     const indicesToRemove = Array.from(checkboxes).map(cb => parseInt(cb.getAttribute('data-idx')));
     state.parsedExcelList = state.parsedExcelList.filter((_, idx) => !indicesToRemove.includes(idx));
     renderExcelTable(); 
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     await autoSaveExcelToFirebase(); 
 }
 
@@ -839,6 +835,8 @@ export async function clearAllExcelRows() {
     
     state.parsedExcelList = []; 
     renderExcelTable(); 
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     await autoSaveExcelToFirebase();
 
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';

@@ -120,7 +120,8 @@ export function renderDriverListView() {
             const routeDateStr = getLocalDateString(new Date(routeData.updatedAt));
             if (isToday || routeDateStr === selectedDate) driverRoute = routeData;
         }
-        const rawDests = driverRoute ? driverRoute.destinations || [] : [];
+        let rawDests = driverRoute ? driverRoute.destinations || [] : [];
+        rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
         const driverDone = state.allCompletions.filter(c => {
             const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || 
@@ -198,7 +199,10 @@ export function renderDriverDetailView(devId) {
         const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
         if (isToday || routeDateStr === selectedDate) driverRoute = driver;
     }
-    const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
+    
+    // 🌟 배송 순번(displayNumber) 기준으로 엄격 정렬
+    let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
+    rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
     const driverDone = state.allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId) || 
@@ -254,14 +258,29 @@ export function renderDriverDetailView(devId) {
                 const comp = doneMap[d.address];
                 const isDone = !!comp;
                 const num = d.displayNumber || (idx + 1);
-                let numberBadge = isDone ? `<span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs"><i class="fa-solid fa-check text-[9px]"></i></span>` : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
-                let addressHtml = isDone ? `<span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${d.address}</span>` : `<span class="font-bold text-gray-900 truncate">${d.address}</span>`;
+                const storeBadge = d.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1 shrink-0">${d.storeName}</span>` : '';
+                
+                let numberBadge = isDone 
+                    ? `<span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs"><i class="fa-solid fa-check text-[9px]"></i></span>` 
+                    : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
+                
+                let addressHtml = isDone 
+                    ? `<span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${storeBadge}${d.address}</span>` 
+                    : `<span class="font-bold text-gray-900 truncate">${storeBadge}${d.address}</span>`;
+                
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
-                let statusBadge = isDone ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
-                let photoBtn = comp && comp.photoUrl ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
+                let statusBadge = isDone 
+                    ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` 
+                    : `<span class="bg-blue-50 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded border border-blue-200 shadow-2xs shrink-0 whitespace-nowrap">대기</span>`;
+                
+                let photoBtn = comp && comp.photoUrl 
+                    ? `<a href="${comp.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-0.5"><i class="fa-solid fa-camera"></i> 사진</a>` 
+                    : '';
+
                 html += `
                 <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border ${isDone ? 'bg-emerald-50/40 border-emerald-200' : 'bg-white border-gray-200 hover:border-blue-400'} flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
-                    <div class="flex items-center gap-2 min-w-0 flex-1">${numberBadge}${addressHtml}</div><div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}${statusBadge}</div>
+                    <div class="flex items-center gap-2 min-w-0 flex-1">${numberBadge}${addressHtml}</div>
+                    <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}${statusBadge}</div>
                 </div>`;
             });
             html += `</div>`;
@@ -272,11 +291,13 @@ export function renderDriverDetailView(devId) {
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
+                const num = d.displayNumber || (idx + 1);
+                const storeBadge = d.storeName ? `<span class="bg-amber-100 text-amber-900 text-[10px] px-1.5 py-0.5 rounded font-black mr-1 shrink-0">${d.storeName}</span>` : '';
                 html += `
                 <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
-                        <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${d.displayNumber || idx + 1}</span>
-                        <span class="font-bold text-gray-900 truncate">${d.address}</span>
+                        <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>
+                        <span class="font-bold text-gray-900 truncate">${storeBadge}${d.address}</span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
                         <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shrink-0">배송 대기</span>
@@ -323,7 +344,7 @@ export async function removeOrUnlinkDriver(devId, key) {
 }
 
 // ==========================================
-// 3. 지도 위에 경로 및 마커 렌더링
+// 3. 지도 위에 경로 및 마커 렌더링 (2-opt 순번 순 연결)
 // ==========================================
 export function drawDriverOnMap(devId) {
     forceClearMap(); 
@@ -346,7 +367,10 @@ export function drawDriverOnMap(devId) {
             driverRoute = driver;
         }
     }
-    const rawDests = driverRoute ? (driverRoute.destinations || []) : [];
+
+    // 🌟 배송 순번(displayNumber) 순으로 정렬하여 지도에 순서대로 선 연결
+    let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
+    rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
     const completions = state.allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId) || 
@@ -370,6 +394,21 @@ export function drawDriverOnMap(devId) {
     const completedPath = [];
     const currentMode = state.currentMapPolylineMode || 'all';
 
+    // 🌟 등록된 본사 거점이 있을 경우 거점 좌표를 경로 시작점으로 지도에 포함
+    const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
+    if (companyBaseStr) {
+        try {
+            const companyBase = JSON.parse(companyBaseStr);
+            if (companyBase.lat && companyBase.lng && rawDests.length > 0) {
+                const basePos = new kakao.maps.LatLng(companyBase.lat, companyBase.lng);
+                plannedPath.push(basePos);
+                bounds.extend(basePos);
+                pointsCount++;
+            }
+        } catch(e) {}
+    }
+
+    // 완료된 배송 마커 및 완료 경로
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
@@ -387,17 +426,21 @@ export function drawDriverOnMap(devId) {
         }
     });
 
+    // 예정된 배송 마커 및 계획 경로 (2-opt 순서대로 1번 ➔ N번 연결)
     if (rawDests.length > 0) {
-        rawDests.forEach(d => {
+        rawDests.forEach((d, idx) => {
             if (d.lat && d.lng) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
                 plannedPath.push(pos);
                 if (!doneMap[d.address]) {
                     bounds.extend(pos); pointsCount++;
                     const isCurrent = d.address === currentTargetAddr;
+                    const courseNum = d.displayNumber || (idx + 1);
                     const content = document.createElement('div');
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
-                    content.innerHTML = isCurrent ? `<i class="fa-solid fa-truck-fast mr-1"></i>${d.displayNumber}번 이동` : `${d.displayNumber}번`;
+                    content.innerHTML = isCurrent 
+                        ? `<i class="fa-solid fa-truck-fast mr-1"></i>${courseNum}번 이동` 
+                        : `${courseNum}번`;
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
                     overlay.customType = 'planned'; 
                     
@@ -412,7 +455,7 @@ export function drawDriverOnMap(devId) {
 
     if (plannedPath.length > 1 && driverRoute) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
-            path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.7, strokeStyle: 'solid'
+            path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.75, strokeStyle: 'solid'
         });
         if (currentMode === 'all' || currentMode === 'planned') {
             window.mapPlannedPolyline.setMap(map);
@@ -515,12 +558,25 @@ export function handleGlobalSearch(query) {
         const dests = r.destinations || [];
         const p = r.phone || '기사';
         dests.forEach(d => {
-            if (d.address && (d.address.toLowerCase().includes(q) || p.includes(q))) {
+            const matchesAddr = d.address && d.address.toLowerCase().includes(q);
+            const matchesStore = d.storeName && d.storeName.toLowerCase().includes(q);
+            const matchesPhone = p.includes(q);
+            
+            if (matchesAddr || matchesStore || matchesPhone) {
                 const addrKey = d.address.trim();
                 if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
                 addressGroups[addrKey].push({
-                    type: 'PENDING', address: d.address, dateStr: todayStr, timeStr: '이동/대기 중',
-                    phone: p, devId: devId, lat: d.lat, lng: d.lng, displayNumber: d.displayNumber, timestamp: Date.now()
+                    type: 'PENDING', 
+                    address: d.address, 
+                    storeName: d.storeName || '',
+                    dateStr: todayStr, 
+                    timeStr: '이동/대기 중',
+                    phone: p, 
+                    devId: devId, 
+                    lat: d.lat, 
+                    lng: d.lng, 
+                    displayNumber: d.displayNumber, 
+                    timestamp: Date.now()
                 });
             }
         });
@@ -551,9 +607,10 @@ export function handleGlobalSearch(query) {
     uniqueAddresses.slice(0, 15).forEach((addr) => {
         const items = addressGroups[addr]; items.sort((a,b) => b.timestamp - a.timestamp);
         const latest = items[0]; const isToday = (latest.dateStr === todayStr);
+        const storeLabel = latest.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${latest.storeName}</span>` : '';
         html += `
         <div class="border border-gray-200 rounded-2xl p-3 bg-white hover:border-blue-300 transition shadow-xs">
-            <div class="flex justify-between items-center mb-1.5"><span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${latest.address}</span><span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span></div>
+            <div class="flex justify-between items-center mb-1.5"><span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${storeLabel}${latest.address}</span><span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span></div>
             <div onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
                 <div class="flex justify-between items-center text-xs">
                     <div class="flex items-center gap-1.5"><span class="text-[10px] font-black px-1.5 py-0.5 rounded ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span><span class="font-bold text-gray-800">${latest.phone}</span></div>
@@ -628,7 +685,6 @@ export function handleProFeature(featureName) {
         }
 
     } else if (featureName === 'INVOICE') {
-        // 🌟 주문서 통합관리 모달 열기: 3단 레이아웃 및 인쇄리스트, PDF 드롭존을 완벽하게 초기화
         if (window.exportToInvoiceModal) {
             window.exportToInvoiceModal();
         } else {
