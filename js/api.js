@@ -151,7 +151,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     };
 }
 
-// 3. 라이선스 상태 감시 (단발성 getDoc 최적화)
+// 3. 라이선스 상태 감시
 export function watchLicenseStatus(key, callback, onUpdateCallback) {
     (async () => {
         try {
@@ -198,7 +198,7 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
     return () => {};
 }
 
-// 3-1. 주요 액션(스캔 시점 등) 단발성 1회 라이선스 유효성 검증 함수
+// 3-1. 주요 액션 1회 라이선스 검증
 export async function firebaseCheckLicenseOnce(key, deviceId) {
     if (!key) return { valid: false, msg: "라이선스 키가 올바르지 않습니다." };
     try {
@@ -277,7 +277,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (문서 삭제 및 빈 목록 완벽 대응)
+// 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (경합 버그 완벽 수정)
 export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let phone = "";
     let onRoutesReceived = null;
@@ -297,74 +297,60 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
     const unsubs = [];
     let lastHandledTime = 0;
+    const initializationTime = Date.now(); // 앱 로드 시점 기록
 
-    const handleRouteData = (data, sourceKey) => {
-        // 관제에서 초기화되었거나 배송지가 비어있는 경우 즉시 전체 비우기 실행
-        if (!data || !data.destinations || !Array.isArray(data.destinations) || data.destinations.length === 0) {
-            lastHandledTime = Date.now();
+    const handleRouteData = (data, exists) => {
+        const now = Date.now();
+
+        // 문서가 삭제되었거나 배송지 배열이 비어있는 경우 (관제 초기화 상태)
+        if (!exists || !data || !data.destinations || !Array.isArray(data.destinations) || data.destinations.length === 0) {
+            // [핵심 방어] 새로고침 직후 2초 이내에는 비어있는 문서가 기존 화면을 날려버리지 못하게 무시
+            if (now - initializationTime < 2000) {
+                return; 
+            }
+            
+            lastHandledTime = now;
             if (typeof onRoutesCleared === 'function') {
                 onRoutesCleared();
             }
-            return true;
+            return;
         }
         
-        // 동일 데이터 중복 처리 방지 및 최신성 검증
-        const updateTime = data.updatedAt || Date.now();
+        // 정상적인 최신 할당 데이터 처리
+        const updateTime = data.updatedAt || now;
         if (updateTime < lastHandledTime && (lastHandledTime - updateTime > 2000)) {
-            return false;
+            return; 
         }
+        
         lastHandledTime = updateTime;
-
         if (typeof onRoutesReceived === 'function') {
             onRoutesReceived(data.destinations, data);
         }
-        return true;
     };
 
-    // 1) deviceId 기준 실시간 리스너
     if (deviceId) {
         const devRef = doc(db, "routes", deviceId);
         const unsubDev = onSnapshot(devRef, (docSnap) => {
-            if (docSnap.exists()) {
-                handleRouteData(docSnap.data(), deviceId);
-            } else {
-                // 관제에서 문서를 삭제(할당 초기화)한 경우 즉시 앱 화면도 비움
-                if (typeof onRoutesCleared === 'function') {
-                    onRoutesCleared();
-                }
-            }
+            handleRouteData(docSnap.data(), docSnap.exists());
         }, (err) => console.warn("deviceId 동선 감시 오류:", err));
         unsubs.push(unsubDev);
     }
 
-    // 2) phone 기준 실시간 리스너 (숫자 형태 및 원본 형태 동시 감시)
     if (phone) {
         const cleanPhone = phone.replace(/[^0-9]/g, '');
         if (cleanPhone && cleanPhone !== deviceId) {
             const phoneRef = doc(db, "routes", cleanPhone);
             const unsubPhone = onSnapshot(phoneRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    handleRouteData(docSnap.data(), cleanPhone);
-                } else {
-                    if (typeof onRoutesCleared === 'function') {
-                        onRoutesCleared();
-                    }
-                }
-            }, (err) => console.warn("cleanPhone 동선 감시 오류:", err));
+                handleRouteData(docSnap.data(), docSnap.exists());
+            }, (err) => console.warn("cleanPhone 감시 오류:", err));
             unsubs.push(unsubPhone);
         }
 
         if (phone !== cleanPhone && phone !== deviceId) {
             const rawPhoneRef = doc(db, "routes", phone);
             const unsubRawPhone = onSnapshot(rawPhoneRef, (docSnap) => {
-                if (docSnap.exists()) {
-                    handleRouteData(docSnap.data(), phone);
-                } else {
-                    if (typeof onRoutesCleared === 'function') {
-                        onRoutesCleared();
-                    }
-                }
-            }, (err) => console.warn("rawPhone 동선 감시 오류:", err));
+                handleRouteData(docSnap.data(), docSnap.exists());
+            }, (err) => console.warn("rawPhone 감시 오류:", err));
             unsubs.push(unsubRawPhone);
         }
     }
@@ -376,30 +362,40 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     };
 }
 
-// 4-2. 포그라운드 복귀 시(화면 켰을 때) 최신 동선 1회 단발성 즉시 동기화 함수
+export const startAssignedRouteListener = listenToActiveRoutes;
+
+// 🌟 4-2. 포그라운드 복귀(화면 켬) 시 1회 즉시 동기화 보조 함수
 export async function fetchActiveRouteOnce(deviceId, phone) {
     try {
         const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
-        if (deviceId) {
-            const devSnap = await getDoc(doc(db, "routes", deviceId));
-            if (devSnap.exists()) return devSnap.data();
-        }
-        if (cleanPhone) {
-            const phoneSnap = await getDoc(doc(db, "routes", cleanPhone));
-            if (phoneSnap.exists()) return phoneSnap.data();
-        }
-        if (phone && phone !== cleanPhone) {
-            const rawPhoneSnap = await getDoc(doc(db, "routes", phone));
-            if (rawPhoneSnap.exists()) return rawPhoneSnap.data();
-        }
-        return null;
+        let latestData = null;
+        let latestTime = -1;
+
+        const checkDoc = async (id) => {
+            if (!id) return;
+            const snap = await getDoc(doc(db, "routes", id));
+            if (snap.exists()) {
+                const d = snap.data();
+                if (d && d.destinations && d.destinations.length > 0) {
+                    const t = d.updatedAt || 0;
+                    if (t > latestTime) {
+                        latestTime = t;
+                        latestData = d;
+                    }
+                }
+            }
+        };
+
+        await checkDoc(deviceId);
+        await checkDoc(cleanPhone);
+        if (phone !== cleanPhone) await checkDoc(phone);
+
+        return latestData;
     } catch (e) {
         console.warn("최신 동선 단발 조회 오류:", e);
         return null;
     }
 }
-
-export const startAssignedRouteListener = listenToActiveRoutes;
 
 // 5. 관제 메시지 리스너 (최신 5건 한정 구독)
 export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessageReceived) {
