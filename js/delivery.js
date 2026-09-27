@@ -77,9 +77,9 @@ export function triggerPhotoCompletion() {
 }
 
 // ==========================================
-// 5. 배송 완료 최종 확정 처리 (관제 실시간 동기화 포함)
+// 5. 배송 완료 최종 확정 처리 (사전 수신 GPS 파라미터 지원)
 // ==========================================
-export async function confirmCompletion(photoUrl = null) {
+export async function confirmCompletion(photoUrl = null, precomputedGps = null) {
     if (typeof photoUrl !== 'string') photoUrl = null;
     
     if (!photoUrl && !selectedCompTag) { 
@@ -109,12 +109,18 @@ export async function confirmCompletion(photoUrl = null) {
 
     document.getElementById('completion-modal')?.classList.add('hidden');
 
-    const loadingMsg = photoUrl 
-        ? "사진 등록 및 현장 GPS 완료 처리 중..." 
-        : "현장 실제 GPS 수신 및 완료 처리 중...";
-    showLoading(loadingMsg);
+    // 사전 측정된 GPS가 없을 때만 단독 GPS 측정 진행
+    let realGps = precomputedGps;
+    if (!realGps) {
+        const loadingMsg = photoUrl 
+            ? "사진 등록 및 현장 GPS 완료 처리 중..." 
+            : "현장 실제 GPS 수신 및 완료 처리 중...";
+        showLoading(loadingMsg);
+        realGps = await getDeviceRealGPS();
+    } else {
+        showLoading("완료 정보 저장 중...");
+    }
     
-    const realGps = await getDeviceRealGPS();
     let actualLat = item.lat;
     let actualLng = item.lng;
     let isRealGpsCaptured = false;
@@ -200,7 +206,7 @@ export function cancelDestination(id) {
 }
 
 // ==========================================
-// 7. 배송 완료 카메라 input 리스너 초기화
+// 7. 배송 완료 카메라 input 리스너 초기화 (병렬 고속 처리 탑재)
 // ==========================================
 export function initPhotoCompletion() {
     const photoInput = document.getElementById('completion-photo-input');
@@ -212,14 +218,21 @@ export function initPhotoCompletion() {
 
         document.getElementById('completion-modal')?.classList.add('hidden');
 
-        showLoading("사진 압축 및 서버 전송 중...");
+        showLoading("사진 전송 및 현장 GPS 확인 중...");
         try {
             const deviceId = getOrCreateDeviceId();
-            const photoUrl = await firebaseUploadDeliveryPhoto(file, deviceId);
-            await confirmCompletion(photoUrl);
+
+            // 🌟 [병렬 고속 파이프라인]: 사진 업로드와 GPS 좌표 수신을 동시에 가동
+            const [photoUrl, realGps] = await Promise.all([
+                firebaseUploadDeliveryPhoto(file, deviceId),
+                getDeviceRealGPS()
+            ]);
+
+            // 이미 확보된 GPS 값을 전달하여 재대기 없이 즉시 완료 확정
+            await confirmCompletion(photoUrl, realGps);
         } catch (err) {
             hideLoading();
-            alert("사진 전송 중 오류가 발생했습니다: " + err.message);
+            alert("사진 완료 처리 중 오류가 발생했습니다: " + err.message);
         } finally {
             e.target.value = '';
         }

@@ -36,8 +36,8 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// 이미지 클라이언트 압축 함수
-async function compressImageToBlob(file, maxDimension = 1280, quality = 0.75) {
+// 🌟 [속도 최적화] 이미지 클라이언트 초고속 압축 함수 (배송 증빙 최적화: 960px / 0.65 품질)
+async function compressImageToBlob(file, maxDimension = 960, quality = 0.65) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -86,9 +86,9 @@ export async function checkIfDeviceBlocked(deviceId) {
     }
 }
 
-// 1. 배송 완료 사진 업로드
+// 🌟 1. 배송 완료 사진 고속 업로드 (경량화 규격 적용)
 export async function firebaseUploadDeliveryPhoto(file, deviceId) {
-    const blob = await compressImageToBlob(file, 1280, 0.75);
+    const blob = await compressImageToBlob(file, 960, 0.65);
     const safeDeviceId = (deviceId || 'dev').replace(/[^a-zA-Z0-9_-]/g, '');
     const filePath = `delivery_photos/${Date.now()}_${safeDeviceId}.jpg`;
     const storageRef = ref(storage, filePath);

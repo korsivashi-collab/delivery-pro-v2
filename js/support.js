@@ -204,10 +204,12 @@ export function cleanOldHistory() {
     localStorage.setItem('deliveryPro_history', JSON.stringify(history));
 }
 
+// 🌟 [UI 개편] 겹침 현상 원천 차단 및 시원한 주소 가독성을 보장하는 2단 카드 레이아웃
 export function openHistoryModal() {
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
     let container = document.getElementById('history-list-container');
     if (!container) return;
+    
     if (history.length === 0) {
         container.innerHTML = `<div class="text-center text-gray-400 py-16 text-sm"><p>완료된 배송 이력이 없습니다.</p></div>`;
     } else {
@@ -218,30 +220,48 @@ export function openHistoryModal() {
         });
         let html = '';
         for (let date in grouped) {
-            html += `<div class="sticky top-0 bg-white/95 backdrop-blur-sm z-10 py-2 mt-1 mb-2 border-b border-gray-100"><span class="text-[11px] font-black text-gray-600 bg-gray-100 px-2 py-1 rounded-md">${date}</span></div><div class="space-y-2 mb-4">`;
+            html += `<div class="sticky top-0 bg-white/95 backdrop-blur-sm z-10 py-2 mt-1 mb-2 border-b border-gray-100"><span class="text-[11px] font-black text-gray-600 bg-gray-100 px-2.5 py-1 rounded-md shadow-2xs">${date}</span></div><div class="space-y-2 mb-4">`;
             let dailyTotal = grouped[date].length;
             grouped[date].forEach((h, idx) => { 
                 let sequentialNum = dailyTotal - idx;
+                
+                // 완료 및 취소 상태 태그
                 let tagBadge = "";
                 if (h.tag) {
                     if (h.tag === "배송 취소") {
-                        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
+                        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${h.tag}]</span>`;
                     } else {
-                        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1.5 shrink-0 whitespace-nowrap shadow-sm">[${h.tag}]</span>`;
+                        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${h.tag}]</span>`;
                     }
                 }
-                let photoBadge = h.photoUrl 
-                    ? `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0 flex items-center gap-0.5 shadow-sm active:bg-blue-100"><i class="fa-solid fa-camera"></i> 사진</a>`
-                    : (h.hasPhoto ? `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[9px] font-black px-1.5 py-0.5 rounded ml-1 shrink-0"><i class="fa-solid fa-camera"></i></span>` : "");
+
+                // 사진 증빙 뱃지 (클릭 시 원본 사진 새창 확인 지원)
+                let photoBadge = "";
+                if (h.photoUrl) {
+                    photoBadge = `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs active:bg-blue-200 transition"><i class="fa-solid fa-camera"></i> 사진보기</a>`;
+                } else if (h.hasPhoto) {
+                    photoBadge = `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-camera"></i> 사진</span>`;
+                }
+
                 html += `
-                <div class="bg-gray-50 border border-gray-200 p-2.5 rounded-xl flex justify-between items-center text-xs shadow-sm">
-                    <div class="flex items-center gap-1.5 flex-1 min-w-0">
-                        <span class="bg-gray-200 text-gray-700 font-bold px-2 py-0.5 rounded-full shrink-0 text-[10px]">${sequentialNum}건</span>
-                        <span class="font-bold text-gray-800 truncate ml-0.5">${h.address}</span>${tagBadge}${photoBadge}
+                <div class="bg-white border border-gray-200 p-3 rounded-2xl flex flex-col gap-2 shadow-2xs">
+                    <!-- 1열: 순번, 태그, 사진배지 / 시간, 복원버튼 -->
+                    <div class="flex justify-between items-center gap-2">
+                        <div class="flex items-center gap-1.5 flex-wrap min-w-0">
+                            <span class="bg-gray-100 text-gray-700 font-black px-2 py-0.5 rounded-full text-[10px] shrink-0">${sequentialNum}건</span>
+                            ${tagBadge}
+                            ${photoBadge}
+                        </div>
+                        <div class="flex items-center gap-2 shrink-0">
+                            <span class="text-gray-400 text-[10px] font-mono">${h.time}</span>
+                            <button onclick="restoreHistoryItem(${h.timestamp})" class="bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition flex items-center">
+                                <i class="fa-solid fa-rotate-left mr-1"></i> 복원
+                            </button>
+                        </div>
                     </div>
-                    <div class="flex items-center gap-2 shrink-0 ml-2">
-                        <span class="text-gray-400 text-[9px] font-semibold">${h.time}</span>
-                        <button onclick="restoreHistoryItem(${h.timestamp})" class="bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1.5 rounded-lg text-[10px] font-bold active:bg-blue-100 shadow-sm transition flex items-center"><i class="fa-solid fa-rotate-left mr-1"></i> 복원</button>
+                    <!-- 2열: 전체 주소지 및 상호명 (절대 겹치지 않고 시원하게 표시) -->
+                    <div class="font-bold text-gray-800 text-[12px] break-keep leading-snug pl-0.5">
+                        ${h.address || "주소 정보 없음"}
                     </div>
                 </div>`; 
             });

@@ -320,7 +320,7 @@ export function openStartSelectionModal() {
         const title = fmt.storeName ? `[${fmt.storeName}] ${fmt.cleanAddr}` : fmt.cleanAddr;
         html += `
             <button onclick="selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
-                <span class="font-bold text-gray-800 text-[13px] break-keep flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
+                <span class="font-bold text-gray-800 text-[13.5px] break-keep flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
                 <i class="fa-solid fa-check text-gray-300"></i>
             </button>
         `;
@@ -442,7 +442,7 @@ export function moveDestinationDown(id) {
 }
 
 // ==========================================
-// 7. 배송 목록 메인 렌더링
+// 7. 배송 목록 메인 렌더링 (🌟 터치 영역 및 폰트 밸런스 최적화)
 // ==========================================
 export function renderList() {
     const listEl = document.getElementById('destination-list');
@@ -484,18 +484,19 @@ export function renderList() {
             if (dest.orderNo) {
                 li.setAttribute('data-orderno', dest.orderNo);
             }
-            li.className = "bg-white p-2.5 rounded-xl shadow-sm border border-gray-200 flex flex-col gap-1.5";
+            li.className = "bg-white p-3 rounded-2xl shadow-xs border border-gray-200 flex flex-col gap-2";
             
+            // 순번 배지 크기를 6x6으로 확대하여 시인성 개선
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
-                `<div class="bg-indigo-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
-                `<div class="bg-blue-600 text-white font-black w-5 h-5 rounded-full flex items-center justify-center text-[10px] shadow-sm shrink-0">${dest.displayNumber}</div>`;
+                `<div class="bg-indigo-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[10px]"></i></div>` : 
+                `<div class="bg-blue-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-sm shrink-0">${dest.displayNumber}</div>`;
             
-            // 전화번호 정제
+            // 전화번호 정제 및 폰트 크기 계산
             let customerPhoneStr = sanitizePhoneNumber(dest.phone || ""); 
-            let dynamicTextSize = "text-[13px]"; 
-            if (customerPhoneStr.length >= 13) dynamicTextSize = "text-[10px]"; 
-            else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
-            else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12px]";
+            let dynamicTextSize = "text-[13.5px]"; 
+            if (customerPhoneStr.length >= 13) dynamicTextSize = "text-[11px]"; 
+            else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[12px]"; 
+            else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[12.5px]";
 
             // 주소지 표시 (상호명 배지와 도로명 주소 원본 보존)
             const formatted = formatDisplayAddress(dest.address, dest.storeName);
@@ -503,11 +504,11 @@ export function renderList() {
             
             if (formatted.storeName) {
                 displayAddressHTML = `
-                    <span class="text-blue-600 block text-[11px] mb-0.5 leading-none font-bold">🏢 ${formatted.storeName}</span>
-                    <span class="block leading-tight text-gray-800 break-keep font-bold">${formatted.cleanAddr}</span>
+                    <span class="text-blue-600 block text-[11.5px] mb-0.5 leading-none font-bold">🏢 ${formatted.storeName}</span>
+                    <span class="block leading-snug text-gray-900 break-keep font-extrabold text-[13.5px]">${formatted.cleanAddr}</span>
                 `;
             } else {
-                displayAddressHTML = `<span class="block leading-tight text-gray-800 break-keep font-bold">${formatted.cleanAddr}</span>`;
+                displayAddressHTML = `<span class="block leading-snug text-gray-900 break-keep font-extrabold text-[13.5px]">${formatted.cleanAddr}</span>`;
             }
 
             // 내비게이션 앱 목적지 명칭
@@ -517,45 +518,48 @@ export function renderList() {
             const isLast = index === destinations.length - 1;
 
             li.innerHTML = `
-                <div class="flex items-center gap-1.5 pb-1">
-                    <!-- 위/아래 순서 변경 버튼 -->
-                    <div class="flex flex-col items-center justify-center gap-1.5 shrink-0 -ml-1 mr-0.5">
-                        <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[18px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
+                <div class="flex items-center gap-2 pb-0.5">
+                    <!-- 위/아래 순서 변경 버튼: 터치 안정감을 위해 높이 21px로 개선 -->
+                    <div class="flex flex-col items-center justify-center gap-1 shrink-0 -ml-0.5 mr-0.5">
+                        <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[21px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
                         </button>
-                        <button onclick="moveDestinationDown(${dest.id})" ${isLast ? 'disabled' : ''} class="w-6 h-[18px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="아래로 이동">
+                        <button onclick="moveDestinationDown(${dest.id})" ${isLast ? 'disabled' : ''} class="w-6 h-[21px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="아래로 이동">
                             <i class="fa-solid fa-chevron-down text-[10px]"></i>
                         </button>
                     </div>
                     ${numberBadge}
-                    <div class="font-bold text-gray-900 text-[13px] flex-1 ml-0.5 min-w-0 flex flex-col justify-center">
+                    <div class="font-bold text-gray-900 flex-1 ml-0.5 min-w-0 flex flex-col justify-center">
                         ${displayAddressHTML}
                     </div>
-                    <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 p-1.5 -mr-1 shrink-0"><i class="fa-solid fa-pen text-[13px]"></i></button>
+                    <!-- 수정 버튼 터치 영역 확장 -->
+                    <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 w-8 h-8 flex items-center justify-center -mr-1.5 shrink-0 rounded-lg active:bg-gray-100 transition"><i class="fa-solid fa-pen text-[14px]"></i></button>
                 </div>
                 
-                <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-1 mt-1"></div>
-                <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded p-1.5 text-[11px] text-gray-800 border border-gray-100 truncate shadow-sm mb-1 mt-1"></div>
+                <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-0.5 mt-0.5"></div>
+                <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded-lg p-2 text-[11.5px] text-gray-800 border border-gray-100 truncate shadow-2xs mb-0.5 mt-0.5"></div>
                 <!-- 공용 메모 아랫단에 개인 메모 표시 슬롯 -->
-                <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50 rounded p-1.5 text-[11px] text-emerald-950 border border-emerald-200 truncate shadow-sm mb-1.5 mt-0.5"></div>
+                <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50 rounded-lg p-2 text-[11.5px] text-emerald-950 border border-emerald-200 truncate shadow-2xs mb-1 mt-0.5"></div>
                 
-                <div class="flex flex-col gap-1.5 mt-1 pt-2 border-t border-gray-100">
-                    <div class="flex gap-1.5 h-[40px]">
-                        ${customerPhoneStr ? `<a href="tel:${customerPhoneStr}" class="flex-none w-[115px] bg-green-50 text-green-700 border border-green-200 rounded-lg shadow-sm flex items-center justify-center active:bg-green-100 transition px-1.5 phone-number-box"><i class="fa-solid fa-phone mr-1 text-[11px] shrink-0"></i><span class="${dynamicTextSize} font-black tracking-tighter whitespace-nowrap">${customerPhoneStr}</span></a>` : `<div class="flex-none w-[115px] bg-gray-50 text-gray-400 border border-gray-100 rounded-lg shadow-sm flex items-center justify-center px-1.5"><i class="fa-solid fa-phone-slash mr-1 text-[11px]"></i><span class="text-[11px] font-bold whitespace-nowrap">번호 없음</span></div>`}
-                        <a href="sms:${customerPhoneStr}" class="flex-1 bg-sky-50 text-sky-600 border border-sky-200 rounded-lg shadow-sm flex items-center justify-center gap-1 active:bg-sky-100 transition ${!customerPhoneStr ? 'opacity-30 pointer-events-none' : ''}"><i class="fa-solid fa-comment-sms text-[14px]"></i><span class="text-[12px] font-black">문자</span></a>
-                        <button onclick="openMemoModal(${dest.id})" class="flex-1 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-lg shadow-sm flex items-center justify-center gap-1 active:bg-yellow-100 transition"><i class="fa-solid fa-pen-to-square text-[14px]"></i><span class="text-[12px] font-black">메모</span></button>
-                        <button onclick="completeDestination(${dest.id})" class="flex-1 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-lg shadow-sm flex items-center justify-center gap-1 active:bg-emerald-100 transition"><i class="fa-solid fa-check text-[15px]"></i><span class="text-[12px] font-black">완료</span></button>
+                <div class="flex flex-col gap-1.5 mt-0.5 pt-2 border-t border-gray-100">
+                    <!-- 버튼 1열: 전화/문자/메모/완료 (높이 42px로 쾌적한 터치감 확보) -->
+                    <div class="flex gap-1.5 h-[42px]">
+                        ${customerPhoneStr ? `<a href="tel:${customerPhoneStr}" class="flex-none w-[118px] bg-green-50 text-green-700 border border-green-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-green-100 transition px-2 phone-number-box"><i class="fa-solid fa-phone mr-1.5 text-[11px] shrink-0"></i><span class="${dynamicTextSize} font-black tracking-tight whitespace-nowrap">${customerPhoneStr}</span></a>` : `<div class="flex-none w-[118px] bg-gray-50 text-gray-400 border border-gray-100 rounded-xl shadow-2xs flex items-center justify-center px-2"><i class="fa-solid fa-phone-slash mr-1 text-[11px]"></i><span class="text-[11px] font-bold whitespace-nowrap">번호 없음</span></div>`}
+                        <a href="sms:${customerPhoneStr}" class="flex-1 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-sky-100 transition ${!customerPhoneStr ? 'opacity-30 pointer-events-none' : ''}"><i class="fa-solid fa-comment-sms text-[14px]"></i><span class="text-[12.5px] font-black">문자</span></a>
+                        <button onclick="openMemoModal(${dest.id})" class="flex-1 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-yellow-100 transition"><i class="fa-solid fa-pen-to-square text-[14px]"></i><span class="text-[12.5px] font-black">메모</span></button>
+                        <button onclick="completeDestination(${dest.id})" class="flex-1 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-emerald-100 transition"><i class="fa-solid fa-check text-[15px]"></i><span class="text-[13px] font-black">완료</span></button>
                     </div>
-                    <div class="flex gap-1.5 h-[36px]">
-                        <div class="flex-1 bg-gray-50 border border-gray-200 p-1 rounded-lg flex items-center gap-1.5">
-                            <span class="text-[11px] font-black text-gray-500 w-10 text-center leading-tight">길찾기</span>
+                    <!-- 버튼 2열: 길찾기(티맵/카카오) & 삭제 (높이 38px로 확장) -->
+                    <div class="flex gap-1.5 h-[38px]">
+                        <div class="flex-1 bg-gray-50 border border-gray-200 p-1 rounded-xl flex items-center gap-2 shadow-2xs">
+                            <span class="text-[11px] font-black text-gray-500 w-9 text-center leading-tight">길찾기</span>
                             <div class="w-px h-5 bg-gray-300"></div>
                             <div class="flex-1 grid grid-cols-2 gap-1.5 h-full">
-                                <button onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-black text-white text-[11px] font-bold rounded-md active:opacity-80 flex items-center justify-center gap-1 shadow-sm h-full"><i class="fa-solid fa-map-location-dot text-[10px]"></i> 티맵</button>
-                                <button onclick="openKakaoNaviDirect(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#FEE500] text-black text-[11px] font-bold rounded-md border border-yellow-400 active:bg-yellow-400 flex items-center justify-center gap-1 shadow-sm h-full"><i class="fa-solid fa-location-arrow text-[10px]"></i> 카카오</button>
+                                <button onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-black text-white text-[12px] font-bold rounded-lg active:opacity-80 flex items-center justify-center gap-1 shadow-2xs h-full"><i class="fa-solid fa-map-location-dot text-[11px]"></i> 티맵</button>
+                                <button onclick="openKakaoNaviDirect(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#FEE500] text-black text-[12px] font-bold rounded-lg border border-yellow-400 active:bg-yellow-400 flex items-center justify-center gap-1 shadow-2xs h-full"><i class="fa-solid fa-location-arrow text-[11px]"></i> 카카오</button>
                             </div>
                         </div>
-                        <button onclick="cancelDestination(${dest.id})" class="w-[50px] shrink-0 bg-red-50 text-red-500 border border-red-200 rounded-lg shadow-sm flex items-center justify-center active:bg-red-100 transition"><i class="fa-solid fa-trash-can text-[15px]"></i></button>
+                        <button onclick="cancelDestination(${dest.id})" class="w-[48px] shrink-0 bg-red-50 text-red-500 border border-red-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-red-100 transition" title="배송 취소"><i class="fa-solid fa-trash-can text-[15px]"></i></button>
                     </div>
                 </div>`;
             listEl.appendChild(li);
