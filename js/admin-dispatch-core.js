@@ -502,8 +502,13 @@ export function setMapPolylineMode(mode) {
 }
 
 // ==========================================
-// 🌟 4. 날짜 및 전역 검색 기능 (우측 슬라이드 패널 연동 완료)
+// 🌟 4. 전역 검색 및 과거 내역 확장 조회 (최근 1주일/1달/기간설정)
 // ==========================================
+let currentSearchQuery = '';
+let currentSearchRangeMode = 'today'; // 'today', '7days', '30days', 'custom'
+let currentSearchCustomStart = '';
+let currentSearchCustomEnd = '';
+
 export function changeDispatchDate(days) {
     const picker = document.getElementById('dispatch-date-picker');
     if (!picker) return;
@@ -525,31 +530,176 @@ export function resetDispatchDateToToday() {
     onDispatchDateChange();
 }
 
-export function clearSearchInput() {
-    document.getElementById('global-search-input').value = '';
-    const sidePanel = document.getElementById('search-result-side-panel');
-    if (sidePanel) sidePanel.classList.add('translate-x-full');
-    document.getElementById('search-clear-btn').classList.add('hidden');
+function ensureSearchSidePanel() {
+    let sidePanel = document.getElementById('search-result-side-panel');
+    if (!sidePanel) {
+        const mapSec = document.getElementById('map-section');
+        if (mapSec) {
+            sidePanel = document.createElement('div');
+            sidePanel.id = 'search-result-side-panel';
+            sidePanel.className = 'absolute top-0 right-0 h-full w-1/2 max-w-[500px] min-w-[340px] bg-white shadow-2xl z-[400] transform translate-x-full transition-transform duration-300 flex flex-col border-l border-gray-200';
+            sidePanel.innerHTML = `
+                <div class="px-5 py-3.5 border-b border-gray-200 bg-gray-50 flex justify-between items-center flex-none">
+                    <div>
+                        <h3 class="font-black text-gray-900 text-sm flex items-center gap-2">
+                            <i class="fa-solid fa-magnifying-glass text-blue-600"></i> 통합 검색 결과
+                        </h3>
+                        <p class="text-[11px] text-gray-500 font-bold mt-0.5">오늘 배송지 및 배정 기사 현황</p>
+                    </div>
+                    <button onclick="window.closeSearchSidePanel()" class="text-gray-400 hover:text-gray-700 bg-white border border-gray-200 rounded-lg p-1.5 shadow-sm transition active:scale-95">
+                        <i class="fa-solid fa-xmark text-lg px-1"></i>
+                    </button>
+                </div>
+                <div id="search-range-toolbar" class="px-4 py-2.5 bg-white border-b border-gray-200 flex-none"></div>
+                <div id="search-result-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar"></div>
+            `;
+            mapSec.appendChild(sidePanel);
+        }
+    }
+    return sidePanel;
 }
 
-export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
+export function closeSearchSidePanel() {
     const sidePanel = document.getElementById('search-result-side-panel');
     if (sidePanel) sidePanel.classList.add('translate-x-full');
-    
     clearSearchInput();
-    
-    if (dateStr) document.getElementById('dispatch-date-picker').value = dateStr;
-    setDispatchMode('DELIVERY', true);
-    if (devId) window.selectDriver(devId);
-    if (lat && lng && window.focusMapPosition) window.focusMapPosition(lat, lng);
 }
 
-export function handleGlobalSearch(query) {
+export function clearSearchInput() {
+    const input = document.getElementById('global-search-input');
+    if (input) input.value = '';
     const sidePanel = document.getElementById('search-result-side-panel');
-    const contentEl = document.getElementById('search-result-content');
+    if (sidePanel) sidePanel.classList.add('translate-x-full');
     const clearBtn = document.getElementById('search-clear-btn');
-    const q = query.trim().toLowerCase();
+    if (clearBtn) clearBtn.classList.add('hidden');
+    currentSearchQuery = '';
+    currentSearchRangeMode = 'today';
+}
+
+// 🌟 기사명/버튼 클릭 시 해당 기사의 배송 관리(동선) 뷰로 다이렉트 전환
+export function inspectDriverRoute(devId, dateStr) {
+    if (!devId || devId === '미배정') {
+        alert("배정된 기사가 없는 주문건입니다.");
+        return;
+    }
+    if (dateStr) {
+        const picker = document.getElementById('dispatch-date-picker');
+        if (picker) picker.value = dateStr;
+    }
+    setDispatchMode('DELIVERY', true);
+    selectDriver(devId);
     
+    // 지도가 잘 보이도록 우측 검색 패널 닫기
+    const sidePanel = document.getElementById('search-result-side-panel');
+    if (sidePanel) sidePanel.classList.add('translate-x-full');
+}
+
+// 🌟 배송 완료 사진 단독 뷰어 팝업
+export function viewSearchCompletionPhoto(imgUrl, addr, phone, time) {
+    let modal = document.getElementById('dispatch-search-photo-modal');
+    if (!modal) {
+        modal = document.createElement('div');
+        modal.id = 'dispatch-search-photo-modal';
+        modal.className = 'fixed inset-0 bg-black/80 z-[800] flex items-center justify-center p-4 backdrop-blur-sm';
+        modal.onclick = () => modal.classList.add('hidden');
+        modal.innerHTML = `
+            <div class="bg-white rounded-3xl overflow-hidden shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
+                <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
+                    <div class="min-w-0 pr-2">
+                        <h4 id="disp-photo-addr" class="font-black text-sm text-gray-900 truncate leading-snug"></h4>
+                        <p id="disp-photo-sub" class="text-[11px] text-gray-500 font-bold mt-0.5"></p>
+                    </div>
+                    <button onclick="document.getElementById('dispatch-search-photo-modal').classList.add('hidden')" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-700 flex items-center justify-center transition">
+                        <i class="fa-solid fa-xmark"></i>
+                    </button>
+                </div>
+                <div class="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-[300px]">
+                    <img id="disp-photo-img" src="" alt="배송 완료 사진" class="max-h-[65vh] max-w-full object-contain rounded-lg">
+                </div>
+                <div class="p-3 bg-white border-t border-gray-100 flex justify-between items-center text-xs">
+                    <span class="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-black">배송 완료 사진</span>
+                    <a id="disp-photo-link" href="#" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-black px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-sm">
+                        <i class="fa-solid fa-arrow-up-right-from-square"></i> 원본 새창 보기
+                    </a>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    }
+    document.getElementById('disp-photo-addr').innerText = addr || '주소 정보 없음';
+    document.getElementById('disp-photo-sub').innerText = `${phone || '기사'} | ${time || ''}`;
+    document.getElementById('disp-photo-img').src = imgUrl;
+    document.getElementById('disp-photo-link').href = imgUrl;
+    modal.classList.remove('hidden');
+}
+
+// 🌟 기간 필터 범위 판정 헬퍼
+function isTargetDateInRange(dStr, mode, customStart, customEnd) {
+    if (!dStr) return false;
+    if (mode === 'today') return dStr === todayStr;
+
+    const now = new Date();
+    const targetDate = new Date(dStr);
+    if (isNaN(targetDate.getTime())) return false;
+
+    if (mode === '7days') {
+        const past = new Date();
+        past.setDate(now.getDate() - 7);
+        past.setHours(0,0,0,0);
+        return targetDate >= past;
+    } else if (mode === '30days') {
+        const past = new Date();
+        past.setDate(now.getDate() - 30);
+        past.setHours(0,0,0,0);
+        return targetDate >= past;
+    } else if (mode === 'custom') {
+        if (!customStart || !customEnd) return true;
+        return dStr >= customStart && dStr <= customEnd;
+    }
+    return true;
+}
+
+export function setSearchRangeMode(mode) {
+    currentSearchRangeMode = mode;
+    handleGlobalSearch(currentSearchQuery, false);
+}
+
+export function applyCustomSearchRange() {
+    const sInput = document.getElementById('search-custom-start');
+    const eInput = document.getElementById('search-custom-end');
+    if (!sInput?.value || !eInput?.value) {
+        alert("시작일과 종료일을 모두 선택해 주세요.");
+        return;
+    }
+    if (sInput.value > eInput.value) {
+        alert("시작일이 종료일보다 클 수 없습니다.");
+        return;
+    }
+    currentSearchCustomStart = sInput.value;
+    currentSearchCustomEnd = eInput.value;
+    currentSearchRangeMode = 'custom';
+    handleGlobalSearch(currentSearchQuery, false);
+}
+
+export function resetSearchToToday() {
+    currentSearchRangeMode = 'today';
+    currentSearchCustomStart = '';
+    currentSearchCustomEnd = '';
+    handleGlobalSearch(currentSearchQuery, false);
+}
+
+export function handleGlobalSearch(query, isNewSearch = true) {
+    const sidePanel = ensureSearchSidePanel();
+    const contentEl = document.getElementById('search-result-content');
+    const toolbarEl = document.getElementById('search-range-toolbar');
+    const clearBtn = document.getElementById('search-clear-btn');
+    
+    if (isNewSearch) {
+        currentSearchQuery = (query || '').trim();
+        currentSearchRangeMode = 'today'; // 새 검색 시 항상 오늘 기본 노출
+    }
+
+    const q = currentSearchQuery.toLowerCase();
     if (!q) { 
         if (sidePanel) sidePanel.classList.add('translate-x-full'); 
         if (clearBtn) clearBtn.classList.add('hidden'); 
@@ -557,72 +707,208 @@ export function handleGlobalSearch(query) {
     }
     if (clearBtn) clearBtn.classList.remove('hidden');
 
+    // 1. 기간 확장 툴바 렌더링
+    if (toolbarEl) {
+        let rangeLabel = '';
+        if (currentSearchRangeMode === 'today') rangeLabel = `<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-black text-[11px]">오늘 (${todayStr})</span>`;
+        else if (currentSearchRangeMode === '7days') rangeLabel = `<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black text-[11px]">최근 1주일</span>`;
+        else if (currentSearchRangeMode === '30days') rangeLabel = `<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black text-[11px]">최근 1달</span>`;
+        else rangeLabel = `<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-black text-[11px]">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
+
+        toolbarEl.innerHTML = `
+            <div class="flex flex-col gap-2">
+                <div class="flex items-center justify-between text-xs">
+                    <span class="font-bold text-gray-600 flex items-center gap-1.5">
+                        <i class="fa-regular fa-calendar-check text-blue-600"></i> 조회 범위: ${rangeLabel}
+                    </span>
+                    ${currentSearchRangeMode !== 'today' ? `
+                    <button onclick="window.resetSearchToToday()" class="text-[11px] font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 transition">
+                        <i class="fa-solid fa-rotate-left mr-0.5"></i> 오늘만 보기
+                    </button>` : ''}
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap">
+                    <span class="text-[10px] text-gray-400 font-bold shrink-0">과거 내역:</span>
+                    <button onclick="window.setSearchRangeMode('7days')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === '7days' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+                        최근 1주일
+                    </button>
+                    <button onclick="window.setSearchRangeMode('30days')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === '30days' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+                        최근 1달
+                    </button>
+                    <button onclick="document.getElementById('custom-range-box').classList.toggle('hidden')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === 'custom' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
+                        기간 설정
+                    </button>
+                </div>
+                <div id="custom-range-box" class="${currentSearchRangeMode === 'custom' ? 'flex' : 'hidden'} items-center gap-1.5 bg-gray-50 p-2 rounded-xl border border-gray-200 mt-1">
+                    <input type="date" id="search-custom-start" value="${currentSearchCustomStart || todayStr}" class="bg-white border border-gray-300 rounded px-1.5 py-1 text-[11px] font-bold outline-none cursor-pointer flex-1">
+                    <span class="text-xs text-gray-400 font-bold">~</span>
+                    <input type="date" id="search-custom-end" value="${currentSearchCustomEnd || todayStr}" class="bg-white border border-gray-300 rounded px-1.5 py-1 text-[11px] font-bold outline-none cursor-pointer flex-1">
+                    <button onclick="window.applyCustomSearchRange()" class="bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black px-2.5 py-1 rounded transition shadow-2xs">
+                        조회
+                    </button>
+                </div>
+            </div>
+        `;
+    }
+
     const addressGroups = {};
+
+    // 2. 활성 동선(routes) 데이터 매칭
     for (let devId in state.activeRoutes) {
         const r = state.activeRoutes[devId];
         const dests = r.destinations || [];
         const p = r.phone || '기사';
         dests.forEach(d => {
             const matchesAddr = d.address && d.address.toLowerCase().includes(q);
+            const matchesFull = d.fullAddress && d.fullAddress.toLowerCase().includes(q);
             const matchesStore = d.storeName && d.storeName.toLowerCase().includes(q);
-            const matchesPhone = p.includes(q);
+            const matchesPhone = p.includes(q) || (d.phone && d.phone.includes(q));
             
-            if (matchesAddr || matchesStore || matchesPhone) {
-                const addrKey = d.address.trim();
-                if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
-                addressGroups[addrKey].push({
-                    type: 'PENDING', 
-                    address: d.address, 
-                    storeName: d.storeName || '',
-                    dateStr: todayStr, 
-                    timeStr: '이동/대기 중',
-                    phone: p, 
-                    devId: devId, 
-                    lat: d.lat, 
-                    lng: d.lng, 
-                    displayNumber: d.displayNumber, 
-                    timestamp: Date.now()
-                });
+            if (matchesAddr || matchesFull || matchesStore || matchesPhone) {
+                if (isTargetDateInRange(todayStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
+                    const addrKey = (d.address || d.fullAddress || '').trim();
+                    if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
+                    addressGroups[addrKey].push({
+                        type: 'PENDING', 
+                        address: d.address || d.fullAddress, 
+                        storeName: d.storeName || '',
+                        dateStr: todayStr, 
+                        timeStr: '이동/대기 중',
+                        phone: p, 
+                        devId: devId, 
+                        lat: d.lat, 
+                        lng: d.lng, 
+                        displayNumber: d.displayNumber, 
+                        timestamp: Date.now()
+                    });
+                }
             }
         });
     }
-    
+
+    // 3. 배송 완료 기록(completions) 매칭
     state.allCompletions.forEach(c => {
-        if (c.address && (c.address.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)))) {
-            const addrKey = c.address.trim();
-            if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
-            let dStr = todayStr; let tStr = '';
-            if (c.timeString && c.timeString.includes(' ')) { dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); tStr = c.timeString.split(' ')[1]; } 
-            else if (c.completedAt) { 
+        const matchesAddr = c.address && c.address.toLowerCase().includes(q);
+        const matchesPhone = (c.phone && c.phone.includes(q)) || (c.customerPhone && c.customerPhone.includes(q));
+        if (matchesAddr || matchesPhone) {
+            let dStr = '';
+            let tStr = '';
+            if (c.timeString && c.timeString.includes(' ')) { 
+                dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); 
+                tStr = c.timeString.split(' ')[1]; 
+            } else if (c.completedAt) { 
                 dStr = getLocalDateString(new Date(c.completedAt)); 
                 const dt = new Date(c.completedAt); 
                 tStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; 
             }
-            addressGroups[addrKey].push({
-                type: 'DONE', address: c.address, dateStr: dStr, timeStr: tStr, tag: c.tag || '전달완료',
-                phone: c.phone || '기사', devId: c.deviceId, lat: c.lat, lng: c.lng, timestamp: c.completedAt || 0
-            });
+
+            if (isTargetDateInRange(dStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
+                const addrKey = (c.address || '').trim();
+                if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
+                addressGroups[addrKey].push({
+                    type: 'DONE', 
+                    address: c.address, 
+                    dateStr: dStr, 
+                    timeStr: tStr, 
+                    tag: c.tag || '전달완료',
+                    phone: c.phone || '기사', 
+                    devId: c.deviceId, 
+                    lat: c.lat, 
+                    lng: c.lng, 
+                    photoUrl: c.photoUrl || '',
+                    timestamp: c.completedAt || 0
+                });
+            }
         }
     });
 
+    // 4. 업로드된 관제 엑셀 주문 리스트 매칭
+    if (state.parsedExcelList && state.parsedExcelList.length > 0) {
+        state.parsedExcelList.forEach(o => {
+            const matchesAddr = o.address && o.address.toLowerCase().includes(q);
+            const matchesFull = o.fullAddress && o.fullAddress.toLowerCase().includes(q);
+            const matchesStore = o.storeName && o.storeName.toLowerCase().includes(q);
+            const matchesPhone = (o.phone && o.phone.includes(q)) || (o.assignedDriver && o.assignedDriver.toLowerCase().includes(q));
+            
+            if (matchesAddr || matchesFull || matchesStore || matchesPhone) {
+                if (isTargetDateInRange(todayStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
+                    const addrKey = (o.address || o.fullAddress || '').trim();
+                    if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
+                    addressGroups[addrKey].push({
+                        type: 'EXCEL',
+                        address: o.address || o.fullAddress,
+                        storeName: o.storeName || '',
+                        dateStr: todayStr,
+                        timeStr: o.assignedDriver ? `담당: ${o.assignedDriver}` : '미배정',
+                        phone: o.assignedDriver || '미배정',
+                        devId: o.assignedDriver,
+                        lat: o.lat,
+                        lng: o.lng,
+                        timestamp: 1
+                    });
+                }
+            }
+        });
+    }
+
     const uniqueAddresses = Object.keys(addressGroups);
+    if (!contentEl) return;
+
     if (uniqueAddresses.length === 0) {
-        contentEl.innerHTML = `<div class="py-20 flex flex-col items-center justify-center space-y-3"><i class="fa-solid fa-magnifying-glass text-gray-300 text-4xl mb-2"></i><p class="text-sm text-gray-500 font-bold">검색 결과가 없습니다.</p></div>`; 
+        contentEl.innerHTML = `
+            <div class="py-20 flex flex-col items-center justify-center space-y-2">
+                <i class="fa-solid fa-magnifying-glass text-gray-300 text-3xl mb-1"></i>
+                <p class="text-sm text-gray-600 font-bold">지정된 기간 내 검색 결과가 없습니다.</p>
+                <p class="text-[11px] text-gray-400">상단의 [최근 1주일] 또는 [최근 1달]을 눌러 과거 내역을 확인해 보세요.</p>
+            </div>`; 
         if (sidePanel) sidePanel.classList.remove('translate-x-full'); 
         return;
     }
     
     let html = '';
-    uniqueAddresses.slice(0, 30).forEach((addr) => {
+    uniqueAddresses.slice(0, 40).forEach((addr) => {
         const items = addressGroups[addr]; 
         items.sort((a,b) => b.timestamp - a.timestamp);
         const latest = items[0]; 
         const isToday = (latest.dateStr === todayStr);
         const storeLabel = latest.storeName ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] px-1.5 py-0.5 rounded font-black mr-1.5 shrink-0">${latest.storeName}</span>` : '';
         
+        let statusBadge = '';
+        if (latest.type === 'DONE') {
+            statusBadge = `
+                <div class="flex items-center gap-1.5">
+                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-emerald-700 bg-emerald-100">
+                        ✓ 완료 [${latest.tag || '전달'}] ${latest.timeStr}
+                    </span>
+                    ${latest.photoUrl ? `
+                    <button onclick="event.stopPropagation(); window.viewSearchCompletionPhoto('${latest.photoUrl}', '${(latest.address || '').replace(/'/g, "\\'")}', '${latest.phone}', '${latest.timeStr}')" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] px-2 py-0.5 rounded shadow-xs flex items-center gap-1 transition active:scale-95">
+                        <i class="fa-solid fa-camera"></i> 사진
+                    </button>` : ''}
+                </div>
+            `;
+        } else if (latest.type === 'PENDING') {
+            statusBadge = `
+                <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-blue-700 bg-blue-100">
+                    ➔ 이동 대기중
+                </span>
+            `;
+        } else {
+            statusBadge = `
+                <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-amber-700 bg-amber-100">
+                    📦 배정 주문
+                </span>
+            `;
+        }
+
+        // 🌟 기사명을 클릭하면 바로 그 기사의 동선 뷰로 전환
+        const driverBtn = latest.phone && latest.phone !== '미배정'
+            ? `<button onclick="event.stopPropagation(); window.inspectDriverRoute('${latest.devId}', '${latest.dateStr}')" class="hover:bg-blue-100 bg-gray-100 text-blue-700 font-bold px-2 py-0.5 rounded text-[11px] flex items-center transition" title="클릭 시 기사의 오늘 배송 동선으로 이동합니다">
+                 <i class="fa-solid fa-truck text-[10px] mr-1 text-blue-500"></i>${latest.phone}
+               </button>`
+            : `<span class="text-gray-400 font-bold text-[11px]">기사 미배정</span>`;
+
         html += `
-        <div class="border border-gray-200 rounded-2xl p-4 bg-white hover:border-blue-400 hover:shadow-md transition shadow-sm cursor-pointer group" onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')">
-            <div class="flex justify-between items-start mb-3">
+        <div class="border border-gray-200 rounded-2xl p-4 bg-white hover:border-blue-400 hover:shadow-md transition shadow-sm cursor-pointer group" onclick="if(window.focusMapPosition && ${latest.lat} && ${latest.lng}){ window.focusMapPosition(${latest.lat}, ${latest.lng}); }">
+            <div class="flex justify-between items-start mb-2.5">
                 <div class="flex-1 min-w-0 pr-2">
                     <span class="font-black text-sm text-gray-900 leading-snug break-keep flex items-start">
                         <i class="fa-solid fa-location-dot text-red-500 mt-0.5 mr-1.5 text-xs shrink-0 group-hover:animate-bounce"></i>
@@ -632,18 +918,19 @@ export function handleGlobalSearch(query) {
                 <span class="bg-gray-100 text-gray-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0 mt-0.5 whitespace-nowrap">총 ${items.length}회</span>
             </div>
             <div class="p-3 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-blue-50/50 border-blue-200'}">
-                <div class="flex justify-between items-center text-xs">
+                <div class="flex justify-between items-center text-xs flex-wrap gap-1.5">
                     <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-black px-2 py-1 rounded shadow-sm ${isToday ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span>
-                        <span class="font-bold text-gray-800 flex items-center"><i class="fa-solid fa-truck text-[9px] text-gray-400 mr-1.5"></i>${latest.phone}</span>
+                        <span class="text-[10px] font-black px-2 py-0.5 rounded shadow-sm ${isToday ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}">
+                            ${latest.dateStr}
+                        </span>
+                        ${driverBtn}
                     </div>
-                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md ${latest.type === 'DONE' ? 'text-emerald-700 bg-emerald-100' : 'text-blue-700 bg-blue-100'}">
-                        ${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}]${latest.timeStr}` : `➔ 대기중`}
-                    </span>
+                    ${statusBadge}
                 </div>
             </div>
         </div>`;
     });
+
     contentEl.innerHTML = html; 
     if (sidePanel) sidePanel.classList.remove('translate-x-full');
 }
@@ -817,8 +1104,13 @@ window.changeDispatchDate = changeDispatchDate;
 window.onDispatchDateChange = onDispatchDateChange;
 window.resetDispatchDateToToday = resetDispatchDateToToday;
 window.clearSearchInput = clearSearchInput;
-window.jumpToDeliveryTarget = jumpToDeliveryTarget;
+window.closeSearchSidePanel = closeSearchSidePanel;
 window.handleGlobalSearch = handleGlobalSearch;
+window.inspectDriverRoute = inspectDriverRoute;
+window.viewSearchCompletionPhoto = viewSearchCompletionPhoto;
+window.setSearchRangeMode = setSearchRangeMode;
+window.applyCustomSearchRange = applyCustomSearchRange;
+window.resetSearchToToday = resetSearchToToday;
 window.updateProButtonsUI = updateProButtonsUI;
 window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
