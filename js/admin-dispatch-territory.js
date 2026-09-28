@@ -121,22 +121,10 @@ export function jumpToDriverDelivery(devId) {
 // ==========================================
 // 2. 실시간 지도 위치 추적
 // ==========================================
-function isAllowedWorkingHours() {
-    const now = new Date();
-    const day = now.getDay();
-    const hour = now.getHours();
-    return (day >= 1 && day <= 5) && (hour >= 9 && hour < 17);
-}
-
 export async function focusDriverLocationOnMap(devId) {
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const phoneName = matchedLic?.phone || '기사님';
 
-    if (!isAllowedWorkingHours()) {
-        alert("[프라이버시 보호 기능]\n\n기사님의 평일(월~금) 오전 9시 ~ 오후 5시 업무 시간 외에는 실시간 위치를 추적할 수 없습니다.\n\n시스템에 저장된 마지막 확인 위치를 표시합니다.");
-        showFallbackLocation(devId);
-        return;
-    }
     if (!map) return;
     closeCurrentLocationOverlay();
 
