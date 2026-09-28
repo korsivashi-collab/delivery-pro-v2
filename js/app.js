@@ -1,5 +1,3 @@
-// js/app.js
-
 // =================================================================
 // [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러
 // =================================================================
@@ -206,17 +204,21 @@ export async function initApp() {
         if (document.visibilityState === 'visible') {
             const deviceId = getOrCreateDeviceId();
             const phone = localStorage.getItem('deliveryProUserPhone') || "";
-            if (deviceId || phone) {
-                const latestRoute = await fetchActiveRouteOnce(deviceId, phone);
-                if (!latestRoute || !latestRoute.destinations || latestRoute.destinations.length === 0) {
-                    const currentDests = state.getDestinations();
-                    // 관제에는 비어있는데 기기 화면에만 남아있는 경우 즉시 초기화
-                    if (currentDests.length > 0) {
-                        state.setDestinations([]);
-                        state.setStartLocation(null);
-                        state.saveActiveData();
-                        renderList();
+            if ((deviceId || phone) && typeof fetchActiveRouteOnce === 'function') {
+                try {
+                    const latestRoute = await fetchActiveRouteOnce(deviceId, phone);
+                    if (!latestRoute || !latestRoute.destinations || latestRoute.destinations.length === 0) {
+                        const currentDests = state.getDestinations();
+                        // 관제에는 비어있는데 기기 화면에만 남아있는 경우 즉시 초기화
+                        if (currentDests.length > 0) {
+                            state.setDestinations([]);
+                            state.setStartLocation(null);
+                            state.saveActiveData();
+                            renderList();
+                        }
                     }
+                } catch (err) {
+                    console.warn("포그라운드 복귀 동선 동기화 확인 실패:", err);
                 }
             }
         }
@@ -250,7 +252,7 @@ export function updateDisplayNumbers() {
 }
 
 // ==========================================
-// 3. 밀어서 최적화(스와이프 버튼) 초기화
+// 3. 밀어서 최적화(스와이프 버튼) 초기화 (🌟 안드로이드 터치 스크롤 간섭 차단 및 위치 보정)
 // ==========================================
 function initSwipeButton() {
     const swipeContainer = document.getElementById('swipe-container');
@@ -259,30 +261,39 @@ function initSwipeButton() {
     
     let isDragging = false;
     let startX = 0; 
-    let btnLeft = 6;
+    let btnInitialLeft = 4;
     
     function startDrag(e) {
         isDragging = true;
         startX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
+        btnInitialLeft = swipeBtn.offsetLeft || 4;
         swipeBtn.style.transition = 'none';
     }
     
     function moveDrag(e) {
         if (!isDragging) return;
+        
+        // 안드로이드 웹뷰에서 스와이프 도중 상하 화면 스크롤이 트리거되는 현상 완벽 방지
+        if (e.cancelable && e.type.includes('touch')) {
+            e.preventDefault();
+        }
+
         const currentX = e.type.includes('mouse') ? e.clientX : e.touches[0].clientX;
         let moveX = currentX - startX;
-        let newLeft = btnLeft + moveX;
-        let maxW = swipeContainer.offsetWidth - swipeBtn.offsetWidth - 6;
+        let newLeft = btnInitialLeft + moveX;
+        let maxW = swipeContainer.offsetWidth - swipeBtn.offsetWidth - 4;
         
-        if (newLeft < 6) newLeft = 6;
+        if (newLeft < 4) newLeft = 4;
         if (newLeft > maxW) newLeft = maxW;
         
-        swipeBtn.style.transform = `translateX(${newLeft - 6}px)`;
+        swipeBtn.style.transform = `translateX(${newLeft - btnInitialLeft}px)`;
         
-        if (newLeft >= maxW - 2) {
+        // 끝 지점 근처(끝에서 4px 이내)에 도달하면 즉각 실행
+        if (newLeft >= maxW - 4) {
             isDragging = false;
             swipeBtn.style.transform = `translateX(0px)`;
             swipeBtn.style.transition = 'transform 0.3s cubic-bezier(0.16, 1, 0.3, 1)';
+            if (navigator.vibrate) navigator.vibrate(30);
             openStartSelectionModal();
         }
     }
@@ -442,7 +453,7 @@ export function moveDestinationDown(id) {
 }
 
 // ==========================================
-// 7. 배송 목록 메인 렌더링 (🌟 시인성 및 터치 영역 확대)
+// 7. 배송 목록 메인 렌더링 (시인성 및 터치 영역 확대)
 // ==========================================
 export function renderList() {
     const listEl = document.getElementById('destination-list');
@@ -542,14 +553,14 @@ export function renderList() {
                 <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50 rounded-lg p-2 text-[11.5px] text-emerald-950 border border-emerald-200 truncate shadow-2xs mb-1 mt-0.5"></div>
                 
                 <div class="flex flex-col gap-1.5 mt-0.5 pt-2 border-t border-gray-100">
-                    <!-- 🌟 버튼 1열: 전화/문자/메모/완료 (높이 42px 및 폰트 확대) -->
+                    <!-- 버튼 1열: 전화/문자/메모/완료 (높이 42px 및 폰트 확대) -->
                     <div class="flex gap-1.5 h-[42px]">
                         ${customerPhoneStr ? `<a href="tel:${customerPhoneStr}" class="flex-none w-[106px] bg-green-50 text-green-700 border border-green-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-green-100 transition px-1.5 phone-number-box"><i class="fa-solid fa-phone mr-1 text-[11px] shrink-0"></i><span class="${dynamicTextSize} font-black tracking-tight whitespace-nowrap">${customerPhoneStr}</span></a>` : `<div class="flex-none w-[106px] bg-gray-50 text-gray-400 border border-gray-100 rounded-xl shadow-2xs flex items-center justify-center px-1.5"><i class="fa-solid fa-phone-slash mr-1 text-[11px] shrink-0"></i><span class="text-[10.5px] font-bold whitespace-nowrap">번호 없음</span></div>`}
                         <a href="sms:${customerPhoneStr}" class="flex-1 min-w-0 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-sky-100 transition flex-nowrap ${!customerPhoneStr ? 'opacity-30 pointer-events-none' : ''}"><i class="fa-solid fa-comment-sms text-[13px] shrink-0"></i><span class="text-[12.5px] font-black whitespace-nowrap tracking-tight">문자</span></a>
                         <button onclick="openMemoModal(${dest.id})" class="flex-1 min-w-0 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-yellow-100 transition flex-nowrap"><i class="fa-solid fa-pen-to-square text-[13px] shrink-0"></i><span class="text-[12.5px] font-black whitespace-nowrap tracking-tight">메모</span></button>
                         <button onclick="completeDestination(${dest.id})" class="flex-1 min-w-0 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-emerald-100 transition flex-nowrap"><i class="fa-solid fa-check text-[14px] shrink-0"></i><span class="text-[12.5px] font-black whitespace-nowrap tracking-tight">완료</span></button>
                     </div>
-                    <!-- 🌟 버튼 2열: 길찾기(티맵/카카오) & 삭제 (높이 38px 및 버튼 확대) -->
+                    <!-- 버튼 2열: 길찾기(티맵/카카오) & 삭제 (높이 38px 및 버튼 확대) -->
                     <div class="flex gap-1.5 h-[38px]">
                         <div class="flex-1 min-w-0 bg-gray-50 border border-gray-200 p-1 rounded-xl flex items-center gap-1.5 shadow-2xs">
                             <span class="text-[11.5px] font-black text-gray-500 px-1.5 shrink-0 whitespace-nowrap leading-none tracking-tight">길찾기</span>

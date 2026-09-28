@@ -1,4 +1,3 @@
-// js/api.js
 // =================================================================
 // [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈
 // =================================================================
@@ -277,7 +276,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (경합 버그 완벽 수정)
+// 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (경합 및 부팅 지연 방어)
 export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let phone = "";
     let onRoutesReceived = null;
@@ -297,19 +296,21 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
     const unsubs = [];
     let lastHandledTime = 0;
-    const initializationTime = Date.now(); // 앱 로드 시점 기록
+    const initializationTime = Date.now();
+    let hadExistingRoute = false;
 
     const handleRouteData = (data, exists) => {
         const now = Date.now();
 
-        // 문서가 삭제되었거나 배송지 배열이 비어있는 경우 (관제 초기화 상태)
+        // 문서가 삭제되었거나 배송지 목록이 비어있는 경우 (관제 초기화 상태)
         if (!exists || !data || !data.destinations || !Array.isArray(data.destinations) || data.destinations.length === 0) {
-            // [핵심 방어] 새로고침 직후 2초 이내에는 비어있는 문서가 기존 화면을 날려버리지 못하게 무시
-            if (now - initializationTime < 2000) {
+            // 앱 로드 후 2.5초 이내의 초기 미수신 상태이거나 이전에 동선을 수신한 적이 없다면 화면 초기화 무시
+            if ((now - initializationTime < 2500) && !hadExistingRoute) {
                 return; 
             }
             
             lastHandledTime = now;
+            hadExistingRoute = false;
             if (typeof onRoutesCleared === 'function') {
                 onRoutesCleared();
             }
@@ -323,6 +324,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
         }
         
         lastHandledTime = updateTime;
+        hadExistingRoute = true;
         if (typeof onRoutesReceived === 'function') {
             onRoutesReceived(data.destinations, data);
         }
@@ -364,19 +366,21 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
 export const startAssignedRouteListener = listenToActiveRoutes;
 
-// 🌟 4-2. 포그라운드 복귀(화면 켬) 시 1회 즉시 동기화 보조 함수
+// 🌟 4-2. 포그라운드 복귀(화면 켬) 시 1회 즉시 동기화 보조 함수 (오프라인 증발 방지 보호막 탑재)
 export async function fetchActiveRouteOnce(deviceId, phone) {
     try {
         const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
         let latestData = null;
         let latestTime = -1;
+        let foundAnyDoc = false;
 
         const checkDoc = async (id) => {
             if (!id) return;
             const snap = await getDoc(doc(db, "routes", id));
             if (snap.exists()) {
+                foundAnyDoc = true;
                 const d = snap.data();
-                if (d && d.destinations && d.destinations.length > 0) {
+                if (d) {
                     const t = d.updatedAt || 0;
                     if (t > latestTime) {
                         latestTime = t;
@@ -390,10 +394,16 @@ export async function fetchActiveRouteOnce(deviceId, phone) {
         await checkDoc(cleanPhone);
         if (phone !== cleanPhone) await checkDoc(phone);
 
-        return latestData;
+        // 서버에 아예 동선 문서가 없는 상태라면 기존 로컬 작업을 지우지 않도록 보호 객체 반환
+        if (!foundAnyDoc) {
+            return { destinations: ['PRESERVE_LOCAL_ON_NO_DOC'], isNoDoc: true };
+        }
+
+        return latestData || { destinations: [] };
     } catch (e) {
-        console.warn("최신 동선 단발 조회 오류:", e);
-        return null;
+        console.warn("최신 동선 단발 조회 오류 (로컬 유지 보호):", e);
+        // 통신 오류 발생 시에도 화면 증발 방지용 보호 객체 반환
+        return { destinations: ['PRESERVE_LOCAL_ON_ERROR'], isOffline: true };
     }
 }
 
@@ -631,6 +641,7 @@ export async function reportMemoInFirestore(docId) {
 // 8. 배송 경로 및 완료 내역 동기화
 export async function saveRouteToFirestore(deviceId, phone, destinations) {
     try {
+        if (!deviceId) return;
         const routeRef = doc(db, "routes", deviceId);
         await setDoc(routeRef, {
             phone: phone || "연락처 미등록",
