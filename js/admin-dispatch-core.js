@@ -544,13 +544,12 @@ function ensureSearchSidePanel() {
                         <h3 class="font-black text-gray-900 text-sm flex items-center gap-2">
                             <i class="fa-solid fa-magnifying-glass text-blue-600"></i> 통합 검색 결과
                         </h3>
-                        <p class="text-[11px] text-gray-500 font-bold mt-0.5">오늘 배송지 및 배정 기사 현황</p>
+                        <p class="text-[11px] text-gray-500 font-bold mt-0.5">배송지 및 배정 기사 현황</p>
                     </div>
                     <button onclick="window.closeSearchSidePanel()" class="text-gray-400 hover:text-gray-700 bg-white border border-gray-200 rounded-lg p-1.5 shadow-sm transition active:scale-95">
                         <i class="fa-solid fa-xmark text-lg px-1"></i>
                     </button>
                 </div>
-                <div id="search-range-toolbar" class="px-4 py-2.5 bg-white border-b border-gray-200 flex-none"></div>
                 <div id="search-result-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar"></div>
             `;
             mapSec.appendChild(sidePanel);
@@ -576,7 +575,7 @@ export function clearSearchInput() {
     currentSearchRangeMode = 'today';
 }
 
-// 🌟 [복구 완료] admin-app.js 연동용 타겟 점프 함수 (누락 오류 해결)
+// 🌟 [admin-app.js 연동] 타겟 점프 함수
 export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
     const sidePanel = document.getElementById('search-result-side-panel');
     if (sidePanel) sidePanel.classList.add('translate-x-full');
@@ -590,19 +589,30 @@ export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
     if (lat && lng && window.focusMapPosition) window.focusMapPosition(lat, lng);
 }
 
-// 🌟 기사명/버튼 클릭 시 해당 기사의 배송 관리(동선) 뷰로 다이렉트 전환
+// 🌟 기사명 클릭 시 해당 기사의 배송 관리 동선 뷰로 다이렉트 전환
 export function inspectDriverRoute(devId, dateStr) {
     if (!devId || devId === '미배정') {
-        alert("배정된 기사가 없는 주문건입니다.");
+        alert("배정된 기사 정보가 없는 주문건입니다.");
         return;
     }
+
+    const matched = state.allLicenses.find(l => 
+        l.deviceId === devId || 
+        l.key === devId || 
+        (l.phone && l.phone === devId) ||
+        (l.phone && devId.includes(l.phone))
+    );
+    const targetDevId = matched ? (matched.deviceId || matched.key) : devId;
+
+    setDispatchMode('DELIVERY', true);
+
     if (dateStr) {
         const picker = document.getElementById('dispatch-date-picker');
         if (picker) picker.value = dateStr;
     }
-    setDispatchMode('DELIVERY', true);
-    selectDriver(devId);
-    
+
+    selectDriver(targetDevId);
+
     const sidePanel = document.getElementById('search-result-side-panel');
     if (sidePanel) sidePanel.classList.add('translate-x-full');
 }
@@ -658,12 +668,12 @@ function isTargetDateInRange(dStr, mode, customStart, customEnd) {
     if (mode === '7days') {
         const past = new Date();
         past.setDate(now.getDate() - 7);
-        past.setHours(0,0,0,0);
+        past.setHours(0, 0, 0, 0);
         return targetDate >= past;
     } else if (mode === '30days') {
         const past = new Date();
         past.setDate(now.getDate() - 30);
-        past.setHours(0,0,0,0);
+        past.setHours(0, 0, 0, 0);
         return targetDate >= past;
     } else if (mode === 'custom') {
         if (!customStart || !customEnd) return true;
@@ -704,7 +714,6 @@ export function resetSearchToToday() {
 export function handleGlobalSearch(query, isNewSearch = true) {
     const sidePanel = ensureSearchSidePanel();
     const contentEl = document.getElementById('search-result-content');
-    const toolbarEl = document.getElementById('search-range-toolbar');
     const clearBtn = document.getElementById('search-clear-btn');
     
     if (isNewSearch) {
@@ -720,52 +729,9 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     }
     if (clearBtn) clearBtn.classList.remove('hidden');
 
-    // 1. 기간 확장 툴바 렌더링
-    if (toolbarEl) {
-        let rangeLabel = '';
-        if (currentSearchRangeMode === 'today') rangeLabel = `<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-black text-[11px]">오늘 (${todayStr})</span>`;
-        else if (currentSearchRangeMode === '7days') rangeLabel = `<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black text-[11px]">최근 1주일</span>`;
-        else if (currentSearchRangeMode === '30days') rangeLabel = `<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black text-[11px]">최근 1달</span>`;
-        else rangeLabel = `<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-black text-[11px]">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
-
-        toolbarEl.innerHTML = `
-            <div class="flex flex-col gap-2">
-                <div class="flex items-center justify-between text-xs">
-                    <span class="font-bold text-gray-600 flex items-center gap-1.5">
-                        <i class="fa-regular fa-calendar-check text-blue-600"></i> 조회 범위: ${rangeLabel}
-                    </span>
-                    ${currentSearchRangeMode !== 'today' ? `
-                    <button onclick="window.resetSearchToToday()" class="text-[11px] font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 transition">
-                        <i class="fa-solid fa-rotate-left mr-0.5"></i> 오늘만 보기
-                    </button>` : ''}
-                </div>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-[10px] text-gray-400 font-bold shrink-0">과거 내역:</span>
-                    <button onclick="window.setSearchRangeMode('7days')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === '7days' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
-                        최근 1주일
-                    </button>
-                    <button onclick="window.setSearchRangeMode('30days')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === '30days' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
-                        최근 1달
-                    </button>
-                    <button onclick="document.getElementById('custom-range-box').classList.toggle('hidden')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === 'custom' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">
-                        기간 설정
-                    </button>
-                </div>
-                <div id="custom-range-box" class="${currentSearchRangeMode === 'custom' ? 'flex' : 'hidden'} items-center gap-1.5 bg-gray-50 p-2 rounded-xl border border-gray-200 mt-1">
-                    <input type="date" id="search-custom-start" value="${currentSearchCustomStart || todayStr}" class="bg-white border border-gray-300 rounded px-1.5 py-1 text-[11px] font-bold outline-none cursor-pointer flex-1">
-                    <span class="text-xs text-gray-400 font-bold">~</span>
-                    <input type="date" id="search-custom-end" value="${currentSearchCustomEnd || todayStr}" class="bg-white border border-gray-300 rounded px-1.5 py-1 text-[11px] font-bold outline-none cursor-pointer flex-1">
-                    <button onclick="window.applyCustomSearchRange()" class="bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black px-2.5 py-1 rounded transition shadow-2xs">
-                        조회
-                    </button>
-                </div>
-            </div>
-        `;
-    }
-
     const addressGroups = {};
 
-    // 2. 활성 동선(routes) 데이터 매칭
+    // 1. 활성 동선(routes) 데이터 매칭
     for (let devId in state.activeRoutes) {
         const r = state.activeRoutes[devId];
         const dests = r.destinations || [];
@@ -798,7 +764,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
         });
     }
 
-    // 3. 배송 완료 기록(completions) 매칭
+    // 2. 배송 완료 기록(completions) 매칭
     state.allCompletions.forEach(c => {
         const matchesAddr = c.address && c.address.toLowerCase().includes(q);
         const matchesPhone = (c.phone && c.phone.includes(q)) || (c.customerPhone && c.customerPhone.includes(q));
@@ -811,7 +777,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
             } else if (c.completedAt) { 
                 dStr = getLocalDateString(new Date(c.completedAt)); 
                 const dt = new Date(c.completedAt); 
-                tStr = `${String(dt.getHours()).padStart(2,'0')}:${String(dt.getMinutes()).padStart(2,'0')}`; 
+                tStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`; 
             }
 
             if (isTargetDateInRange(dStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
@@ -834,7 +800,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
         }
     });
 
-    // 4. 업로드된 관제 엑셀 주문 리스트 매칭
+    // 3. 업로드된 관제 엑셀 주문 리스트 매칭
     if (state.parsedExcelList && state.parsedExcelList.length > 0) {
         state.parsedExcelList.forEach(o => {
             const matchesAddr = o.address && o.address.toLowerCase().includes(q);
@@ -866,82 +832,130 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     const uniqueAddresses = Object.keys(addressGroups);
     if (!contentEl) return;
 
+    let rangeTitleBadge = '';
+    if (currentSearchRangeMode === 'today') rangeTitleBadge = `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full">오늘 결과</span>`;
+    else if (currentSearchRangeMode === '7days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1주일 조회 중</span>`;
+    else if (currentSearchRangeMode === '30days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1달 조회 중</span>`;
+    else rangeTitleBadge = `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
+
+    let html = `
+        <div class="flex items-center justify-between pb-2 border-b border-gray-200">
+            <div class="flex items-center gap-1.5">
+                <span class="text-xs font-black text-gray-800">검색 내역</span>
+                ${rangeTitleBadge}
+            </div>
+            ${currentSearchRangeMode !== 'today' ? `
+            <button onclick="window.resetSearchToToday()" class="text-[11px] font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 transition">
+                <i class="fa-solid fa-rotate-left mr-0.5"></i> 오늘 결과만 보기
+            </button>` : ''}
+        </div>
+    `;
+
     if (uniqueAddresses.length === 0) {
-        contentEl.innerHTML = `
-            <div class="py-20 flex flex-col items-center justify-center space-y-2">
+        html += `
+            <div class="py-16 flex flex-col items-center justify-center space-y-2">
                 <i class="fa-solid fa-magnifying-glass text-gray-300 text-3xl mb-1"></i>
                 <p class="text-sm text-gray-600 font-bold">지정된 기간 내 검색 결과가 없습니다.</p>
-                <p class="text-[11px] text-gray-400">상단의 [최근 1주일] 또는 [최근 1달]을 눌러 과거 내역을 확인해 보세요.</p>
-            </div>`; 
-        if (sidePanel) sidePanel.classList.remove('translate-x-full'); 
-        return;
-    }
-    
-    let html = '';
-    uniqueAddresses.slice(0, 40).forEach((addr) => {
-        const items = addressGroups[addr]; 
-        items.sort((a,b) => b.timestamp - a.timestamp);
-        const latest = items[0]; 
-        const isToday = (latest.dateStr === todayStr);
-        const storeLabel = latest.storeName ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] px-1.5 py-0.5 rounded font-black mr-1.5 shrink-0">${latest.storeName}</span>` : '';
-        
-        let statusBadge = '';
-        if (latest.type === 'DONE') {
-            statusBadge = `
-                <div class="flex items-center gap-1.5">
-                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-emerald-700 bg-emerald-100">
-                        ✓ 완료 [${latest.tag || '전달'}] ${latest.timeStr}
-                    </span>
-                    ${latest.photoUrl ? `
-                    <button onclick="event.stopPropagation(); window.viewSearchCompletionPhoto('${latest.photoUrl}', '${(latest.address || '').replace(/'/g, "\\'")}', '${latest.phone}', '${latest.timeStr}')" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] px-2 py-0.5 rounded shadow-xs flex items-center gap-1 transition active:scale-95">
-                        <i class="fa-solid fa-camera"></i> 사진
-                    </button>` : ''}
-                </div>
-            `;
-        } else if (latest.type === 'PENDING') {
-            statusBadge = `
-                <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-blue-700 bg-blue-100">
-                    ➔ 이동 대기중
-                </span>
-            `;
-        } else {
-            statusBadge = `
-                <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-amber-700 bg-amber-100">
-                    📦 배정 주문
-                </span>
-            `;
-        }
-
-        const driverBtn = latest.phone && latest.phone !== '미배정'
-            ? `<button onclick="event.stopPropagation(); window.inspectDriverRoute('${latest.devId}', '${latest.dateStr}')" class="hover:bg-blue-100 bg-gray-100 text-blue-700 font-bold px-2 py-0.5 rounded text-[11px] flex items-center transition" title="클릭 시 기사의 오늘 배송 동선으로 이동합니다">
-                 <i class="fa-solid fa-truck text-[10px] mr-1 text-blue-500"></i>${latest.phone}
-               </button>`
-            : `<span class="text-gray-400 font-bold text-[11px]">기사 미배정</span>`;
-
-        html += `
-        <div class="border border-gray-200 rounded-2xl p-4 bg-white hover:border-blue-400 hover:shadow-md transition shadow-sm cursor-pointer group" onclick="if(window.focusMapPosition && ${latest.lat} && ${latest.lng}){ window.focusMapPosition(${latest.lat}, ${latest.lng}); }">
-            <div class="flex justify-between items-start mb-2.5">
-                <div class="flex-1 min-w-0 pr-2">
-                    <span class="font-black text-sm text-gray-900 leading-snug break-keep flex items-start">
-                        <i class="fa-solid fa-location-dot text-red-500 mt-0.5 mr-1.5 text-xs shrink-0 group-hover:animate-bounce"></i>
-                        <span>${storeLabel}${latest.address}</span>
-                    </span>
-                </div>
-                <span class="bg-gray-100 text-gray-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0 mt-0.5 whitespace-nowrap">총 ${items.length}회</span>
-            </div>
-            <div class="p-3 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-blue-50/50 border-blue-200'}">
-                <div class="flex justify-between items-center text-xs flex-wrap gap-1.5">
-                    <div class="flex items-center gap-2">
-                        <span class="text-[10px] font-black px-2 py-0.5 rounded shadow-sm ${isToday ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}">
-                            ${latest.dateStr}
+                <p class="text-[11px] text-gray-400">아래 버튼을 눌러 지난 내역을 다시 검색해 보세요.</p>
+            </div>`;
+    } else {
+        uniqueAddresses.slice(0, 40).forEach((addr) => {
+            const items = addressGroups[addr]; 
+            items.sort((a, b) => b.timestamp - a.timestamp);
+            const latest = items[0]; 
+            const isToday = (latest.dateStr === todayStr);
+            const storeLabel = latest.storeName ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] px-1.5 py-0.5 rounded font-black mr-1.5 shrink-0">${latest.storeName}</span>` : '';
+            
+            let statusBadge = '';
+            if (latest.type === 'DONE') {
+                statusBadge = `
+                    <div class="flex items-center gap-1.5">
+                        <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-emerald-700 bg-emerald-100">
+                            ✓ 완료 [${latest.tag || '전달'}] ${latest.timeStr}
                         </span>
-                        ${driverBtn}
+                        ${latest.photoUrl ? `
+                        <button type="button" onclick="event.stopPropagation(); window.viewSearchCompletionPhoto('${latest.photoUrl}', '${(latest.address || '').replace(/'/g, "\\'")}', '${latest.phone}', '${latest.timeStr}')" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] px-2 py-0.5 rounded shadow-xs flex items-center gap-1 transition active:scale-95">
+                            <i class="fa-solid fa-camera"></i> 사진보기
+                        </button>` : ''}
                     </div>
-                    ${statusBadge}
+                `;
+            } else if (latest.type === 'PENDING') {
+                statusBadge = `
+                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-blue-700 bg-blue-100">
+                        ➔ 이동 대기중
+                    </span>
+                `;
+            } else {
+                statusBadge = `
+                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-amber-700 bg-amber-100">
+                        📦 배정 주문
+                    </span>
+                `;
+            }
+
+            // 기사 클릭 시 해당 기사의 배송 관리 동선 뷰로 전환
+            const driverBtn = latest.phone && latest.phone !== '미배정'
+                ? `<button type="button" onclick="event.stopPropagation(); window.inspectDriverRoute('${latest.devId}', '${latest.dateStr}')" class="hover:bg-blue-600 hover:text-white bg-blue-50 text-blue-700 border border-blue-200 font-black px-2.5 py-1 rounded-lg text-xs flex items-center transition shadow-2xs active:scale-95" title="클릭 시 기사의 오늘 배송 동선으로 이동합니다">
+                     <i class="fa-solid fa-truck text-[10px] mr-1.5 text-blue-500"></i>${latest.phone}
+                   </button>`
+                : `<span class="text-gray-400 font-bold text-[11px]">기사 미배정</span>`;
+
+            html += `
+            <div class="border border-gray-200 rounded-2xl p-4 bg-white hover:border-blue-400 hover:shadow-md transition shadow-sm cursor-pointer group" onclick="if(window.focusMapPosition && ${latest.lat} && ${latest.lng}){ window.focusMapPosition(${latest.lat}, ${latest.lng}); }">
+                <div class="flex justify-between items-start mb-2.5">
+                    <div class="flex-1 min-w-0 pr-2">
+                        <span class="font-black text-sm text-gray-900 leading-snug break-keep flex items-start">
+                            <i class="fa-solid fa-location-dot text-red-500 mt-0.5 mr-1.5 text-xs shrink-0 group-hover:animate-bounce"></i>
+                            <span>${storeLabel}${latest.address}</span>
+                        </span>
+                    </div>
+                    <span class="bg-gray-100 text-gray-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0 mt-0.5 whitespace-nowrap">총 ${items.length}회</span>
                 </div>
+                <div class="p-3 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-blue-50/50 border-blue-200'}">
+                    <div class="flex justify-between items-center text-xs flex-wrap gap-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-black px-2 py-0.5 rounded shadow-sm ${isToday ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}">
+                                ${latest.dateStr}
+                            </span>
+                            ${driverBtn}
+                        </div>
+                        ${statusBadge}
+                    </div>
+                </div>
+            </div>`;
+        });
+    }
+
+    // 🌟 결과 밑에 배치되는 기간 확장 조회 툴바
+    html += `
+        <div class="mt-4 pt-4 border-t-2 border-dashed border-gray-200 flex flex-col gap-2.5 bg-white p-3.5 rounded-2xl shadow-xs">
+            <div class="flex items-center justify-between">
+                <span class="text-xs font-black text-gray-800 flex items-center gap-1.5">
+                    <i class="fa-solid fa-clock-rotate-left text-blue-600"></i> 지난 배송 내역 다시 검색
+                </span>
+                <span class="text-[10px] text-gray-400 font-bold">1주일 / 1달 / 기간 지정</span>
             </div>
-        </div>`;
-    });
+            <div class="grid grid-cols-3 gap-2">
+                <button type="button" onclick="window.setSearchRangeMode('7days')" class="py-2.5 ${currentSearchRangeMode === '7days' ? 'bg-purple-600 text-white' : 'bg-gray-50 hover:bg-purple-50 hover:text-purple-700 text-gray-700'} font-black text-xs rounded-xl border border-gray-200 transition active:scale-95 shadow-2xs">
+                    최근 1주일
+                </button>
+                <button type="button" onclick="window.setSearchRangeMode('30days')" class="py-2.5 ${currentSearchRangeMode === '30days' ? 'bg-purple-600 text-white' : 'bg-gray-50 hover:bg-purple-50 hover:text-purple-700 text-gray-700'} font-black text-xs rounded-xl border border-gray-200 transition active:scale-95 shadow-2xs">
+                    최근 1달
+                </button>
+                <button type="button" onclick="document.getElementById('search-custom-box').classList.toggle('hidden')" class="py-2.5 ${currentSearchRangeMode === 'custom' ? 'bg-emerald-600 text-white' : 'bg-gray-50 hover:bg-emerald-50 hover:text-emerald-700 text-gray-700'} font-black text-xs rounded-xl border border-gray-200 transition active:scale-95 shadow-2xs">
+                    기간 설정
+                </button>
+            </div>
+            <div id="search-custom-box" class="${currentSearchRangeMode === 'custom' ? 'flex' : 'hidden'} items-center gap-1.5 pt-2 border-t border-gray-100 flex-wrap sm:flex-nowrap">
+                <input type="date" id="search-custom-start" value="${currentSearchCustomStart || todayStr}" class="bg-gray-50 border border-gray-300 rounded-lg p-1.5 text-xs font-bold outline-none flex-1 cursor-pointer">
+                <span class="text-xs text-gray-400 font-bold">~</span>
+                <input type="date" id="search-custom-end" value="${currentSearchCustomEnd || todayStr}" class="bg-gray-50 border border-gray-300 rounded-lg p-1.5 text-xs font-bold outline-none flex-1 cursor-pointer">
+                <button type="button" onclick="window.applyCustomSearchRange()" class="bg-slate-900 hover:bg-slate-800 text-white text-xs font-black px-3 py-1.5 rounded-lg transition active:scale-95 shadow-2xs whitespace-nowrap">
+                    조회
+                </button>
+            </div>
+        </div>
+    `;
 
     contentEl.innerHTML = html; 
     if (sidePanel) sidePanel.classList.remove('translate-x-full');
