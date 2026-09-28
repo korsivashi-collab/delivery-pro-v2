@@ -11,12 +11,11 @@ import { coordToAddress } from './kakao.js';
 import { showLoading, hideLoading } from './utils.js';
 import { state } from './state.js';
 
-// 관제 실시간 요청 리스너 해제용 핸들러
 let unsubRequestDevice = null;
 let unsubRequestKey = null;
 let lastReportTime = 0;
 
-// 🌟 api.js export 의존성을 제거하고 실행 중인 Firebase 인스턴스를 직접 안전하게 획득
+// 🌟 안전한 Firestore 인스턴스 획득
 function getDbInstance() {
     try {
         if (getApps().length > 0) {
@@ -29,39 +28,32 @@ function getDbInstance() {
 }
 
 // ==========================================
-// 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진
+// 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진 (🌟 과금 폭탄 방지 최적화)
 // ==========================================
 export async function reportGpsToFirestore(lat, lng, force = false) {
     if (!lat || !lng) return;
 
     const now = Date.now();
-    // 40초 이내 중복 전송 방지 (단, 관제 직접 요청인 force=true는 즉시 전송)
-    if (!force && now - lastReportTime < 40000) return;
+    // 🌟 [핵심] 45초 이내 중복 전송 강력 방지 (단, 관제 직접 요청인 force=true는 즉시 전송)
+    if (!force && now - lastReportTime < 45000) return;
     lastReportTime = now;
 
     const deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
-    const licKey = localStorage.getItem('deliveryProKey');
+    if (!deviceId) return;
+
     const phone = localStorage.getItem('deliveryProUserPhone') || '';
-
-    const payload = {
-        lat: parseFloat(lat),
-        lng: parseFloat(lng),
-        phone: phone,
-        updatedAt: now
-    };
-
     const db = getDbInstance();
     if (!db) return;
 
     try {
-        // 1. 기기 고유 deviceId 문서로 보고
-        if (deviceId) {
-            await setDoc(doc(db, "gps_reports", deviceId), { ...payload, deviceId }, { merge: true });
-        }
-        // 2. 라이선스 키가 다를 경우 키 문서로도 동시 보고 (관제 매칭 실패 방지)
-        if (licKey && licKey !== deviceId) {
-            await setDoc(doc(db, "gps_reports", licKey), { ...payload, deviceId: licKey }, { merge: true });
-        }
+        // 🌟 [비용 절감] deviceId 단일 경로로만 전송하여 Firestore Write 요금 50% 절약
+        await setDoc(doc(db, "gps_reports", deviceId), {
+            deviceId: deviceId,
+            phone: phone,
+            lat: parseFloat(lat),
+            lng: parseFloat(lng),
+            updatedAt: now
+        }, { merge: true });
     } catch (e) {
         console.error("관제 위치 보고 오류:", e);
     }
@@ -76,7 +68,6 @@ function listenToGpsRequests() {
     const db = getDbInstance();
 
     if (!db) {
-        // Firebase 앱 초기화 타이밍 대기 후 1초 뒤 재시도
         setTimeout(listenToGpsRequests, 1000);
         return;
     }
@@ -85,7 +76,7 @@ function listenToGpsRequests() {
         if (!snap.exists()) return;
         const reqData = snap.data();
         
-        // 관제 요청이 최근 20초 이내에 발생한 유효한 요청일 때만 즉시 측정 후 보고
+        // 관제 요청이 최근 20초 이내에 발생한 유효한 요청일 때만 즉시 측정 후 1회 강제 보고
         if (reqData.requestedAt && Date.now() - reqData.requestedAt < 20000) {
             const pos = await getDeviceRealGPS();
             if (pos && pos.lat && pos.lng) {
@@ -94,18 +85,12 @@ function listenToGpsRequests() {
         }
     };
 
-    // deviceId 채널 구독
     if (deviceId && !unsubRequestDevice) {
-        try {
-            unsubRequestDevice = onSnapshot(doc(db, "gps_requests", deviceId), handleRequest);
-        } catch (e) {}
+        try { unsubRequestDevice = onSnapshot(doc(db, "gps_requests", deviceId), handleRequest); } catch (e) {}
     }
 
-    // licenseKey 채널 구독
     if (licKey && licKey !== deviceId && !unsubRequestKey) {
-        try {
-            unsubRequestKey = onSnapshot(doc(db, "gps_requests", licKey), handleRequest);
-        } catch (e) {}
+        try { unsubRequestKey = onSnapshot(doc(db, "gps_requests", licKey), handleRequest); } catch (e) {}
     }
 }
 
@@ -113,27 +98,25 @@ function listenToGpsRequests() {
 // 1. 백그라운드 GPS 위치 추적 시작
 // ==========================================
 export function startGpsWatcher() {
-    // 관제 위치 요청 감시 리스너 가동
     listenToGpsRequests();
 
     if (!navigator.geolocation || state.getGpsWatchId() !== null) return;
     
+    // 🌟 [배터리 절약] GPS 센서 민감도를 조절하여 불필요한 콜백 폭주 방지
     const watchId = navigator.geolocation.watchPosition(
         (pos) => {
             const lat = pos.coords.latitude;
             const lng = pos.coords.longitude;
 
-            state.setLastKnownGps({ 
-                lat: lat, 
-                lng: lng, 
-                timestamp: Date.now() 
-            });
+            state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
 
-            // 주행 중 관제 센터로 백그라운드 자동 주기적 보고
-            reportGpsToFirestore(lat, lng, false);
+            // 45초 쿨타임이 지났을 때만 서버 보고 시도
+            if (Date.now() - lastReportTime >= 45000) {
+                reportGpsToFirestore(lat, lng, false);
+            }
         },
         (err) => {},
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 10000 }
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 15000 }
     );
     
     state.setGpsWatchId(watchId);
@@ -149,14 +132,8 @@ export function stopGpsWatcher() {
         state.setGpsWatchId(null);
     }
 
-    if (unsubRequestDevice) { 
-        unsubRequestDevice(); 
-        unsubRequestDevice = null; 
-    }
-    if (unsubRequestKey) { 
-        unsubRequestKey(); 
-        unsubRequestKey = null; 
-    }
+    if (unsubRequestDevice) { unsubRequestDevice(); unsubRequestDevice = null; }
+    if (unsubRequestKey) { unsubRequestKey(); unsubRequestKey = null; }
 }
 
 // ==========================================
@@ -166,9 +143,8 @@ export function getDeviceRealGPS() {
     return new Promise((resolve) => {
         const lastGps = state.getLastKnownGps();
         
-        // 1분 이내에 수신된 신선한 좌표가 있으면 즉시 재사용 및 보고
+        // 1분 이내의 신선한 좌표가 있으면 재사용 (단, 강제 보고는 하지 않음)
         if (lastGps && (Date.now() - lastGps.timestamp < 60000)) {
-            reportGpsToFirestore(lastGps.lat, lastGps.lng, false);
             return resolve({ lat: lastGps.lat, lng: lastGps.lng, isReal: true });
         }
         
@@ -180,19 +156,12 @@ export function getDeviceRealGPS() {
             (pos) => {
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
-                const newGps = { lat, lng, timestamp: Date.now() };
-                state.setLastKnownGps(newGps);
-                reportGpsToFirestore(lat, lng, false);
+                state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
                 resolve({ lat, lng, isReal: true });
             },
             (err) => {
                 const fallbackGps = state.getLastKnownGps();
-                if (fallbackGps) {
-                    reportGpsToFirestore(fallbackGps.lat, fallbackGps.lng, false);
-                    resolve({ lat: fallbackGps.lat, lng: fallbackGps.lng, isReal: true });
-                } else {
-                    resolve(null);
-                }
+                resolve(fallbackGps ? { lat: fallbackGps.lat, lng: fallbackGps.lng, isReal: true } : null);
             },
             { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
         );
@@ -208,11 +177,7 @@ export async function setEndLocationGPS() {
     
     if (lastGps) {
         const addr = await coordToAddress(lastGps.lng, lastGps.lat);
-        state.setEndLocation({ 
-            lat: lastGps.lat, 
-            lng: lastGps.lng, 
-            address: addr || "현재 위치 (GPS)" 
-        });
+        state.setEndLocation({ lat: lastGps.lat, lng: lastGps.lng, address: addr || "현재 위치 (GPS)" });
         state.saveActiveData();
         if (typeof window.renderList === 'function') window.renderList();
         hideLoading();
@@ -225,14 +190,9 @@ export async function setEndLocationGPS() {
                 let lat = position.coords.latitude;
                 let lng = position.coords.longitude;
                 state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
-                reportGpsToFirestore(lat, lng, false);
                 
                 const addr = await coordToAddress(lng, lat);
-                state.setEndLocation({ 
-                    lat: lat, 
-                    lng: lng, 
-                    address: addr || "현재 위치 (GPS)" 
-                });
+                state.setEndLocation({ lat, lng, address: addr || "현재 위치 (GPS)" });
                 state.saveActiveData();
                 if (typeof window.renderList === 'function') window.renderList();
                 hideLoading();
