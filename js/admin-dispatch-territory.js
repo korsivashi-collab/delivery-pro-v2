@@ -4,7 +4,7 @@ import { db } from "./admin-api.js";
 import { state } from "./admin-state.js";
 import { map } from "./admin-map.js";
 import { getAddressFromCoords } from "./admin-utils.js";
-import { doc, setDoc, updateDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, updateDoc, onSnapshot, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // 지역(권역) 지도 관리를 위한 로컬 상태 변수
 let territoryMap = null;
@@ -119,59 +119,103 @@ export function jumpToDriverDelivery(devId) {
 }
 
 // ==========================================
-// 2. 실시간 지도 위치 추적
+// 2. 실시간 지도 위치 추적 (🌟 즉시 표출 + 백그라운드 갱신 하이브리드 엔진)
 // ==========================================
 export async function focusDriverLocationOnMap(devId) {
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const phoneName = matchedLic?.phone || '기사님';
+    const targetDevId = matchedLic?.deviceId || devId;
+    const targetKey = matchedLic?.key || devId;
 
     if (!map) return;
     closeCurrentLocationOverlay();
 
-    const reqTime = Date.now();
-    try { await setDoc(doc(db, "gps_requests", devId), { deviceId: devId, requestedAt: reqTime }); } catch(e) {}
-    let isResolved = false;
+    // 위치 오버레이 렌더링 내부 헬퍼
+    const renderLocationMarker = async (lat, lng, timeLabel = '실시간 수신됨') => {
+        const pos = new kakao.maps.LatLng(lat, lng);
+        map.setLevel(3);
+        map.panTo(pos);
 
-    const unsub = onSnapshot(doc(db, "gps_reports", devId), async (snap) => {
+        closeCurrentLocationOverlay();
+
+        const overlayContainer = document.createElement('div');
+        overlayContainer.className = 'custom-location-overlay animate-pop-in';
+        overlayContainer.innerHTML = `
+            <div style="transform: translate(-50%, -100%); margin-top: -15px;" class="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-emerald-400 text-xs flex flex-col gap-1.5 min-w-[240px] max-w-[320px] relative z-50">
+                <div class="flex justify-between items-center pb-1.5 border-b border-slate-700">
+                    <span class="font-black text-emerald-400 flex items-center gap-1.5 text-xs"><i class="fa-solid fa-satellite-dish animate-pulse text-emerald-400"></i> ${timeLabel}</span>
+                    <span class="text-[10px] text-gray-400 font-mono" id="loc-overlay-time">${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+                </div>
+                <div id="loc-overlay-addr" class="font-black text-gray-100 text-[13px] leading-snug py-0.5 break-keep"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-emerald-400"></i>주소 확인 중...</div>
+                <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-emerald-400 mr-1"></i>${phoneName}</span><button onclick="window.closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
+                <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
+            </div>`;
+        window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
+        window.currentLocationOverlay.setMap(map); 
+        if (window.myMapOverlays) window.myMapOverlays.push(window.currentLocationOverlay);
+
+        const resolvedAddr = await getAddressFromCoords(lat, lng);
+        const finalAddr = resolvedAddr || "주소 정보를 변환할 수 없습니다.";
+        const addrEl = document.getElementById('loc-overlay-addr');
+        if (addrEl) addrEl.innerHTML = `<i class="fa-solid fa-map-pin text-emerald-400 mr-1 text-xs"></i>${finalAddr}`;
+    };
+
+    // 🌟 [1단계] 서버에 이미 올라와 있는 최신 위치가 있는지 0.1초 만에 즉시 확인하여 화면에 먼저 표출
+    let hasShownInitial = false;
+    try {
+        let snap = await getDoc(doc(db, "gps_reports", targetDevId));
+        if (!snap.exists() && targetKey !== targetDevId) {
+            snap = await getDoc(doc(db, "gps_reports", targetKey));
+        }
+
+        if (snap.exists()) {
+            const data = snap.data();
+            if (data.lat && data.lng) {
+                hasShownInitial = true;
+                const elapsedSec = Math.round((Date.now() - (data.updatedAt || 0)) / 1000);
+                let label = '실시간 위치';
+                if (elapsedSec > 120) {
+                    label = `최근 위치 (${Math.round(elapsedSec / 60)}분 전)`;
+                }
+                await renderLocationMarker(data.lat, data.lng, label);
+            }
+        }
+    } catch (e) {
+        console.warn("초기 위치 캐시 확인 실패:", e);
+    }
+
+    // 🌟 [2단계] 기사 폰으로 최신 GPS 재측정 신호 전송 (백그라운드 동기화)
+    const reqTime = Date.now();
+    try {
+        await setDoc(doc(db, "gps_requests", targetDevId), { deviceId: targetDevId, requestedAt: reqTime });
+        if (targetKey !== targetDevId) {
+            await setDoc(doc(db, "gps_requests", targetKey), { deviceId: targetKey, requestedAt: reqTime });
+        }
+    } catch (e) {}
+
+    // 🌟 [3단계] 기사 폰이 응답하면 부드럽게 최신 위치로 갱신 (지연 대기 해소)
+    let isResolved = false;
+    const unsub = onSnapshot(doc(db, "gps_reports", targetDevId), async (snap) => {
         if (snap.exists()) {
             const data = snap.data();
             if (data.updatedAt && data.updatedAt >= reqTime) {
-                isResolved = true; unsub(); 
-                const lat = data.lat; const lng = data.lng;
-                const pos = new kakao.maps.LatLng(lat, lng);
-                map.setLevel(3); map.panTo(pos);
-
-                const timeStr = new Date(data.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-                const overlayContainer = document.createElement('div');
-                overlayContainer.className = 'custom-location-overlay animate-pop-in';
-                overlayContainer.innerHTML = `
-                    <div style="transform: translate(-50%, -100%); margin-top: -15px;" class="bg-slate-900 text-white p-3.5 rounded-2xl shadow-2xl border-2 border-emerald-400 text-xs flex flex-col gap-1.5 min-w-[240px] max-w-[320px] relative z-50">
-                        <div class="flex justify-between items-center pb-1.5 border-b border-slate-700">
-                            <span class="font-black text-emerald-400 flex items-center gap-1.5 text-xs"><i class="fa-solid fa-satellite-dish animate-pulse text-emerald-400"></i> 실시간 위치 수신됨</span>
-                            <span class="text-[10px] text-gray-400 font-mono">${timeStr}</span>
-                        </div>
-                        <div id="loc-overlay-addr" class="font-black text-gray-100 text-[13px] leading-snug py-0.5 break-keep"><i class="fa-solid fa-circle-notch fa-spin mr-1 text-emerald-400"></i>주소 확인 중...</div>
-                        <div class="flex justify-between items-center pt-1.5 border-t border-slate-800 text-[11px]"><span class="font-bold text-gray-300"><i class="fa-solid fa-phone text-emerald-400 mr-1"></i>${phoneName}</span><button onclick="window.closeCurrentLocationOverlay()" class="text-gray-400 hover:text-white px-2 py-0.5 rounded bg-slate-800 hover:bg-slate-700 text-[10px] font-bold transition active:scale-95">닫기</button></div>
-                        <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
-                    </div>`;
-                window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
-                window.currentLocationOverlay.setMap(map); 
-                if (window.myMapOverlays) window.myMapOverlays.push(window.currentLocationOverlay);
-
-                const resolvedAddr = await getAddressFromCoords(lat, lng);
-                const finalAddr = resolvedAddr || "주소 정보를 변환할 수 없습니다.";
-                const addrEl = document.getElementById('loc-overlay-addr');
-                if (addrEl) addrEl.innerHTML = `<i class="fa-solid fa-map-pin text-emerald-400 mr-1 text-xs"></i>${finalAddr}`;
+                isResolved = true;
+                unsub();
+                await renderLocationMarker(data.lat, data.lng, '실시간 위치 수신됨');
             }
         }
     });
 
+    // 만약 초기 위치도 없었고, 6초 안에도 응답이 없으면 과거 배송 완료 위치로 Fallback
     setTimeout(() => {
         if (!isResolved) {
-            unsub(); alert(`[안내] 실시간 위치 응답을 받지 못했습니다.\n(앱 미실행, 통신 불량 등)\n\n시스템에 저장된 최근 마지막 위치를 표시합니다.`);
-            showFallbackLocation(devId);
+            unsub();
+            if (!hasShownInitial) {
+                alert(`[안내] 실시간 위치 응답을 받지 못했습니다.\n(앱 미실행, 통신 불량 등)\n\n시스템에 저장된 최근 마지막 위치를 표시합니다.`);
+                showFallbackLocation(devId);
+            }
         }
-    }, 7000);
+    }, 6000);
 }
 
 export async function showFallbackLocation(devId) {
