@@ -29,7 +29,6 @@ function ensureSearchSidePanel() {
                         <i class="fa-solid fa-xmark text-lg px-1"></i>
                     </button>
                 </div>
-                <div id="search-range-toolbar" class="px-4 py-2.5 bg-white border-b border-gray-200 flex-none"></div>
                 <div id="search-result-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar"></div>
             `;
             mapSec.appendChild(sidePanel);
@@ -190,7 +189,6 @@ export function resetSearchToToday() {
 export function handleGlobalSearch(query, isNewSearch = true) {
     const sidePanel = ensureSearchSidePanel();
     const contentEl = document.getElementById('search-result-content');
-    const toolbarEl = document.getElementById('search-range-toolbar');
     const clearBtn = document.getElementById('search-clear-btn');
     
     if (isNewSearch) {
@@ -199,7 +197,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     }
 
     const q = currentSearchQuery.toLowerCase();
-    const qDigits = q.replace(/[^0-9]/g, ''); // 🌟 번호 숫자만 추출하여 하이픈 무시 검색 지원
+    const qDigits = q.replace(/[^0-9]/g, ''); // 하이픈(-) 무시 검색용 순수 숫자
 
     if (!q) { 
         if (sidePanel) sidePanel.classList.add('translate-x-full'); 
@@ -208,43 +206,9 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     }
     if (clearBtn) clearBtn.classList.remove('hidden');
 
-    if (toolbarEl) {
-        let rangeLabel = '';
-        if (currentSearchRangeMode === 'today') rangeLabel = `<span class="bg-blue-100 text-blue-800 px-2 py-0.5 rounded font-black text-[11px]">오늘 (${todayStr})</span>`;
-        else if (currentSearchRangeMode === '7days') rangeLabel = `<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black text-[11px]">최근 1주일</span>`;
-        else if (currentSearchRangeMode === '30days') rangeLabel = `<span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded font-black text-[11px]">최근 1달</span>`;
-        else rangeLabel = `<span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded font-black text-[11px]">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
-
-        toolbarEl.innerHTML = `
-            <div class="flex flex-col gap-2">
-                <div class="flex items-center justify-between text-xs">
-                    <span class="font-bold text-gray-600 flex items-center gap-1.5">
-                        <i class="fa-regular fa-calendar-check text-blue-600"></i> 조회 범위: ${rangeLabel}
-                    </span>
-                    ${currentSearchRangeMode !== 'today' ? `
-                    <button onclick="window.resetSearchToToday()" class="text-[11px] font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 transition">
-                        <i class="fa-solid fa-rotate-left mr-0.5"></i> 오늘만 보기
-                    </button>` : ''}
-                </div>
-                <div class="flex items-center gap-1.5 flex-wrap">
-                    <span class="text-[10px] text-gray-400 font-bold shrink-0">과거 내역:</span>
-                    <button onclick="window.setSearchRangeMode('7days')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === '7days' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">최근 1주일</button>
-                    <button onclick="window.setSearchRangeMode('30days')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === '30days' ? 'bg-purple-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">최근 1달</button>
-                    <button onclick="document.getElementById('custom-range-box').classList.toggle('hidden')" class="px-2.5 py-1 rounded-lg text-[11px] font-bold transition shadow-2xs ${currentSearchRangeMode === 'custom' ? 'bg-emerald-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}">기간 설정</button>
-                </div>
-                <div id="custom-range-box" class="${currentSearchRangeMode === 'custom' ? 'flex' : 'hidden'} items-center gap-1.5 bg-gray-50 p-2 rounded-xl border border-gray-200 mt-1">
-                    <input type="date" id="search-custom-start" value="${currentSearchCustomStart || todayStr}" class="bg-white border border-gray-300 rounded px-1.5 py-1 text-[11px] font-bold outline-none cursor-pointer flex-1">
-                    <span class="text-xs text-gray-400 font-bold">~</span>
-                    <input type="date" id="search-custom-end" value="${currentSearchCustomEnd || todayStr}" class="bg-white border border-gray-300 rounded px-1.5 py-1 text-[11px] font-bold outline-none cursor-pointer flex-1">
-                    <button onclick="window.applyCustomSearchRange()" class="bg-slate-800 hover:bg-slate-900 text-white text-[11px] font-black px-2.5 py-1 rounded transition shadow-2xs">조회</button>
-                </div>
-            </div>
-        `;
-    }
-
     const addressGroups = {};
 
-    // 1. 활성 동선(routes) 데이터 매칭 (고객/기사 번호 분리 처리)
+    // 1. 활성 동선(routes) 데이터 매칭
     for (let devId in state.activeRoutes) {
         const r = state.activeRoutes[devId];
         const dests = r.destinations || [];
@@ -259,7 +223,6 @@ export function handleGlobalSearch(query, isNewSearch = true) {
             const matchesFull = d.fullAddress && d.fullAddress.toLowerCase().includes(q);
             const matchesStore = d.storeName && d.storeName.toLowerCase().includes(q);
             
-            // 🌟 하이픈 무시 전화번호 매칭 강화
             let matchesPhone = driverPhone.includes(q) || customerPhone.includes(q);
             if (!matchesPhone && qDigits.length >= 4) {
                 if (driverDigits.includes(qDigits) || customerDigits.includes(qDigits)) {
@@ -278,7 +241,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                         dateStr: todayStr, 
                         timeStr: '이동/대기 중',
                         driverPhone: driverPhone, 
-                        customerPhone: customerPhone, // 🌟 고객 번호 누락 복구
+                        customerPhone: customerPhone,
                         devId: devId, 
                         lat: d.lat, 
                         lng: d.lng, 
@@ -328,7 +291,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                     timeStr: tStr, 
                     tag: c.tag || '전달완료',
                     driverPhone: driverPhone, 
-                    customerPhone: customerPhone, // 🌟 고객 번호 복구
+                    customerPhone: customerPhone,
                     devId: c.deviceId, 
                     lat: c.lat, 
                     lng: c.lng, 
@@ -369,7 +332,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                         dateStr: todayStr,
                         timeStr: driverPhone !== '미배정' ? `담당: ${driverPhone}` : '미배정',
                         driverPhone: driverPhone,
-                        customerPhone: customerPhone, // 🌟 고객 번호 복구
+                        customerPhone: customerPhone,
                         devId: o.assignedDriver,
                         lat: o.lat,
                         lng: o.lng,
@@ -383,15 +346,34 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     const uniqueAddresses = Object.keys(addressGroups);
     if (!contentEl) return;
 
+    let rangeTitleBadge = '';
+    if (currentSearchRangeMode === 'today') rangeTitleBadge = `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full">오늘 결과</span>`;
+    else if (currentSearchRangeMode === '7days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1주일 조회 중</span>`;
+    else if (currentSearchRangeMode === '30days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1달 조회 중</span>`;
+    else rangeTitleBadge = `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
+
+    // 🌟 안전하게 html 변수를 최상위에서 초기화
+    let html = `
+        <div class="flex items-center justify-between pb-2 border-b border-gray-200">
+            <div class="flex items-center gap-1.5">
+                <span class="text-xs font-black text-gray-800">검색 내역</span>
+                ${rangeTitleBadge}
+            </div>
+            ${currentSearchRangeMode !== 'today' ? `
+            <button type="button" onclick="window.resetSearchToToday()" class="text-[11px] font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 transition">
+                <i class="fa-solid fa-rotate-left mr-0.5"></i> 오늘 결과만 보기
+            </button>` : ''}
+        </div>
+    `;
+
     if (uniqueAddresses.length === 0) {
-        contentEl.innerHTML = `
+        html += `
             <div class="py-16 flex flex-col items-center justify-center space-y-2">
                 <i class="fa-solid fa-magnifying-glass text-gray-300 text-3xl mb-1"></i>
                 <p class="text-sm text-gray-600 font-bold">지정된 기간 내 검색 결과가 없습니다.</p>
                 <p class="text-[11px] text-gray-400">아래 버튼을 눌러 지난 내역을 다시 검색해 보세요.</p>
             </div>`;
     } else {
-        let html = '';
         uniqueAddresses.slice(0, 40).forEach((addr) => {
             const items = addressGroups[addr]; 
             items.sort((a, b) => b.timestamp - a.timestamp);
@@ -422,7 +404,6 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                    </button>`
                 : `<span class="text-gray-400 font-bold text-[11px] bg-gray-100 px-2 py-0.5 rounded-md border border-gray-200">기사 미배정</span>`;
 
-            // 🌟 UI에 고객 연락처를 기사 연락처 옆에 깔끔하게 표기
             const customerPhoneUI = latest.customerPhone 
                 ? `<div class="flex items-center gap-1 ml-1.5 pl-1.5 border-l border-gray-300 text-gray-600 font-bold">
                      <i class="fa-solid fa-user text-[9px] text-gray-400"></i> <span class="text-[11px]">${latest.customerPhone}</span>
@@ -454,11 +435,9 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                 </div>
             </div>`;
         });
-        contentEl.innerHTML = html;
     }
 
-    html = contentEl.innerHTML;
-
+    // 🌟 결과 하단에 고정되는 기간 확장 조회 툴바
     html += `
         <div class="mt-4 pt-4 border-t-2 border-dashed border-gray-200 flex flex-col gap-2.5 bg-white p-3.5 rounded-2xl shadow-xs">
             <div class="flex items-center justify-between">
