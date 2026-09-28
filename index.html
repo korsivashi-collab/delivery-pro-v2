@@ -174,40 +174,41 @@
 
     <!-- 2. 메인 앱 영역 -->
     <div id="main-app" class="hidden flex-col h-full w-full">
-        <!-- 🌟 [헤더 레이아웃 최적화] 상단 4개 버튼 및 사용기한 뱃지 약 30% 시인성/터치영역 확대 -->
+        <!-- 🌟 [헤더 레이아웃 복원] 오작동 방지를 위해 1열에 4개 버튼을 모두 배치하고 2열에 사용기한만 배치 -->
         <header class="bg-white px-2.5 pt-safe pb-2.5 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.06)] z-20 flex-none border-b border-gray-200 relative w-full">
-            <div class="flex flex-col gap-1.5 w-full">
-                <!-- 1열: 상단 타이틀 및 가로 1열 액션 버튼 (지난배송, 설정, 알림, 로그아웃 30% 확대) -->
-                <div class="flex items-center justify-between gap-1 w-full min-w-0">
-                    <h1 class="text-[15px] font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink-0 whitespace-nowrap">
-                        <i class="fa-solid fa-route text-blue-600 text-[16px] shrink-0"></i>
+            <div class="flex flex-col gap-1 w-full">
+                <!-- 1열: 상단 타이틀 및 가로 1열 액션 버튼 (지난배송, 설정, 알림, 로그아웃) -->
+                <div class="flex items-center justify-between gap-0.5 w-full min-w-0">
+                    <h1 class="text-[14px] font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <i class="fa-solid fa-route text-blue-600 text-[15px] shrink-0"></i>
                         <span>배송경로PRO</span>
                     </h1>
                     
-                    <div class="flex items-center gap-1.5 shrink-0">
-                        <button onclick="window.openHistoryModal()" class="text-[12px] bg-gray-100 hover:bg-gray-200 text-gray-800 px-2.5 py-1.5 rounded-lg font-bold border border-gray-300 active:bg-gray-300 flex items-center gap-1 shadow-2xs transition active:scale-95 whitespace-nowrap">
-                            <i class="fa-solid fa-clock-rotate-left text-[11px]"></i> 지난배송
+                    <!-- 좁은 폰에서도 한 줄에 다 들어가도록 패딩과 폰트 크기 미세 최적화 -->
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-800 px-1.5 py-1.5 rounded-lg font-bold border border-gray-300 active:bg-gray-300 flex items-center gap-0.5 shadow-2xs transition active:scale-95 whitespace-nowrap">
+                            <i class="fa-solid fa-clock-rotate-left"></i> 지난배송
                         </button>
 
-                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-800 border border-gray-300 px-2.5 py-1.5 rounded-lg text-[12px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap">
-                            <i class="fa-solid fa-gear text-gray-500 text-[11px]"></i> 설정
+                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-800 border border-gray-300 px-1.5 py-1.5 rounded-lg text-[10px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap">
+                            <i class="fa-solid fa-gear text-gray-500"></i> 설정
                         </button>
                         
-                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-2.5 py-1.5 rounded-lg text-[12px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap">
-                            <i class="fa-solid fa-bell text-blue-600 text-[11px]"></i> 알림
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-1.5 py-1.5 rounded-lg text-[10px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap">
+                            <i class="fa-solid fa-bell text-blue-600"></i> 알림
                             <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
                         </button>
 
-                        <button onclick="window.logout()" class="text-[12px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-300 px-2.5 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
+                        <button onclick="window.logout()" class="text-[10px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-300 px-1.5 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
                             로그아웃
                         </button>
                     </div>
                 </div>
                 
-                <!-- 2열: 사용기한만 단독 배치 (가독성 30% 확대) -->
+                <!-- 2열: 사용기한만 단독 배치 (버튼 오작동 원천 차단) -->
                 <div class="flex justify-between items-center w-full min-w-0 mt-0.5">
-                    <span class="text-[11.5px] text-gray-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap ml-0.5">물류 라스트마일</span>
-                    <span id="license-expire-badge" class="text-[13px] bg-blue-50 text-blue-700 border border-blue-200 px-3 py-1.5 rounded-lg font-black whitespace-nowrap shadow-2xs">
+                    <span class="text-[10.5px] text-gray-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap ml-0.5">물류 라스트마일</span>
+                    <span id="license-expire-badge" class="text-[10.5px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-md font-black whitespace-nowrap shadow-2xs">
                         사용기한: 확인중...
                     </span>
                 </div>
@@ -239,10 +240,11 @@
             </ul>
         </main>
 
-        <!-- 하단 푸터: 스캔 버튼 & 84px 스와이프 손잡이 유지, 글자 가림 방지 -->
+        <!-- 🌟 [하단 푸터 복원: 거대한 스캔 버튼 & 84px 스와이프 손잡이 유지, 글자 가림 방지 기술 적용] -->
         <footer class="bg-white border-t border-gray-200 px-2.5 sm:px-4 pt-2.5 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
             <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
+                <!-- 스캔 버튼 폭 대폭 확대 (w-[80px]) -->
                 <button onclick="document.getElementById('camera-input').click()" class="h-[54px] w-[80px] bg-gray-900 hover:bg-gray-800 active:bg-black text-white font-bold rounded-xl shadow active:scale-95 transition text-[15px] flex items-center justify-center gap-1.5 shrink-0">
                     <i class="fa-solid fa-camera text-lg"></i>
                     <span>스캔</span>
@@ -250,9 +252,11 @@
                 
                 <!-- 슬라이더 트랙 -->
                 <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[54px]">
+                    <!-- 🌟 텍스트 가림 완벽 해결: 글자 시작 지점을 오른쪽으로 강하게 밀어버림 (pl-[90px]) -->
                     <div class="absolute inset-0 flex items-center justify-center pl-[90px] pr-2 text-blue-600 font-black text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
                         밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-500 animate-pulse"></i>
                     </div>
+                    <!-- 대표님이 원하시는 거대한 84px 제어 손잡이 -->
                     <div id="swipe-btn" class="absolute left-1 w-[84px] h-[46px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
                         <i class="fa-solid fa-angles-right text-xl"></i>
                     </div>
