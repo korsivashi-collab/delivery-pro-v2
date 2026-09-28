@@ -389,7 +389,7 @@ export async function generateNewLicense() {
                 deviceId: "",
                 status: "active",
                 maxSlots: (type === 'dispatch' ? 20 : 0),
-                maxSessions: (type === 'dispatch' ? 1 : 1), // 기본 관제는 기본 1회선 (PRO는 2회선)
+                maxSessions: (type === 'dispatch' ? 1 : 1),
                 isPro: false,
                 createdAt: Date.now() + i
             });
@@ -415,6 +415,45 @@ export async function generateNewLicense() {
     }
 }
 
+// 🌟 회선 수 증감 컨트롤러 함수
+export function adjustLicenseSessions(delta) {
+    const input = document.getElementById('edit-sessions-input');
+    if (!input) return;
+    let val = parseInt(input.value) || 1;
+    val += delta;
+    if (val < 1) val = 1;
+    if (val > 50) val = 50;
+    input.value = val;
+    updateSessionDescUI(val);
+}
+
+// 🌟 회선 안내 문구 및 배지 동적 갱신 헬퍼
+function updateSessionDescUI(val) {
+    const proCheck = document.getElementById('edit-pro-checkbox');
+    const desc = document.getElementById('edit-sessions-desc');
+    const badge = document.getElementById('edit-sessions-badge');
+    const isPro = proCheck ? proCheck.checked : false;
+
+    if (badge) badge.innerText = `${val}대 접속 허용`;
+    if (desc) {
+        if (isPro) {
+            if (val === 2) {
+                desc.innerHTML = `<b class="text-amber-700">PRO 기본 2회선 포함</b> (추가 요금 결제 시 수량 증설 가능)`;
+            } else if (val > 2) {
+                desc.innerHTML = `<b class="text-indigo-700">PRO 회선 증설 (+${val - 2}대 추가)</b> 적용됨`;
+            } else {
+                desc.innerHTML = `<b class="text-gray-500">1회선 설정됨</b>`;
+            }
+        } else {
+            if (val === 1) {
+                desc.innerHTML = `<b class="text-gray-700">기본 요금제 1회선</b> (추가 요금 결제 시 수량 증설 가능)`;
+            } else {
+                desc.innerHTML = `<b class="text-indigo-700">기본형 회선 증설 (+${val - 1}대 추가)</b> 적용됨`;
+            }
+        }
+    }
+}
+
 export function openEditLicenseModal(key) {
     const target = state.allLicenses.find(l => l.key === key);
     if (!target) return;
@@ -435,19 +474,26 @@ export function openEditLicenseModal(key) {
     const proBox = document.getElementById('edit-pro-container');
     const dispatchSec = document.getElementById('edit-dispatch-connected-section');
 
-    // 🌟 동시 접속(모니터링) 회선 설정 UI 동적 주입 (HTML 파일 변경 없이 자동 생성)
+    // 🌟 동시 접속(모니터링) 회선 증설 컨트롤러 동적 생성 (절대 잠기지 않음)
     let sessionsBox = document.getElementById('edit-sessions-container');
     if (!sessionsBox && proBox && proBox.parentNode) {
         sessionsBox = document.createElement('div');
         sessionsBox.id = 'edit-sessions-container';
-        sessionsBox.className = 'hidden mt-2 p-3 bg-indigo-50/70 rounded-xl border border-indigo-200';
+        sessionsBox.className = 'hidden mt-2 p-3 bg-indigo-50/70 rounded-xl border border-indigo-200 shadow-2xs';
         sessionsBox.innerHTML = `
-            <label class="block text-[11px] font-black text-indigo-900 mb-1 flex items-center gap-1.5">
-                <i class="fa-solid fa-network-wired text-indigo-600"></i> 동시 접속(모니터링) 허용 회선 수
-            </label>
-            <div class="flex items-center gap-2 mt-1.5">
-                <input type="number" id="edit-sessions-input" min="1" max="20" class="w-20 bg-white border border-indigo-300 rounded-lg p-1.5 text-xs font-black text-center outline-none focus:border-indigo-600">
-                <span class="text-xs font-bold text-gray-700">대</span>
+            <div class="flex items-center justify-between mb-1.5">
+                <label class="block text-[11px] font-black text-indigo-900 flex items-center gap-1.5">
+                    <i class="fa-solid fa-network-wired text-indigo-600"></i> 동시 접속(모니터링) 허용 회선 수
+                </label>
+                <span id="edit-sessions-badge" class="text-[10px] font-black px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-800">1대 접속</span>
+            </div>
+            <div class="flex items-center gap-2 mt-1">
+                <div class="flex items-center bg-white border border-indigo-300 rounded-lg shadow-2xs overflow-hidden">
+                    <button type="button" onclick="window.adjustLicenseSessions(-1)" class="px-2.5 py-1.5 bg-gray-50 hover:bg-indigo-100 text-gray-700 font-black text-xs transition border-r border-indigo-200 active:scale-95" title="회선 감소">-</button>
+                    <input type="number" id="edit-sessions-input" min="1" max="50" oninput="window.onSessionsInputChange(this.value)" class="w-14 p-1 text-xs font-black text-center outline-none border-none text-indigo-900 bg-white" value="1">
+                    <button type="button" onclick="window.adjustLicenseSessions(1)" class="px-2.5 py-1.5 bg-gray-50 hover:bg-indigo-100 text-gray-700 font-black text-xs transition border-l border-indigo-200 active:scale-95" title="회선 증설">+</button>
+                </div>
+                <span class="text-xs font-black text-gray-800">대</span>
                 <span id="edit-sessions-desc" class="text-[10px] font-bold text-gray-500 ml-1"></span>
             </div>
         `;
@@ -456,25 +502,6 @@ export function openEditLicenseModal(key) {
 
     const proCheck = document.getElementById('edit-pro-checkbox');
     const sessionsInput = document.getElementById('edit-sessions-input');
-    const sessionsDesc = document.getElementById('edit-sessions-desc');
-
-    // 🌟 PRO 활성화 여부에 따른 회선 수 제어 함수
-    const updateSessionUIByProState = (isProActive) => {
-        if (!sessionsInput || !sessionsDesc) return;
-        if (isProActive) {
-            sessionsInput.disabled = false;
-            sessionsInput.className = "w-20 bg-white border border-indigo-300 rounded-lg p-1.5 text-xs font-black text-center outline-none focus:border-indigo-600 shadow-2xs";
-            if (parseInt(sessionsInput.value) < 2 || !sessionsInput.value) {
-                sessionsInput.value = 2; // PRO 요금제 기본 2회선 포함
-            }
-            sessionsDesc.innerHTML = `<b class="text-amber-700">PRO 요금제</b> 기본 2회선 포함 (추가 슬롯 직접 조절 가능)`;
-        } else {
-            sessionsInput.value = 1; // 기본형은 1회선 고정
-            sessionsInput.disabled = true;
-            sessionsInput.className = "w-20 bg-gray-100 border border-gray-300 rounded-lg p-1.5 text-xs font-black text-center text-gray-400 cursor-not-allowed";
-            sessionsDesc.innerHTML = `<b class="text-gray-700">기본 요금제(5.5만)</b>는 1회선 전용 (추가 불가)`;
-        }
-    };
 
     if (target.type === 'dispatch') {
         if (slotsBox) slotsBox.classList.remove('hidden');
@@ -483,17 +510,27 @@ export function openEditLicenseModal(key) {
         
         document.getElementById('edit-slots-input').value = target.maxSlots || 0;
         
+        // 현재 계정의 저장된 회선 수 로드 (기본값: PRO는 2, 기본형은 1)
+        const currentSavedSessions = target.maxSessions || (target.isPro ? 2 : 1);
+        if (sessionsInput) {
+            sessionsInput.value = currentSavedSessions;
+        }
+
         if (proCheck) {
             proCheck.checked = !!target.isPro;
             proCheck.onchange = (e) => {
-                updateSessionUIByProState(e.target.checked);
+                const isChecked = e.target.checked;
+                let curVal = parseInt(sessionsInput.value) || 1;
+                // PRO 활성화 체크 시 회선이 1대면 PRO 기본 2대로 자동 승격
+                if (isChecked && curVal < 2) {
+                    sessionsInput.value = 2;
+                    curVal = 2;
+                }
+                updateSessionDescUI(curVal);
             };
         }
 
-        if (sessionsInput) {
-            sessionsInput.value = target.maxSessions || (target.isPro ? 2 : 1);
-        }
-        updateSessionUIByProState(!!target.isPro);
+        updateSessionDescUI(currentSavedSessions);
 
         if (dispatchSec) { dispatchSec.classList.remove('hidden'); dispatchSec.classList.add('flex'); }
         const addInput = document.getElementById('modal-add-driver-input');
@@ -506,6 +543,11 @@ export function openEditLicenseModal(key) {
         if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
     }
     document.getElementById('edit-license-modal').classList.remove('hidden');
+}
+
+export function onSessionsInputChange(val) {
+    const num = parseInt(val) || 1;
+    updateSessionDescUI(num);
 }
 
 export function closeEditModal() { 
@@ -560,7 +602,7 @@ export async function linkDriverFromModal() {
     }
 
     const cleanDigits = rawVal.replace(/[^0-9]/g, '');
-    const rawKeyOnly = rawVal.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+    const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
     let targetLic = state.allLicenses.find(l => {
         if (l.type === 'dispatch') return false;
         const lKey = (l.key || '').toUpperCase();
@@ -619,12 +661,11 @@ export async function saveLicenseEdit() {
     const expStr = expireDate.replace(/-/g, '.');
     const target = state.allLicenses.find(l => l.key === origKey);
     
-    // UI에서 설정한 PRO 활성화 상태 반영
     const isPro = document.getElementById('edit-pro-checkbox')?.checked || false;
 
-    // 🌟 동시 접속 허용 회선 수 계산
+    // 🌟 마스터 관리자가 직접 입력하거나 증설한 회선 수 그대로 반영
     const inputSessions = parseInt(document.getElementById('edit-sessions-input')?.value);
-    const maxSessions = type === 'dispatch' ? (isPro ? (inputSessions || 2) : 1) : 1;
+    const maxSessions = type === 'dispatch' ? (inputSessions > 0 ? inputSessions : (isPro ? 2 : 1)) : 1;
 
     const updatePayload = {
         key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
@@ -645,7 +686,7 @@ export async function saveLicenseEdit() {
         } else {
             await updateDoc(doc(db, "licenses", origKey), updatePayload);
         }
-        alert("계정 정보가 성공적으로 수정되었습니다.");
+        alert(`계정 정보가 성공적으로 수정되었습니다.\n(동시 접속 허용: ${maxSessions}대)`);
         closeEditModal();
     } catch (e) { alert("오류: " + e.message); }
 }
@@ -689,6 +730,8 @@ window.addBlockedDevice = addBlockedDevice;
 window.unblockDevice = unblockDevice;
 
 window.generateNewLicense = generateNewLicense;
+window.adjustLicenseSessions = adjustLicenseSessions;
+window.onSessionsInputChange = onSessionsInputChange;
 window.openEditLicenseModal = openEditLicenseModal;
 window.closeEditModal = closeEditModal;
 window.renderModalConnectedDrivers = renderModalConnectedDrivers;
