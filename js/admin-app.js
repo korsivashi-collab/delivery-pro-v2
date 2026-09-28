@@ -32,17 +32,23 @@ import {
 } from "./admin-master-history.js";
 
 // ==========================================
-// [관제/PRO 기능 모듈 가져오기]
+// [관제/PRO 코어 모듈 가져오기]
 // ==========================================
 import {
     formatNumber, forceClearMap, getFilteredVisibleDrivers, setDispatchMode, renderSidebar,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView, selectDriver,
     clearSelectedDriver, removeOrUnlinkDriver, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
-    clearSearchInput, jumpToDeliveryTarget, handleGlobalSearch,
     handleProFeature, closeAutoDispatchModal, closeProInvoiceModal, closePremiumModal,
     openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver
 } from "./admin-dispatch-core.js";
+
+// 🌟 [신규 분리 3: 통합 검색 및 기간 확장 조회 모듈]
+import {
+    closeSearchSidePanel, clearSearchInput, jumpToDeliveryTarget,
+    inspectDriverRoute, viewSearchCompletionPhoto, setSearchRangeMode,
+    applyCustomSearchRange, resetSearchToToday, handleGlobalSearch
+} from "./admin-dispatch-search.js";
 
 import {
     saveCompanyBaseAddress, clearCompanyBaseAddress, updateCompanyBaseUI,
@@ -623,9 +629,6 @@ window.setMapPolylineMode = setMapPolylineMode;
 window.changeDispatchDate = changeDispatchDate;
 window.onDispatchDateChange = onDispatchDateChange;
 window.resetDispatchDateToToday = resetDispatchDateToToday;
-window.clearSearchInput = clearSearchInput;
-window.jumpToDeliveryTarget = jumpToDeliveryTarget;
-window.handleGlobalSearch = handleGlobalSearch;
 window.openLinkDriverModal = openLinkDriverModal;
 window.closeLinkDriverModal = closeLinkDriverModal;
 window.confirmLinkDriver = confirmLinkDriver;
@@ -634,6 +637,17 @@ window.closeAutoDispatchModal = closeAutoDispatchModal;
 window.closeProInvoiceModal = closeProInvoiceModal;
 window.closePremiumModal = closePremiumModal;
 window.focusMapPosition = focusMapPosition;
+
+// 🌟 [관제 통합 검색 (Search)]
+window.closeSearchSidePanel = closeSearchSidePanel;
+window.clearSearchInput = clearSearchInput;
+window.jumpToDeliveryTarget = jumpToDeliveryTarget;
+window.inspectDriverRoute = inspectDriverRoute;
+window.viewSearchCompletionPhoto = viewSearchCompletionPhoto;
+window.setSearchRangeMode = setSearchRangeMode;
+window.applyCustomSearchRange = applyCustomSearchRange;
+window.resetSearchToToday = resetSearchToToday;
+window.handleGlobalSearch = handleGlobalSearch;
 
 // [관제 자동할당 및 기사 배포 모듈 (Auto Dispatch)]
 window.saveCompanyBaseAddress = saveCompanyBaseAddress;

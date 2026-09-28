@@ -5,6 +5,19 @@ import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { map } from "./admin-map.js";
 import { doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
+// 🌟 분리된 검색 전용 모듈에서 함수들을 재연결 (안전한 호환성 유지)
+export {
+    closeSearchSidePanel,
+    clearSearchInput,
+    jumpToDeliveryTarget,
+    inspectDriverRoute,
+    viewSearchCompletionPhoto,
+    setSearchRangeMode,
+    applyCustomSearchRange,
+    resetSearchToToday,
+    handleGlobalSearch
+} from "./admin-dispatch-search.js";
+
 export function formatNumber(num) {
     if (!num || isNaN(num)) return num || ''; 
     return Number(num).toLocaleString('ko-KR');
@@ -502,13 +515,8 @@ export function setMapPolylineMode(mode) {
 }
 
 // ==========================================
-// 🌟 4. 전역 검색 및 과거 내역 확장 조회 (최근 1주일/1달/기간설정)
+// 4. 날짜 변경 제어
 // ==========================================
-let currentSearchQuery = '';
-let currentSearchRangeMode = 'today'; // 'today', '7days', '30days', 'custom'
-let currentSearchCustomStart = '';
-let currentSearchCustomEnd = '';
-
 export function changeDispatchDate(days) {
     const picker = document.getElementById('dispatch-date-picker');
     if (!picker) return;
@@ -528,437 +536,6 @@ export function resetDispatchDateToToday() {
     const picker = document.getElementById('dispatch-date-picker');
     if (picker) picker.value = todayStr;
     onDispatchDateChange();
-}
-
-function ensureSearchSidePanel() {
-    let sidePanel = document.getElementById('search-result-side-panel');
-    if (!sidePanel) {
-        const mapSec = document.getElementById('map-section');
-        if (mapSec) {
-            sidePanel = document.createElement('div');
-            sidePanel.id = 'search-result-side-panel';
-            sidePanel.className = 'absolute top-0 right-0 h-full w-1/2 max-w-[500px] min-w-[340px] bg-white shadow-2xl z-[400] transform translate-x-full transition-transform duration-300 flex flex-col border-l border-gray-200';
-            sidePanel.innerHTML = `
-                <div class="px-5 py-3.5 border-b border-gray-200 bg-gray-50 flex justify-between items-center flex-none">
-                    <div>
-                        <h3 class="font-black text-gray-900 text-sm flex items-center gap-2">
-                            <i class="fa-solid fa-magnifying-glass text-blue-600"></i> 통합 검색 결과
-                        </h3>
-                        <p class="text-[11px] text-gray-500 font-bold mt-0.5">배송지 및 배정 기사 현황</p>
-                    </div>
-                    <button onclick="window.closeSearchSidePanel()" class="text-gray-400 hover:text-gray-700 bg-white border border-gray-200 rounded-lg p-1.5 shadow-sm transition active:scale-95">
-                        <i class="fa-solid fa-xmark text-lg px-1"></i>
-                    </button>
-                </div>
-                <div id="search-result-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar"></div>
-            `;
-            mapSec.appendChild(sidePanel);
-        }
-    }
-    return sidePanel;
-}
-
-export function closeSearchSidePanel() {
-    const sidePanel = document.getElementById('search-result-side-panel');
-    if (sidePanel) sidePanel.classList.add('translate-x-full');
-    clearSearchInput();
-}
-
-export function clearSearchInput() {
-    const input = document.getElementById('global-search-input');
-    if (input) input.value = '';
-    const sidePanel = document.getElementById('search-result-side-panel');
-    if (sidePanel) sidePanel.classList.add('translate-x-full');
-    const clearBtn = document.getElementById('search-clear-btn');
-    if (clearBtn) clearBtn.classList.add('hidden');
-    currentSearchQuery = '';
-    currentSearchRangeMode = 'today';
-}
-
-// 🌟 [admin-app.js 연동] 타겟 점프 함수
-export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
-    const sidePanel = document.getElementById('search-result-side-panel');
-    if (sidePanel) sidePanel.classList.add('translate-x-full');
-    clearSearchInput();
-    if (dateStr) {
-        const picker = document.getElementById('dispatch-date-picker');
-        if (picker) picker.value = dateStr;
-    }
-    setDispatchMode('DELIVERY', true);
-    if (devId) selectDriver(devId);
-    if (lat && lng && window.focusMapPosition) window.focusMapPosition(lat, lng);
-}
-
-// 🌟 기사명 클릭 시 해당 기사의 배송 관리 동선 뷰로 다이렉트 전환
-export function inspectDriverRoute(devId, dateStr) {
-    if (!devId || devId === '미배정') {
-        alert("배정된 기사 정보가 없는 주문건입니다.");
-        return;
-    }
-
-    const matched = state.allLicenses.find(l => 
-        l.deviceId === devId || 
-        l.key === devId || 
-        (l.phone && l.phone === devId) ||
-        (l.phone && devId.includes(l.phone))
-    );
-    const targetDevId = matched ? (matched.deviceId || matched.key) : devId;
-
-    setDispatchMode('DELIVERY', true);
-
-    if (dateStr) {
-        const picker = document.getElementById('dispatch-date-picker');
-        if (picker) picker.value = dateStr;
-    }
-
-    selectDriver(targetDevId);
-
-    const sidePanel = document.getElementById('search-result-side-panel');
-    if (sidePanel) sidePanel.classList.add('translate-x-full');
-}
-
-// 🌟 배송 완료 사진 단독 뷰어 팝업
-export function viewSearchCompletionPhoto(imgUrl, addr, phone, time) {
-    let modal = document.getElementById('dispatch-search-photo-modal');
-    if (!modal) {
-        modal = document.createElement('div');
-        modal.id = 'dispatch-search-photo-modal';
-        modal.className = 'fixed inset-0 bg-black/80 z-[800] flex items-center justify-center p-4 backdrop-blur-sm';
-        modal.onclick = () => modal.classList.add('hidden');
-        modal.innerHTML = `
-            <div class="bg-white rounded-3xl overflow-hidden shadow-2xl max-w-lg w-full max-h-[90vh] flex flex-col" onclick="event.stopPropagation()">
-                <div class="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
-                    <div class="min-w-0 pr-2">
-                        <h4 id="disp-photo-addr" class="font-black text-sm text-gray-900 truncate leading-snug"></h4>
-                        <p id="disp-photo-sub" class="text-[11px] text-gray-500 font-bold mt-0.5"></p>
-                    </div>
-                    <button onclick="document.getElementById('dispatch-search-photo-modal').classList.add('hidden')" class="w-8 h-8 rounded-full bg-gray-200 hover:bg-gray-300 text-gray-700 flex items-center justify-center transition">
-                        <i class="fa-solid fa-xmark"></i>
-                    </button>
-                </div>
-                <div class="flex-1 overflow-auto bg-black flex items-center justify-center p-2 min-h-[300px]">
-                    <img id="disp-photo-img" src="" alt="배송 완료 사진" class="max-h-[65vh] max-w-full object-contain rounded-lg">
-                </div>
-                <div class="p-3 bg-white border-t border-gray-100 flex justify-between items-center text-xs">
-                    <span class="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-black">배송 완료 사진</span>
-                    <a id="disp-photo-link" href="#" target="_blank" class="bg-blue-600 hover:bg-blue-700 text-white font-black px-3.5 py-1.5 rounded-xl transition flex items-center gap-1.5 shadow-sm">
-                        <i class="fa-solid fa-arrow-up-right-from-square"></i> 원본 새창 보기
-                    </a>
-                </div>
-            </div>
-        `;
-        document.body.appendChild(modal);
-    }
-    document.getElementById('disp-photo-addr').innerText = addr || '주소 정보 없음';
-    document.getElementById('disp-photo-sub').innerText = `${phone || '기사'} | ${time || ''}`;
-    document.getElementById('disp-photo-img').src = imgUrl;
-    document.getElementById('disp-photo-link').href = imgUrl;
-    modal.classList.remove('hidden');
-}
-
-// 🌟 기간 필터 범위 판정 헬퍼
-function isTargetDateInRange(dStr, mode, customStart, customEnd) {
-    if (!dStr) return false;
-    if (mode === 'today') return dStr === todayStr;
-
-    const now = new Date();
-    const targetDate = new Date(dStr);
-    if (isNaN(targetDate.getTime())) return false;
-
-    if (mode === '7days') {
-        const past = new Date();
-        past.setDate(now.getDate() - 7);
-        past.setHours(0, 0, 0, 0);
-        return targetDate >= past;
-    } else if (mode === '30days') {
-        const past = new Date();
-        past.setDate(now.getDate() - 30);
-        past.setHours(0, 0, 0, 0);
-        return targetDate >= past;
-    } else if (mode === 'custom') {
-        if (!customStart || !customEnd) return true;
-        return dStr >= customStart && dStr <= customEnd;
-    }
-    return true;
-}
-
-export function setSearchRangeMode(mode) {
-    currentSearchRangeMode = mode;
-    handleGlobalSearch(currentSearchQuery, false);
-}
-
-export function applyCustomSearchRange() {
-    const sInput = document.getElementById('search-custom-start');
-    const eInput = document.getElementById('search-custom-end');
-    if (!sInput?.value || !eInput?.value) {
-        alert("시작일과 종료일을 모두 선택해 주세요.");
-        return;
-    }
-    if (sInput.value > eInput.value) {
-        alert("시작일이 종료일보다 클 수 없습니다.");
-        return;
-    }
-    currentSearchCustomStart = sInput.value;
-    currentSearchCustomEnd = eInput.value;
-    currentSearchRangeMode = 'custom';
-    handleGlobalSearch(currentSearchQuery, false);
-}
-
-export function resetSearchToToday() {
-    currentSearchRangeMode = 'today';
-    currentSearchCustomStart = '';
-    currentSearchCustomEnd = '';
-    handleGlobalSearch(currentSearchQuery, false);
-}
-
-export function handleGlobalSearch(query, isNewSearch = true) {
-    const sidePanel = ensureSearchSidePanel();
-    const contentEl = document.getElementById('search-result-content');
-    const clearBtn = document.getElementById('search-clear-btn');
-    
-    if (isNewSearch) {
-        currentSearchQuery = (query || '').trim();
-        currentSearchRangeMode = 'today'; // 새 검색 시 항상 오늘 기본 노출
-    }
-
-    const q = currentSearchQuery.toLowerCase();
-    if (!q) { 
-        if (sidePanel) sidePanel.classList.add('translate-x-full'); 
-        if (clearBtn) clearBtn.classList.add('hidden'); 
-        return; 
-    }
-    if (clearBtn) clearBtn.classList.remove('hidden');
-
-    const addressGroups = {};
-
-    // 1. 활성 동선(routes) 데이터 매칭
-    for (let devId in state.activeRoutes) {
-        const r = state.activeRoutes[devId];
-        const dests = r.destinations || [];
-        const p = r.phone || '기사';
-        dests.forEach(d => {
-            const matchesAddr = d.address && d.address.toLowerCase().includes(q);
-            const matchesFull = d.fullAddress && d.fullAddress.toLowerCase().includes(q);
-            const matchesStore = d.storeName && d.storeName.toLowerCase().includes(q);
-            const matchesPhone = p.includes(q) || (d.phone && d.phone.includes(q));
-            
-            if (matchesAddr || matchesFull || matchesStore || matchesPhone) {
-                if (isTargetDateInRange(todayStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
-                    const addrKey = (d.address || d.fullAddress || '').trim();
-                    if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
-                    addressGroups[addrKey].push({
-                        type: 'PENDING', 
-                        address: d.address || d.fullAddress, 
-                        storeName: d.storeName || '',
-                        dateStr: todayStr, 
-                        timeStr: '이동/대기 중',
-                        phone: p, 
-                        devId: devId, 
-                        lat: d.lat, 
-                        lng: d.lng, 
-                        displayNumber: d.displayNumber, 
-                        timestamp: Date.now()
-                    });
-                }
-            }
-        });
-    }
-
-    // 2. 배송 완료 기록(completions) 매칭
-    state.allCompletions.forEach(c => {
-        const matchesAddr = c.address && c.address.toLowerCase().includes(q);
-        const matchesPhone = (c.phone && c.phone.includes(q)) || (c.customerPhone && c.customerPhone.includes(q));
-        if (matchesAddr || matchesPhone) {
-            let dStr = '';
-            let tStr = '';
-            if (c.timeString && c.timeString.includes(' ')) { 
-                dStr = c.timeString.split(' ')[0].replace(/\./g, '-'); 
-                tStr = c.timeString.split(' ')[1]; 
-            } else if (c.completedAt) { 
-                dStr = getLocalDateString(new Date(c.completedAt)); 
-                const dt = new Date(c.completedAt); 
-                tStr = `${String(dt.getHours()).padStart(2, '0')}:${String(dt.getMinutes()).padStart(2, '0')}`; 
-            }
-
-            if (isTargetDateInRange(dStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
-                const addrKey = (c.address || '').trim();
-                if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
-                addressGroups[addrKey].push({
-                    type: 'DONE', 
-                    address: c.address, 
-                    dateStr: dStr, 
-                    timeStr: tStr, 
-                    tag: c.tag || '전달완료',
-                    phone: c.phone || '기사', 
-                    devId: c.deviceId, 
-                    lat: c.lat, 
-                    lng: c.lng, 
-                    photoUrl: c.photoUrl || '',
-                    timestamp: c.completedAt || 0
-                });
-            }
-        }
-    });
-
-    // 3. 업로드된 관제 엑셀 주문 리스트 매칭
-    if (state.parsedExcelList && state.parsedExcelList.length > 0) {
-        state.parsedExcelList.forEach(o => {
-            const matchesAddr = o.address && o.address.toLowerCase().includes(q);
-            const matchesFull = o.fullAddress && o.fullAddress.toLowerCase().includes(q);
-            const matchesStore = o.storeName && o.storeName.toLowerCase().includes(q);
-            const matchesPhone = (o.phone && o.phone.includes(q)) || (o.assignedDriver && o.assignedDriver.toLowerCase().includes(q));
-            
-            if (matchesAddr || matchesFull || matchesStore || matchesPhone) {
-                if (isTargetDateInRange(todayStr, currentSearchRangeMode, currentSearchCustomStart, currentSearchCustomEnd)) {
-                    const addrKey = (o.address || o.fullAddress || '').trim();
-                    if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
-                    addressGroups[addrKey].push({
-                        type: 'EXCEL',
-                        address: o.address || o.fullAddress,
-                        storeName: o.storeName || '',
-                        dateStr: todayStr,
-                        timeStr: o.assignedDriver ? `담당: ${o.assignedDriver}` : '미배정',
-                        phone: o.assignedDriver || '미배정',
-                        devId: o.assignedDriver,
-                        lat: o.lat,
-                        lng: o.lng,
-                        timestamp: 1
-                    });
-                }
-            }
-        });
-    }
-
-    const uniqueAddresses = Object.keys(addressGroups);
-    if (!contentEl) return;
-
-    let rangeTitleBadge = '';
-    if (currentSearchRangeMode === 'today') rangeTitleBadge = `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded-full">오늘 결과</span>`;
-    else if (currentSearchRangeMode === '7days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1주일 조회 중</span>`;
-    else if (currentSearchRangeMode === '30days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1달 조회 중</span>`;
-    else rangeTitleBadge = `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
-
-    let html = `
-        <div class="flex items-center justify-between pb-2 border-b border-gray-200">
-            <div class="flex items-center gap-1.5">
-                <span class="text-xs font-black text-gray-800">검색 내역</span>
-                ${rangeTitleBadge}
-            </div>
-            ${currentSearchRangeMode !== 'today' ? `
-            <button onclick="window.resetSearchToToday()" class="text-[11px] font-black text-blue-600 hover:text-blue-800 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 transition">
-                <i class="fa-solid fa-rotate-left mr-0.5"></i> 오늘 결과만 보기
-            </button>` : ''}
-        </div>
-    `;
-
-    if (uniqueAddresses.length === 0) {
-        html += `
-            <div class="py-16 flex flex-col items-center justify-center space-y-2">
-                <i class="fa-solid fa-magnifying-glass text-gray-300 text-3xl mb-1"></i>
-                <p class="text-sm text-gray-600 font-bold">지정된 기간 내 검색 결과가 없습니다.</p>
-                <p class="text-[11px] text-gray-400">아래 버튼을 눌러 지난 내역을 다시 검색해 보세요.</p>
-            </div>`;
-    } else {
-        uniqueAddresses.slice(0, 40).forEach((addr) => {
-            const items = addressGroups[addr]; 
-            items.sort((a, b) => b.timestamp - a.timestamp);
-            const latest = items[0]; 
-            const isToday = (latest.dateStr === todayStr);
-            const storeLabel = latest.storeName ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] px-1.5 py-0.5 rounded font-black mr-1.5 shrink-0">${latest.storeName}</span>` : '';
-            
-            let statusBadge = '';
-            if (latest.type === 'DONE') {
-                statusBadge = `
-                    <div class="flex items-center gap-1.5">
-                        <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-emerald-700 bg-emerald-100">
-                            ✓ 완료 [${latest.tag || '전달'}] ${latest.timeStr}
-                        </span>
-                        ${latest.photoUrl ? `
-                        <button type="button" onclick="event.stopPropagation(); window.viewSearchCompletionPhoto('${latest.photoUrl}', '${(latest.address || '').replace(/'/g, "\\'")}', '${latest.phone}', '${latest.timeStr}')" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] px-2 py-0.5 rounded shadow-xs flex items-center gap-1 transition active:scale-95">
-                            <i class="fa-solid fa-camera"></i> 사진보기
-                        </button>` : ''}
-                    </div>
-                `;
-            } else if (latest.type === 'PENDING') {
-                statusBadge = `
-                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-blue-700 bg-blue-100">
-                        ➔ 이동 대기중
-                    </span>
-                `;
-            } else {
-                statusBadge = `
-                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md text-amber-700 bg-amber-100">
-                        📦 배정 주문
-                    </span>
-                `;
-            }
-
-            // 기사 클릭 시 해당 기사의 배송 관리 동선 뷰로 전환
-            const driverBtn = latest.phone && latest.phone !== '미배정'
-                ? `<button type="button" onclick="event.stopPropagation(); window.inspectDriverRoute('${latest.devId}', '${latest.dateStr}')" class="hover:bg-blue-600 hover:text-white bg-blue-50 text-blue-700 border border-blue-200 font-black px-2.5 py-1 rounded-lg text-xs flex items-center transition shadow-2xs active:scale-95" title="클릭 시 기사의 오늘 배송 동선으로 이동합니다">
-                     <i class="fa-solid fa-truck text-[10px] mr-1.5 text-blue-500"></i>${latest.phone}
-                   </button>`
-                : `<span class="text-gray-400 font-bold text-[11px]">기사 미배정</span>`;
-
-            html += `
-            <div class="border border-gray-200 rounded-2xl p-4 bg-white hover:border-blue-400 hover:shadow-md transition shadow-sm cursor-pointer group" onclick="if(window.focusMapPosition && ${latest.lat} && ${latest.lng}){ window.focusMapPosition(${latest.lat}, ${latest.lng}); }">
-                <div class="flex justify-between items-start mb-2.5">
-                    <div class="flex-1 min-w-0 pr-2">
-                        <span class="font-black text-sm text-gray-900 leading-snug break-keep flex items-start">
-                            <i class="fa-solid fa-location-dot text-red-500 mt-0.5 mr-1.5 text-xs shrink-0 group-hover:animate-bounce"></i>
-                            <span>${storeLabel}${latest.address}</span>
-                        </span>
-                    </div>
-                    <span class="bg-gray-100 text-gray-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0 mt-0.5 whitespace-nowrap">총 ${items.length}회</span>
-                </div>
-                <div class="p-3 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-blue-50/50 border-blue-200'}">
-                    <div class="flex justify-between items-center text-xs flex-wrap gap-1.5">
-                        <div class="flex items-center gap-2">
-                            <span class="text-[10px] font-black px-2 py-0.5 rounded shadow-sm ${isToday ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}">
-                                ${latest.dateStr}
-                            </span>
-                            ${driverBtn}
-                        </div>
-                        ${statusBadge}
-                    </div>
-                </div>
-            </div>`;
-        });
-    }
-
-    // 🌟 결과 밑에 배치되는 기간 확장 조회 툴바
-    html += `
-        <div class="mt-4 pt-4 border-t-2 border-dashed border-gray-200 flex flex-col gap-2.5 bg-white p-3.5 rounded-2xl shadow-xs">
-            <div class="flex items-center justify-between">
-                <span class="text-xs font-black text-gray-800 flex items-center gap-1.5">
-                    <i class="fa-solid fa-clock-rotate-left text-blue-600"></i> 지난 배송 내역 다시 검색
-                </span>
-                <span class="text-[10px] text-gray-400 font-bold">1주일 / 1달 / 기간 지정</span>
-            </div>
-            <div class="grid grid-cols-3 gap-2">
-                <button type="button" onclick="window.setSearchRangeMode('7days')" class="py-2.5 ${currentSearchRangeMode === '7days' ? 'bg-purple-600 text-white' : 'bg-gray-50 hover:bg-purple-50 hover:text-purple-700 text-gray-700'} font-black text-xs rounded-xl border border-gray-200 transition active:scale-95 shadow-2xs">
-                    최근 1주일
-                </button>
-                <button type="button" onclick="window.setSearchRangeMode('30days')" class="py-2.5 ${currentSearchRangeMode === '30days' ? 'bg-purple-600 text-white' : 'bg-gray-50 hover:bg-purple-50 hover:text-purple-700 text-gray-700'} font-black text-xs rounded-xl border border-gray-200 transition active:scale-95 shadow-2xs">
-                    최근 1달
-                </button>
-                <button type="button" onclick="document.getElementById('search-custom-box').classList.toggle('hidden')" class="py-2.5 ${currentSearchRangeMode === 'custom' ? 'bg-emerald-600 text-white' : 'bg-gray-50 hover:bg-emerald-50 hover:text-emerald-700 text-gray-700'} font-black text-xs rounded-xl border border-gray-200 transition active:scale-95 shadow-2xs">
-                    기간 설정
-                </button>
-            </div>
-            <div id="search-custom-box" class="${currentSearchRangeMode === 'custom' ? 'flex' : 'hidden'} items-center gap-1.5 pt-2 border-t border-gray-100 flex-wrap sm:flex-nowrap">
-                <input type="date" id="search-custom-start" value="${currentSearchCustomStart || todayStr}" class="bg-gray-50 border border-gray-300 rounded-lg p-1.5 text-xs font-bold outline-none flex-1 cursor-pointer">
-                <span class="text-xs text-gray-400 font-bold">~</span>
-                <input type="date" id="search-custom-end" value="${currentSearchCustomEnd || todayStr}" class="bg-gray-50 border border-gray-300 rounded-lg p-1.5 text-xs font-bold outline-none flex-1 cursor-pointer">
-                <button type="button" onclick="window.applyCustomSearchRange()" class="bg-slate-900 hover:bg-slate-800 text-white text-xs font-black px-3 py-1.5 rounded-lg transition active:scale-95 shadow-2xs whitespace-nowrap">
-                    조회
-                </button>
-            </div>
-        </div>
-    `;
-
-    contentEl.innerHTML = html; 
-    if (sidePanel) sidePanel.classList.remove('translate-x-full');
 }
 
 // ==========================================
@@ -1112,7 +689,7 @@ export async function confirmLinkDriver() {
 }
 
 // ==========================================
-// 6. 전역 Window 객체 바인딩
+// 6. 전역 Window 객체 바인딩 (핵심 관제 기능만 유지)
 // ==========================================
 window.formatNumber = formatNumber;
 window.getFilteredVisibleDrivers = getFilteredVisibleDrivers;
@@ -1129,15 +706,6 @@ window.setMapPolylineMode = setMapPolylineMode;
 window.changeDispatchDate = changeDispatchDate;
 window.onDispatchDateChange = onDispatchDateChange;
 window.resetDispatchDateToToday = resetDispatchDateToToday;
-window.clearSearchInput = clearSearchInput;
-window.closeSearchSidePanel = closeSearchSidePanel;
-window.jumpToDeliveryTarget = jumpToDeliveryTarget;
-window.inspectDriverRoute = inspectDriverRoute;
-window.viewSearchCompletionPhoto = viewSearchCompletionPhoto;
-window.setSearchRangeMode = setSearchRangeMode;
-window.applyCustomSearchRange = applyCustomSearchRange;
-window.resetSearchToToday = resetSearchToToday;
-window.handleGlobalSearch = handleGlobalSearch;
 window.updateProButtonsUI = updateProButtonsUI;
 window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
