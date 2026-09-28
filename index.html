@@ -2,7 +2,7 @@
 <html lang="ko">
 <head>
     <meta charset="UTF-8">
-    <!-- 🌟 [기기 해상도 자동 대응 최적화] 기기 본연의 가로폭(device-width)을 인식하여 선명하고 쾌적한 1:1 비율로 렌더링합니다. -->
+    <!-- 🌟 [기기 해상도 자동 대응 최적화] iOS와 안드로이드 모두 1:1 정배율로 선명하게 고정 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     
     <!-- 모바일 웹 & 네이티브 앱 공용 필수 메타 태그 -->
@@ -34,6 +34,7 @@
 
         * {
             box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
         }
 
         html, body {
@@ -44,14 +45,15 @@
             height: -webkit-fill-available;
             height: calc(var(--vh, 1vh) * 100);
             
-            /* 🌟 [안드로이드 글꼴 크기 강제 고정] */
-            -webkit-text-size-adjust: none !important;
-            -moz-text-size-adjust: none !important;
-            text-size-adjust: none !important;
+            /* 🌟 [안드로이드/iOS 폰트 크기 강제 왜곡 방지 - 100% 1:1 표준 고정] */
+            -webkit-text-size-adjust: 100% !important;
+            -moz-text-size-adjust: 100% !important;
+            text-size-adjust: 100% !important;
             
             overscroll-behavior-y: none;
             -webkit-user-select: none;
             user-select: none;
+            touch-action: manipulation;
         }
 
         input, textarea {
@@ -67,12 +69,12 @@
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         
-        /* Safe-Area 안전 여백 (iOS 노치 및 안드로이드 하단 제스처 바 대응) */
+        /* Safe-Area 안전 여백 (iOS 노치 및 안드로이드 하단 제스처 바 완벽 대응) */
         .pt-safe { 
             padding-top: max(0.5rem, env(safe-area-inset-top, 0px)); 
         }
         .pb-safe { 
-            padding-bottom: max(0.85rem, env(safe-area-inset-bottom, 8px)); 
+            padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 8px)); 
         }
         
         .animate-slide-up {
@@ -84,7 +86,7 @@
         }
     </style>
 
-    <!-- 화면 가용 높이 보정 스크립트 -->
+    <!-- 화면 가용 높이 즉각 보정 스크립트 -->
     <script>
         (function() {
             function updateImmediateVH() {
@@ -104,14 +106,12 @@
             if ('wakeLock' in navigator) {
                 try {
                     wakeLock = await navigator.wakeLock.request('screen');
-                    console.log('Wake Lock is active: 화면 꺼짐 방지 활성화');
                 } catch (err) {
                     console.error('Wake Lock error:', err);
                 }
             }
         }
         
-        // 화면 상태(백그라운드/포그라운드) 복귀 시 WakeLock 재요청
         document.addEventListener('visibilitychange', async () => {
             if (document.visibilityState === 'visible') {
                 await requestWakeLock();
@@ -254,55 +254,56 @@
 
     <!-- 2. 메인 앱 영역 -->
     <div id="main-app" class="hidden flex-col h-full w-full">
-        <!-- 🌟 [헤더: 윗줄에 액션 버튼 전체 배치 / 아랫줄에 사용기한만 배치하여 상하 오클릭 원천 차단] -->
-        <header class="bg-white px-3 pt-safe pb-2.5 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.06)] z-20 flex-none border-b border-gray-200 relative w-full overflow-hidden">
-            <div class="flex flex-col gap-2 w-full">
-                <!-- 1열: 상단 타이틀 및 가로 1열 액션 버튼 (지난배송, 설정, 알림, 로그아웃) -->
+        <!-- 🌟 [헤더 레이아웃: 과밀 해소 및 완벽한 가로/세로 균형 배치] -->
+        <header class="bg-white px-3 pt-safe pb-2 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.06)] z-20 flex-none border-b border-gray-200 relative w-full">
+            <div class="flex flex-col gap-1.5 w-full">
+                <!-- 1열: 상단 타이틀 및 우측 핵심 관리 버튼 -->
                 <div class="flex items-center justify-between gap-1 w-full min-w-0">
-                    <h1 class="text-[15px] font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
+                    <h1 class="text-[15px] font-black text-gray-900 tracking-tight flex items-center gap-1.5 shrink-0 whitespace-nowrap">
                         <i class="fa-solid fa-route text-blue-600 text-base shrink-0"></i>
                         <span>배송 경로 PRO</span>
                     </h1>
                     
                     <div class="flex items-center gap-1 shrink-0">
-                        <button onclick="window.openHistoryModal()" class="text-[11px] bg-gray-100 hover:bg-gray-200 text-gray-800 px-1.5 py-1 rounded-lg font-bold border border-gray-300 active:bg-gray-300 flex items-center gap-0.5 shadow-2xs transition active:scale-95 min-h-[30px] whitespace-nowrap">
-                            <i class="fa-solid fa-clock-rotate-left text-[10px]"></i> 지난배송
-                        </button>
-
-                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-800 border border-gray-300 px-1.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 min-h-[30px] whitespace-nowrap" title="연결설정">
-                            <i class="fa-solid fa-gear text-[10px] text-gray-600"></i>
+                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-700 border border-gray-200 px-2 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap min-h-[30px]" title="연결설정">
+                            <i class="fa-solid fa-gear text-[10px] text-gray-500"></i>
                             <span>설정</span>
                         </button>
                         
-                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-1.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 min-h-[30px] whitespace-nowrap" title="알림 보관함">
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-2 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap min-h-[30px]" title="알림 보관함">
                             <i class="fa-solid fa-bell text-[10px] text-blue-600"></i>
                             <span>알림</span>
                             <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
                         </button>
 
-                        <button onclick="window.logout()" class="text-[11px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-300 px-1.5 py-1 rounded-lg font-bold active:scale-95 transition shadow-2xs min-h-[30px] whitespace-nowrap">
+                        <button onclick="window.logout()" class="text-[11px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 px-2 py-1 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap min-h-[30px]">
                             로그아웃
                         </button>
                     </div>
                 </div>
                 
-                <!-- 2열: 사용기한만 단독 배치 (하단 터치 오류 요소 없음) -->
-                <div class="flex justify-between items-center gap-1 w-full min-w-0">
+                <!-- 2열: 사용기한 뱃지 & 지난배송 버튼 (시원한 가로 분배) -->
+                <div class="flex justify-between items-center gap-1.5 w-full min-w-0">
                     <span class="text-[11px] text-gray-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap">물류 라스트마일</span>
-                    <span id="license-expire-badge" class="text-[11px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-lg font-black whitespace-nowrap shadow-2xs">
-                        사용기한: 확인중...
-                    </span>
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <span id="license-expire-badge" class="text-[10px] bg-blue-50 text-blue-700 border border-blue-200 px-2 py-1 rounded-md font-extrabold whitespace-nowrap shadow-2xs">
+                            사용기한: 확인중...
+                        </span>
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 hover:bg-gray-200 active:bg-gray-300 text-gray-700 px-2 py-1 rounded-md font-bold border border-gray-200 flex items-center gap-1 shadow-2xs transition whitespace-nowrap min-h-[26px]">
+                            <i class="fa-solid fa-clock-rotate-left text-[10px]"></i> 지난배송
+                        </button>
+                    </div>
                 </div>
                 
                 <!-- 3열: 종료 지점 바 -->
                 <div class="bg-red-50 border border-red-200 rounded-xl p-2 flex items-center justify-between gap-1.5 shadow-2xs w-full min-w-0">
                     <div class="flex items-center gap-1.5 min-w-0 flex-1">
-                        <span class="bg-red-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">종료지점</span>
-                        <span id="header-end-address" class="text-[12.5px] font-bold text-red-800 truncate flex-1 leading-tight">설정 안 함</span>
+                        <span class="bg-red-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">종료지점</span>
+                        <span id="header-end-address" class="text-[12px] font-bold text-red-800 truncate flex-1 leading-tight">설정 안 함</span>
                     </div>
-                    <div class="flex gap-1.5 shrink-0">
-                        <button onclick="window.setEndLocationGPS()" class="text-[11px] bg-white text-emerald-700 border border-emerald-300 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-emerald-50 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-crosshairs text-[10px]"></i> 현위치</button>
-                        <button onclick="window.toggleHeaderEndEdit()" class="text-[11px] bg-white text-red-600 border border-red-300 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-red-50 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-pen text-[10px]"></i> 직접입력</button>
+                    <div class="flex gap-1 shrink-0">
+                        <button onclick="window.setEndLocationGPS()" class="text-[10.5px] bg-white text-emerald-700 border border-emerald-300 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-emerald-50 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-crosshairs text-[10px]"></i> 현위치</button>
+                        <button onclick="window.toggleHeaderEndEdit()" class="text-[10.5px] bg-white text-red-600 border border-red-300 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-red-50 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-pen text-[10px]"></i> 직접입력</button>
                     </div>
                 </div>
                 <div id="header-end-edit-area" class="hidden flex gap-1.5 mt-0.5 w-full">
@@ -321,24 +322,25 @@
             </ul>
         </main>
 
-        <!-- 하단 푸터: 🌟 스캔 버튼 가로폭 확대 & 스와이프 손잡이 84px 확장 -->
-        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-3 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
-            <div class="flex items-center gap-2.5 relative w-full">
+        <!-- 🌟 [하단 푸터: 스캔 버튼과 스와이프 손잡이의 완벽한 비율 조정] -->
+        <footer class="bg-white border-t border-gray-200 px-3 sm:px-4 pt-2.5 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
+            <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
-                <!-- 스캔 버튼: 가로폭 확대 (px-6) -->
-                <button onclick="document.getElementById('camera-input').click()" class="h-[54px] px-6 bg-gray-900 hover:bg-gray-800 active:bg-black text-white font-bold rounded-xl shadow active:scale-95 transition text-[15px] flex items-center justify-center gap-1.5 shrink-0">
-                    <i class="fa-solid fa-camera text-lg"></i>
+                <!-- 스캔 버튼 -->
+                <button onclick="document.getElementById('camera-input').click()" class="h-[50px] px-5 bg-gray-900 hover:bg-gray-800 active:bg-black text-white font-bold rounded-xl shadow active:scale-95 transition text-[14px] flex items-center justify-center gap-1.5 shrink-0">
+                    <i class="fa-solid fa-camera text-base"></i>
                     <span>스캔</span>
                 </button>
                 
                 <!-- 슬라이더 트랙 -->
-                <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[54px]">
-                    <div class="absolute inset-0 flex items-center justify-center pl-16 pr-2 text-blue-600 font-extrabold text-[14px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
+                <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[50px]">
+                    <!-- 안내 텍스트 (글자가 가려지지 않도록 왼쪽 패딩 48px 최적화) -->
+                    <div class="absolute inset-0 flex items-center justify-center pl-12 pr-3 text-blue-600 font-black text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
                         밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-500 animate-pulse"></i>
                     </div>
-                    <!-- 🌟 스와이프 손잡이 너비를 84px로 대폭 확장 -->
-                    <div id="swipe-btn" class="absolute left-1 w-[84px] h-[46px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
-                        <i class="fa-solid fa-angles-right text-xl"></i>
+                    <!-- 제어 손잡이 (44px 정비율로 복원하여 글자 침범 완벽 방지) -->
+                    <div id="swipe-btn" class="absolute left-1 w-[44px] h-[42px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
+                        <i class="fa-solid fa-angles-right text-lg"></i>
                     </div>
                 </div>
             </div>
