@@ -43,7 +43,7 @@ import {
     openLinkDriverModal, closeLinkDriverModal, confirmLinkDriver
 } from "./admin-dispatch-core.js";
 
-// 🌟 [신규 분리 3: 통합 검색 및 기간 확장 조회 모듈]
+// 🌟 [관제 통합 검색 및 기간 확장 조회 모듈]
 import {
     closeSearchSidePanel, clearSearchInput, jumpToDeliveryTarget,
     inspectDriverRoute, viewSearchCompletionPhoto, setSearchRangeMode,
@@ -86,14 +86,14 @@ import {
     sortPrintList, initInvoiceResizer
 } from "./admin-dispatch-print.js";
 
-// 🌟 [신규 분리 1: 서식/폼 관리 모듈]
+// 🌟 [서식/폼 관리 모듈]
 import {
     loadSavedForms, setAsDefaultForm, toggleSelectForm,
     previewSavedForm, applySavedForm, saveProviderForm,
     deleteSavedForm, cancelProviderFormEdit, updateLivePreview, syncPreviewData
 } from "./admin-dispatch-forms.js";
 
-// 🌟 [신규 분리 2: 창고 피킹 리스트 모듈]
+// 🌟 [창고 피킹 리스트 모듈]
 import {
     openPickingDriverModal, closePickingDriverModal,
     toggleAllPickingDrivers, togglePickingDriver, executePickingListPrint
@@ -188,7 +188,7 @@ window.onload = () => {
 };
 
 // ==========================================
-// 2. 통합 로그인 및 로그아웃
+// 2. 통합 로그인 및 로그아웃 (다중 회선 FIFO 제어 엔진)
 // ==========================================
 window.handleSingleKeyLogin = async function() {
     const keyInput = document.getElementById('single-key-input').value.trim();
@@ -226,8 +226,36 @@ window.handleSingleKeyLogin = async function() {
         }
 
         if (licSnap.exists() && licSnap.data().type === 'dispatch') {
+            const licData = licSnap.data();
+
+            if (licData.status === 'suspended') {
+                msgEl.innerText = "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요.";
+                return;
+            }
+
+            // 🌟 허용 동시 접속 회선 수 판정 (기본형: 1대, PRO: 2대 이상)
+            const maxSessions = parseInt(licData.maxSessions) || (licData.isPro ? 2 : 1);
+            let activeSessions = Array.isArray(licData.activeSessions) ? [...licData.activeSessions] : [];
+            
+            if (activeSessions.length === 0 && licData.currentSessionToken) {
+                activeSessions.push(licData.currentSessionToken);
+            }
+
             const newSessionToken = 'SES-' + Math.random().toString(36).substring(2, 10);
-            await updateDoc(licRef, { currentSessionToken: newSessionToken, deviceId: newSessionToken });
+            
+            // 🌟 FIFO 큐: 허용 회선 수를 초과할 경우 가장 오래된 세션부터 순차적으로 제거
+            while (activeSessions.length >= maxSessions) {
+                activeSessions.shift();
+            }
+            activeSessions.push(newSessionToken);
+
+            await updateDoc(licRef, { 
+                currentSessionToken: newSessionToken,
+                activeSessions: activeSessions,
+                maxSessions: maxSessions,
+                lastLoginAt: Date.now()
+            });
+
             sessionStorage.setItem('deliveryProRole', 'DISPATCH');
             sessionStorage.setItem('deliveryProDispatchKey', licSnap.id);
             sessionStorage.setItem('deliveryProSessionToken', newSessionToken);
@@ -244,7 +272,27 @@ window.handleSingleKeyLogin = async function() {
     }
 };
 
-window.systemLogout = function() {
+window.systemLogout = async function() {
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const localToken = sessionStorage.getItem('deliveryProSessionToken');
+    
+    // 정상 로그아웃 시 본인 세션 토큰을 Firestore에서 제거하여 회선 즉시 반환
+    if (currentKey && localToken && !localToken.startsWith('MONITOR-')) {
+        try {
+            const licRef = doc(db, "licenses", currentKey);
+            const licSnap = await getDoc(licRef);
+            if (licSnap.exists()) {
+                const data = licSnap.data();
+                if (Array.isArray(data.activeSessions)) {
+                    const filtered = data.activeSessions.filter(s => s !== localToken);
+                    await updateDoc(licRef, { activeSessions: filtered });
+                }
+            }
+        } catch (e) {
+            console.warn("로그아웃 세션 해제 중 오류:", e);
+        }
+    }
+    
     sessionStorage.clear();
     window.location.href = 'admin.html';
 };
@@ -291,6 +339,7 @@ window.initMasterDataSync = function() {
         
         const currentRole = sessionStorage.getItem('deliveryProRole');
         const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+        const localToken = sessionStorage.getItem('deliveryProSessionToken');
         
         if (currentRole === 'DISPATCH' && currentKey) {
             const myAccount = state.allLicenses.find(l => l.key === currentKey || l.id === currentKey);
@@ -303,6 +352,21 @@ window.initMasterDataSync = function() {
                 alert("⚠️ 관리자에 의해 관제 계정 사용이 정지되었습니다.\n시스템 보안을 위해 즉시 로그아웃됩니다.");
                 window.systemLogout();
                 return;
+            }
+
+            // 🌟 동시 접속(회선 수) 초과 검사 및 자동 튕김 제어 (모니터링 전용 계정은 예외)
+            if (localToken && !localToken.startsWith('MONITOR-')) {
+                const maxAllowed = parseInt(myAccount.maxSessions) || (myAccount.isPro ? 2 : 1);
+                const activeSessions = Array.isArray(myAccount.activeSessions) 
+                    ? myAccount.activeSessions 
+                    : (myAccount.currentSessionToken ? [myAccount.currentSessionToken] : []);
+                
+                if (activeSessions.length > 0 && !activeSessions.includes(localToken)) {
+                    alert(`⚠️ 다른 PC에서 로그인하여 동시 접속 허용 회선 수(${maxAllowed}대)를 초과했습니다.\n시스템 보안을 위해 현재 창이 자동 로그아웃됩니다.`);
+                    sessionStorage.clear();
+                    window.location.href = 'admin.html';
+                    return;
+                }
             }
         }
 
@@ -371,7 +435,7 @@ window.initMasterDataSync = function() {
         }
     });
 
-    // 6. 메시지 실시간 동기화 (최신 50건으로 제한하여 읽기 비용 및 부하 절감)
+    // 6. 메시지 실시간 동기화
     onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });

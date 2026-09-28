@@ -82,13 +82,21 @@ export function renderMasterTables() {
     renderPagedTableTab('dispatch', dispatches, 'table-body-dispatch', 'pagination-dispatch', (item, idx) => {
         const connectedDrivers = state.allLicenses.filter(l => l.dispatchKey === item.key);
         const slotLimitStr = item.maxSlots ? `${item.maxSlots}대 한도` : '무제한';
+        const allowedSessions = item.maxSessions || (item.isPro ? 2 : 1);
         const proBadge = item.isPro ? `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-black ml-1 border border-amber-300"><i class="fa-solid fa-crown text-amber-500"></i> PRO</span>` : ``;
+        const sessionBadge = `<span class="bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-black px-1.5 py-0.5 rounded ml-1">${allowedSessions}회선</span>`;
+
         return `
         <tr class="hover:bg-gray-50/80 transition">
             <td class="py-3 px-3 font-bold text-gray-400 text-center">${idx}</td>
             <td class="py-3 px-3 font-mono font-black text-purple-600 select-all">${item.key}</td>
             <td class="py-3 px-3 font-black text-gray-900">${item.phone ? `<i class="fa-solid fa-phone text-blue-500 mr-1 text-[10px]"></i>${item.phone}` : '<span class="text-gray-400 text-[11px]">연락처 미등록</span>'}</td>
-            <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-600">${item.deviceId ? `<i class="fa-solid fa-display text-blue-500 mr-1"></i>${item.deviceId}` : '오프라인'}</span></td>
+            <td class="py-3 px-3">
+                <span class="font-mono text-[11px] text-gray-600">${item.deviceId ? `<i class="fa-solid fa-display text-blue-500 mr-1"></i>${item.deviceId}` : '오프라인'}</span>
+                <div class="text-[10px] text-indigo-600 font-bold mt-0.5 flex items-center gap-1">
+                    <i class="fa-solid fa-network-wired text-[9px]"></i> 동시 접속 허용: <b>${allowedSessions}대</b>
+                </div>
+            </td>
             <td class="py-3 px-3">
                 <span class="inline-flex items-center gap-1 font-black text-purple-700 bg-purple-50 px-2 py-0.5 rounded-lg border border-purple-200">
                     <i class="fa-solid fa-users text-[10px]"></i> ${connectedDrivers.length}명 연결
@@ -96,7 +104,7 @@ export function renderMasterTables() {
                 <span class="text-[10px] text-gray-400 block mt-0.5">(${slotLimitStr})</span>
             </td>
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
-            <td class="py-3 px-3"><span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full text-[10px] font-black">관제운영</span>${proBadge}</td>
+            <td class="py-3 px-3"><span class="bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full text-[10px] font-black">관제운영</span>${proBadge}${sessionBadge}</td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="window.open(window.location.pathname + '?monitor=' + '${item.key}', '_blank')" class="px-2.5 py-1 bg-emerald-600 text-white font-black rounded-lg text-[11px] hover:bg-emerald-700 transition">모니터링</button>
                 <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px] hover:bg-blue-700 transition">수정</button>
@@ -381,6 +389,7 @@ export async function generateNewLicense() {
                 deviceId: "",
                 status: "active",
                 maxSlots: (type === 'dispatch' ? 20 : 0),
+                maxSessions: (type === 'dispatch' ? 1 : 1), // 기본 관제는 기본 1회선 (PRO는 2회선)
                 isPro: false,
                 createdAt: Date.now() + i
             });
@@ -423,28 +432,77 @@ export function openEditLicenseModal(key) {
     document.getElementById('edit-status-select').value = target.status || 'active';
 
     const slotsBox = document.getElementById('edit-slots-container');
-    const proBox = document.getElementById('edit-pro-container'); // 프리미엄 체크박스 컨테이너
+    const proBox = document.getElementById('edit-pro-container');
     const dispatchSec = document.getElementById('edit-dispatch-connected-section');
 
+    // 🌟 동시 접속(모니터링) 회선 설정 UI 동적 주입 (HTML 파일 변경 없이 자동 생성)
+    let sessionsBox = document.getElementById('edit-sessions-container');
+    if (!sessionsBox && proBox && proBox.parentNode) {
+        sessionsBox = document.createElement('div');
+        sessionsBox.id = 'edit-sessions-container';
+        sessionsBox.className = 'hidden mt-2 p-3 bg-indigo-50/70 rounded-xl border border-indigo-200';
+        sessionsBox.innerHTML = `
+            <label class="block text-[11px] font-black text-indigo-900 mb-1 flex items-center gap-1.5">
+                <i class="fa-solid fa-network-wired text-indigo-600"></i> 동시 접속(모니터링) 허용 회선 수
+            </label>
+            <div class="flex items-center gap-2 mt-1.5">
+                <input type="number" id="edit-sessions-input" min="1" max="20" class="w-20 bg-white border border-indigo-300 rounded-lg p-1.5 text-xs font-black text-center outline-none focus:border-indigo-600">
+                <span class="text-xs font-bold text-gray-700">대</span>
+                <span id="edit-sessions-desc" class="text-[10px] font-bold text-gray-500 ml-1"></span>
+            </div>
+        `;
+        proBox.parentNode.insertBefore(sessionsBox, proBox.nextSibling);
+    }
+
+    const proCheck = document.getElementById('edit-pro-checkbox');
+    const sessionsInput = document.getElementById('edit-sessions-input');
+    const sessionsDesc = document.getElementById('edit-sessions-desc');
+
+    // 🌟 PRO 활성화 여부에 따른 회선 수 제어 함수
+    const updateSessionUIByProState = (isProActive) => {
+        if (!sessionsInput || !sessionsDesc) return;
+        if (isProActive) {
+            sessionsInput.disabled = false;
+            sessionsInput.className = "w-20 bg-white border border-indigo-300 rounded-lg p-1.5 text-xs font-black text-center outline-none focus:border-indigo-600 shadow-2xs";
+            if (parseInt(sessionsInput.value) < 2 || !sessionsInput.value) {
+                sessionsInput.value = 2; // PRO 요금제 기본 2회선 포함
+            }
+            sessionsDesc.innerHTML = `<b class="text-amber-700">PRO 요금제</b> 기본 2회선 포함 (추가 슬롯 직접 조절 가능)`;
+        } else {
+            sessionsInput.value = 1; // 기본형은 1회선 고정
+            sessionsInput.disabled = true;
+            sessionsInput.className = "w-20 bg-gray-100 border border-gray-300 rounded-lg p-1.5 text-xs font-black text-center text-gray-400 cursor-not-allowed";
+            sessionsDesc.innerHTML = `<b class="text-gray-700">기본 요금제(5.5만)</b>는 1회선 전용 (추가 불가)`;
+        }
+    };
+
     if (target.type === 'dispatch') {
-        // 관제 계정일 경우 슬롯과 PRO 설정 노출
         if (slotsBox) slotsBox.classList.remove('hidden');
         if (proBox) proBox.classList.remove('hidden');
+        if (sessionsBox) sessionsBox.classList.remove('hidden');
         
         document.getElementById('edit-slots-input').value = target.maxSlots || 0;
         
-        // 기존 PRO 상태 반영
-        const proCheck = document.getElementById('edit-pro-checkbox');
-        if (proCheck) proCheck.checked = !!target.isPro;
+        if (proCheck) {
+            proCheck.checked = !!target.isPro;
+            proCheck.onchange = (e) => {
+                updateSessionUIByProState(e.target.checked);
+            };
+        }
+
+        if (sessionsInput) {
+            sessionsInput.value = target.maxSessions || (target.isPro ? 2 : 1);
+        }
+        updateSessionUIByProState(!!target.isPro);
 
         if (dispatchSec) { dispatchSec.classList.remove('hidden'); dispatchSec.classList.add('flex'); }
         const addInput = document.getElementById('modal-add-driver-input');
         if (addInput) addInput.value = '';
         renderModalConnectedDrivers(target.key);
     } else {
-        // 일반 계정일 경우 숨김 처리
         if (slotsBox) slotsBox.classList.add('hidden');
         if (proBox) proBox.classList.add('hidden');
+        if (sessionsBox) sessionsBox.classList.add('hidden');
         if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
     }
     document.getElementById('edit-license-modal').classList.remove('hidden');
@@ -561,14 +619,18 @@ export async function saveLicenseEdit() {
     const expStr = expireDate.replace(/-/g, '.');
     const target = state.allLicenses.find(l => l.key === origKey);
     
-    // UI에서 설정한 체크박스 값을 통해 isPro 상태 결정
+    // UI에서 설정한 PRO 활성화 상태 반영
     const isPro = document.getElementById('edit-pro-checkbox')?.checked || false;
+
+    // 🌟 동시 접속 허용 회선 수 계산
+    const inputSessions = parseInt(document.getElementById('edit-sessions-input')?.value);
+    const maxSessions = type === 'dispatch' ? (isPro ? (inputSessions || 2) : 1) : 1;
 
     const updatePayload = {
         key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
         dispatchKey: target ? target.dispatchKey || '' : '',
         maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input')?.value) || 0 : 0,
-        // 관제 계정일 경우에만 프리미엄 여부 저장
+        maxSessions: maxSessions,
         isPro: type === 'dispatch' ? isPro : false
     };
 
