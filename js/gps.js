@@ -4,8 +4,8 @@
 // [배송 동선 PRO] 기기 GPS 위치 센서 및 현위치 추적 전담 모듈
 // =================================================================
 
-import { db } from './api.js';
-import { doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { getApp, getApps } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import { getFirestore, doc, setDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getOrCreateDeviceId } from './auth.js';
 import { coordToAddress } from './kakao.js';
 import { showLoading, hideLoading } from './utils.js';
@@ -15,6 +15,18 @@ import { state } from './state.js';
 let unsubRequestDevice = null;
 let unsubRequestKey = null;
 let lastReportTime = 0;
+
+// 🌟 api.js export 의존성을 제거하고 실행 중인 Firebase 인스턴스를 직접 안전하게 획득
+function getDbInstance() {
+    try {
+        if (getApps().length > 0) {
+            return getFirestore(getApp());
+        }
+    } catch (e) {
+        console.warn("Firestore 인스턴스 획득 대기:", e);
+    }
+    return null;
+}
 
 // ==========================================
 // 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진
@@ -38,13 +50,16 @@ export async function reportGpsToFirestore(lat, lng, force = false) {
         updatedAt: now
     };
 
+    const db = getDbInstance();
+    if (!db) return;
+
     try {
         // 1. 기기 고유 deviceId 문서로 보고
-        if (deviceId && db) {
+        if (deviceId) {
             await setDoc(doc(db, "gps_reports", deviceId), { ...payload, deviceId }, { merge: true });
         }
-        // 2. 라이선스 키가 다를 경우 키 문서로도 동시 보고 (관제 매칭 실패 100% 방지)
-        if (licKey && licKey !== deviceId && db) {
+        // 2. 라이선스 키가 다를 경우 키 문서로도 동시 보고 (관제 매칭 실패 방지)
+        if (licKey && licKey !== deviceId) {
             await setDoc(doc(db, "gps_reports", licKey), { ...payload, deviceId: licKey }, { merge: true });
         }
     } catch (e) {
@@ -58,8 +73,13 @@ export async function reportGpsToFirestore(lat, lng, force = false) {
 function listenToGpsRequests() {
     const deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
     const licKey = localStorage.getItem('deliveryProKey');
+    const db = getDbInstance();
 
-    if (!db) return;
+    if (!db) {
+        // Firebase 앱 초기화 타이밍 대기 후 1초 뒤 재시도
+        setTimeout(listenToGpsRequests, 1000);
+        return;
+    }
 
     const handleRequest = async (snap) => {
         if (!snap.exists()) return;
