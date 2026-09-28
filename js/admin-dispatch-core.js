@@ -200,7 +200,6 @@ export function renderDriverDetailView(devId) {
         if (isToday || routeDateStr === selectedDate) driverRoute = driver;
     }
     
-    // 🌟 배송 순번(displayNumber) 기준으로 엄격 정렬
     let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
     rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
@@ -344,7 +343,7 @@ export async function removeOrUnlinkDriver(devId, key) {
 }
 
 // ==========================================
-// 3. 지도 위에 경로 및 마커 렌더링 (2-opt 순번 순 연결)
+// 3. 지도 위에 경로 및 마커 렌더링
 // ==========================================
 export function drawDriverOnMap(devId) {
     forceClearMap(); 
@@ -368,7 +367,6 @@ export function drawDriverOnMap(devId) {
         }
     }
 
-    // 🌟 배송 순번(displayNumber) 순으로 정렬하여 지도에 순서대로 선 연결
     let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
     rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
@@ -394,7 +392,6 @@ export function drawDriverOnMap(devId) {
     const completedPath = [];
     const currentMode = state.currentMapPolylineMode || 'all';
 
-    // 🌟 등록된 본사 거점이 있을 경우 거점 좌표를 경로 시작점으로 지도에 포함
     const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
     if (companyBaseStr) {
         try {
@@ -408,7 +405,6 @@ export function drawDriverOnMap(devId) {
         } catch(e) {}
     }
 
-    // 완료된 배송 마커 및 완료 경로
     completions.forEach(comp => {
         if (comp.lat && comp.lng) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
@@ -426,7 +422,6 @@ export function drawDriverOnMap(devId) {
         }
     });
 
-    // 예정된 배송 마커 및 계획 경로 (2-opt 순서대로 1번 ➔ N번 연결)
     if (rawDests.length > 0) {
         rawDests.forEach((d, idx) => {
             if (d.lat && d.lng) {
@@ -507,7 +502,7 @@ export function setMapPolylineMode(mode) {
 }
 
 // ==========================================
-// 4. 날짜 및 전역 검색 기능
+// 🌟 4. 날짜 및 전역 검색 기능 (우측 슬라이드 패널 연동 완료)
 // ==========================================
 export function changeDispatchDate(days) {
     const picker = document.getElementById('dispatch-date-picker');
@@ -532,13 +527,17 @@ export function resetDispatchDateToToday() {
 
 export function clearSearchInput() {
     document.getElementById('global-search-input').value = '';
-    document.getElementById('search-dropdown').classList.add('hidden');
+    const sidePanel = document.getElementById('search-result-side-panel');
+    if (sidePanel) sidePanel.classList.add('translate-x-full');
     document.getElementById('search-clear-btn').classList.add('hidden');
 }
 
 export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
-    document.getElementById('search-dropdown').classList.add('hidden');
+    const sidePanel = document.getElementById('search-result-side-panel');
+    if (sidePanel) sidePanel.classList.add('translate-x-full');
+    
     clearSearchInput();
+    
     if (dateStr) document.getElementById('dispatch-date-picker').value = dateStr;
     setDispatchMode('DELIVERY', true);
     if (devId) window.selectDriver(devId);
@@ -546,11 +545,17 @@ export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
 }
 
 export function handleGlobalSearch(query) {
-    const dropdown = document.getElementById('search-dropdown');
+    const sidePanel = document.getElementById('search-result-side-panel');
+    const contentEl = document.getElementById('search-result-content');
     const clearBtn = document.getElementById('search-clear-btn');
     const q = query.trim().toLowerCase();
-    if (!q) { dropdown.classList.add('hidden'); clearBtn.classList.add('hidden'); return; }
-    clearBtn.classList.remove('hidden');
+    
+    if (!q) { 
+        if (sidePanel) sidePanel.classList.add('translate-x-full'); 
+        if (clearBtn) clearBtn.classList.add('hidden'); 
+        return; 
+    }
+    if (clearBtn) clearBtn.classList.remove('hidden');
 
     const addressGroups = {};
     for (let devId in state.activeRoutes) {
@@ -581,6 +586,7 @@ export function handleGlobalSearch(query) {
             }
         });
     }
+    
     state.allCompletions.forEach(c => {
         if (c.address && (c.address.toLowerCase().includes(q) || (c.phone && c.phone.includes(q)))) {
             const addrKey = c.address.trim();
@@ -601,25 +607,45 @@ export function handleGlobalSearch(query) {
 
     const uniqueAddresses = Object.keys(addressGroups);
     if (uniqueAddresses.length === 0) {
-        dropdown.innerHTML = `<div class="p-6 text-center text-xs text-gray-400 font-bold">검색 결과가 없습니다.</div>`; dropdown.classList.remove('hidden'); return;
+        contentEl.innerHTML = `<div class="py-20 flex flex-col items-center justify-center space-y-3"><i class="fa-solid fa-magnifying-glass text-gray-300 text-4xl mb-2"></i><p class="text-sm text-gray-500 font-bold">검색 결과가 없습니다.</p></div>`; 
+        if (sidePanel) sidePanel.classList.remove('translate-x-full'); 
+        return;
     }
+    
     let html = '';
-    uniqueAddresses.slice(0, 15).forEach((addr) => {
-        const items = addressGroups[addr]; items.sort((a,b) => b.timestamp - a.timestamp);
-        const latest = items[0]; const isToday = (latest.dateStr === todayStr);
-        const storeLabel = latest.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${latest.storeName}</span>` : '';
+    uniqueAddresses.slice(0, 30).forEach((addr) => {
+        const items = addressGroups[addr]; 
+        items.sort((a,b) => b.timestamp - a.timestamp);
+        const latest = items[0]; 
+        const isToday = (latest.dateStr === todayStr);
+        const storeLabel = latest.storeName ? `<span class="bg-indigo-50 text-indigo-700 border border-indigo-100 text-[10px] px-1.5 py-0.5 rounded font-black mr-1.5 shrink-0">${latest.storeName}</span>` : '';
+        
         html += `
-        <div class="border border-gray-200 rounded-2xl p-3 bg-white hover:border-blue-300 transition shadow-xs">
-            <div class="flex justify-between items-center mb-1.5"><span class="font-black text-[13px] text-gray-900 truncate flex-1 pr-2"><i class="fa-solid fa-location-dot text-red-500 mr-1 text-xs"></i>${storeLabel}${latest.address}</span><span class="bg-gray-100 text-gray-700 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0">총 ${items.length}회 배송</span></div>
-            <div onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')" class="p-2.5 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/40 border-emerald-200' : 'bg-blue-50/40 border-blue-200'} cursor-pointer hover:shadow-xs transition">
+        <div class="border border-gray-200 rounded-2xl p-4 bg-white hover:border-blue-400 hover:shadow-md transition shadow-sm cursor-pointer group" onclick="window.jumpToDeliveryTarget('${latest.devId}', ${latest.lat}, ${latest.lng}, '${latest.dateStr}')">
+            <div class="flex justify-between items-start mb-3">
+                <div class="flex-1 min-w-0 pr-2">
+                    <span class="font-black text-sm text-gray-900 leading-snug break-keep flex items-start">
+                        <i class="fa-solid fa-location-dot text-red-500 mt-0.5 mr-1.5 text-xs shrink-0 group-hover:animate-bounce"></i>
+                        <span>${storeLabel}${latest.address}</span>
+                    </span>
+                </div>
+                <span class="bg-gray-100 text-gray-600 text-[10px] font-black px-2 py-0.5 rounded-full border border-gray-200 shrink-0 mt-0.5 whitespace-nowrap">총 ${items.length}회</span>
+            </div>
+            <div class="p-3 rounded-xl border ${latest.type === 'DONE' ? 'bg-emerald-50/50 border-emerald-200' : 'bg-blue-50/50 border-blue-200'}">
                 <div class="flex justify-between items-center text-xs">
-                    <div class="flex items-center gap-1.5"><span class="text-[10px] font-black px-1.5 py-0.5 rounded ${isToday ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-700'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span><span class="font-bold text-gray-800">${latest.phone}</span></div>
-                    <span class="font-black text-[11px] ${latest.type === 'DONE' ? 'text-emerald-700' : 'text-blue-700'}">${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}]${latest.timeStr}` : `➔ ${latest.displayNumber || 1}번 이동 대기`}</span>
+                    <div class="flex items-center gap-2">
+                        <span class="text-[10px] font-black px-2 py-1 rounded shadow-sm ${isToday ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-600'}">${latest.dateStr} ${isToday ? '(오늘)' : ''}</span>
+                        <span class="font-bold text-gray-800 flex items-center"><i class="fa-solid fa-truck text-[9px] text-gray-400 mr-1.5"></i>${latest.phone}</span>
+                    </div>
+                    <span class="font-black text-[11px] px-2 py-0.5 rounded-md ${latest.type === 'DONE' ? 'text-emerald-700 bg-emerald-100' : 'text-blue-700 bg-blue-100'}">
+                        ${latest.type === 'DONE' ? `✓ 완료 [${latest.tag}]${latest.timeStr}` : `➔ 대기중`}
+                    </span>
                 </div>
             </div>
         </div>`;
     });
-    dropdown.innerHTML = html; dropdown.classList.remove('hidden');
+    contentEl.innerHTML = html; 
+    if (sidePanel) sidePanel.classList.remove('translate-x-full');
 }
 
 // ==========================================

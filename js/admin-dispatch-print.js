@@ -11,8 +11,8 @@ import { loadSavedForms } from "./admin-dispatch-forms.js";
 let invoiceSearchKeyword = '';
 let currentSenderFilter = 'ALL';
 
-// 🌟 좌측 인쇄 리스트 정렬 상태 변수 (기본: 코스 순번 순)
-let printListSortField = 'course'; // 'course', 'originalIdx', 'senderName', 'storeName', 'address'
+// 🌟 좌측 인쇄 리스트 정렬 상태 변수 (기본: 기사명 순)
+let printListSortField = 'driver'; // 'driver', 'originalIdx', 'senderName', 'storeName', 'address'
 let printListSortAsc = true;
 
 // ==========================================
@@ -40,17 +40,12 @@ export function exportToInvoiceModal() {
         state.printReadyList = [];
     }
 
-    // 🌟 모달 진입 시 기사별 ➔ 배송 코스 순번(displayNumber: 1, 2, 3...) 순으로 기본 정렬
+    // 🌟 모달 진입 시 기사명 가나다순으로 기본 정렬 (배송 코스 순번 배제)
     if (state.printReadyList.length > 0) {
         state.printReadyList.sort((a, b) => {
             const driverA = a.assignedDriver || '미배정';
             const driverB = b.assignedDriver || '미배정';
-            if (driverA !== driverB) {
-                return driverA.localeCompare(driverB, 'ko');
-            }
-            const numA = a.displayNumber || 9999;
-            const numB = b.displayNumber || 9999;
-            return numA - numB;
+            return driverA.localeCompare(driverB, 'ko');
         });
     }
 
@@ -61,7 +56,7 @@ export function exportToInvoiceModal() {
     state.currentPreviewInvoiceIndex = 0;
     invoiceSearchKeyword = '';
     currentSenderFilter = 'ALL';
-    printListSortField = 'course';
+    printListSortField = 'driver';
     printListSortAsc = true;
 
     const searchInput = document.getElementById('invoice-search-input');
@@ -195,13 +190,12 @@ function getFilteredPrintOrders() {
             const addr = (item.address || item.fullAddress || '').toLowerCase();
             const phone = (item.phone || '').toLowerCase();
             const driver = (item.assignedDriver || '').toLowerCase();
-            const course = item.displayNumber ? `${item.displayNumber}번` : '';
+            
             return sName.includes(invoiceSearchKeyword) || 
                    store.includes(invoiceSearchKeyword) || 
                    addr.includes(invoiceSearchKeyword) || 
                    phone.includes(invoiceSearchKeyword) ||
-                   driver.includes(invoiceSearchKeyword) ||
-                   course.includes(invoiceSearchKeyword);
+                   driver.includes(invoiceSearchKeyword);
         });
     }
 
@@ -209,15 +203,17 @@ function getFilteredPrintOrders() {
         let valA = '';
         let valB = '';
 
-        if (printListSortField === 'course') {
+        if (printListSortField === 'driver') {
             const driverA = a.assignedDriver || 'zzz';
             const driverB = b.assignedDriver || 'zzz';
             if (driverA !== driverB) {
                 return printListSortAsc ? driverA.localeCompare(driverB, 'ko') : driverB.localeCompare(driverA, 'ko');
             }
-            const numA = a.displayNumber || 9999;
-            const numB = b.displayNumber || 9999;
-            return printListSortAsc ? (numA - numB) : (numB - numA);
+            
+            const idxA = state.printReadyList.indexOf(a);
+            const idxB = state.printReadyList.indexOf(b);
+            return printListSortAsc ? (idxA - idxB) : (idxB - idxA);
+            
         } else if (printListSortField === 'senderName') {
             valA = (a.senderName || '').toLowerCase();
             valB = (b.senderName || '').toLowerCase();
@@ -335,7 +331,7 @@ export function renderInvoiceOrderList() {
                     <th class="py-2.5 px-2 text-center w-8">
                         <input type="checkbox" id="chk-invoice-all-table" ${isAllChecked ? 'checked' : ''} onclick="window.handleHeaderCheckAll(event)" class="cursor-pointer">
                     </th>
-                    <th class="sortable-th py-2.5 px-2 text-center w-16" onclick="window.sortPrintList('course')" title="기사별 배송 코스 순번순 정렬">코스${getArrow('course')}</th>
+                    <th class="sortable-th py-2.5 px-2 text-center w-16" onclick="window.sortPrintList('driver')" title="담당 기사별 정렬">기사${getArrow('driver')}</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('senderName')">공급자${getArrow('senderName')}</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('storeName')">상호(간판명)${getArrow('storeName')}</th>
                     <th class="sortable-th py-2.5 px-3" onclick="window.sortPrintList('address')">배송지 주소${getArrow('address')}</th>
@@ -353,12 +349,9 @@ export function renderInvoiceOrderList() {
         const storeDisplay = item.storeName || '-';
         const addressDisplay = item.address || item.fullAddress || '-';
 
-        // 🌟 기사별 배송 코스 순번 뱃지 구성
-        const courseBadge = item.assignedDriver
-            ? `<div class="flex flex-col items-center">
-                 <span class="bg-blue-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded font-mono shadow-2xs">${item.displayNumber ? item.displayNumber + '번' : '배정'}</span>
-                 <span class="text-[9px] text-gray-500 font-bold truncate max-w-[65px] mt-0.5" title="${item.assignedDriver}">${item.assignedDriver}</span>
-               </div>`
+        // 🌟 기사 코스 순번 삭제 후 이름만 깔끔하게 노출
+        const driverBadge = item.assignedDriver
+            ? `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs truncate max-w-[70px] inline-block" title="${item.assignedDriver}">${item.assignedDriver}</span>`
             : `<span class="text-[10px] text-gray-400 font-bold">미배정</span>`;
 
         tableHtml += `
@@ -366,7 +359,7 @@ export function renderInvoiceOrderList() {
             <td class="text-center py-2 px-2" onclick="event.stopPropagation()">
                 <input type="checkbox" onchange="window.toggleSingleInvoiceItem('${item.id}', this.checked, ${originalIdx})" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500 cursor-pointer invoice-row-checkbox" data-idx="${originalIdx}">
             </td>
-            <td class="text-center py-2 px-1">${courseBadge}</td>
+            <td class="text-center py-2 px-1">${driverBadge}</td>
             <td class="py-2 px-3 font-black text-amber-900 truncate max-w-[90px]" title="${senderDisplay}">${senderDisplay}</td>
             <td class="py-2 px-3 font-bold text-indigo-900 truncate max-w-[100px]" title="${storeDisplay}">${storeDisplay}</td>
             <td class="py-2 px-3 text-gray-900 truncate max-w-[160px]" title="${addressDisplay}">${addressDisplay}</td>
@@ -391,7 +384,7 @@ export function previewInvoiceRow(idx) {
     if (labelEl) {
         const sName = item.senderName ? `[${item.senderName}] ` : '';
         const driverCourse = item.assignedDriver 
-            ? ` (${item.assignedDriver}${item.displayNumber ? ' #' + item.displayNumber + '번' : ''})` 
+            ? ` (담당: ${item.assignedDriver})` 
             : ' (기사 미배정)';
         labelEl.innerText = `#${idx + 1} ${sName}${item.storeName || item.address || ''}${driverCourse}`;
     }
@@ -399,11 +392,11 @@ export function previewInvoiceRow(idx) {
     const docCanvas = document.getElementById('editable-doc-canvas');
     const baseTemplate = templateBuilderState.currentDocHtml;
     if (docCanvas && baseTemplate && typeof fillTemplateWithOrderData === 'function') {
-        // 미리보기 서식에 기사명과 코스 번호(#N번) 함께 전달
+        // 미리보기 서식에 기사명만 깔끔하게 전달 (순번 제거)
         const previewItem = {
             ...item,
             assignedDriver: item.assignedDriver 
-                ? `${item.assignedDriver}${item.displayNumber ? ` (${item.displayNumber}번)` : ''}`
+                ? item.assignedDriver
                 : '미배정'
         };
         docCanvas.innerHTML = fillTemplateWithOrderData(baseTemplate, previewItem, idx);
@@ -455,7 +448,7 @@ export function initTemplatePdfDropZone() {
 }
 
 // ==========================================
-// 5. 주문서 일괄 출력 (기사별 ➔ 배송 코스 순번 순 완벽 정렬)
+// 5. 주문서 일괄 출력 (기사명 가나다순으로 깔끔하게 정렬)
 // ==========================================
 export function executeBatchPrint() {
     if (!state.printReadyList || state.printReadyList.length === 0) { 
@@ -469,16 +462,11 @@ export function executeBatchPrint() {
         return;
     }
 
-    // 🌟 배송 현장 최적화: 기사별 ➔ 배송 코스 순번(displayNumber: 1, 2, 3...) 순서로 완벽 정렬하여 인쇄
+    // 🌟 배송 현장 최적화: 코스 번호가 제외되었으므로 기사명 가나다순으로 정렬
     selectedOrders.sort((a, b) => {
         const driverA = a.assignedDriver || '미배정';
         const driverB = b.assignedDriver || '미배정';
-        if (driverA !== driverB) {
-            return driverA.localeCompare(driverB, 'ko');
-        }
-        const numA = a.displayNumber || 9999;
-        const numB = b.displayNumber || 9999;
-        return numA - numB;
+        return driverA.localeCompare(driverB, 'ko');
     });
 
     const baseTemplateHtml = templateBuilderState.currentDocHtml || document.getElementById('editable-doc-canvas')?.innerHTML;
@@ -500,11 +488,11 @@ export function executeBatchPrint() {
     let printPagesHtml = '';
 
     selectedOrders.forEach((item, idx) => {
-        // 인쇄되는 전표 스탬프에 담당기사와 코스 번호 함께 전달
+        // 인쇄되는 전표 스탬프에 담당기사명만 순번 없이 깔끔하게 전달
         const printItem = {
             ...item,
             assignedDriver: item.assignedDriver 
-                ? `${item.assignedDriver}${item.displayNumber ? ` (${item.displayNumber}번)` : ''}`
+                ? item.assignedDriver
                 : '미배정'
         };
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, printItem, idx);
