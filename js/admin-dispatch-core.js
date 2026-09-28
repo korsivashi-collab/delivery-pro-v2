@@ -576,6 +576,20 @@ export function clearSearchInput() {
     currentSearchRangeMode = 'today';
 }
 
+// 🌟 [복구 완료] admin-app.js 연동용 타겟 점프 함수 (누락 오류 해결)
+export function jumpToDeliveryTarget(devId, lat, lng, dateStr) {
+    const sidePanel = document.getElementById('search-result-side-panel');
+    if (sidePanel) sidePanel.classList.add('translate-x-full');
+    clearSearchInput();
+    if (dateStr) {
+        const picker = document.getElementById('dispatch-date-picker');
+        if (picker) picker.value = dateStr;
+    }
+    setDispatchMode('DELIVERY', true);
+    if (devId) selectDriver(devId);
+    if (lat && lng && window.focusMapPosition) window.focusMapPosition(lat, lng);
+}
+
 // 🌟 기사명/버튼 클릭 시 해당 기사의 배송 관리(동선) 뷰로 다이렉트 전환
 export function inspectDriverRoute(devId, dateStr) {
     if (!devId || devId === '미배정') {
@@ -589,7 +603,6 @@ export function inspectDriverRoute(devId, dateStr) {
     setDispatchMode('DELIVERY', true);
     selectDriver(devId);
     
-    // 지도가 잘 보이도록 우측 검색 패널 닫기
     const sidePanel = document.getElementById('search-result-side-panel');
     if (sidePanel) sidePanel.classList.add('translate-x-full');
 }
@@ -899,7 +912,6 @@ export function handleGlobalSearch(query, isNewSearch = true) {
             `;
         }
 
-        // 🌟 기사명을 클릭하면 바로 그 기사의 동선 뷰로 전환
         const driverBtn = latest.phone && latest.phone !== '미배정'
             ? `<button onclick="event.stopPropagation(); window.inspectDriverRoute('${latest.devId}', '${latest.dateStr}')" class="hover:bg-blue-100 bg-gray-100 text-blue-700 font-bold px-2 py-0.5 rounded text-[11px] flex items-center transition" title="클릭 시 기사의 오늘 배송 동선으로 이동합니다">
                  <i class="fa-solid fa-truck text-[10px] mr-1 text-blue-500"></i>${latest.phone}
@@ -1105,12 +1117,13 @@ window.onDispatchDateChange = onDispatchDateChange;
 window.resetDispatchDateToToday = resetDispatchDateToToday;
 window.clearSearchInput = clearSearchInput;
 window.closeSearchSidePanel = closeSearchSidePanel;
-window.handleGlobalSearch = handleGlobalSearch;
+window.jumpToDeliveryTarget = jumpToDeliveryTarget;
 window.inspectDriverRoute = inspectDriverRoute;
 window.viewSearchCompletionPhoto = viewSearchCompletionPhoto;
 window.setSearchRangeMode = setSearchRangeMode;
 window.applyCustomSearchRange = applyCustomSearchRange;
 window.resetSearchToToday = resetSearchToToday;
+window.handleGlobalSearch = handleGlobalSearch;
 window.updateProButtonsUI = updateProButtonsUI;
 window.handleProFeature = handleProFeature;
 window.closeAutoDispatchModal = closeAutoDispatchModal;
