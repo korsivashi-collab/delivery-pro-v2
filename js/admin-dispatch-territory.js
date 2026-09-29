@@ -89,8 +89,10 @@ export function renderLocationSidebar() {
         if (driverComps.length > 0 && driverComps[0].address) {
             previewAddress = driverComps[0].address;
             previewTime = driverComps[0].timeString ? driverComps[0].timeString.split(' ')[1] : '';
-        } else if (driver && driver.destinations && driver.destinations.length > 0 && driver.destinations[0].address) {
-            previewAddress = driver.destinations[0].address; previewTime = "목적지";
+        } else if (driver && Array.isArray(driver.destinations) && driver.destinations.length > 0 && driver.destinations[0].address) {
+            // 🌟 목적지가 실제 1건 이상 존재할 때만 목적지 주소 표출
+            previewAddress = driver.destinations[0].address; 
+            previewTime = "목적지";
         }
 
         html += `
@@ -130,7 +132,6 @@ export async function focusDriverLocationOnMap(devId) {
     if (!map) return;
     closeCurrentLocationOverlay();
 
-    // 위치 오버레이 렌더링 내부 헬퍼
     const renderLocationMarker = async (lat, lng, timeLabel = '실시간 수신됨') => {
         const pos = new kakao.maps.LatLng(lat, lng);
         map.setLevel(3);
@@ -160,7 +161,6 @@ export async function focusDriverLocationOnMap(devId) {
         if (addrEl) addrEl.innerHTML = `<i class="fa-solid fa-map-pin text-emerald-400 mr-1 text-xs"></i>${finalAddr}`;
     };
 
-    // 🌟 [1단계] 서버에 이미 올라와 있는 최신 위치가 있는지 0.1초 만에 즉시 확인하여 화면에 먼저 표출
     let hasShownInitial = false;
     try {
         let snap = await getDoc(doc(db, "gps_reports", targetDevId));
@@ -184,7 +184,6 @@ export async function focusDriverLocationOnMap(devId) {
         console.warn("초기 위치 캐시 확인 실패:", e);
     }
 
-    // 🌟 [2단계] 기사 폰으로 최신 GPS 재측정 신호 전송 (백그라운드 동기화)
     const reqTime = Date.now();
     try {
         await setDoc(doc(db, "gps_requests", targetDevId), { deviceId: targetDevId, requestedAt: reqTime });
@@ -193,7 +192,6 @@ export async function focusDriverLocationOnMap(devId) {
         }
     } catch (e) {}
 
-    // 🌟 [3단계] 기사 폰이 응답하면 부드럽게 최신 위치로 갱신 (지연 대기 해소)
     let isResolved = false;
     const unsub = onSnapshot(doc(db, "gps_reports", targetDevId), async (snap) => {
         if (snap.exists()) {
@@ -206,7 +204,6 @@ export async function focusDriverLocationOnMap(devId) {
         }
     });
 
-    // 만약 초기 위치도 없었고, 6초 안에도 응답이 없으면 과거 배송 완료 위치로 Fallback
     setTimeout(() => {
         if (!isResolved) {
             unsub();
@@ -227,13 +224,21 @@ export async function showFallbackLocation(devId) {
     if (driverComps.length > 0 && driverComps[0].lat) {
         lat = driverComps[0].lat; lng = driverComps[0].lng; knownAddress = driverComps[0].address;
         timeStr = driverComps[0].timeString || (new Date(driverComps[0].completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
-    } else if (driver && driver.destinations && driver.destinations.length > 0 && driver.destinations[0].lat) {
+    } else if (driver && Array.isArray(driver.destinations) && driver.destinations.length > 0 && driver.destinations[0].lat) {
         lat = driver.destinations[0].lat; lng = driver.destinations[0].lng; knownAddress = driver.destinations[0].address; timeStr = '배송 목적지';
     }
 
-    if (!lat || !lng || !map) { alert("해당 기사의 위치나 동선 데이터가 전혀 없습니다."); return; }
-    const pos = new kakao.maps.LatLng(lat, lng); map.setLevel(3); map.panTo(pos);
-    if (window.currentLocationOverlay) { window.currentLocationOverlay.setMap(null); window.currentLocationOverlay = null; }
+    // 🌟 위치나 동선 데이터가 없을 때 이전 오버레이 잔상 먼저 확실하게 제거
+    if (!lat || !lng || !map) { 
+        closeCurrentLocationOverlay();
+        alert("해당 기사의 위치나 동선 데이터가 전혀 없습니다."); 
+        return; 
+    }
+
+    const pos = new kakao.maps.LatLng(lat, lng); 
+    map.setLevel(3); 
+    map.panTo(pos);
+    closeCurrentLocationOverlay();
 
     const phone = matchedLic?.phone || driver?.phone || '기사';
     const overlayContainer = document.createElement('div');
@@ -263,7 +268,10 @@ export function closeCurrentLocationOverlay() {
 }
 
 export function drawAllDriversOnMap() {
+    // 🌟 다중 초기화 창구를 통해 잔상 완전 삭제
     if (window.forceClearMap) window.forceClearMap();
+    else if (window.clearMapOverlays) window.clearMapOverlays();
+
     if (!map) return;
     const visibleLicenses = window.getFilteredVisibleDrivers();
     const bounds = new kakao.maps.LatLngBounds();
@@ -275,12 +283,17 @@ export function drawAllDriversOnMap() {
         let pos = null;
         const driverComps = state.allCompletions.filter(c => c.deviceId === devId || (c.phone && c.phone === lic.phone)).sort((a,b) => b.completedAt - a.completedAt);
         
-        if (driverComps.length > 0 && driverComps[0].lat) pos = new kakao.maps.LatLng(driverComps[0].lat, driverComps[0].lng);
-        else if (driver && driver.destinations && driver.destinations.length > 0 && driver.destinations[0].lat) pos = new kakao.maps.LatLng(driver.destinations[0].lat, driver.destinations[0].lng);
+        if (driverComps.length > 0 && driverComps[0].lat) {
+            pos = new kakao.maps.LatLng(driverComps[0].lat, driverComps[0].lng);
+        } else if (driver && Array.isArray(driver.destinations) && driver.destinations.length > 0 && driver.destinations[0].lat) {
+            pos = new kakao.maps.LatLng(driver.destinations[0].lat, driver.destinations[0].lng);
+        }
         
         if (pos) {
-            bounds.extend(pos); hasPoints = true;
-            const content = document.createElement('div'); content.className = 'driver-pin';
+            bounds.extend(pos); 
+            hasPoints = true;
+            const content = document.createElement('div'); 
+            content.className = 'driver-pin';
             content.innerHTML = `<i class="fa-solid fa-truck text-sky-400 text-xs"></i><span>${lic.phone || '기사'}</span>`;
             content.onclick = () => { window.jumpToDriverDelivery(devId); };
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.3, zIndex: 30 });
@@ -288,7 +301,10 @@ export function drawAllDriversOnMap() {
             if (window.myMapOverlays) window.myMapOverlays.push(overlay);
         }
     });
-    if (hasPoints) map.setBounds(bounds);
+
+    if (hasPoints) {
+        map.setBounds(bounds);
+    }
 }
 
 export function fitMapToAllDrivers() { drawAllDriversOnMap(); }
@@ -405,7 +421,6 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
             if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-crosshairs text-gray-400 mr-1"></i> 지도에 핀을 찍어주세요`;
         }
         
-        // 🌟 타 기사 권역: 지도를 가리지 않는 은은한 투명도(0.04)와 정적 반경 적용
         const allDrivers = window.getFilteredVisibleDrivers();
         allDrivers.forEach(d => {
             const dId = d.deviceId || d.key;
@@ -446,7 +461,6 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
 
         setTerritoryCenter(centerPos);
 
-        // 🌟 지도의 상하 여백에 거의 닿을 정도로 꽉 차게 줌 레벨 자동 맞춤
         setTimeout(() => { 
             if (territoryMap) {
                 territoryMap.relayout(); 
@@ -460,7 +474,6 @@ export function closeDriverTerritoryModal() {
     document.getElementById('driver-territory-modal')?.classList.add('hidden'); 
 }
 
-// 🌟 동/구/시 선택 시 화면 위아래 끝에 원이 거의 닿도록 타이트하게 자동 줌 맞춤
 export function setTerritoryScale(scale, skipRedraw = false) {
     state.currentTerritoryScale = scale;
     const scaleInput = document.getElementById('input-territory-scale');
@@ -479,11 +492,9 @@ export function setTerritoryScale(scale, skipRedraw = false) {
     }
 }
 
-// 🌟 렉(버벅임) 완전 제거: 중복 이벤트 차단 및 기존 마커/원 위치 재활용
 export function setTerritoryCenter(latLng) {
     if (!latLng) return;
 
-    // 50ms 이내 중복 트리거 차단 (원 클릭 + 지도 클릭 동시 발화 렉 방지)
     const now = Date.now();
     if (now - lastCenterUpdateTime < 60) return;
     lastCenterUpdateTime = now;
@@ -505,7 +516,6 @@ export function setTerritoryCenter(latLng) {
         if(addrDisplayEl) addrDisplayEl.innerHTML = `<i class="fa-solid fa-location-dot text-red-500 mr-1"></i> ${displayAddr}`;
     });
 
-    // 마커가 없으면 생성, 있으면 위치만 업데이트 (메모리 누수 및 재렌더링 렉 방지)
     if (!territoryMarker) {
         territoryMarker = new kakao.maps.Marker({ 
             position: latLng,
@@ -525,7 +535,6 @@ export function setTerritoryCenter(latLng) {
     const sizeRatio = currentTerritorySize / 100;
     r *= sizeRatio; 
 
-    // 원(Circle) 역시 재활용하여 부드럽게 크기와 중심점만 갱신
     if (territoryCircles.length === 0 || !territoryCircles[0]) {
         const c1 = new kakao.maps.Circle({ 
             center: latLng, 
@@ -644,7 +653,21 @@ export function closeAllTerritoriesMap() {
     document.getElementById('all-territories-modal')?.classList.add('hidden'); 
 }
 
-// 전역 window 객체 바인딩
+// 🌟 HTML 인라인 이벤트 및 다중 모듈 호출용 Window 전역 객체 완전 매핑
+window.renderLocationSidebar = renderLocationSidebar;
+window.jumpToDriverDelivery = jumpToDriverDelivery;
+window.focusDriverLocationOnMap = focusDriverLocationOnMap;
+window.showFallbackLocation = showFallbackLocation;
+window.closeCurrentLocationOverlay = closeCurrentLocationOverlay;
+window.drawAllDriversOnMap = drawAllDriversOnMap;
+window.fitMapToAllDrivers = fitMapToAllDrivers;
+window.openDriverTerritoryModal = openDriverTerritoryModal;
+window.closeDriverTerritoryModal = closeDriverTerritoryModal;
+window.setTerritoryScale = setTerritoryScale;
+window.setTerritoryCenter = setTerritoryCenter;
+window.saveDriverTerritory = saveDriverTerritory;
+window.openAllTerritoriesMap = openAllTerritoriesMap;
+window.closeAllTerritoriesMap = closeAllTerritoriesMap;
 window.toggleTerritoryPinMode = toggleTerritoryPinMode;
 window.searchTerritoryAddress = searchTerritoryAddress;
 window.adjustModalTerritorySize = adjustModalTerritorySize;

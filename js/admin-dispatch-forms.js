@@ -16,12 +16,15 @@ export function loadSavedForms() {
     if (!listEl) return;
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
     
+    // 🌟 저장된 양식이 없을 때 에디터 및 템플릿 상태 잔상 완전 소거
     if (savedForms.length === 0) { 
         listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-[10px] font-bold">저장된 서류 양식이 없습니다.<br>우측에서 PDF를 업로드하여 양식을 생성하세요.</div>`; 
         const placeholder = document.getElementById('preview-placeholder');
         const editorWrapper = document.getElementById('doc-editor-wrapper');
         if (placeholder) placeholder.classList.remove('hidden');
         if (editorWrapper) editorWrapper.innerHTML = '';
+        templateBuilderState.currentDocHtml = '';
+        templateBuilderState.activeTemplateTitle = '';
         return; 
     }
     
@@ -55,7 +58,7 @@ export function loadSavedForms() {
 
     if (state.currentSelectedFormIndex === null) {
         const defaultIdx = savedForms.findIndex(f => f.isDefault);
-        if (defaultIdx >= 0) {
+        if (defaultIdx >= 0 && defaultIdx < savedForms.length) {
             applySavedForm(defaultIdx);
         }
     }
@@ -95,7 +98,9 @@ export function applySavedForm(idx) {
         templateBuilderState.currentDocHtml = form.templateHtml;
 
         const curIdx = state.currentPreviewInvoiceIndex || 0;
-        const curOrder = state.printReadyList ? state.printReadyList[curIdx] : null;
+        // 🌟 주문 데이터가 실제로 1건 이상 존재할 때만 데이터 치환 렌더링, 없을 때는 순수 템플릿 서식만 렌더링하여 이전 잔상 차단
+        const hasOrders = state.printReadyList && state.printReadyList.length > 0;
+        const curOrder = hasOrders ? state.printReadyList[curIdx] : null;
 
         if (curOrder && typeof fillTemplateWithOrderData === 'function') {
             renderEditableDocument(fillTemplateWithOrderData(form.templateHtml, curOrder, curIdx));
@@ -131,6 +136,10 @@ export function cancelProviderFormEdit() {
     const editorWrapper = document.getElementById('doc-editor-wrapper');
     if (placeholder) placeholder.classList.remove('hidden');
     if (editorWrapper) editorWrapper.innerHTML = '';
+
+    // 🌟 양식 선택 해제 시 현재 템플릿 메모리도 초기화
+    templateBuilderState.currentDocHtml = '';
+    templateBuilderState.activeTemplateTitle = '';
 
     loadSavedForms(); 
 }

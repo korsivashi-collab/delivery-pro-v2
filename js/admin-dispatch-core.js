@@ -356,7 +356,7 @@ export async function removeOrUnlinkDriver(devId, key) {
 }
 
 // ==========================================
-// 3. 지도 위에 경로 및 마커 렌더링
+// 3. 지도 위에 경로 및 마커 렌더링 (잔상 방지 클리어 로직 강화)
 // ==========================================
 export function drawDriverOnMap(devId) {
     forceClearMap(); 
@@ -382,6 +382,12 @@ export function drawDriverOnMap(devId) {
 
     let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
     rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
+
+    // 🌟 서버/앱으로부터 빈 목록([])을 전달받았을 때 즉시 지도 및 잔상을 완벽히 백지화
+    if (rawDests.length === 0) {
+        forceClearMap();
+        return;
+    }
 
     const completions = state.allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId) || 

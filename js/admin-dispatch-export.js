@@ -33,10 +33,16 @@ export function executeExcelExport() {
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
     const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
 
-    // core 모듈에서 전역에 바인딩된 필터링 함수 호출
+    // 🌟 core 모듈에서 전역 바인딩된 필터링 함수 호출 및 고유 식별자 Set 생성
     const visibleLicenses = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : state.allLicenses;
-    const visibleDeviceIds = visibleLicenses.map(l => l.deviceId || l.key);
-    const visiblePhones = visibleLicenses.map(l => l.phone).filter(p => p);
+    const visibleDeviceIds = new Set();
+    const visiblePhones = new Set();
+
+    visibleLicenses.forEach(l => {
+        if (l.deviceId) visibleDeviceIds.add(l.deviceId);
+        if (l.key) visibleDeviceIds.add(l.key);
+        if (l.phone) visiblePhones.add(l.phone);
+    });
 
     const wb = XLSX.utils.book_new();
     let hasData = false;
@@ -45,7 +51,7 @@ export function executeExcelExport() {
     if (isCompleted) {
         const targetCompletions = state.allCompletions.filter(c => {
             if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const matchesDev = visibleDeviceIds.has(c.deviceId) || (c.phone && visiblePhones.has(c.phone));
             const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
             const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
             return matchesDev && inRange && !isCancelTag;
@@ -68,20 +74,37 @@ export function executeExcelExport() {
         }
     }
 
-    // (2) 미처리 대기 동선 데이터 추출
+    // (2) 미처리 대기 동선 데이터 추출 (🌟 초기화/삭제된 빈 동선 잔상 완전 배제)
     if (isPending) {
         let pendingList = [];
         for (const devId in state.activeRoutes) {
-            if (!visibleDeviceIds.includes(devId)) continue;
             const driver = state.activeRoutes[devId];
             if (!driver || !driver.updatedAt) continue;
+            
+            const isDriverVisible = visibleDeviceIds.has(devId) || 
+                                    visibleDeviceIds.has(driver.deviceId) || 
+                                    (driver.phone && visiblePhones.has(driver.phone));
+            if (!isDriverVisible) continue;
 
             if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
-                const dests = driver.destinations || [];
+                const dests = Array.isArray(driver.destinations) ? driver.destinations : [];
+                // 🌟 동선이 비워졌거나(0건) 삭제된 경우 대기동선에 추가되지 않도록 차단
+                if (dests.length === 0) continue;
+
                 dests.forEach(d => {
-                    const isDone = state.allCompletions.some(c => c.deviceId === devId && c.address === d.address && c.completedAt >= startTs && c.completedAt <= endTs);
+                    if (!d || !d.address) return;
+                    const isDone = state.allCompletions.some(c => 
+                        (c.deviceId === devId || c.deviceId === driver.deviceId || (driver.phone && c.phone === driver.phone)) &&
+                        c.address === d.address && 
+                        c.completedAt >= startTs && 
+                        c.completedAt <= endTs
+                    );
                     if (!isDone) {
-                        pendingList.push({ ...d, driverPhone: driver.phone || '미등록', updatedAt: driver.updatedAt });
+                        pendingList.push({ 
+                            ...d, 
+                            driverPhone: driver.phone || devId, 
+                            updatedAt: driver.updatedAt 
+                        });
                     }
                 });
             }
@@ -107,7 +130,7 @@ export function executeExcelExport() {
     if (isCanceled) {
         const targetCanceled = state.allCompletions.filter(c => {
             if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.includes(c.deviceId) || (c.phone && visiblePhones.includes(c.phone));
+            const matchesDev = visibleDeviceIds.has(c.deviceId) || (c.phone && visiblePhones.has(c.phone));
             const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
             const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
             return matchesDev && inRange && isCancelTag;
@@ -139,3 +162,10 @@ export function executeExcelExport() {
     XLSX.writeFile(wb, `배송리포트_통합본_${fileNameDate}.xlsx`);
     closeExcelExportModal();
 }
+
+// ==========================================
+// 3. 전역 Window 객체 바인딩
+// ==========================================
+window.openExcelExportModal = openExcelExportModal;
+window.closeExcelExportModal = closeExcelExportModal;
+window.executeExcelExport = executeExcelExport;

@@ -197,7 +197,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     }
 
     const q = currentSearchQuery.toLowerCase();
-    const qDigits = q.replace(/[^0-9]/g, ''); // 하이픈(-) 무시 검색용 순수 숫자
+    const qDigits = q.replace(/[^0-9]/g, '');
 
     if (!q) { 
         if (sidePanel) sidePanel.classList.add('translate-x-full'); 
@@ -352,7 +352,6 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     else if (currentSearchRangeMode === '30days') rangeTitleBadge = `<span class="bg-purple-100 text-purple-800 text-[10px] font-black px-2 py-0.5 rounded-full">최근 1달 조회 중</span>`;
     else rangeTitleBadge = `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded-full">${currentSearchCustomStart} ~ ${currentSearchCustomEnd}</span>`;
 
-    // 🌟 안전하게 html 변수를 최상위에서 초기화
     let html = `
         <div class="flex items-center justify-between pb-2 border-b border-gray-200">
             <div class="flex items-center gap-1.5">
@@ -437,7 +436,6 @@ export function handleGlobalSearch(query, isNewSearch = true) {
         });
     }
 
-    // 🌟 결과 하단에 고정되는 기간 확장 조회 툴바
     html += `
         <div class="mt-4 pt-4 border-t-2 border-dashed border-gray-200 flex flex-col gap-2.5 bg-white p-3.5 rounded-2xl shadow-xs">
             <div class="flex items-center justify-between">
@@ -464,7 +462,6 @@ export function handleGlobalSearch(query, isNewSearch = true) {
     if (sidePanel) sidePanel.classList.remove('translate-x-full');
 }
 
-// 🌟 HTML 인라인 바인딩을 위한 window 객체 매핑
 window.closeSearchSidePanel = closeSearchSidePanel;
 window.clearSearchInput = clearSearchInput;
 window.jumpToDeliveryTarget = jumpToDeliveryTarget;

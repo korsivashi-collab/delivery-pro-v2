@@ -11,6 +11,26 @@ export const pickingModalState = {
     selectedDrivers: new Set()
 };
 
+// 기사 식별자(전화번호, 라이선스키, 디바이스ID) 다중 정밀 매칭 헬퍼
+function getDriverAssignedOrders(driverIdentifier) {
+    if (!driverIdentifier || !state.parsedExcelList || state.parsedExcelList.length === 0) return [];
+
+    const matchedLic = (state.allLicenses || []).find(l => 
+        l.phone === driverIdentifier || 
+        l.key === driverIdentifier || 
+        l.deviceId === driverIdentifier
+    );
+
+    const validKeys = new Set([driverIdentifier]);
+    if (matchedLic) {
+        if (matchedLic.phone) validKeys.add(matchedLic.phone);
+        if (matchedLic.key) validKeys.add(matchedLic.key);
+        if (matchedLic.deviceId) validKeys.add(matchedLic.deviceId);
+    }
+
+    return state.parsedExcelList.filter(o => o.assignedDriver && validKeys.has(o.assignedDriver));
+}
+
 export function openPickingDriverModal() {
     pickingModalState.selectedDrivers.clear();
 
@@ -19,14 +39,19 @@ export function openPickingDriverModal() {
     visibleDrivers.forEach(d => {
         if (d.phone || d.key) driverNames.add(d.phone || d.key);
     });
+    
     (state.parsedExcelList || []).forEach(o => {
         if (o.assignedDriver) driverNames.add(o.assignedDriver);
     });
 
     const uniqueDrivers = Array.from(driverNames);
+    
+    // 🌟 실제로 배정된 물량이 1건 이상 존재하는 기사만 기본 선택 처리 (잔상 방지)
     uniqueDrivers.forEach(d => {
-        const hasOrders = (state.parsedExcelList || []).some(o => o.assignedDriver === d);
-        if (hasOrders) pickingModalState.selectedDrivers.add(d);
+        const orders = getDriverAssignedOrders(d);
+        if (orders.length > 0) {
+            pickingModalState.selectedDrivers.add(d);
+        }
     });
 
     const modal = document.getElementById('picking-driver-modal');
@@ -36,21 +61,31 @@ export function openPickingDriverModal() {
 }
 
 export function closePickingDriverModal() {
+    // 🌟 모달 닫을 때 선택 상태를 완전히 초기화하여 잔상 차단
+    pickingModalState.selectedDrivers.clear();
     const modal = document.getElementById('picking-driver-modal');
     if (modal) modal.classList.add('hidden');
 }
 
 export function toggleAllPickingDrivers(isChecked) {
     const driverNames = new Set();
+    const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
+    visibleDrivers.forEach(d => {
+        if (d.phone || d.key) driverNames.add(d.phone || d.key);
+    });
     (state.parsedExcelList || []).forEach(o => {
         if (o.assignedDriver) driverNames.add(o.assignedDriver);
     });
     const uniqueDrivers = Array.from(driverNames);
 
+    pickingModalState.selectedDrivers.clear();
     if (isChecked) {
-        uniqueDrivers.forEach(d => pickingModalState.selectedDrivers.add(d));
-    } else {
-        pickingModalState.selectedDrivers.clear();
+        // 배정 물량이 있는 기사만 선택
+        uniqueDrivers.forEach(d => {
+            if (getDriverAssignedOrders(d).length > 0) {
+                pickingModalState.selectedDrivers.add(d);
+            }
+        });
     }
     renderPickingDriverList(uniqueDrivers);
 }
@@ -62,6 +97,10 @@ export function togglePickingDriver(driver) {
         pickingModalState.selectedDrivers.add(driver);
     }
     const driverNames = new Set();
+    const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
+    visibleDrivers.forEach(d => {
+        if (d.phone || d.key) driverNames.add(d.phone || d.key);
+    });
     (state.parsedExcelList || []).forEach(o => {
         if (o.assignedDriver) driverNames.add(o.assignedDriver);
     });
@@ -72,32 +111,43 @@ export function renderPickingDriverList(uniqueDrivers) {
     const listEl = document.getElementById('picking-driver-list');
     if (!listEl) return;
 
+    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-10 text-xs font-bold"><i class="fa-solid fa-boxes-packing text-3xl text-gray-300 mb-2 block"></i>배정된 배송 주문 데이터가 없습니다.<br>주문 업로드 및 자동할당을 먼저 진행하세요.</div>`;
+        const chkAll = document.getElementById('chk-picking-all');
+        if (chkAll) chkAll.checked = false;
+        return;
+    }
+
     if (!uniqueDrivers || uniqueDrivers.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-xs font-bold">배정된 기사가 없습니다.<br>자동할당을 먼저 진행하세요.</div>`;
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-6 text-xs font-bold">배정 대상 기사가 없습니다.<br>자동할당을 먼저 진행하세요.</div>`;
         return;
     }
 
     let html = '';
+    let selectableCount = 0;
+
     uniqueDrivers.forEach(d => {
-        const isChecked = pickingModalState.selectedDrivers.has(d);
-        const orderCount = (state.parsedExcelList || []).filter(o => o.assignedDriver === d).length;
+        const orderCount = getDriverAssignedOrders(d).length;
+        const isChecked = pickingModalState.selectedDrivers.has(d) && orderCount > 0;
+        if (orderCount > 0) selectableCount++;
+
         html += `
         <label class="flex items-center justify-between p-3 bg-white border ${isChecked ? 'border-blue-500 bg-blue-50/40 ring-1 ring-blue-300' : 'border-gray-200 hover:bg-gray-50'} rounded-xl cursor-pointer transition shadow-xs">
             <div class="flex items-center gap-3">
-                <input type="checkbox" onchange="window.togglePickingDriver('${d}')" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer">
+                <input type="checkbox" onchange="window.togglePickingDriver('${d}')" ${isChecked ? 'checked' : ''} ${orderCount === 0 ? 'disabled' : ''} class="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer disabled:cursor-not-allowed">
                 <div>
                     <span class="font-black text-sm text-gray-900 block leading-tight"><i class="fa-solid fa-truck text-blue-500 mr-1.5 text-xs"></i>${d}</span>
-                    <span class="text-[10px] text-gray-400 font-bold">배정 물량: ${orderCount}건</span>
+                    <span class="text-[10px] ${orderCount > 0 ? 'text-blue-600 font-bold' : 'text-gray-400 font-normal'}">배정 물량: ${orderCount}건</span>
                 </div>
             </div>
-            <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${isChecked ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-500'}">${isChecked ? '선택됨' : '제외'}</span>
+            <span class="text-[10px] font-black px-2 py-0.5 rounded-full ${isChecked ? 'bg-blue-600 text-white' : (orderCount > 0 ? 'bg-gray-100 text-gray-500' : 'bg-gray-100 text-gray-300')}">${isChecked ? '선택됨' : (orderCount > 0 ? '제외' : '물량없음')}</span>
         </label>`;
     });
     listEl.innerHTML = html;
 
     const chkAll = document.getElementById('chk-picking-all');
     if (chkAll) {
-        chkAll.checked = (pickingModalState.selectedDrivers.size === uniqueDrivers.length && uniqueDrivers.length > 0);
+        chkAll.checked = (selectableCount > 0 && pickingModalState.selectedDrivers.size === selectableCount);
     }
 }
 
@@ -462,10 +512,7 @@ export function executePickingListPrint() {
     const A4_PAGE_SAFE_HEIGHT_PX = 1020;
 
     selectedDriverList.forEach((driverName) => {
-        const driverOrders = (state.parsedExcelList || []).filter(item => 
-            item.assignedDriver === driverName
-        );
-
+        const driverOrders = getDriverAssignedOrders(driverName);
         if (driverOrders.length === 0) return;
 
         const aggregationMap = {};
@@ -518,7 +565,7 @@ export function executePickingListPrint() {
     document.body.removeChild(measureContainer);
 
     if (validPageCount === 0) {
-        alert("선택된 기사들에게 배정된 배송 상품이 없습니다.");
+        alert("선택된 기사들에게 배정된 유효한 배송 상품이 없습니다.");
         return;
     }
 

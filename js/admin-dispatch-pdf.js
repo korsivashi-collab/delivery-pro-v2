@@ -341,6 +341,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     return [{
         id: Date.now() + Math.random(),
         assignedDriver: assignedDriver,
+        displayNumber: null, // 🌟 코스 순번 잔상 방지 초기화
         senderName: senderName,
         buyerName: buyerName,
         orderNo: orderNo,
@@ -436,35 +437,38 @@ export async function batchGeocodePdfList(items) {
     const originalDropHtml = dropZone ? dropZone.innerHTML : '';
     const cache = getGeoCache();
 
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (dropZone) {
-            dropZone.innerHTML = `
-                <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
-                    <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                    <span>배송지 정밀 좌표 분석 중... (${i + 1} / ${items.length})</span>
-                </div>`;
-        }
+    try {
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (dropZone) {
+                dropZone.innerHTML = `
+                    <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
+                        <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
+                        <span>배송지 정밀 좌표 분석 중... (${i + 1} / ${items.length})</span>
+                    </div>`;
+            }
 
-        if (item.address) {
-            if (!item.fullAddress) item.fullAddress = item.address;
+            if (item.address) {
+                if (!item.fullAddress) item.fullAddress = item.address;
 
-            const isCached = !!cache[item.address.trim()];
-            const coords = await getCoordsFromAddress(item.address);
-            if (coords) {
-                item.lat = coords.lat;
-                item.lng = coords.lng;
-                if (coords.fullAddress) {
-                    item.address = coords.fullAddress;
+                const isCached = !!cache[item.address.trim()];
+                const coords = await getCoordsFromAddress(item.address);
+                if (coords) {
+                    item.lat = coords.lat;
+                    item.lng = coords.lng;
+                    if (coords.fullAddress) {
+                        item.address = coords.fullAddress;
+                    }
+                }
+                if (!isCached) {
+                    await new Promise(r => setTimeout(r, 40));
                 }
             }
-            if (!isCached) {
-                await new Promise(r => setTimeout(r, 40));
-            }
         }
+    } finally {
+        // 🌟 지오코딩 작업 중 오류가 발생하더라도 드롭존 UI 텍스트 잔상을 반드시 원래대로 복구
+        if (dropZone) dropZone.innerHTML = originalDropHtml;
     }
-
-    if (dropZone) dropZone.innerHTML = originalDropHtml;
 }
 
 // ==========================================

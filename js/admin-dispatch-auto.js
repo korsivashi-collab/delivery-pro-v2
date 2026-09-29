@@ -2,7 +2,7 @@
 
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
-import { getFilteredVisibleDrivers, formatNumber } from "./admin-dispatch-core.js";
+import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
 import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
@@ -141,7 +141,7 @@ export function initDispatchResizer() {
 // ==========================================
 export const autoDispatchState = {
     selectedDrivers: new Set(),
-    weights: loadSavedDriverWeights(), // 🌟 저장된 가중치 불러오기
+    weights: loadSavedDriverWeights(),
     isInit: false
 };
 
@@ -181,7 +181,6 @@ export function renderDispatchDriverList() {
         return;
     }
 
-    // 최신 가중치 저장값 동기화
     if (!autoDispatchState.weights || Object.keys(autoDispatchState.weights).length === 0) {
         autoDispatchState.weights = loadSavedDriverWeights();
     }
@@ -197,7 +196,6 @@ export function renderDispatchDriverList() {
         const t1 = d.territory1 || ''; 
         const t2 = d.territory2 || '';
         
-        // 🌟 해당 기사에게 현재 배정된 실제 주문 건수 계산
         const assignedOrders = (state.parsedExcelList || []).filter(o => 
             o.assignedDriver && (
                 o.assignedDriver === phoneDisplay || 
@@ -234,7 +232,6 @@ export function renderDispatchDriverList() {
         const weight = autoDispatchState.weights[devId] || 0;
         const weightText = weight > 0 ? `+${weight}` : weight;
 
-        // 🌟 기사 카드 내에 [배정 건수 뱃지] 및 [하단 배정 물량 표시] 추가
         html += `
         <div onclick="window.selectDispatchDriver('${devId}')" class="cursor-pointer bg-white border ${isFocus ? 'border-blue-500 ring-2 ring-blue-300 bg-blue-50/30' : 'border-gray-200 hover:border-blue-400'} p-3 rounded-2xl flex flex-col gap-2.5 shadow-xs transition mb-2.5">
             <div class="flex items-start justify-between gap-2">
@@ -287,7 +284,6 @@ export function adjustDriverWeight(devId, delta) {
     let w = autoDispatchState.weights[devId] || 0;
     w += delta;
     autoDispatchState.weights[devId] = w;
-    // 🌟 가중치 변경 시 LocalStorage에 영구 저장
     saveDriverWeights(autoDispatchState.weights);
     renderDispatchDriverList();
 }
@@ -299,7 +295,7 @@ export function selectDispatchDriver(devId) {
 }
 
 // ==========================================
-// 4. 기사별 할당 상세 내역 (2-opt 최적화 순번 순 정렬 연동)
+// 4. 기사별 할당 상세 내역 (완전 초기화 및 2-opt 순번 연동)
 // ==========================================
 
 let detailAddressSortState = 'none';
@@ -323,12 +319,19 @@ export function renderDispatchDriverDetail() {
         if (header) header.classList.remove('hidden'); 
         if (table) table.classList.add('hidden'); 
         if (badge) badge.classList.add('hidden'); 
+        if (tbody) tbody.innerHTML = '';
         return;
     }
 
     const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
-    let assignedItems = (state.parsedExcelList || []).filter(item => item.assignedDriver === driverName);
+    let assignedItems = (state.parsedExcelList || []).filter(item => 
+        item.assignedDriver && (
+            item.assignedDriver === driverName || 
+            item.assignedDriver === targetLic?.key || 
+            item.assignedDriver === targetLic?.deviceId
+        )
+    );
     const visibleDrivers = getFilteredVisibleDrivers();
 
     if (header) header.classList.add('hidden'); 
@@ -338,6 +341,7 @@ export function renderDispatchDriverDetail() {
         badge.innerText = `총 ${assignedItems.length}건`;
     }
 
+    // 🌟 할당된 배송지가 없거나 초기화되었을 때 잔상 완전 소거
     if (assignedItems.length === 0) {
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
@@ -418,7 +422,7 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 5. 할당 초기화
+// 5. 할당 초기화 (모달 및 메인 관제 잔상 완전 제거)
 // ==========================================
 export async function revertAutoDispatch() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -430,16 +434,21 @@ export async function revertAutoDispatch() {
         return;
     }
 
+    // 1. 주문 데이터 배정 정보 초기화
     state.parsedExcelList.forEach(item => {
         item.assignedDriver = null;
         delete item.displayNumber;
     });
 
+    state.selectedDispatchDriverId = null;
+
+    // 2. 모달 내 화면들 즉시 리셋
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) await window.autoSaveExcelToFirebase();
 
+    // 3. 기사 앱 전송 동선 및 관제 로컬 메모리 잔상 완전 삭제
     const visibleDrivers = getFilteredVisibleDrivers();
     let clearedDriverCount = 0;
 
@@ -447,11 +456,16 @@ export async function revertAutoDispatch() {
         const devId = d.deviceId || d.key;
         try {
             await deleteDoc(doc(db, "routes", devId));
+            delete state.activeRoutes[devId];
             clearedDriverCount++;
         } catch (e) {
             console.error(`기사(${devId}) 동선 초기화 실패:`, e);
         }
     }
+
+    // 🌟 4. 메인 지도 오버레이 및 사이드바 동선 잔상 즉시 소거
+    forceClearMap();
+    renderSidebar();
 
     alert(`[할당 초기화 완료]\n관제 엑셀 배정이 미배정으로 초기화되었으며,\n운행 기사(${clearedDriverCount}명) 스마트폰 앱의 동선도 즉시 초기화되었습니다.`);
 }
@@ -491,7 +505,6 @@ export function runAutoDispatchAlgorithm() {
     const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
     const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
 
-    // 🌟 저장된 가중치를 전달하여 외곽 우선 하버사인 배차 수행
     const result = executeAutoDispatch({
         targetOrders,
         activeDrivers,
@@ -504,7 +517,6 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    // 🌟 화면 갱신 (좌측 기사 목록의 배정 수량 즉시 업데이트)
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
@@ -514,7 +526,7 @@ export function runAutoDispatchAlgorithm() {
 }
 
 // ==========================================
-// 7. 토글 선택 기반 동선 전송 엔진 (2-opt 순번 순 전송)
+// 7. 토글 선택 기반 동선 전송 엔진 (실시간 로컬 동선 동기화)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -569,6 +581,8 @@ export async function sendRoutesToDrivers() {
 
     try {
         let successCount = 0;
+        const nowTs = Date.now();
+
         for (const devId of sendTargetDevIds) {
             const { driver: matchedLic, orders } = driverMap[devId];
 
@@ -585,15 +599,24 @@ export async function sendRoutesToDrivers() {
                 items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
             }));
 
-            await setDoc(doc(db, "routes", devId), {
+            const routePayload = {
                 deviceId: devId,
                 phone: matchedLic.phone || devId,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                 destinations: destinations,
-                updatedAt: Date.now()
-            }, { merge: true });
+                updatedAt: nowTs
+            };
 
+            await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
+
+            // 🌟 실시간 로컬 상태 즉시 갱신 (네트워크 딜레이 없이 즉시 반영)
+            state.activeRoutes[devId] = routePayload;
             successCount++;
+        }
+
+        renderSidebar();
+        if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') {
+            drawDriverOnMap(state.selectedDeviceId);
         }
 
         alert(`[동선 전송 완료]\n체크된 기사 총 ${successCount}명의 스마트폰으로 2-opt 최적화 코스가 성공적으로 전송되었습니다.`);

@@ -16,7 +16,7 @@ let printListSortField = 'driver'; // 'driver', 'originalIdx', 'senderName', 'st
 let printListSortAsc = true;
 
 // ==========================================
-// 1. 주문서 통합관리 모달 열기 & 초기화 (주문 데이터 없어도 상시 진입 허용)
+// 1. 주문서 통합관리 모달 열기 & 초기화 (주문 데이터 없어도 상시 진입 허용 및 잔상 클리어)
 // ==========================================
 export function exportToInvoiceModal() {
     // 엑셀 테이블(#invoice-excel-tbody) 내부의 체크박스만 엄격히 조회
@@ -40,7 +40,7 @@ export function exportToInvoiceModal() {
         state.printReadyList = [];
     }
 
-    // 🌟 모달 진입 시 기사명 가나다순으로 기본 정렬 (배송 코스 순번 배제)
+    // 🌟 모달 진입 시 기사명 가나다순으로 기본 정렬
     if (state.printReadyList.length > 0) {
         state.printReadyList.sort((a, b) => {
             const driverA = a.assignedDriver || '미배정';
@@ -68,10 +68,24 @@ export function exportToInvoiceModal() {
     loadSavedForms(); 
     renderInvoiceOrderList();
     
-    // 주문이 있을 때만 1번 주문 미리보기 바인딩
+    // 🌟 주문이 있을 때만 미리보기를 렌더링하고, 없을 때는 잔상 캔버스를 즉시 백지화
     if (state.printReadyList.length > 0) {
         previewInvoiceRow(0); 
+    } else {
+        clearInvoicePreviewCanvas();
     }
+}
+
+// 🌟 미리보기 캔버스 및 라벨 잔상 완전 제거 헬퍼
+function clearInvoicePreviewCanvas() {
+    const labelEl = document.getElementById('preview-target-order-label');
+    if (labelEl) labelEl.innerText = '출력 대상 주문 없음';
+    
+    const docCanvas = document.getElementById('editable-doc-canvas');
+    if (docCanvas) docCanvas.innerHTML = '';
+    
+    const placeholder = document.getElementById('preview-placeholder');
+    if (placeholder) placeholder.classList.remove('hidden');
 }
 
 // 🌟 주문서 목록 폭 조절(드래그) 리사이저 엔진
@@ -169,6 +183,8 @@ export function filterBySender(senderName) {
         if (firstIdx !== -1) {
             previewInvoiceRow(firstIdx);
         }
+    } else {
+        clearInvoicePreviewCanvas();
     }
 }
 
@@ -240,6 +256,14 @@ function getFilteredPrintOrders() {
 export function filterInvoicePrintList(query) {
     invoiceSearchKeyword = (query || '').trim().toLowerCase();
     renderInvoiceOrderList();
+    
+    const filtered = getFilteredPrintOrders();
+    if (filtered.length > 0) {
+        const firstIdx = state.printReadyList.indexOf(filtered[0]);
+        if (firstIdx !== -1) previewInvoiceRow(firstIdx);
+    } else {
+        clearInvoicePreviewCanvas();
+    }
 }
 
 export function sortPrintList(field) {
@@ -320,6 +344,7 @@ export function renderInvoiceOrderList() {
     if (!filtered || filtered.length === 0) {
         listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">출력할 주문 데이터가 없습니다.<br><span class="text-[10px] text-gray-400 font-normal">우측에서 서식 PDF 업로드 및 양식 편집이 가능합니다.</span></div>`;
         updateInvoiceCountBadge();
+        clearInvoicePreviewCanvas();
         return;
     }
 
@@ -349,7 +374,6 @@ export function renderInvoiceOrderList() {
         const storeDisplay = item.storeName || '-';
         const addressDisplay = item.address || item.fullAddress || '-';
 
-        // 🌟 기사 코스 순번 삭제 후 이름만 깔끔하게 노출
         const driverBadge = item.assignedDriver
             ? `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs truncate max-w-[70px] inline-block" title="${item.assignedDriver}">${item.assignedDriver}</span>`
             : `<span class="text-[10px] text-gray-400 font-bold">미배정</span>`;
@@ -376,7 +400,10 @@ export function renderInvoiceOrderList() {
 // 3. 주문 1건 미리보기 연동
 // ==========================================
 export function previewInvoiceRow(idx) {
-    if (!state.printReadyList || !state.printReadyList[idx]) return;
+    if (!state.printReadyList || !state.printReadyList[idx]) {
+        clearInvoicePreviewCanvas();
+        return;
+    }
     state.currentPreviewInvoiceIndex = idx;
     const item = state.printReadyList[idx];
 
@@ -390,16 +417,16 @@ export function previewInvoiceRow(idx) {
     }
 
     const docCanvas = document.getElementById('editable-doc-canvas');
+    const placeholder = document.getElementById('preview-placeholder');
     const baseTemplate = templateBuilderState.currentDocHtml;
+
     if (docCanvas && baseTemplate && typeof fillTemplateWithOrderData === 'function') {
-        // 미리보기 서식에 기사명만 깔끔하게 전달 (순번 제거)
         const previewItem = {
             ...item,
-            assignedDriver: item.assignedDriver 
-                ? item.assignedDriver
-                : '미배정'
+            assignedDriver: item.assignedDriver ? item.assignedDriver : '미배정'
         };
         docCanvas.innerHTML = fillTemplateWithOrderData(baseTemplate, previewItem, idx);
+        if (placeholder) placeholder.classList.add('hidden');
     }
 
     renderInvoiceOrderList();
@@ -462,7 +489,6 @@ export function executeBatchPrint() {
         return;
     }
 
-    // 🌟 배송 현장 최적화: 코스 번호가 제외되었으므로 기사명 가나다순으로 정렬
     selectedOrders.sort((a, b) => {
         const driverA = a.assignedDriver || '미배정';
         const driverB = b.assignedDriver || '미배정';
@@ -488,12 +514,9 @@ export function executeBatchPrint() {
     let printPagesHtml = '';
 
     selectedOrders.forEach((item, idx) => {
-        // 인쇄되는 전표 스탬프에 담당기사명만 순번 없이 깔끔하게 전달
         const printItem = {
             ...item,
-            assignedDriver: item.assignedDriver 
-                ? item.assignedDriver
-                : '미배정'
+            assignedDriver: item.assignedDriver ? item.assignedDriver : '미배정'
         };
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, printItem, idx);
         filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');

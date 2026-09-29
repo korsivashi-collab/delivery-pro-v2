@@ -276,7 +276,6 @@ window.systemLogout = async function() {
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
     
-    // 정상 로그아웃 시 본인 세션 토큰을 Firestore에서 제거하여 회선 즉시 반환
     if (currentKey && localToken && !localToken.startsWith('MONITOR-')) {
         try {
             const licRef = doc(db, "licenses", currentKey);
@@ -293,6 +292,7 @@ window.systemLogout = async function() {
         }
     }
     
+    if (typeof forceClearMap === 'function') forceClearMap();
     sessionStorage.clear();
     window.location.href = 'admin.html';
 };
@@ -324,10 +324,12 @@ window.showDispatchPanel = function() {
     if (typeof initKakaoMap === 'function') initKakaoMap();
     window.initMasterDataSync();
     if (typeof setDispatchMode === 'function') setDispatchMode('DELIVERY');
+    // 🌟 관제 진입 시 당일 저장된 엑셀/주문 데이터가 있으면 자동 로드
+    if (typeof loadExcelFromFirebase === 'function') loadExcelFromFirebase();
 };
 
 // ==========================================
-// 3. 실시간 데이터 동기화 (Firestore Snapshots)
+// 3. 실시간 데이터 동기화 (Firestore Snapshots - 실시간 잔상 소거 연동)
 // ==========================================
 window.initMasterDataSync = function() {
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
@@ -354,7 +356,6 @@ window.initMasterDataSync = function() {
                 return;
             }
 
-            // 🌟 동시 접속(회선 수) 초과 검사 및 자동 튕김 제어 (모니터링 전용 계정은 예외)
             if (localToken && !localToken.startsWith('MONITOR-')) {
                 const maxAllowed = parseInt(myAccount.maxSessions) || (myAccount.isPro ? 2 : 1);
                 const activeSessions = Array.isArray(myAccount.activeSessions) 
@@ -409,22 +410,34 @@ window.initMasterDataSync = function() {
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
-    // 4. 경로 실시간 동기화
+    // 🌟 4. 경로(Routes) 실시간 동기화 (기사 앱에서 동선 삭제/초기화 시 지도 및 모달 잔상 즉시 소거)
     onSnapshot(collection(db, "routes"), (snapshot) => {
         state.activeRoutes = {};
         snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
+
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
+        
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
             drawDriverOnMap(state.selectedDeviceId);
+        } else if (!isMaster && !state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof forceClearMap === 'function') {
+            forceClearMap();
         }
+
         if (typeof populateDriverSelect === 'function') populateDriverSelect();
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
+
+        // 🌟 기사 앱에서 동선이 삭제/비워졌을 때 자동할당 모달 UI(기사 목록/상세 테이블) 즉시 동기화
+        if (document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
+            if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
+            if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
+        }
     });
 
-    // 5. 배송 완료 실시간 동기화
+    // 🌟 5. 배송 완료 실시간 동기화
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         state.allCompletions = [];
         snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
             drawDriverOnMap(state.selectedDeviceId);
@@ -432,6 +445,12 @@ window.initMasterDataSync = function() {
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
         if (document.getElementById('photo-gallery-modal') && !document.getElementById('photo-gallery-modal').classList.contains('hidden')) {
             renderPhotoGalleryTable();
+        }
+
+        // 🌟 완료 건수 변경 시 자동할당 모달 UI 실시간 갱신
+        if (document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
+            if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
+            if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
     });
 
@@ -615,7 +634,7 @@ export async function deletePhotoCompletion(id) {
 }
 
 // ==========================================
-// 5. HTML 인라인 이벤트를 위한 전역 Window 객체 바인딩
+// 5. HTML 인라인 이벤트를 위한 전역 Window 객체 바인딩 (forceClearMap 포함 누락 완전 방지)
 // ==========================================
 window.formatNumber = formatNumber;
 
@@ -679,6 +698,7 @@ window.closePhotoPreviewModal = closePhotoPreviewModal;
 window.deletePhotoCompletion = deletePhotoCompletion;
 
 // [관제 코어]
+window.forceClearMap = forceClearMap; // 🌟 외부 모듈에서 호출 가능한 전역 바인딩 등록
 window.setDispatchMode = setDispatchMode;
 window.renderSidebar = renderSidebar;
 window.getFilteredVisibleDrivers = getFilteredVisibleDrivers;

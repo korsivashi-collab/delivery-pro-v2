@@ -165,7 +165,7 @@ function extractSenderFromFileName(fileName) {
 }
 
 // ==========================================
-// 1. Firebase 엑셀/주문 데이터 연동 (다중 패널 동시 갱신)
+// 1. Firebase 엑셀/주문 데이터 연동 (다중 패널 동시 갱신 및 완전 동기화)
 // ==========================================
 export async function loadExcelFromFirebase() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey'); 
@@ -175,7 +175,7 @@ export async function loadExcelFromFirebase() {
         const snap = await getDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`));
         state.parsedExcelList = (snap.exists() && snap.data().orders) ? snap.data().orders : []; 
         renderExcelTable();
-        // 🌟 날짜 변경 로드시 기사별 상세 내역 및 목록도 함께 동기화
+        // 🌟 주문 데이터 변경/초기화 시 기사별 상세 내역 및 배정 목록 실시간 갱신
         if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
         if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     } catch (error) {
@@ -200,7 +200,7 @@ export async function autoSaveExcelToFirebase() {
 }
 
 // ==========================================
-// 2. 엑셀/주문 테이블 화면 렌더링 (코스 순번 뱃지 연동)
+// 2. 엑셀/주문 테이블 화면 렌더링 (잔상 방지 완전 클리어 및 뱃지 연동)
 // ==========================================
 export function renderExcelTable() {
     const tbody = document.getElementById('invoice-excel-tbody'); 
@@ -212,12 +212,14 @@ export function renderExcelTable() {
         totalCountBadge.innerText = `총 ${totalOrdersCount}건`;
     }
 
+    // 🌟 목록이 0개일 때 모든 테이블 잔상 및 기사별 상세 내역을 즉시 백지화
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         tbody.innerHTML = `<tr id="empty-excel-row"><td colspan="5" class="text-center py-20"><i class="fa-solid fa-file-excel text-3xl text-gray-300 mb-2 block"></i><span class="text-gray-400 font-bold text-[11px]">업로드된 데이터가 없습니다.</span></td></tr>`;
         const chkAll = document.getElementById('chk-excel-all'); 
         if (chkAll) chkAll.checked = false;
         
         if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail(); 
+        if (window.renderDispatchDriverList) window.renderDispatchDriverList();
         return;
     }
 
@@ -232,7 +234,6 @@ export function renderExcelTable() {
             driverSelectOptions += `<option value="${dName}" ${isSelected}>${dName}</option>`;
         });
 
-        // 🌟 기사 배정 및 2-opt 순번이 존재할 때 파란색 코스 순번 뱃지 표시
         const courseBadge = (item.assignedDriver && item.displayNumber)
             ? `<span class="bg-blue-600 text-white text-[10px] font-black px-1.5 py-0.5 rounded font-mono shrink-0 shadow-2xs" title="${item.assignedDriver} 기사의 ${item.displayNumber}번째 배송지">${item.displayNumber}번</span>`
             : '';
@@ -797,7 +798,7 @@ async function batchGeocodeExcelList(items) {
 }
 
 // ==========================================
-// 6. 테이블 데이터 삭제/초기화 기능 (다중 뷰 실시간 동기화)
+// 6. 테이블 데이터 삭제/초기화 기능 (다중 뷰 실시간 동기화 및 메모리 잔상 방지)
 // ==========================================
 export function toggleRowCheckbox(e, idx) {
     if (e && e.target.tagName === 'INPUT') return; 
@@ -834,6 +835,7 @@ export async function clearAllExcelRows() {
     if(!confirm("업로드된 모든 주문 리스트와 기사 앱으로 전송된 배송 동선을 모두 완전히 초기화하시겠습니까?")) return;
     
     state.parsedExcelList = []; 
+    state.printReadyList = [];
     renderExcelTable(); 
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
@@ -853,6 +855,7 @@ export async function clearAllExcelRows() {
         if (state.activeRoutes && state.activeRoutes[devId]) {
             try {
                 await deleteDoc(doc(db, "routes", devId));
+                delete state.activeRoutes[devId]; // 🌟 로컬 메모리에서도 즉시 동선 삭제
                 clearCount++;
             } catch (e) {
                 console.error(`동선 삭제 실패 (${devId}):`, e);
@@ -860,6 +863,10 @@ export async function clearAllExcelRows() {
         }
     }
     
+    // 🌟 지도 및 사이드바 뷰 잔상 즉시 소거
+    if (window.forceClearMap) window.forceClearMap();
+    if (window.renderSidebar) window.renderSidebar();
+
     alert(`전체 초기화가 완료되었습니다.\n(기사 스마트폰 동선 삭제 완료: ${clearCount}명)`);
 }
 

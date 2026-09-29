@@ -180,7 +180,6 @@ function generateSingleInvoiceBlock(cfg, partName) {
         </tr>
     `).join('');
 
-    // 🌟 핵심: 제목은 중앙 정렬을 유지하고, [담당기사]는 주문번호 바로 윗줄(우측 상단 최적 여백)에 깔끔한 전표 스탬프 박스로 배치
     return `
     <div class="invoice-box-part" style="width: 100%; height: 148.5mm; max-height: 148.5mm; padding: 4mm 8mm 3mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
         <div style="position: relative; margin-bottom: 2px; flex-shrink: 0;">
@@ -364,10 +363,11 @@ export function insertDocTag(tagStr) {
 }
 
 // ==========================================
-// 4. [핵심] 다중 품목 동적 렌더링 엔진 (담당기사 및 주문 데이터 서식 완벽 치환)
+// 4. [핵심] 다중 품목 동적 렌더링 엔진 (잔상 방지 안전 치환 엔진)
 // ==========================================
 export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
-    if (!baseTemplateHtml || !order) return '';
+    if (!baseTemplateHtml) return '';
+    if (!order) return baseTemplateHtml;
     let html = baseTemplateHtml;
 
     const today = getLocalDateString();
@@ -390,7 +390,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     else if (memo.includes('무통장') || memo.includes('계좌')) payMethod = '무통장입금';
     else if (memo.includes('현금')) payMethod = '현금결제';
 
-    const totalQty = order.qty ? `${formatNumber(order.qty)}개` : '1개';
+    const totalQty = order.qty ? `${formatNumber(order.qty)}개` : (order.items && order.items.length > 0 ? `${formatNumber(order.items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0))}개` : '-');
     const grandTotal = order.total ? `${formatNumber(order.total)}원` : '';
 
     // 1. 단일 필드 태그 치환 (담당기사 포함)
@@ -410,14 +410,16 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
                .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
 
-    // 2. 다중 품목 테이블 지능형 동적 생성
-    const items = (order.items && order.items.length > 0) ? order.items : [{
-        name: order.itemName || '상품명 미지정',
-        qty: order.qty || 1,
-        unit: order.unit || '개',
-        price: order.price || '',
-        total: order.total || ''
-    }];
+    // 2. 다중 품목 테이블 지능형 동적 생성 (실제 품목이 없을 경우 가짜 품목 잔상 생성 차단)
+    const items = (order.items && order.items.length > 0) 
+        ? order.items 
+        : (order.itemName ? [{
+            name: order.itemName,
+            qty: order.qty || 1,
+            unit: order.unit || '개',
+            price: order.price || '',
+            total: order.total || ''
+        }] : []);
 
     const cols = templateBuilderState.detectedColumns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
 
@@ -453,7 +455,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
         </tr>`;
     });
 
-    // 5행 미만일 때만 빈 행 채움
+    // 5행 미만일 때만 빈 행 채움 (실제 품목이 0건이면 1~5번까지 빈 행으로 채워짐)
     const remainCount = Math.max(0, 5 - items.length);
     for (let r = 0; r < remainCount; r++) {
         const rowNo = items.length + r + 1;
@@ -478,7 +480,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
 }
 
 // ==========================================
-// 5. [양식 저장] 버튼 클릭 시 동작 로직 (우측 목록에 즉시 추가)
+// 5. [양식 저장] 버튼 클릭 시 동작 로직
 // ==========================================
 export function saveCurrentDocumentTemplate() {
     const docCanvas = document.getElementById('editable-doc-canvas');

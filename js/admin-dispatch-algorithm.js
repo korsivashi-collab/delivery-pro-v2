@@ -207,8 +207,9 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     // 2. 가중치가 반영된 기사별 목표 쿼터 산출
     const driverStats = calculateDriverCapacities(activeDrivers, totalOrders, weights, companyBase);
 
-    // 각 주문의 거점 대비 거리 사전 계산 (좌표 없는 건은 최후순위인 -1 처리)
+    // 각 주문의 거점 대비 거리 계산 및 이전 번호 초기화
     targetOrders.forEach(o => {
+        delete o.displayNumber; // 이전 배정 순번 잔상 소거
         if (o.lat && o.lng && baseLat && baseLng) {
             o._distFromBase = getBaseDist(baseLat, baseLng, parseFloat(o.lat), parseFloat(o.lng));
         } else {
@@ -296,6 +297,11 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
         if (ds.assignedOrders.length > 0) {
             optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng });
         }
+    });
+
+    // 🌟 연산용 임시 속성(_distFromBase) 완전 삭제 (메모리 및 DB 저장 데이터 클린업)
+    targetOrders.forEach(o => {
+        delete o._distFromBase;
     });
 
     return {
