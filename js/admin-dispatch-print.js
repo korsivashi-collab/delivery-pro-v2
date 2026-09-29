@@ -397,7 +397,7 @@ export function renderInvoiceOrderList() {
 }
 
 // ==========================================
-// 3. 주문 1건 미리보기 연동
+// 3. 주문 1건 미리보기 연동 (상품명 잘림 잔여 스타일 실시간 소거)
 // ==========================================
 export function previewInvoiceRow(idx) {
     if (!state.printReadyList || !state.printReadyList[idx]) {
@@ -425,7 +425,13 @@ export function previewInvoiceRow(idx) {
             ...item,
             assignedDriver: item.assignedDriver ? item.assignedDriver : '미배정'
         };
-        docCanvas.innerHTML = fillTemplateWithOrderData(baseTemplate, previewItem, idx);
+        let filledHtml = fillTemplateWithOrderData(baseTemplate, previewItem, idx);
+        
+        // 🌟 안전장치: 구버전 서식의 잔여 nowrap 및 ellipsis 인라인 속성 실시간 완전 소거
+        filledHtml = filledHtml.replace(/white-space:\s*nowrap;?/gi, '')
+                               .replace(/text-overflow:\s*ellipsis;?/gi, '');
+
+        docCanvas.innerHTML = filledHtml;
         if (placeholder) placeholder.classList.add('hidden');
     }
 
@@ -475,7 +481,7 @@ export function initTemplatePdfDropZone() {
 }
 
 // ==========================================
-// 5. 주문서 일괄 출력 (기사명 가나다순으로 깔끔하게 정렬)
+// 5. 주문서 일괄 출력 (인쇄 엔진 레벨 상품명 자동 줄바꿈 및 절대 안 잘림 강제 주입)
 // ==========================================
 export function executeBatchPrint() {
     if (!state.printReadyList || state.printReadyList.length === 0) { 
@@ -519,7 +525,11 @@ export function executeBatchPrint() {
             assignedDriver: item.assignedDriver ? item.assignedDriver : '미배정'
         };
         let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, printItem, idx);
-        filledPageHtml = filledPageHtml.replace(/contenteditable="true"/g, 'contenteditable="false"');
+        
+        // 🌟 상품명 잘림 잔여 인라인 속성 완전 소거 및 contenteditable 비활성화
+        filledPageHtml = filledPageHtml.replace(/white-space:\s*nowrap;?/gi, '')
+                                       .replace(/text-overflow:\s*ellipsis;?/gi, '')
+                                       .replace(/contenteditable="true"/g, 'contenteditable="false"');
 
         printPagesHtml += `
         <div class="print-page-wrapper">
@@ -621,6 +631,30 @@ export function executeBatchPrint() {
             height: 0 !important; 
             box-sizing: border-box !important; 
             flex-shrink: 0 !important; 
+        }
+
+        /* 🌟 인쇄 엔진 핵심: 상품명 컬럼 절대 잘림 방지 (강제 자동 줄바꿈 및 전체 표시) */
+        .item-table {
+            table-layout: fixed !important;
+            width: 100% !important;
+        }
+        .item-table th, 
+        .item-table td {
+            word-break: break-all !important;
+            white-space: normal !important;
+            text-overflow: clip !important;
+            line-height: 1.18 !important;
+        }
+        .item-row td {
+            word-break: break-all !important;
+            white-space: normal !important;
+        }
+        .item-row td div {
+            white-space: normal !important;
+            text-overflow: clip !important;
+            overflow: visible !important;
+            max-height: none !important;
+            line-height: 1.18 !important;
         }
     </style></head><body>${printPagesHtml}</body></html>`);
     doc.close();

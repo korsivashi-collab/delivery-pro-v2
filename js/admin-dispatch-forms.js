@@ -94,8 +94,14 @@ export function applySavedForm(idx) {
     state.currentSelectedFormIndex = idx;
 
     if (form.templateHtml) {
+        // 🌟 핵심: 기존 저장된 양식에 남아있던 상품명 잘림(nowrap, ellipsis, max-height) 인라인 스타일 자동 정제
+        let sanitizedHtml = form.templateHtml
+            .replace(/white-space:\s*nowrap;?/gi, '')
+            .replace(/text-overflow:\s*ellipsis;?/gi, '')
+            .replace(/max-height:\s*[^;"]+;?/gi, '');
+
         templateBuilderState.activeTemplateTitle = form.title || '주문서 양식';
-        templateBuilderState.currentDocHtml = form.templateHtml;
+        templateBuilderState.currentDocHtml = sanitizedHtml;
 
         const curIdx = state.currentPreviewInvoiceIndex || 0;
         // 🌟 주문 데이터가 실제로 1건 이상 존재할 때만 데이터 치환 렌더링, 없을 때는 순수 템플릿 서식만 렌더링하여 이전 잔상 차단
@@ -103,9 +109,9 @@ export function applySavedForm(idx) {
         const curOrder = hasOrders ? state.printReadyList[curIdx] : null;
 
         if (curOrder && typeof fillTemplateWithOrderData === 'function') {
-            renderEditableDocument(fillTemplateWithOrderData(form.templateHtml, curOrder, curIdx));
+            renderEditableDocument(fillTemplateWithOrderData(sanitizedHtml, curOrder, curIdx));
         } else {
-            renderEditableDocument(form.templateHtml);
+            renderEditableDocument(sanitizedHtml);
         }
     }
 
