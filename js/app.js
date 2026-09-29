@@ -1,7 +1,7 @@
 // js/app.js
 
 // =================================================================
-// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (데이터 유실 방지 탑재)
+// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (관제 초기화 연동)
 // =================================================================
 
 import { calculateOptimizedRoute } from './optimizer.js';
@@ -186,7 +186,7 @@ export async function initApp() {
             });
         }
 
-        // 유효한 관제 배송지가 있을 때만 화면 갱신
+        // 유효한 배송지가 있을 때 상태 갱신
         if (formattedList.length > 0) {
             state.setDestinations(formattedList);
             state.updateDisplayNumbers();
@@ -197,18 +197,14 @@ export async function initApp() {
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         }
     }, () => {
-        // 🌟 [안전장치]: 관제에서 빈 응답이 오더라도 기사님이 직접 스캔해 둔 배송지가 있으면 함부로 지우지 않음
-        const currentDests = state.getDestinations();
-        if (currentDests && currentDests.length > 0) {
-            return;
-        }
+        // 🌟 관제 센터에서 '할당 초기화' 또는 '전체 삭제'를 진행한 경우 기기 화면 및 저장소를 즉시 깨끗하게 비움
         state.setDestinations([]);
         state.setStartLocation(null);
         state.saveActiveData();
         renderList();
     });
 
-    // 🌟 화면 복귀 시 관제에 새로운 배송지가 할당된 경우에만 안전하게 반영 (기존 작업 삭제 방지)
+    // 화면 복귀 시 관제에 새로운 배송지가 할당된 경우에만 안전하게 반영
     document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'visible') {
             const deviceId = getOrCreateDeviceId();
@@ -216,7 +212,6 @@ export async function initApp() {
             if ((deviceId || phone) && typeof fetchActiveRouteOnce === 'function') {
                 try {
                     const latestRoute = await fetchActiveRouteOnce(deviceId, phone);
-                    // 서버에 실제 배송 목록이 존재하고 1건 이상일 때만 동기화
                     if (latestRoute && Array.isArray(latestRoute.destinations) && latestRoute.destinations.length > 0) {
                         const firstItem = latestRoute.destinations[0];
                         if (typeof firstItem === 'object' && firstItem !== null && firstItem.address) {
