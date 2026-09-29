@@ -53,11 +53,11 @@
                 </div>
             </div>
 
-            <!-- 중앙: 주소 / 목적지 실시간 검색창 (엔터 입력 시 우측 패널 열림) -->
+            <!-- 중앙: 주소 / 목적지 실시간 검색창 (엔터 입력 또는 검색 버튼 클릭 시 우측 패널 연동) -->
             <div class="flex-1 max-w-md relative min-w-[220px]">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
-                    <input type="text" id="global-search-input" onkeyup="if(window.event.keyCode===13){window.handleGlobalSearch(this.value)}" placeholder="기사, 주소, 상호, 연락처 검색 (Enter ↵)" class="w-full pl-9 pr-14 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
+                    <input type="text" id="global-search-input" onkeyup="if(window.event.keyCode===13){window.handleGlobalSearch(this.value)}" placeholder="기사, 주소, 상호, 연락처 검색 (Enter ↵)" class="w-full pl-9 pr-16 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
                     <div class="absolute right-2 flex items-center gap-1">
                         <button onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden text-gray-400 hover:text-gray-600 text-xs px-1" title="검색어 지우기">
                             <i class="fa-solid fa-circle-xmark"></i>
@@ -133,7 +133,7 @@
                 </div>
                 <button onclick="window.fitMapToAllDrivers()" id="btn-fit-all-drivers" class="hidden absolute bottom-6 right-6 z-20 bg-slate-900 hover:bg-slate-800 text-white font-black px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2 transition active:scale-95 text-sm"><i class="fa-solid fa-expand"></i> 전체 기사 한눈에 보기</button>
 
-                <!-- 🌟 신규 추가: 지도 우측 통합 검색 결과 패널 (슬라이드 인) -->
+                <!-- 🌟 통합 검색 결과 패널 (슬라이드 인) -->
                 <div id="search-result-side-panel" class="absolute top-0 right-0 h-full w-1/2 max-w-[480px] min-w-[340px] bg-white shadow-2xl z-[400] transform translate-x-full transition-transform duration-300 flex flex-col border-l border-gray-200">
                     <div class="px-5 py-4 border-b border-gray-200 bg-gray-50 flex justify-between items-center flex-none">
                         <div>
@@ -146,9 +146,7 @@
                             <i class="fa-solid fa-xmark text-lg px-1"></i>
                         </button>
                     </div>
-                    <div id="search-result-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar">
-                        <!-- 검색 결과 목록이 이곳에 렌더링 됩니다 -->
-                    </div>
+                    <div id="search-result-content" class="flex-1 overflow-y-auto p-4 space-y-3 bg-slate-50 custom-scrollbar"></div>
                 </div>
             </section>
 
@@ -663,12 +661,5 @@
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
     <script type="module" src="./js/admin-app.js"></script>
-    <script>
-        // 검색 슬라이드 패널 닫기 전역 헬퍼 함수
-        window.closeSearchSidePanel = function() {
-            document.getElementById('search-result-side-panel').classList.add('translate-x-full');
-            setTimeout(() => window.clearSearchInput(), 300);
-        };
-    </script>
 </body>
 </html>
