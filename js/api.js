@@ -1,6 +1,6 @@
 // js/api.js
 // =================================================================
-// [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈
+// [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈 (통로 충돌 완벽 방어)
 // =================================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
@@ -277,7 +277,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 🌟 4-1. 관제 센터 실시간 자동할당 동선 리스너 (관제 초기화 즉시 연동 및 기사 단독 스캔 보호)
+// 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (통로 독립 격리 방어)
 export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let phone = "";
     let onRoutesReceived = null;
@@ -297,9 +297,15 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
     const unsubs = [];
     let lastHandledTime = 0;
-    let hadExistingRoute = false; // 관제로부터 동선을 내려받은 적이 있는지 여부 추적
+    
+    // 🌟 핵심 방어: 통로별로 "내 통로에 정상 할당 데이터가 있었는지"를 각각 따로 기억합니다.
+    const channelState = {
+        device: false,
+        cleanPhone: false,
+        rawPhone: false
+    };
 
-    const handleRouteData = (data, exists) => {
+    const handleRouteData = (data, exists, channelKey) => {
         const now = Date.now();
 
         // 1) 관제에서 전송한 유효한 배송지 목록이 있는 경우
@@ -310,19 +316,21 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
             }
             
             lastHandledTime = updateTime;
-            hadExistingRoute = true; // 관제 동선 수신 상태 활성화
+            channelState[channelKey] = true; // 이 통로가 데이터를 받았음을 마킹
+            
             if (typeof onRoutesReceived === 'function') {
                 onRoutesReceived(data.destinations, data);
             }
             return;
         }
 
-        // 2) 관제에서 문서가 삭제되었거나(!exists) 배송지 목록이 비어있는 경우(destinations.length === 0)
-        // 🌟 관제 동선을 수신하여 배송 중이던 상태(hadExistingRoute === true)였다면 관제의 할당 초기화로 즉시 인식
+        // 2) 관제에서 문서가 삭제되었거나 비어있는 경우 (할당 취소 또는 초기화)
         if (!exists || !data || !data.destinations || data.destinations.length === 0 || data.cleared === true) {
-            if (hadExistingRoute) {
+            // 🌟 오직 '이 통로'에서 정상 데이터를 준 적이 있을 때만 삭제(초기화) 명령을 받아들입니다.
+            if (channelState[channelKey]) {
                 lastHandledTime = now;
-                hadExistingRoute = false;
+                channelState[channelKey] = false;
+                
                 if (typeof onRoutesCleared === 'function') {
                     onRoutesCleared();
                 }
@@ -333,7 +341,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     if (deviceId) {
         const devRef = doc(db, "routes", deviceId);
         const unsubDev = onSnapshot(devRef, (docSnap) => {
-            handleRouteData(docSnap.data(), docSnap.exists());
+            handleRouteData(docSnap.data(), docSnap.exists(), 'device');
         }, (err) => console.warn("deviceId 동선 감시 오류:", err));
         unsubs.push(unsubDev);
     }
@@ -343,7 +351,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
         if (cleanPhone && cleanPhone !== deviceId) {
             const phoneRef = doc(db, "routes", cleanPhone);
             const unsubPhone = onSnapshot(phoneRef, (docSnap) => {
-                handleRouteData(docSnap.data(), docSnap.exists());
+                handleRouteData(docSnap.data(), docSnap.exists(), 'cleanPhone');
             }, (err) => console.warn("cleanPhone 감시 오류:", err));
             unsubs.push(unsubPhone);
         }
@@ -351,7 +359,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
         if (phone !== cleanPhone && phone !== deviceId) {
             const rawPhoneRef = doc(db, "routes", phone);
             const unsubRawPhone = onSnapshot(rawPhoneRef, (docSnap) => {
-                handleRouteData(docSnap.data(), docSnap.exists());
+                handleRouteData(docSnap.data(), docSnap.exists(), 'rawPhone');
             }, (err) => console.warn("rawPhone 감시 오류:", err));
             unsubs.push(unsubRawPhone);
         }
@@ -366,7 +374,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
 export const startAssignedRouteListener = listenToActiveRoutes;
 
-// 🌟 4-2. 포그라운드 복귀 시 1회 즉시 동기화 보조 함수
+// 4-2. 포그라운드 복귀 시 1회 즉시 동기화 보조 함수
 export async function fetchActiveRouteOnce(deviceId, phone) {
     try {
         const cleanPhone = (phone || "").replace(/[^0-9]/g, '');

@@ -1,7 +1,7 @@
 // js/app.js
 
 // =================================================================
-// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (관제 초기화 연동)
+// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (2중 데이터 유실 방어 탑재)
 // =================================================================
 
 import { calculateOptimizedRoute } from './optimizer.js';
@@ -186,8 +186,10 @@ export async function initApp() {
             });
         }
 
-        // 유효한 배송지가 있을 때 상태 갱신
+        // 유효한 배송지가 도착했을 때만 상태 갱신
         if (formattedList.length > 0) {
+            // 🌟 관제 동선이 정상 할당되었음을 브라우저 세션에 안전하게 기록
+            sessionStorage.setItem('deliveryPro_has_dispatch_route', 'true');
             state.setDestinations(formattedList);
             state.updateDisplayNumbers();
             state.saveActiveData();
@@ -197,11 +199,16 @@ export async function initApp() {
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         }
     }, () => {
-        // 🌟 관제 센터에서 '할당 초기화' 또는 '전체 삭제'를 진행한 경우 기기 화면 및 저장소를 즉시 깨끗하게 비움
-        state.setDestinations([]);
-        state.setStartLocation(null);
-        state.saveActiveData();
-        renderList();
+        // 🌟 [핵심 2차 안전장치]: 관제로부터 실제로 동선을 수신받은 이력이 있는 경우에만 초기화 실행!
+        // 기사님이 직접 수동 스캔했거나, 단순 새로고침(F5) 시에는 로컬 목록을 안전하게 보존합니다.
+        const hadDispatchRoute = sessionStorage.getItem('deliveryPro_has_dispatch_route') === 'true';
+        if (hadDispatchRoute) {
+            sessionStorage.removeItem('deliveryPro_has_dispatch_route');
+            state.setDestinations([]);
+            state.setStartLocation(null);
+            state.saveActiveData();
+            renderList();
+        }
     });
 
     // 화면 복귀 시 관제에 새로운 배송지가 할당된 경우에만 안전하게 반영
@@ -215,6 +222,7 @@ export async function initApp() {
                     if (latestRoute && Array.isArray(latestRoute.destinations) && latestRoute.destinations.length > 0) {
                         const firstItem = latestRoute.destinations[0];
                         if (typeof firstItem === 'object' && firstItem !== null && firstItem.address) {
+                            sessionStorage.setItem('deliveryPro_has_dispatch_route', 'true');
                             state.setDestinations(latestRoute.destinations);
                             state.updateDisplayNumbers();
                             state.saveActiveData();
