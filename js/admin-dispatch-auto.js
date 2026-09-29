@@ -295,7 +295,7 @@ export function selectDispatchDriver(devId) {
 }
 
 // ==========================================
-// 4. 기사별 할당 상세 내역 (완전 초기화 및 2-opt 순번 연동)
+// 4. 기사별 할당 상세 내역
 // ==========================================
 
 let detailAddressSortState = 'none';
@@ -341,7 +341,6 @@ export function renderDispatchDriverDetail() {
         badge.innerText = `총 ${assignedItems.length}건`;
     }
 
-    // 🌟 할당된 배송지가 없거나 초기화되었을 때 잔상 완전 소거
     if (assignedItems.length === 0) {
         if (tbody) tbody.innerHTML = `<tr><td colspan="3" class="text-center py-16 text-gray-400 font-bold text-[11px]"><i class="fa-solid fa-box-open text-3xl text-gray-300 mb-2 block"></i>배정된 배송 건이 없습니다.</td></tr>`; 
         return;
@@ -422,11 +421,14 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 5. 할당 초기화 (모달 및 메인 관제 잔상 완전 제거)
+// 5. 할당 초기화 (🌟 deviceId, key, phone 전수 삭제로 9건 잔상 완전 소거)
 // ==========================================
 export async function revertAutoDispatch() {
-    if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
-        alert("초기화할 배송 데이터가 없습니다.");
+    const hasExcelOrders = state.parsedExcelList && state.parsedExcelList.length > 0;
+    const hasActiveRoutes = Object.keys(state.activeRoutes || {}).length > 0;
+
+    if (!hasExcelOrders && !hasActiveRoutes) {
+        alert("초기화할 배송 데이터나 기사 동선이 없습니다.");
         return;
     }
 
@@ -435,10 +437,12 @@ export async function revertAutoDispatch() {
     }
 
     // 1. 주문 데이터 배정 정보 초기화
-    state.parsedExcelList.forEach(item => {
-        item.assignedDriver = null;
-        delete item.displayNumber;
-    });
+    if (state.parsedExcelList) {
+        state.parsedExcelList.forEach(item => {
+            item.assignedDriver = null;
+            delete item.displayNumber;
+        });
+    }
 
     state.selectedDispatchDriverId = null;
 
@@ -448,24 +452,26 @@ export async function revertAutoDispatch() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) await window.autoSaveExcelToFirebase();
 
-    // 3. 기사 앱 전송 동선 및 관제 로컬 메모리 잔상 완전 삭제
+    // 🌟 3. 핵심: 기사별 식별자(deviceId, key, phone)에 생성된 모든 Firestore 동선 문서를 전수 삭제
     const visibleDrivers = getFilteredVisibleDrivers();
     let clearedDriverCount = 0;
 
     for (const d of visibleDrivers) {
-        const devId = d.deviceId || d.key;
-        try {
-            await deleteDoc(doc(db, "routes", devId));
-            delete state.activeRoutes[devId];
-            clearedDriverCount++;
-        } catch (e) {
-            console.error(`기사(${devId}) 동선 초기화 실패:`, e);
+        const keysToDelete = new Set([d.deviceId, d.key, d.phone].filter(Boolean));
+        for (const k of keysToDelete) {
+            try {
+                await deleteDoc(doc(db, "routes", k));
+                if (state.activeRoutes) delete state.activeRoutes[k];
+            } catch (e) {
+                console.error(`기사 동선 삭제 오류 (${k}):`, e);
+            }
         }
+        clearedDriverCount++;
     }
 
     // 🌟 4. 메인 지도 오버레이 및 사이드바 동선 잔상 즉시 소거
-    forceClearMap();
-    renderSidebar();
+    if (typeof forceClearMap === 'function') forceClearMap();
+    if (typeof renderSidebar === 'function') renderSidebar();
 
     alert(`[할당 초기화 완료]\n관제 엑셀 배정이 미배정으로 초기화되었으며,\n운행 기사(${clearedDriverCount}명) 스마트폰 앱의 동선도 즉시 초기화되었습니다.`);
 }
@@ -526,7 +532,7 @@ export function runAutoDispatchAlgorithm() {
 }
 
 // ==========================================
-// 7. 토글 선택 기반 동선 전송 엔진 (실시간 로컬 동선 동기화)
+// 7. 토글 선택 기반 동선 전송 엔진 (🌟 잔여 옛날 키 자동 소거 연동)
 // ==========================================
 export async function sendRoutesToDrivers() {
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
@@ -609,7 +615,16 @@ export async function sendRoutesToDrivers() {
 
             await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
 
-            // 🌟 실시간 로컬 상태 즉시 갱신 (네트워크 딜레이 없이 즉시 반영)
+            // 🌟 중복 방지: devId 외에 남아있던 구형 식별자 문서(key, phone)는 자동 정리하여 옛날 9건 부활 차단
+            const otherKeys = [matchedLic.key, matchedLic.phone].filter(k => k && k !== devId);
+            for (const ok of otherKeys) {
+                try {
+                    await deleteDoc(doc(db, "routes", ok));
+                    if (state.activeRoutes) delete state.activeRoutes[ok];
+                } catch(e) {}
+            }
+
+            // 🌟 실시간 로컬 상태 즉시 갱신
             state.activeRoutes[devId] = routePayload;
             successCount++;
         }

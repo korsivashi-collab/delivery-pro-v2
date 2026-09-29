@@ -3,7 +3,7 @@
 import { db } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { map } from "./admin-map.js";
-import { doc, updateDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, updateDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // 🌟 분리된 검색 전용 모듈에서 함수들을 재연결 (안전한 호환성 유지)
 export {
@@ -24,11 +24,15 @@ export function formatNumber(num) {
 }
 
 export function forceClearMap() {
-    if (window.myMapOverlays) window.myMapOverlays.forEach(ov => ov.setMap(null));
-    window.myMapOverlays = [];
-    if (window.mapPlannedPolyline) { window.mapPlannedPolyline.setMap(null); window.mapPlannedPolyline = null; }
-    if (window.mapCompletedPolyline) { window.mapCompletedPolyline.setMap(null); window.mapCompletedPolyline = null; }
-    if (window.currentLocationOverlay) { window.currentLocationOverlay.setMap(null); window.currentLocationOverlay = null; }
+    if (window.clearMapOverlays) {
+        window.clearMapOverlays();
+    } else {
+        if (window.myMapOverlays) window.myMapOverlays.forEach(ov => ov.setMap(null));
+        window.myMapOverlays = [];
+        if (window.mapPlannedPolyline) { window.mapPlannedPolyline.setMap(null); window.mapPlannedPolyline = null; }
+        if (window.mapCompletedPolyline) { window.mapCompletedPolyline.setMap(null); window.mapCompletedPolyline = null; }
+        if (window.currentLocationOverlay) { window.currentLocationOverlay.setMap(null); window.currentLocationOverlay = null; }
+    }
 }
 
 export function getFilteredVisibleDrivers() {
@@ -39,6 +43,39 @@ export function getFilteredVisibleDrivers() {
         visibleLicenses = visibleLicenses.filter(l => l.dispatchKey === dispatchKey);
     }
     return visibleLicenses;
+}
+
+// ==========================================
+// 🌟 [핵심] 기사 활성 동선 정밀 판별 엔진 (오래된 과거 키 9건 잔상 완전 차단)
+// ==========================================
+export function getDriverRouteData(lic, selectedDate) {
+    if (!lic) return null;
+
+    // 🌟 핵심 방어: 앱 로그인 기기(deviceId)가 등록된 기사는 오직 기기 ID 문서만 확인
+    // (옛날 테스트 때 라이선스키 문서에 남아있던 9건 잔상이 차선책으로 부활하는 것을 원천 차단)
+    let candidateKeys = [];
+    if (lic.deviceId) {
+        candidateKeys = [lic.deviceId];
+    } else {
+        candidateKeys = [lic.key, lic.phone].filter(Boolean);
+    }
+
+    let foundRoute = null;
+    for (const k of candidateKeys) {
+        if (state.activeRoutes && state.activeRoutes[k]) {
+            foundRoute = state.activeRoutes[k];
+            break;
+        }
+    }
+
+    if (!foundRoute || !foundRoute.updatedAt) return null;
+
+    // 🌟 선택된 관제 날짜와 당일 생성된 동선인지 엄격 검증 (과거 날짜 유령 데이터 차단)
+    const routeDateStr = getLocalDateString(new Date(foundRoute.updatedAt));
+    if (routeDateStr === selectedDate) {
+        return foundRoute;
+    }
+    return null;
 }
 
 // ==========================================
@@ -98,7 +135,7 @@ export function renderSidebar() {
 }
 
 // ==========================================
-// 2. 배송 관리 모드 - 기사 목록 및 상세 뷰
+// 2. 배송 관리 모드 - 기사 목록 및 상세 뷰 (9건 잔상 소거 연동)
 // ==========================================
 export function renderDriverListView() {
     const headerEl = document.getElementById('sidebar-header');
@@ -114,7 +151,7 @@ export function renderDriverListView() {
         contentEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">연결된 운행 기사가 없습니다. [+ 기사 등록]을 눌러 기사를 추가하세요.</div>`; return;
     }
 
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
+    const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
@@ -123,17 +160,9 @@ export function renderDriverListView() {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         
-        const routeData = state.activeRoutes[devId] || 
-                          (lic.deviceId ? state.activeRoutes[lic.deviceId] : null) || 
-                          (lic.key ? state.activeRoutes[lic.key] : null) || 
-                          null;
-
-        let driverRoute = null;
-        if (routeData && routeData.updatedAt) {
-            const routeDateStr = getLocalDateString(new Date(routeData.updatedAt));
-            if (isToday || routeDateStr === selectedDate) driverRoute = routeData;
-        }
-        let rawDests = driverRoute ? driverRoute.destinations || [] : [];
+        // 🌟 기사별 정밀 활성 동선 조회
+        const driverRoute = getDriverRouteData(lic, selectedDate);
+        let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
         rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
         const driverDone = state.allCompletions.filter(c => {
@@ -187,14 +216,9 @@ export function setDispatchDetailTab(tab) {
 export function renderDriverDetailView(devId) {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    
-    const driver = state.activeRoutes[devId] || 
-                   (matchedLic?.deviceId ? state.activeRoutes[matchedLic.deviceId] : null) || 
-                   (matchedLic?.key ? state.activeRoutes[matchedLic.key] : null) || 
-                   null;
-                   
-    const phone = driver?.phone || matchedLic?.phone || matchedLic?.key || '기사';
+    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId || l.phone === devId);
+    const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
+    const phone = licObj.phone || licObj.key || '기사';
 
     headerEl.innerHTML = `
         <div class="flex items-center justify-between w-full">
@@ -203,16 +227,11 @@ export function renderDriverDetailView(devId) {
         </div>
     `;
 
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
+    const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
-    let driverRoute = null;
-    if (driver && driver.updatedAt) {
-        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
-        if (isToday || routeDateStr === selectedDate) driverRoute = driver;
-    }
-    
+    const driverRoute = getDriverRouteData(licObj, selectedDate);
     let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
     rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
 
@@ -352,42 +371,34 @@ export function clearSelectedDriver() {
 
 export async function removeOrUnlinkDriver(devId, key) {
     if (!confirm(`[${key}] 기사와의 관제 연결을 해제하시겠습니까?`)) return;
-    try { await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); alert("연결이 해제되었습니다."); } catch (e) { alert("오류: " + e.message); }
+    try { 
+        await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); 
+        try {
+            await deleteDoc(doc(db, "routes", devId));
+            if (key && key !== devId) await deleteDoc(doc(db, "routes", key));
+        } catch(err){}
+        alert("연결이 해제되었습니다."); 
+    } catch (e) { 
+        alert("오류: " + e.message); 
+    }
 }
 
 // ==========================================
-// 3. 지도 위에 경로 및 마커 렌더링 (잔상 방지 클리어 로직 강화)
+// 3. 지도 위에 경로 및 마커 렌더링
 // ==========================================
 export function drawDriverOnMap(devId) {
     forceClearMap(); 
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = state.activeRoutes[devId] || 
-                   (matchedLic?.deviceId ? state.activeRoutes[matchedLic.deviceId] : null) || 
-                   (matchedLic?.key ? state.activeRoutes[matchedLic.key] : null) || 
-                   null;
+    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId || l.phone === devId);
+    const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
 
     if (!map) return;
 
-    const selectedDate = document.getElementById('dispatch-date-picker').value || todayStr;
+    const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
     const dotDate = selectedDate.replace(/-/g, '.');
-    const isToday = (selectedDate === todayStr);
 
-    let driverRoute = null;
-    if (driver && driver.updatedAt) {
-        const routeDateStr = getLocalDateString(new Date(driver.updatedAt));
-        if (isToday || routeDateStr === selectedDate) {
-            driverRoute = driver;
-        }
-    }
-
+    const driverRoute = getDriverRouteData(licObj, selectedDate);
     let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
     rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
-
-    // 🌟 서버/앱으로부터 빈 목록([])을 전달받았을 때 즉시 지도 및 잔상을 완벽히 백지화
-    if (rawDests.length === 0) {
-        forceClearMap();
-        return;
-    }
 
     const completions = state.allCompletions.filter(c => {
         const matchesDev = (c.deviceId === devId) || 
@@ -695,10 +706,12 @@ export async function confirmLinkDriver() {
 }
 
 // ==========================================
-// 6. 전역 Window 객체 바인딩 (핵심 관제 기능만 유지)
+// 6. 전역 Window 객체 바인딩
 // ==========================================
 window.formatNumber = formatNumber;
 window.getFilteredVisibleDrivers = getFilteredVisibleDrivers;
+window.getDriverRouteData = getDriverRouteData;
+window.forceClearMap = forceClearMap;
 window.setDispatchMode = setDispatchMode;
 window.renderSidebar = renderSidebar;
 window.renderDriverListView = renderDriverListView;
