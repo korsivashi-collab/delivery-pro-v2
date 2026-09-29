@@ -12,7 +12,7 @@ export const templateBuilderState = {
 };
 
 // ==========================================
-// 0. [핵심] 컬럼 감지 기반 동적 비율 계산 엔진 (항상 100.0% 보장)
+// 0. [핵심] 컬럼 감지 기반 동적 비율 계산 엔진 (오직 상품 테이블 전용)
 // ==========================================
 export function buildDynamicColgroup(cols) {
     const fixedWidths = {
@@ -57,7 +57,7 @@ export function buildDynamicColgroup(cols) {
         nonProductTotalWidth += w;
     });
 
-    // 100%에서 나머지 컬럼을 뺀 잔여폭을 상품명에 전부 할당 (최소 25% 보장)
+    // 100%에서 나머지 컬럼을 뺀 잔여폭을 상품명에 전부 할당
     let productWidth = Math.max(25.0, 100.0 - nonProductTotalWidth);
     columnWidthMap['상품명'] = productWidth;
 
@@ -156,7 +156,7 @@ export async function parsePdfToEditableDocument(file) {
 
         renderEditableDocument(formHtml);
 
-        alert(`[PDF 양식 인식 완료]\n\n1. 감지된 컬럼 구성에 맞춰 규격/수량/단가 비율이 슬림하게 최적화되었으며 상품명 공간이 최대 확보되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(주문번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
+        alert(`[PDF 양식 인식 완료]\n\n1. 공급자/공급받는자 표는 정돈된 원래 규격으로 유지되고, 상품 목록 표만 넓게 최적화되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(주문번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
     } catch (e) {
         console.error("PDF 서식 파싱 오류:", e);
         alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
@@ -175,7 +175,7 @@ function extractItemTableColumns(rawText) {
 }
 
 // ==========================================
-// 2. A4 정중앙(148.5mm) 고정 2등분 HTML 빌더 (동적 colgroup 장착)
+// 2. A4 정중앙(148.5mm) 고정 2등분 HTML 빌더
 // ==========================================
 function buildCleanTemplatedHtml(cfg) {
     if (cfg.isTwoPart) {
@@ -199,7 +199,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
 
     const thsHtml = cols.map(c => `<th contenteditable="true" style="border: 1px solid #000; padding: 2.5px 3px; background: #f8fafc; text-align: center; font-weight: bold; font-size: 9.5px;">${c}</th>`).join('');
 
-    // 🌟 감지된 컬럼 구성에 맞춰 실시간으로 정확히 100.0% 너비 계산
+    // 오직 상품 테이블용 colgroup
     const colgroupHtml = buildDynamicColgroup(cols);
 
     // 샘플 행 동적 생성
@@ -229,7 +229,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
     });
     const trSample = `<tr class="item-row" style="min-height: 18px;">${sampleTds}</tr>`;
 
-    // 빈 행 2~5 동적 생성
+    // 빈 행 동적 생성
     const emptyRows = [2, 3, 4, 5].map(num => {
         let emptyTds = '';
         cols.forEach(col => {
@@ -266,6 +266,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </div>
         </div>
 
+        <!-- 🌟 공급자/공급받는자 전용 완벽한 6개 열 비율 고정 (절대 침범 금지) -->
         <table class="doc-table party-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; margin-bottom: 2px; table-layout: fixed; flex-shrink: 0;">
             <colgroup>
                 <col style="width: 4%;">
@@ -311,7 +312,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </tbody>
         </table>
 
-        <!-- 상품 테이블: 동적 컬럼 높이 및 영역 유지 -->
+        <!-- 상품 테이블: 오직 이 표에만 동적 colgroup 적용 -->
         <div style="flex: 1; min-height: 0; overflow: hidden; margin-bottom: 2px;">
             <table class="doc-table item-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; table-layout: fixed;">
                 ${colgroupHtml}
@@ -325,6 +326,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </table>
         </div>
 
+        <!-- 🌟 하단 푸터 전용 완벽한 열 비율 고정 (절대 침범 금지) -->
         <table class="doc-table footer-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; table-layout: fixed; flex-shrink: 0; margin-bottom: 2px;">
             <colgroup>
                 <col style="width: 15%;">
@@ -425,7 +427,7 @@ export function insertDocTag(tagStr) {
 }
 
 // ==========================================
-// 4. [핵심] 다중 품목 동적 렌더링 엔진 (실시간 colgroup 재계산 및 1:1 컬럼 완벽 매핑)
+// 4. [핵심] 다중 품목 동적 렌더링 엔진 (오직 item-table의 colgroup만 안전 교체)
 // ==========================================
 export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     if (!baseTemplateHtml) return '';
@@ -476,7 +478,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
                .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
 
-    // 2. 현재 서식의 실제 thead 컬럼 구조 정밀 추출 (없으면 기본값)
+    // 2. 현재 서식의 상품 테이블 thead 컬럼 구조 정밀 추출
     let cols = templateBuilderState.detectedColumns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
     const theadMatch = html.match(/<table[^>]*item-table[^>]*>[\s\S]*?<thead>[\s\S]*?<tr>([\s\S]*?)<\/tr>[\s\S]*?<\/thead>/i);
     if (theadMatch) {
@@ -486,9 +488,16 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
         }
     }
 
-    // 🌟 핵심: 서식 내부의 <colgroup>을 실시간 컬럼 구성에 맞게 완벽한 동적 100% 비율로 즉시 교체
-    const dynamicColgroupHtml = buildDynamicColgroup(cols);
-    html = html.replace(/<colgroup>[\s\S]*?<\/colgroup>/gi, dynamicColgroupHtml);
+    // 🌟 대참사 방지 핵심: party-table과 footer-table의 원래 colgroup을 100% 원복 및 완벽 보호
+    const partyColgroup = `<colgroup><col style="width: 4%;"><col style="width: 16%;"><col style="width: 30%;"><col style="width: 4%;"><col style="width: 16%;"><col style="width: 30%;"></colgroup>`;
+    const footerColgroup = `<colgroup><col style="width: 15%;"><col style="width: 35%;"><col style="width: 15%;"><col style="width: 10%;"><col style="width: 12%;"><col style="width: 13%;"></colgroup>`;
+
+    html = html.replace(/(<table[^>]*party-table[^>]*>)[\s\S]*?<colgroup>[\s\S]*?<\/colgroup>/gi, `$1\n${partyColgroup}`);
+    html = html.replace(/(<table[^>]*footer-table[^>]*>)[\s\S]*?<colgroup>[\s\S]*?<\/colgroup>/gi, `$1\n${footerColgroup}`);
+
+    // 🌟 오직 'item-table'의 <colgroup>만 타겟팅하여 안전하게 동적 비율 교체
+    const dynamicItemColgroup = buildDynamicColgroup(cols);
+    html = html.replace(/(<table[^>]*item-table[^>]*>)[\s\S]*?<colgroup>[\s\S]*?<\/colgroup>/gi, `$1\n${dynamicItemColgroup}`);
 
     // 3. 다중 품목 데이터 조립
     const items = (order.items && order.items.length > 0) 
