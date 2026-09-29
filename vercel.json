@@ -1,4 +1,16 @@
 {
+  "rewrites": [
+    {
+      "source": "/",
+      "has": [
+        {
+          "type": "host",
+          "value": "driver.mtsk.co.kr"
+        }
+      ],
+      "destination": "/index.html"
+    }
+  ],
   "redirects": [
     {
       "source": "/",
