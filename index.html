@@ -28,7 +28,6 @@
         html, body {
             width: 100%; max-width: 100vw; overflow-x: hidden;
             height: 100%; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);
-            /* 안드로이드 폰트 왜곡 완벽 차단 */
             -webkit-text-size-adjust: 100% !important; -moz-text-size-adjust: 100% !important; text-size-adjust: 100% !important;
             overscroll-behavior-y: none; -webkit-user-select: none; user-select: none; touch-action: manipulation;
         }
@@ -174,43 +173,45 @@
 
     <!-- 2. 메인 앱 영역 -->
     <div id="main-app" class="hidden flex-col h-full w-full">
-        <!-- 🌟 [헤더 레이아웃 복원] 오작동 방지를 위해 1열에 4개 버튼을 모두 배치하고 2열에 사용기한만 배치 -->
+        <!-- 🌟 [헤더 레이아웃]: 1열(회색 버튼군) / 2열(파란색 배지+알림 버튼) 정렬 -->
         <header class="bg-white px-2.5 pt-safe pb-2.5 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.06)] z-20 flex-none border-b border-gray-200 relative w-full">
-            <div class="flex flex-col gap-1 w-full">
-                <!-- 1열: 상단 타이틀 및 가로 1열 액션 버튼 (지난배송, 설정, 알림, 로그아웃) -->
-                <div class="flex items-center justify-between gap-0.5 w-full min-w-0">
+            <div class="flex flex-col gap-1.5 w-full">
+                <!-- 1열: 상단 타이틀 및 그레이 톤 액션 버튼 (지난배송, 설정, 로그아웃) -->
+                <div class="flex items-center justify-between gap-1 w-full min-w-0">
                     <h1 class="text-[14px] font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
                         <i class="fa-solid fa-route text-blue-600 text-[15px] shrink-0"></i>
                         <span>배송경로PRO</span>
                     </h1>
                     
-                    <!-- 좁은 폰에서도 한 줄에 다 들어가도록 패딩과 폰트 크기 미세 최적화 -->
                     <div class="flex items-center gap-1 shrink-0">
-                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-800 px-1.5 py-1.5 rounded-lg font-bold border border-gray-300 active:bg-gray-300 flex items-center gap-0.5 shadow-2xs transition active:scale-95 whitespace-nowrap">
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-gray-100 hover:bg-gray-200 text-gray-800 px-2 py-1.5 rounded-lg font-bold border border-gray-300 active:bg-gray-300 flex items-center gap-0.5 shadow-2xs transition active:scale-95 whitespace-nowrap">
                             <i class="fa-solid fa-clock-rotate-left"></i> 지난배송
                         </button>
 
-                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-800 border border-gray-300 px-1.5 py-1.5 rounded-lg text-[10px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap">
+                        <button onclick="window.openSettingsModal()" class="bg-gray-50 hover:bg-gray-100 active:bg-gray-200 text-gray-800 border border-gray-300 px-2 py-1.5 rounded-lg text-[10px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap">
                             <i class="fa-solid fa-gear text-gray-500"></i> 설정
                         </button>
-                        
-                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-1.5 py-1.5 rounded-lg text-[10px] font-bold shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap">
-                            <i class="fa-solid fa-bell text-blue-600"></i> 알림
-                            <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
-                        </button>
 
-                        <button onclick="window.logout()" class="text-[10px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-300 px-1.5 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
+                        <button onclick="window.logout()" class="text-[10px] text-gray-600 bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-300 px-2 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
                             로그아웃
                         </button>
                     </div>
                 </div>
                 
-                <!-- 2열: 사용기한만 단독 배치 (버튼 오작동 원천 차단) -->
-                <div class="flex justify-between items-center w-full min-w-0 mt-0.5">
+                <!-- 2열: 물류 라스트마일 + 파란색 조합 (사용기한 배지 & 알림 버튼) -->
+                <div class="flex justify-between items-center w-full min-w-0">
                     <span class="text-[10.5px] text-gray-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap ml-0.5">물류 라스트마일</span>
-                    <span id="license-expire-badge" class="text-[10.5px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-md font-black whitespace-nowrap shadow-2xs">
-                        사용기한: 확인중...
-                    </span>
+                    
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <span id="license-expire-badge" class="text-[10.5px] bg-blue-50 text-blue-700 border border-blue-200 px-2.5 py-1 rounded-md font-black whitespace-nowrap shadow-2xs">
+                            사용기한: 확인중...
+                        </span>
+                        
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-700 border border-blue-200 px-2 py-1 rounded-md text-[10.5px] font-black shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap">
+                            <i class="fa-solid fa-bell text-blue-600 text-[11px]"></i> 알림
+                            <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>
+                        </button>
+                    </div>
                 </div>
                 
                 <!-- 3열: 종료 지점 바 -->
@@ -240,23 +241,19 @@
             </ul>
         </main>
 
-        <!-- 🌟 [하단 푸터 복원: 거대한 스캔 버튼 & 84px 스와이프 손잡이 유지, 글자 가림 방지 기술 적용] -->
+        <!-- 하단 푸터: 대형 스캔 버튼 & 스와이프 제어바 -->
         <footer class="bg-white border-t border-gray-200 px-2.5 sm:px-4 pt-2.5 pb-safe z-20 flex-none shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] w-full">
             <div class="flex items-center gap-2 relative w-full">
                 <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
-                <!-- 스캔 버튼 폭 대폭 확대 (w-[80px]) -->
                 <button onclick="document.getElementById('camera-input').click()" class="h-[54px] w-[80px] bg-gray-900 hover:bg-gray-800 active:bg-black text-white font-bold rounded-xl shadow active:scale-95 transition text-[15px] flex items-center justify-center gap-1.5 shrink-0">
                     <i class="fa-solid fa-camera text-lg"></i>
                     <span>스캔</span>
                 </button>
                 
-                <!-- 슬라이더 트랙 -->
                 <div id="swipe-container" class="flex-1 min-w-0 bg-blue-50 rounded-xl relative overflow-hidden flex items-center justify-center border border-blue-200 h-[54px]">
-                    <!-- 🌟 텍스트 가림 완벽 해결: 글자 시작 지점을 오른쪽으로 강하게 밀어버림 (pl-[90px]) -->
                     <div class="absolute inset-0 flex items-center justify-center pl-[90px] pr-2 text-blue-600 font-black text-[13px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
                         밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-500 animate-pulse"></i>
                     </div>
-                    <!-- 대표님이 원하시는 거대한 84px 제어 손잡이 -->
                     <div id="swipe-btn" class="absolute left-1 w-[84px] h-[46px] bg-blue-600 rounded-lg flex items-center justify-center text-white shadow-md z-10 cursor-pointer touch-none">
                         <i class="fa-solid fa-angles-right text-xl"></i>
                     </div>
@@ -316,7 +313,7 @@
         </div>
     </div>
 
-    <!-- 주차정보 보드 모달 -->
+    <!-- 주차정보 보드 모달 (공용 주차 정보 + 로컬 개인 메모) -->
     <div id="memo-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[110] flex items-end justify-center p-0 sm:items-center sm:p-4">
         <div class="bg-gray-100 w-full sm:max-w-md h-[92vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden animate-slide-up shadow-2xl relative">
             <div class="p-4 border-b border-gray-200 flex justify-between items-start bg-white relative z-10 shadow-sm shrink-0">
@@ -350,21 +347,23 @@
                     
                     <div class="space-y-3 mb-3">
                         <div class="grid grid-cols-2 gap-3">
+                            <!-- 🌟 주차장 높이 3단계 개편 (2.1m 이하, 2.2m, 2.3m 이상) -->
                             <div>
                                 <span class="text-[10px] font-bold text-gray-400 block mb-1">주차장 높이</span>
-                                <div class="flex gap-1.5">
-                                    <button onclick="window.selectHeightTag(this, '2.2m 이하')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.2m 이하</button>
-                                    <button onclick="window.selectHeightTag(this, '2.3m 이상')" class="height-tag-btn text-[11px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.3m 이상</button>
+                                <div class="flex gap-1">
+                                    <button onclick="window.selectHeightTag(this, '2.1m 이하')" class="height-tag-btn text-[10.5px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.1m 이하</button>
+                                    <button onclick="window.selectHeightTag(this, '2.2m')" class="height-tag-btn text-[10.5px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.2m</button>
+                                    <button onclick="window.selectHeightTag(this, '2.3m 이상')" class="height-tag-btn text-[10.5px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.3m 이상</button>
                                 </div>
                             </div>
                             
+                            <!-- 🌟 회차 시간 개편 ('무료' 제거, 10분, 15분, 30분) -->
                             <div>
-                                <span class="text-[10px] font-bold text-gray-400 block mb-1">무료 회차 시간</span>
+                                <span class="text-[10px] font-bold text-gray-400 block mb-1">회차 시간</span>
                                 <div class="flex flex-wrap gap-1.5">
-                                    <button onclick="window.selectTimeTag(this, '10분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">10분</button>
-                                    <button onclick="window.selectTimeTag(this, '15분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">15분</button>
-                                    <button onclick="window.selectTimeTag(this, '30분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">30분</button>
-                                    <button onclick="window.selectTimeTag(this, '과금 없음')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">무료</button>
+                                    <button onclick="window.selectTimeTag(this, '10분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2.5 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">10분</button>
+                                    <button onclick="window.selectTimeTag(this, '15분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2.5 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">15분</button>
+                                    <button onclick="window.selectTimeTag(this, '30분')" class="time-tag-btn text-[10px] bg-gray-50 text-gray-700 font-bold px-2.5 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">30분</button>
                                 </div>
                             </div>
                         </div>
@@ -387,7 +386,7 @@
                     </div>
                 </div>
 
-                <!-- 3. 아랫단에 배치된 내 폰 전용 개인 메모 -->
+                <!-- 3. 내 폰 전용 개인 메모 -->
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-emerald-300">
                     <div class="mb-2.5">
                         <div class="flex items-center justify-between">
