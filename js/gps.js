@@ -1,7 +1,7 @@
 // js/gps.js
 
 // =================================================================
-// [배송 동선 PRO] 기기 GPS 위치 센서 및 현위치 추적 전담 모듈
+// [배송 동선 PRO] 기기 GPS 위치 센서 및 현위치 추적 전담 모듈 (초절전 배터리 보호 탑재)
 // =================================================================
 
 import { getApp, getApps } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
@@ -14,6 +14,7 @@ import { state } from './state.js';
 let unsubRequestDevice = null;
 let unsubRequestKey = null;
 let lastReportTime = 0;
+let isGpsWatcherActive = false; // 기사님의 GPS 활성화 설정 상태 보존
 
 // 🌟 안전한 Firestore 인스턴스 획득
 function getDbInstance() {
@@ -28,13 +29,13 @@ function getDbInstance() {
 }
 
 // ==========================================
-// 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진 (🌟 과금 폭탄 방지 최적화)
+// 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진
 // ==========================================
 export async function reportGpsToFirestore(lat, lng, force = false) {
     if (!lat || !lng) return;
 
     const now = Date.now();
-    // 🌟 [핵심] 45초 이내 중복 전송 강력 방지 (단, 관제 직접 요청인 force=true는 즉시 전송)
+    // 45초 이내 중복 전송 방지 (관제 강제 요청인 force=true 제외)
     if (!force && now - lastReportTime < 45000) return;
     lastReportTime = now;
 
@@ -46,7 +47,6 @@ export async function reportGpsToFirestore(lat, lng, force = false) {
     if (!db) return;
 
     try {
-        // 🌟 [비용 절감] deviceId 단일 경로로만 전송하여 Firestore Write 요금 50% 절약
         await setDoc(doc(db, "gps_reports", deviceId), {
             deviceId: deviceId,
             phone: phone,
@@ -76,7 +76,7 @@ function listenToGpsRequests() {
         if (!snap.exists()) return;
         const reqData = snap.data();
         
-        // 관제 요청이 최근 20초 이내에 발생한 유효한 요청일 때만 즉시 측정 후 1회 강제 보고
+        // 최근 20초 이내 유효 요청에 대해서만 1회 강제 위치 보고
         if (reqData.requestedAt && Date.now() - reqData.requestedAt < 20000) {
             const pos = await getDeviceRealGPS();
             if (pos && pos.lat && pos.lng) {
@@ -95,14 +95,13 @@ function listenToGpsRequests() {
 }
 
 // ==========================================
-// 1. 백그라운드 GPS 위치 추적 시작
+// 1. 하드웨어 GPS 센서 실구동 / 정지 내부 헬퍼 (배터리 누수 차단)
 // ==========================================
-export function startGpsWatcher() {
+function _startHardwareWatcher() {
     listenToGpsRequests();
 
     if (!navigator.geolocation || state.getGpsWatchId() !== null) return;
-    
-    // 🌟 [배터리 절약] GPS 센서 민감도를 조절하여 불필요한 콜백 폭주 방지
+
     const watchId = navigator.geolocation.watchPosition(
         (pos) => {
             const lat = pos.coords.latitude;
@@ -110,7 +109,6 @@ export function startGpsWatcher() {
 
             state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
 
-            // 45초 쿨타임이 지났을 때만 서버 보고 시도
             if (Date.now() - lastReportTime >= 45000) {
                 reportGpsToFirestore(lat, lng, false);
             }
@@ -122,10 +120,7 @@ export function startGpsWatcher() {
     state.setGpsWatchId(watchId);
 }
 
-// ==========================================
-// 2. GPS 위치 추적 중지 (설정 토글용)
-// ==========================================
-export function stopGpsWatcher() {
+function _stopHardwareWatcher() {
     const watchId = state.getGpsWatchId();
     if (watchId !== null && navigator.geolocation) {
         navigator.geolocation.clearWatch(watchId);
@@ -137,13 +132,46 @@ export function stopGpsWatcher() {
 }
 
 // ==========================================
-// 3. 실제 현장 GPS 좌표 획득 (완료 및 관제 요청용)
+// 2. 화면 On/Off 감지: 화면 꺼지면 하드웨어 칩 즉시 수면 모드
+// ==========================================
+if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') {
+            // 화면이 꺼지거나 다른 앱으로 전환 시 GPS 칩셋 전원 차단
+            _stopHardwareWatcher();
+        } else if (document.visibilityState === 'visible') {
+            // 화면이 다시 켜졌을 때 사용자가 GPS를 켜둔 상태였다면 즉시 복구
+            if (isGpsWatcherActive) {
+                _startHardwareWatcher();
+            }
+        }
+    });
+}
+
+// ==========================================
+// 3. 백그라운드 GPS 위치 추적 시작 (외부 호출용)
+// ==========================================
+export function startGpsWatcher() {
+    isGpsWatcherActive = true;
+    _startHardwareWatcher();
+}
+
+// ==========================================
+// 4. GPS 위치 추적 중지 (설정 토글용)
+// ==========================================
+export function stopGpsWatcher() {
+    isGpsWatcherActive = false;
+    _stopHardwareWatcher();
+}
+
+// ==========================================
+// 5. 실제 현장 GPS 좌표 획득 (완료 및 관제 요청용)
 // ==========================================
 export function getDeviceRealGPS() {
     return new Promise((resolve) => {
         const lastGps = state.getLastKnownGps();
         
-        // 1분 이내의 신선한 좌표가 있으면 재사용 (단, 강제 보고는 하지 않음)
+        // 1분 이내의 최신 좌표가 있으면 재사용
         if (lastGps && (Date.now() - lastGps.timestamp < 60000)) {
             return resolve({ lat: lastGps.lat, lng: lastGps.lng, isReal: true });
         }
@@ -169,7 +197,7 @@ export function getDeviceRealGPS() {
 }
 
 // ==========================================
-// 4. 헤더의 [현위치] 버튼 클릭 시 종료 지점으로 설정
+// 6. 헤더의 [현위치] 버튼 클릭 시 종료 지점으로 설정
 // ==========================================
 export async function setEndLocationGPS() {
     showLoading("현위치 파악 중...");

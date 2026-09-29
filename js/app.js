@@ -1,5 +1,7 @@
+// js/app.js
+
 // =================================================================
-// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러
+// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (데이터 유실 방지 탑재)
 // =================================================================
 
 import { calculateOptimizedRoute } from './optimizer.js';
@@ -169,7 +171,7 @@ export async function initApp() {
                     lng: typeof d.lng === 'number' ? d.lng : (parseFloat(d.lng) || 0),
                     phone: validPhone,
                     storeName: d.storeName || "",
-                    orderNo: d.orderNo || "", // 실시간 추적용 주문번호 보존
+                    orderNo: d.orderNo || "",
                     memo: d.memo || "",
                     items: d.items || []
                 };
@@ -184,22 +186,29 @@ export async function initApp() {
             });
         }
 
-        state.setDestinations(formattedList);
-        state.updateDisplayNumbers();
-        state.saveActiveData();
-        renderList();
+        // 유효한 관제 배송지가 있을 때만 화면 갱신
+        if (formattedList.length > 0) {
+            state.setDestinations(formattedList);
+            state.updateDisplayNumbers();
+            state.saveActiveData();
+            renderList();
 
-        // 관리자로부터 신규 배송지 할당 시 진동 알림
-        if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            // 관리자로부터 신규 배송지 할당 시 진동 알림
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+        }
     }, () => {
-        // 🌟 관제 센터에서 전체 초기화(삭제)가 진행된 경우 즉각 클리어
+        // 🌟 [안전장치]: 관제에서 빈 응답이 오더라도 기사님이 직접 스캔해 둔 배송지가 있으면 함부로 지우지 않음
+        const currentDests = state.getDestinations();
+        if (currentDests && currentDests.length > 0) {
+            return;
+        }
         state.setDestinations([]);
         state.setStartLocation(null);
         state.saveActiveData();
         renderList();
     });
 
-    // 🌟 앱 화면 복귀(화면 켜짐/포그라운드 전환) 시 관제 최신 상태 자동 대조
+    // 🌟 화면 복귀 시 관제에 새로운 배송지가 할당된 경우에만 안전하게 반영 (기존 작업 삭제 방지)
     document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'visible') {
             const deviceId = getOrCreateDeviceId();
@@ -207,18 +216,18 @@ export async function initApp() {
             if ((deviceId || phone) && typeof fetchActiveRouteOnce === 'function') {
                 try {
                     const latestRoute = await fetchActiveRouteOnce(deviceId, phone);
-                    if (!latestRoute || !latestRoute.destinations || latestRoute.destinations.length === 0) {
-                        const currentDests = state.getDestinations();
-                        // 관제에는 비어있는데 기기 화면에만 남아있는 경우 즉시 초기화
-                        if (currentDests.length > 0) {
-                            state.setDestinations([]);
-                            state.setStartLocation(null);
+                    // 서버에 실제 배송 목록이 존재하고 1건 이상일 때만 동기화
+                    if (latestRoute && Array.isArray(latestRoute.destinations) && latestRoute.destinations.length > 0) {
+                        const firstItem = latestRoute.destinations[0];
+                        if (typeof firstItem === 'object' && firstItem !== null && firstItem.address) {
+                            state.setDestinations(latestRoute.destinations);
+                            state.updateDisplayNumbers();
                             state.saveActiveData();
                             renderList();
                         }
                     }
                 } catch (err) {
-                    console.warn("포그라운드 복귀 동선 동기화 확인 실패:", err);
+                    console.warn("포그라운드 복귀 동선 동기화 확인 대기:", err);
                 }
             }
         }
@@ -252,7 +261,7 @@ export function updateDisplayNumbers() {
 }
 
 // ==========================================
-// 3. 밀어서 최적화(스와이프 버튼) 초기화 (🌟 안드로이드 터치 스크롤 간섭 차단 및 위치 보정)
+// 3. 밀어서 최적화(스와이프 버튼) 초기화
 // ==========================================
 function initSwipeButton() {
     const swipeContainer = document.getElementById('swipe-container');
@@ -273,7 +282,6 @@ function initSwipeButton() {
     function moveDrag(e) {
         if (!isDragging) return;
         
-        // 안드로이드 웹뷰에서 스와이프 도중 상하 화면 스크롤이 트리거되는 현상 완벽 방지
         if (e.cancelable && e.type.includes('touch')) {
             e.preventDefault();
         }
@@ -288,7 +296,6 @@ function initSwipeButton() {
         
         swipeBtn.style.transform = `translateX(${newLeft - btnInitialLeft}px)`;
         
-        // 끝 지점 근처(끝에서 4px 이내)에 도달하면 즉각 실행
         if (newLeft >= maxW - 4) {
             isDragging = false;
             swipeBtn.style.transform = `translateX(0px)`;
@@ -453,7 +460,7 @@ export function moveDestinationDown(id) {
 }
 
 // ==========================================
-// 7. 배송 목록 메인 렌더링 (시인성 및 터치 영역 확대)
+// 7. 배송 목록 메인 렌더링
 // ==========================================
 export function renderList() {
     const listEl = document.getElementById('destination-list');
@@ -491,25 +498,21 @@ export function renderList() {
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
-            // 실시간 추적용 주문번호 보존
             if (dest.orderNo) {
                 li.setAttribute('data-orderno', dest.orderNo);
             }
             li.className = "bg-white p-3 rounded-2xl shadow-xs border border-gray-200 flex flex-col gap-2";
             
-            // 순번 배지 확대 (w-6 h-6)
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
                 `<div class="bg-indigo-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-sm shrink-0 ring-2 ring-indigo-200"><i class="fa-solid fa-flag text-[10px]"></i></div>` : 
                 `<div class="bg-blue-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-sm shrink-0">${dest.displayNumber}</div>`;
             
-            // 전화번호 정제 및 폰트 크기 계산 (시인성 강화)
             let customerPhoneStr = sanitizePhoneNumber(dest.phone || ""); 
             let dynamicTextSize = "text-[12px]"; 
             if (customerPhoneStr.length >= 13) dynamicTextSize = "text-[10.5px]"; 
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[11px]"; 
             else if (customerPhoneStr.length >= 9) dynamicTextSize = "text-[11.5px]";
 
-            // 주소지 표시 (상호명 및 주소 폰트 확대)
             const formatted = formatDisplayAddress(dest.address, dest.storeName);
             let displayAddressHTML = "";
             
@@ -522,7 +525,6 @@ export function renderList() {
                 displayAddressHTML = `<span class="block leading-snug text-gray-900 break-keep font-extrabold text-[14px]">${formatted.cleanAddr}</span>`;
             }
 
-            // 내비게이션 앱 목적지 명칭
             let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
 
             const isFirst = index === 0;
@@ -530,7 +532,6 @@ export function renderList() {
 
             li.innerHTML = `
                 <div class="flex items-center gap-1.5 pb-0.5">
-                    <!-- 위/아래 순서 변경 버튼 -->
                     <div class="flex flex-col items-center justify-center gap-1 shrink-0 -ml-0.5 mr-0.5">
                         <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
@@ -543,24 +544,20 @@ export function renderList() {
                     <div class="font-bold text-gray-900 flex-1 ml-1 min-w-0 flex flex-col justify-center">
                         ${displayAddressHTML}
                     </div>
-                    <!-- 수정 버튼 확대 -->
                     <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 w-8 h-8 flex items-center justify-center -mr-1 shrink-0 rounded-lg active:bg-gray-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[14px]"></i></button>
                 </div>
                 
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-0.5 mt-0.5"></div>
                 <div id="memo-preview-${dest.id}" class="hidden bg-gray-50 rounded-lg p-2 text-[11.5px] text-gray-800 border border-gray-100 truncate shadow-2xs mb-0.5 mt-0.5"></div>
-                <!-- 공용 메모 아랫단에 개인 메모 표시 슬롯 -->
                 <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50 rounded-lg p-2 text-[11.5px] text-emerald-950 border border-emerald-200 truncate shadow-2xs mb-1 mt-0.5"></div>
                 
                 <div class="flex flex-col gap-1.5 mt-0.5 pt-2 border-t border-gray-100">
-                    <!-- 버튼 1열: 전화/문자/메모/완료 (높이 42px 및 폰트 확대) -->
                     <div class="flex gap-1.5 h-[42px]">
                         ${customerPhoneStr ? `<a href="tel:${customerPhoneStr}" class="flex-none w-[106px] bg-green-50 text-green-700 border border-green-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-green-100 transition px-1.5 phone-number-box"><i class="fa-solid fa-phone mr-1 text-[11px] shrink-0"></i><span class="${dynamicTextSize} font-black tracking-tight whitespace-nowrap">${customerPhoneStr}</span></a>` : `<div class="flex-none w-[106px] bg-gray-50 text-gray-400 border border-gray-100 rounded-xl shadow-2xs flex items-center justify-center px-1.5"><i class="fa-solid fa-phone-slash mr-1 text-[11px] shrink-0"></i><span class="text-[10.5px] font-bold whitespace-nowrap">번호 없음</span></div>`}
                         <a href="sms:${customerPhoneStr}" class="flex-1 min-w-0 bg-sky-50 text-sky-600 border border-sky-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-sky-100 transition flex-nowrap ${!customerPhoneStr ? 'opacity-30 pointer-events-none' : ''}"><i class="fa-solid fa-comment-sms text-[13px] shrink-0"></i><span class="text-[12.5px] font-black whitespace-nowrap tracking-tight">문자</span></a>
                         <button onclick="openMemoModal(${dest.id})" class="flex-1 min-w-0 bg-yellow-50 text-yellow-600 border border-yellow-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-yellow-100 transition flex-nowrap"><i class="fa-solid fa-pen-to-square text-[13px] shrink-0"></i><span class="text-[12.5px] font-black whitespace-nowrap tracking-tight">메모</span></button>
                         <button onclick="completeDestination(${dest.id})" class="flex-1 min-w-0 bg-emerald-50 text-emerald-600 border border-emerald-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-emerald-100 transition flex-nowrap"><i class="fa-solid fa-check text-[14px] shrink-0"></i><span class="text-[12.5px] font-black whitespace-nowrap tracking-tight">완료</span></button>
                     </div>
-                    <!-- 버튼 2열: 길찾기(티맵/카카오) & 삭제 (높이 38px 및 버튼 확대) -->
                     <div class="flex gap-1.5 h-[38px]">
                         <div class="flex-1 min-w-0 bg-gray-50 border border-gray-200 p-1 rounded-xl flex items-center gap-1.5 shadow-2xs">
                             <span class="text-[11.5px] font-black text-gray-500 px-1.5 shrink-0 whitespace-nowrap leading-none tracking-tight">길찾기</span>
@@ -671,7 +668,6 @@ window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
-// 순서 이동 전역 함수 바인딩
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 

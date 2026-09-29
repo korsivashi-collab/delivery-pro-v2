@@ -101,7 +101,8 @@ export function renderMemoPreview(dest) {
             while ((match = tagRegex.exec(memoText)) !== null) {
                 let text = match[1]; 
                 text = text.replace('주차장 높이 ', '높이:'); 
-                text = text.replace('무료 회차 시간 ', '회차:'); 
+                // 기존 '무료 회차 시간' 및 신규 '회차 시간' 모두 '회차:'로 통일 변환
+                text = text.replace(/(?:무료\s*)?회차\s*시간\s*/, '회차:'); 
                 tags.push(text);
             }
             
@@ -140,7 +141,7 @@ export function renderMemoPreview(dest) {
 }
 
 // ==========================================
-// 5. 모달 입력 태그 선택 로직
+// 5. 모달 입력 태그 선택 로직 (신규 규격 반영)
 // ==========================================
 export function selectHeightTag(btn, val) {
     const isActive = btn.dataset.active === "true";
@@ -172,7 +173,7 @@ export function selectTimeTag(btn, val) {
         btn.dataset.active = "true"; 
         btn.classList.remove('bg-gray-50', 'border-gray-200', 'text-gray-700'); 
         btn.classList.add('bg-yellow-100', 'border-yellow-400', 'text-yellow-800'); 
-        selectedTimeText = `[무료 회차 시간 ${val}]`; 
+        selectedTimeText = `[회차 시간 ${val}]`; 
     }
 }
 
@@ -251,23 +252,35 @@ export async function openMemoModal(id) {
         const myMemo = memos.find(m => m.deviceId === myDeviceId || (myPhone && m.phone === myPhone));
         if (myMemo) {
             const rawMemo = myMemo.memo || "";
+            
+            // 주차장 높이 매칭 (하위 호환 대응: 기존 '2.2m 이하'인 경우 '2.2m' 버튼 활성화)
             const heightMatch = rawMemo.match(/\[주차장 높이 (.*?)\]/);
             if (heightMatch) {
-                const val = heightMatch[1];
+                const val = heightMatch[1].trim();
+                let matched = false;
                 document.querySelectorAll('.height-tag-btn').forEach(b => {
-                    if (b.innerText.trim() === val) selectHeightTag(b, val);
+                    if (b.innerText.trim() === val) {
+                        selectHeightTag(b, val);
+                        matched = true;
+                    }
                 });
+                if (!matched && val === '2.2m 이하') {
+                    document.querySelectorAll('.height-tag-btn').forEach(b => {
+                        if (b.innerText.trim() === '2.2m') selectHeightTag(b, '2.2m');
+                    });
+                }
             }
 
-            const timeMatch = rawMemo.match(/\[무료 회차 시간 (.*?)\]/);
+            // 회차 시간 매칭 (신/구 태그 모두 매칭)
+            const timeMatch = rawMemo.match(/\[(?:무료\s*)?회차\s*시간\s*(.*?)\]/);
             if (timeMatch) {
-                const val = timeMatch[1];
+                const val = timeMatch[1].trim();
                 document.querySelectorAll('.time-tag-btn').forEach(b => {
                     if (b.innerText.trim() === val) selectTimeTag(b, val);
                 });
             }
 
-            ['도로변 주차', '지하주차장', '지상주차장'].forEach(tag => {
+            ['도로변 주차', '지하주차장', '지상주차장', '엘리베이터'].forEach(tag => {
                 if (rawMemo.includes(`[${tag}]`)) {
                     document.querySelectorAll('.etc-tag-btn').forEach(b => {
                         if (b.dataset.val === tag && b.dataset.active !== "true") toggleEtcTag(b);

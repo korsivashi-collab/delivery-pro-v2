@@ -1,5 +1,6 @@
+// js/api.js
 // =================================================================
-// [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈
+// [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈 (로컬 데이터 유실 방어 탑재)
 // =================================================================
 
 import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
@@ -35,7 +36,7 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// 🌟 [속도 최적화] 이미지 클라이언트 초고속 압축 함수 (배송 증빙 최적화: 960px / 0.65 품질)
+// 이미지 클라이언트 초고속 압축 함수 (배송 증빙 최적화: 960px / 0.65 품질)
 async function compressImageToBlob(file, maxDimension = 960, quality = 0.65) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
@@ -85,7 +86,7 @@ export async function checkIfDeviceBlocked(deviceId) {
     }
 }
 
-// 🌟 1. 배송 완료 사진 고속 업로드 (경량화 규격 적용)
+// 1. 배송 완료 사진 고속 업로드 (경량화 규격 적용)
 export async function firebaseUploadDeliveryPhoto(file, deviceId) {
     const blob = await compressImageToBlob(file, 960, 0.65);
     const safeDeviceId = (deviceId || 'dev').replace(/[^a-zA-Z0-9_-]/g, '');
@@ -247,7 +248,7 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
     }
 }
 
-// 4. GPS 요청 리스너 (auth.js와 정상 연결 보존)
+// 4. GPS 요청 리스너
 export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCallback) {
     const q = query(collection(db, "gps_requests"), where("deviceId", "==", myDeviceId));
     return onSnapshot(q, (snapshot) => {
@@ -276,7 +277,7 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
     });
 }
 
-// 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (경합 및 부팅 지연 방어)
+// 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (기기 로컬 작업 보존 철통 방어)
 export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
     let phone = "";
     let onRoutesReceived = null;
@@ -296,23 +297,25 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
     const unsubs = [];
     let lastHandledTime = 0;
-    const initializationTime = Date.now();
     let hadExistingRoute = false;
 
     const handleRouteData = (data, exists) => {
         const now = Date.now();
 
-        // 문서가 삭제되었거나 배송지 목록이 비어있는 경우 (관제 초기화 상태)
-        if (!exists || !data || !data.destinations || !Array.isArray(data.destinations) || data.destinations.length === 0) {
-            // 앱 로드 후 2.5초 이내의 초기 미수신 상태이거나 이전에 동선을 수신한 적이 없다면 화면 초기화 무시
-            if ((now - initializationTime < 2500) && !hadExistingRoute) {
-                return; 
-            }
-            
-            lastHandledTime = now;
-            hadExistingRoute = false;
-            if (typeof onRoutesCleared === 'function') {
-                onRoutesCleared();
+        // 🌟 [핵심 방어 1]: 문서가 존재하지 않는 경우는 미할당 상태이므로 로컬 데이터를 절대 삭제하지 않음
+        if (!exists) {
+            return;
+        }
+
+        // 🌟 [핵심 방어 2]: 유효한 destinations 배열이 없거나 빈 경우
+        if (!data || !data.destinations || !Array.isArray(data.destinations) || data.destinations.length === 0) {
+            // 이전에 서버로부터 할당받아 배송 중이던 상태였고, 명시적으로 관제에서 지운 경우에만 콜백 호출
+            if (hadExistingRoute && data && (data.cleared === true || data.status === 'cleared')) {
+                lastHandledTime = now;
+                hadExistingRoute = false;
+                if (typeof onRoutesCleared === 'function') {
+                    onRoutesCleared();
+                }
             }
             return;
         }
@@ -366,7 +369,7 @@ export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
 
 export const startAssignedRouteListener = listenToActiveRoutes;
 
-// 🌟 4-2. 포그라운드 복귀(화면 켬) 시 1회 즉시 동기화 보조 함수 (오프라인 증발 방지 보호막 탑재)
+// 🌟 4-2. 포그라운드 복귀 시 1회 즉시 동기화 보조 함수 (오프라인/미할당 증발 방지 보호)
 export async function fetchActiveRouteOnce(deviceId, phone) {
     try {
         const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
@@ -394,15 +397,14 @@ export async function fetchActiveRouteOnce(deviceId, phone) {
         await checkDoc(cleanPhone);
         if (phone !== cleanPhone) await checkDoc(phone);
 
-        // 서버에 아예 동선 문서가 없는 상태라면 기존 로컬 작업을 지우지 않도록 보호 객체 반환
+        // 서버에 아예 동선 문서가 없는 상태라면 기존 로컬 작업을 보존
         if (!foundAnyDoc) {
             return { destinations: ['PRESERVE_LOCAL_ON_NO_DOC'], isNoDoc: true };
         }
 
-        return latestData || { destinations: [] };
+        return latestData || { destinations: ['PRESERVE_LOCAL_ON_EMPTY'], isEmpty: true };
     } catch (e) {
         console.warn("최신 동선 단발 조회 오류 (로컬 유지 보호):", e);
-        // 통신 오류 발생 시에도 화면 증발 방지용 보호 객체 반환
         return { destinations: ['PRESERVE_LOCAL_ON_ERROR'], isOffline: true };
     }
 }
