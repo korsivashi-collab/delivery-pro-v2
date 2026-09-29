@@ -12,6 +12,67 @@ export const templateBuilderState = {
 };
 
 // ==========================================
+// 0. [핵심] 컬럼 감지 기반 동적 비율 계산 엔진 (항상 100.0% 보장)
+// ==========================================
+export function buildDynamicColgroup(cols) {
+    const fixedWidths = {
+        'No.': 3.5,
+        '규격(단위)': 7.5,
+        '제조사(원산지)': 7.0,
+        '수량': 5.5,
+        '단가': 8.5,
+        '공급가액': 9.0,
+        '세액': 5.5,
+        '총액': 10.5
+    };
+
+    let nonProductTotalWidth = 0;
+    const columnWidthMap = {};
+
+    cols.forEach(col => {
+        if (col === '상품명' || /상품|품목|품명/i.test(col)) return;
+
+        let w = 8.0;
+        if (fixedWidths[col] !== undefined) {
+            w = fixedWidths[col];
+        } else if (/규격|단위/i.test(col)) {
+            w = 7.5;
+        } else if (/제조사|원산지/i.test(col)) {
+            w = 7.0;
+        } else if (/수량/i.test(col)) {
+            w = 5.5;
+        } else if (/단가/i.test(col)) {
+            w = 8.5;
+        } else if (/공급가/i.test(col)) {
+            w = 9.0;
+        } else if (/세액|부가세/i.test(col)) {
+            w = 5.5;
+        } else if (/총액|합계/i.test(col)) {
+            w = 10.5;
+        } else if (/No|순번/i.test(col)) {
+            w = 3.5;
+        }
+
+        columnWidthMap[col] = w;
+        nonProductTotalWidth += w;
+    });
+
+    // 100%에서 나머지 컬럼을 뺀 잔여폭을 상품명에 전부 할당 (최소 25% 보장)
+    let productWidth = Math.max(25.0, 100.0 - nonProductTotalWidth);
+    columnWidthMap['상품명'] = productWidth;
+
+    const totalCalculated = nonProductTotalWidth + productWidth;
+    const colsHtml = cols.map(col => {
+        const key = (col === '상품명' || /상품|품목|품명/i.test(col)) ? '상품명' : col;
+        const targetW = columnWidthMap[key] !== undefined ? columnWidthMap[key] : (columnWidthMap[col] || 8.0);
+        const actualPercent = ((targetW / totalCalculated) * 100).toFixed(1);
+        return `<col style="width: ${actualPercent}%;">`;
+    }).join('');
+
+    return `<colgroup>${colsHtml}</colgroup>`;
+}
+
+// ==========================================
 // 1. PDF 분석 및 [양식 보존 + 내용 자동 소거/템플릿화] 알고리즘
 // ==========================================
 export async function parsePdfToEditableDocument(file) {
@@ -95,7 +156,7 @@ export async function parsePdfToEditableDocument(file) {
 
         renderEditableDocument(formHtml);
 
-        alert(`[PDF 양식 인식 완료]\n\n1. 상품명이 잘리지 않도록 열 너비와 자동 줄바꿈이 완벽하게 적용되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(주문번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
+        alert(`[PDF 양식 인식 완료]\n\n1. 감지된 컬럼 구성에 맞춰 규격/수량/단가 비율이 슬림하게 최적화되었으며 상품명 공간이 최대 확보되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(주문번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
     } catch (e) {
         console.error("PDF 서식 파싱 오류:", e);
         alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
@@ -114,7 +175,7 @@ function extractItemTableColumns(rawText) {
 }
 
 // ==========================================
-// 2. A4 정중앙(148.5mm) 고정 2등분 HTML 빌더 (상품명 열 최대 확보)
+// 2. A4 정중앙(148.5mm) 고정 2등분 HTML 빌더 (동적 colgroup 장착)
 // ==========================================
 function buildCleanTemplatedHtml(cfg) {
     if (cfg.isTwoPart) {
@@ -134,53 +195,52 @@ function buildCleanTemplatedHtml(cfg) {
 
 function generateSingleInvoiceBlock(cfg, partName) {
     const title = cfg.docTitle || '거래명세표';
-    const cols = cfg.columns || ['No.', '상품명', '규격(단위)', '수량', '단가', '총액'];
+    const cols = cfg.columns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
 
     const thsHtml = cols.map(c => `<th contenteditable="true" style="border: 1px solid #000; padding: 2.5px 3px; background: #f8fafc; text-align: center; font-weight: bold; font-size: 9.5px;">${c}</th>`).join('');
 
-    // 🌟 핵심: 열 너비의 총합을 정확히 100%로 맞추고 상품명 열을 40% 이상으로 최우선 확보
-    const colgroupHtml = `
-        <colgroup>
-            <col style="width: 4%;">
-            <col style="width: 40%;">
-            ${cols.includes('규격(단위)') ? '<col style="width: 9%;">' : ''}
-            ${cols.includes('제조사(원산지)') ? '<col style="width: 8%;">' : ''}
-            <col style="width: 6%;">
-            <col style="width: 9%;">
-            ${cols.includes('공급가액') ? '<col style="width: 9%;">' : ''}
-            ${cols.includes('세액') ? '<col style="width: 5%;">' : ''}
-            <col style="width: 10%;">
-        </colgroup>
-    `;
+    // 🌟 감지된 컬럼 구성에 맞춰 실시간으로 정확히 100.0% 너비 계산
+    const colgroupHtml = buildDynamicColgroup(cols);
 
-    // 🌟 상품명 셀에 word-break: break-all; white-space: normal;을 적용하여 절대 잘리지 않음
-    const trSample = `
-        <tr class="item-row" style="min-height: 18px;">
-            <td style="border: 1px solid #000; text-align: center; padding: 2px;">1</td>
-            <td style="border: 1px solid #000; font-weight: bold; padding: 2px 4px; word-break: break-all; white-space: normal; line-height: 1.2; text-align: left;" contenteditable="true">{{상품명}}</td>
-            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">{{단위}}</td>' : ''}
-            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">국내산</td>' : ''}
-            <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2px;" contenteditable="true">{{수량}}</td>
-            <td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">{{단가}}</td>
-            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">{{공급가액}}</td>' : ''}
-            ${cols.includes('세액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">{{세액}}</td>' : ''}
-            <td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: 2px 4px;" contenteditable="true">{{총액}}</td>
-        </tr>
-    `;
+    // 샘플 행 동적 생성
+    let sampleTds = '';
+    cols.forEach(col => {
+        if (col === 'No.' || /No|순번/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;">1</td>`;
+        } else if (col === '상품명' || /상품|품목|품명/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; font-weight: bold; padding: 2px 4px; word-break: break-all; white-space: normal; line-height: 1.2; text-align: left;" contenteditable="true">{{상품명}}</td>`;
+        } else if (/규격|단위/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">{{단위}}</td>`;
+        } else if (/제조사|원산지/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">국내산</td>`;
+        } else if (/수량/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2px;" contenteditable="true">{{수량}}</td>`;
+        } else if (/단가/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">{{단가}}</td>`;
+        } else if (/공급가/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">{{공급가액}}</td>`;
+        } else if (/세액|부가세/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true">{{세액}}</td>`;
+        } else if (/총액|합계/i.test(col)) {
+            sampleTds += `<td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: 2px 4px;" contenteditable="true">{{총액}}</td>`;
+        } else {
+            sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">-</td>`;
+        }
+    });
+    const trSample = `<tr class="item-row" style="min-height: 18px;">${sampleTds}</tr>`;
 
-    const emptyRows = [2, 3, 4, 5].map(num => `
-        <tr class="item-row empty-row" style="height: 18px;">
-            <td style="border: 1px solid #000; text-align: center; padding: 2px;">${num}</td>
-            <td style="border: 1px solid #000; padding: 2px 4px;" contenteditable="true"></td>
-            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true"></td>' : ''}
-            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true"></td>' : ''}
-            <td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true"></td>
-            <td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true"></td>
-            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true"></td>' : ''}
-            ${cols.includes('세액') ? '<td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true"></td>' : ''}
-            <td style="border: 1px solid #000; text-align: right; padding: 2px 4px;" contenteditable="true"></td>
-        </tr>
-    `).join('');
+    // 빈 행 2~5 동적 생성
+    const emptyRows = [2, 3, 4, 5].map(num => {
+        let emptyTds = '';
+        cols.forEach(col => {
+            if (col === 'No.' || /No|순번/i.test(col)) {
+                emptyTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;">${num}</td>`;
+            } else {
+                emptyTds += `<td style="border: 1px solid #000; padding: 2px 4px;" contenteditable="true"></td>`;
+            }
+        });
+        return `<tr class="item-row empty-row" style="height: 18px;">${emptyTds}</tr>`;
+    }).join('');
 
     return `
     <div class="invoice-box-part" style="width: 100%; height: 148.5mm; max-height: 148.5mm; padding: 4mm 8mm 3mm 8mm; box-sizing: border-box; font-family: 'Malgun Gothic', Dotum, sans-serif; color: #000; background: #fff; display: flex; flex-direction: column; justify-content: space-between; overflow: hidden;">
@@ -251,7 +311,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
             </tbody>
         </table>
 
-        <!-- 상품 테이블: 148.5mm 안에서 적정 영역 유지 -->
+        <!-- 상품 테이블: 동적 컬럼 높이 및 영역 유지 -->
         <div style="flex: 1; min-height: 0; overflow: hidden; margin-bottom: 2px;">
             <table class="doc-table item-table" style="width: 100%; border-collapse: collapse; border: 1.5px solid #000; font-size: 9.5px; table-layout: fixed;">
                 ${colgroupHtml}
@@ -365,16 +425,16 @@ export function insertDocTag(tagStr) {
 }
 
 // ==========================================
-// 4. [핵심] 다중 품목 동적 렌더링 엔진 (상품명 절대 안 잘림 + 자동 줄바꿈 보장)
+// 4. [핵심] 다중 품목 동적 렌더링 엔진 (실시간 colgroup 재계산 및 1:1 컬럼 완벽 매핑)
 // ==========================================
 export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     if (!baseTemplateHtml) return '';
     if (!order) return baseTemplateHtml;
     let html = baseTemplateHtml;
 
-    // 🌟 안전장치: 기존에 저장된 구버전 양식에 남아있을 수 있는 상품명 잘림(nowrap, ellipsis) 인라인 스타일 완전 소거
-    html = html.replace(/white-space:\s*nowrap;/gi, '')
-               .replace(/text-overflow:\s*ellipsis;/gi, '');
+    // 🌟 안전장치: 구버전 서식의 잔여 nowrap 및 ellipsis 인라인 속성 실시간 완전 소거
+    html = html.replace(/white-space:\s*nowrap;?/gi, '')
+               .replace(/text-overflow:\s*ellipsis;?/gi, '');
 
     const today = getLocalDateString();
     const orderNo = order.orderNo || `ORD-${idx + 1}`;
@@ -416,7 +476,21 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
                .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
 
-    // 2. 다중 품목 테이블 지능형 동적 생성
+    // 2. 현재 서식의 실제 thead 컬럼 구조 정밀 추출 (없으면 기본값)
+    let cols = templateBuilderState.detectedColumns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
+    const theadMatch = html.match(/<table[^>]*item-table[^>]*>[\s\S]*?<thead>[\s\S]*?<tr>([\s\S]*?)<\/tr>[\s\S]*?<\/thead>/i);
+    if (theadMatch) {
+        const thMatches = theadMatch[1].match(/<th[^>]*>([\s\S]*?)<\/th>/gi);
+        if (thMatches && thMatches.length >= 3) {
+            cols = thMatches.map(th => th.replace(/<[^>]+>/g, '').trim());
+        }
+    }
+
+    // 🌟 핵심: 서식 내부의 <colgroup>을 실시간 컬럼 구성에 맞게 완벽한 동적 100% 비율로 즉시 교체
+    const dynamicColgroupHtml = buildDynamicColgroup(cols);
+    html = html.replace(/<colgroup>[\s\S]*?<\/colgroup>/gi, dynamicColgroupHtml);
+
+    // 3. 다중 품목 데이터 조립
     const items = (order.items && order.items.length > 0) 
         ? order.items 
         : (order.itemName ? [{
@@ -426,8 +500,6 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
             price: order.price || '',
             total: order.total || ''
         }] : []);
-
-    const cols = templateBuilderState.detectedColumns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
 
     const isDense = items.length > 5;
     const isVeryDense = items.length > 8;
@@ -444,39 +516,47 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
         const supplyAmt = Math.round(itemTotal / 1.1) || itemTotal;
         const taxAmt = (itemTotal - supplyAmt) || 0;
 
-        // 🌟 핵심: div로 가두어 ellipsis로 자르던 태그를 제거하고, word-break: break-all; white-space: normal;로 상품명 전체 온전히 출력
-        itemsRowsHtml += `
-        <tr class="item-row" style="font-size: ${fontSize};">
-            <td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${i + 1}</td>
-            <td style="border: 1px solid #000; font-weight: bold; padding: ${cellPadding}; text-align: left; vertical-align: middle; word-break: break-all; white-space: normal; line-height: 1.18;">
-                ${it.name || '-'}
-            </td>
-            ${cols.includes('규격(단위)') ? `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${it.unit || '개'}</td>` : ''}
-            ${cols.includes('제조사(원산지)') ? `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">국내산</td>` : ''}
-            <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: ${cellPadding}; vertical-align: middle;">${formatNumber(itemQty)}</td>
-            <td style="border: 1px solid #000; text-align: right; padding: ${cellPadding}; vertical-align: middle;">${itemPrice ? formatNumber(itemPrice) : '-'}</td>
-            ${cols.includes('공급가액') ? `<td style="border: 1px solid #000; text-align: right; padding: ${cellPadding}; vertical-align: middle;">${supplyAmt ? formatNumber(supplyAmt) : '-'}</td>` : ''}
-            ${cols.includes('세액') ? `<td style="border: 1px solid #000; text-align: right; padding: ${cellPadding}; vertical-align: middle;">${taxAmt ? formatNumber(taxAmt) : '0'}</td>` : ''}
-            <td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: ${cellPadding}; vertical-align: middle;">${itemTotal ? formatNumber(itemTotal) : '-'}</td>
-        </tr>`;
+        let tdsHtml = '';
+        cols.forEach(col => {
+            if (col === 'No.' || /No|순번/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${i + 1}</td>`;
+            } else if (col === '상품명' || /상품|품목|품명/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; font-weight: bold; padding: ${cellPadding}; text-align: left; vertical-align: middle; word-break: break-all; white-space: normal; line-height: 1.18;">${it.name || '-'}</td>`;
+            } else if (/규격|단위/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${it.unit || '개'}</td>`;
+            } else if (/제조사|원산지/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">국내산</td>`;
+            } else if (/수량/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: ${cellPadding}; vertical-align: middle;">${formatNumber(itemQty)}</td>`;
+            } else if (/단가/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: right; padding: ${cellPadding}; vertical-align: middle;">${itemPrice ? formatNumber(itemPrice) : '-'}</td>`;
+            } else if (/공급가/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: right; padding: ${cellPadding}; vertical-align: middle;">${supplyAmt ? formatNumber(supplyAmt) : '-'}</td>`;
+            } else if (/세액|부가세/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: right; padding: ${cellPadding}; vertical-align: middle;">${taxAmt ? formatNumber(taxAmt) : '0'}</td>`;
+            } else if (/총액|합계/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: ${cellPadding}; vertical-align: middle;">${itemTotal ? formatNumber(itemTotal) : '-'}</td>`;
+            } else {
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">-</td>`;
+            }
+        });
+
+        itemsRowsHtml += `<tr class="item-row" style="font-size: ${fontSize};">${tdsHtml}</tr>`;
     });
 
-    // 5행 미만일 때만 빈 행 채움
+    // 5행 미만일 때만 빈 행 동적 채움
     const remainCount = Math.max(0, 5 - items.length);
     for (let r = 0; r < remainCount; r++) {
         const rowNo = items.length + r + 1;
-        itemsRowsHtml += `
-        <tr class="item-row empty-row" style="height: 18px;">
-            <td style="border: 1px solid #000; text-align: center; padding: 2px;">${rowNo}</td>
-            <td style="border: 1px solid #000; padding: 2px 4px;"></td>
-            ${cols.includes('규격(단위)') ? '<td style="border: 1px solid #000; padding: 2px;"></td>' : ''}
-            ${cols.includes('제조사(원산지)') ? '<td style="border: 1px solid #000; padding: 2px;"></td>' : ''}
-            <td style="border: 1px solid #000; padding: 2px;"></td>
-            <td style="border: 1px solid #000; padding: 2px 4px;"></td>
-            ${cols.includes('공급가액') ? '<td style="border: 1px solid #000; padding: 2px 4px;"></td>' : ''}
-            ${cols.includes('세액') ? '<td style="border: 1px solid #000; padding: 2px 4px;"></td>' : ''}
-            <td style="border: 1px solid #000; padding: 2px 4px;"></td>
-        </tr>`;
+        let emptyTds = '';
+        cols.forEach(col => {
+            if (col === 'No.' || /No|순번/i.test(col)) {
+                emptyTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;">${rowNo}</td>`;
+            } else {
+                emptyTds += `<td style="border: 1px solid #000; padding: 2px 4px;" contenteditable="true"></td>`;
+            }
+        });
+        itemsRowsHtml += `<tr class="item-row empty-row" style="height: 18px;">${emptyTds}</tr>`;
     }
 
     // 모든 tpl-items-tbody 교체
@@ -534,3 +614,4 @@ window.renderEditableDocument = renderEditableDocument;
 window.insertDocTag = insertDocTag;
 window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 window.fillTemplateWithOrderData = fillTemplateWithOrderData;
+window.buildDynamicColgroup = buildDynamicColgroup;
