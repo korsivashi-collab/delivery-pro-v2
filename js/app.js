@@ -652,30 +652,37 @@ export async function applyHeaderCustomEnd() {
 }
 
 // ==========================================
-// 9. 외부 내비게이션(티맵 / 카카오) 연동
+// 9. 외부 내비게이션(티맵 / 카카오내비) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
     window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
-    const targetName = encodeURIComponent(name || '목적지');
-    // 현장 표준 방식: 카카오맵 자동차 길찾기/내비 스킴 (WGS84 좌표 100% 지원, SDK/인증 불필요)
-    const kakaoAppUrl = `kakaomap://route?ep=${lat},${lng}&by=CAR`;
-    const kakaoWebUrl = `https://map.kakao.com/link/to/${targetName},${lat},${lng}`;
+    if (!lat || !lng) {
+        alert("목적지 좌표가 유효하지 않습니다.");
+        return;
+    }
 
-    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+    // 이모지(🏢 등) 및 특수문자를 정제하여 카카오내비 파싱 오류 방지
+    const cleanName = (name || '목적지')
+        .replace(/[^\w\s가-힣0-9.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || '목적지';
 
-    if (isMobile) {
-        window.location.href = kakaoAppUrl;
-        // 카카오 앱이 미설치된 환경인 경우 모바일 웹으로 안전하게 자동 전환
-        setTimeout(() => {
-            if (document.visibilityState === 'visible') {
-                window.location.href = kakaoWebUrl;
-            }
-        }, 1200);
+    const targetName = encodeURIComponent(cleanName);
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; // 카카오 공식 앱키
+
+    // 🌟 카카오내비 정식 필수 파라미터 규격 (appkey, apiver=1.0, coord_type=wgs84 필수)
+    const naviParams = `name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
+
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (isAndroid) {
+        // 안드로이드: 카카오내비 앱 패키지(com.locnall.KimGiSa) 다이렉트 인텐트 호출
+        window.location.href = `intent://navigate?${naviParams}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
     } else {
-        window.open(kakaoWebUrl, '_blank');
+        // iOS 및 기타: 카카오내비 다이렉트 URL Scheme 호출
+        window.location.href = `kakaonavi://navigate?${naviParams}`;
     }
 }
 
