@@ -100,18 +100,49 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명 주소 정밀 추출 로직
+// 5. 도로명/지번 주소 정밀 추출 로직 (전화번호 섞임 원천 차단)
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
-        let flatText = text.replace(/\n/g, ' ').replace(/\s+/g, ' ');
-        let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*,\s*\([가-힣\s]+\))?)/g;
-        let matches = [...flatText.matchAll(regionPrefixedRegex)];
-        if (matches && matches.length > 0) {
-            return matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
+        // 1) 전화번호 및 타 필드 라벨 직전에 줄바꿈을 두어 한 줄 엉킴 사전 분리
+        let safeText = text
+            .replace(/(전화(?:번호)?|연락처|TEL|H\.?P|대표자|검수자|성명|상호|수령인)\s*[:\s]/gi, '\n')
+            .replace(/(01[0-9]|0[2-8][0-9]?)[-\s]?\d{3,4}[-\s]?\d{4}/g, '\n');
+
+        let flatText = safeText.replace(/\r/g, ' ').replace(/\n/g, '  ').replace(/\s+/g, ' ');
+
+        // 2-1) 정밀 도로명 주소 정규식 (로/길 + 건물번호 + 선택적 법정동/건물명 괄호)
+        const roadRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+?(?:구|군|시)\s+[가-힣0-9\s]+?(?:로|길)\s*\d+(?:-\d+)?(?:\s*\([가-힣0-9\s,·\.]+\))?/g;
+
+        // 2-2) 정밀 지번 주소 정규식 (읍/면/동/리 + 지번 + 선택적 괄호)
+        const jibunRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+?(?:구|군|시)\s+[가-힣0-9\s]+?(?:동|읍|면|리)\s*\d+(?:-\d+)?(?:\s*\([가-힣0-9\s,·\.]+\))?/g;
+
+        let roadMatches = [...flatText.matchAll(roadRegex)];
+        let jibunMatches = [...flatText.matchAll(jibunRegex)];
+
+        let candidate = null;
+        if (roadMatches.length > 0) {
+            candidate = roadMatches[roadMatches.length - 1][0].trim();
+        } else if (jibunMatches.length > 0) {
+            candidate = jibunMatches[jibunMatches.length - 1][0].trim();
         }
-    } catch (e) {} 
+
+        if (candidate) {
+            // 3) 후처리 정제: 전화번호, 필드 라벨, 찌꺼기 완벽 절삭
+            candidate = candidate
+                .replace(/\s*(?:전화|연락처|TEL|HP|핸드폰|성명|대표).*$/i, '')
+                .replace(/\s*(?:01[0-9]|0[2-8][0-9]?)[-\s]?\d+.*$/, '')
+                .replace(/\s+/g, ' ')
+                .trim();
+
+            if (candidate.length >= 8) {
+                return candidate;
+            }
+        }
+    } catch (e) {
+        console.error("주소 추출 오류:", e);
+    } 
     return null;
 }
 
@@ -207,32 +238,25 @@ export function extractStoreNameLogic(fullText) {
 // ==========================================
 export function initResponsiveViewport() {
     function applyViewportMetrics() {
-        // 1. 실제 내부 가용 높이(innerHeight)를 읽어 주소창 높이 변화 보정 (--vh)
         const vh = window.innerHeight * 0.01;
         document.documentElement.style.setProperty('--vh', `${vh}px`);
 
-        // 🌟 [수정됨] 2. 억지 확대/축소(scaleRatio)를 유발하던 로직을 완전히 제거했습니다.
-        // 기기 본연의 해상도(Device-width)를 1:1로 사용하여 넓은 폰에서는 UI가 커지지 않고 정보가 더 많이 표시됩니다.
         const screenWidth = window.innerWidth || document.documentElement.clientWidth;
 
-        // 3. 360px 이하 소형 폰(아이폰 SE 등) 특화 플래그 클래스 지정
         if (screenWidth <= 360) {
             document.body.classList.add('screen-compact');
         } else {
             document.body.classList.remove('screen-compact');
         }
 
-        // 4. 모바일 가상 키보드 및 다이내믹 주소창 대응 (visualViewport 지원 시)
         if (window.visualViewport) {
             const visualHeight = window.visualViewport.height * 0.01;
             document.documentElement.style.setProperty('--vvh', `${visualHeight}px`);
         }
     }
 
-    // 초기 1회 즉시 실행
     applyViewportMetrics();
 
-    // 화면 크기 변경 시 자동 재계산
     window.addEventListener('resize', applyViewportMetrics, { passive: true });
     window.addEventListener('orientationchange', () => {
         setTimeout(applyViewportMetrics, 100);
