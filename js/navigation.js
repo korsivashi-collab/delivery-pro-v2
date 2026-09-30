@@ -62,7 +62,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
     
-    // 🌟 [핵심 수정] 카카오내비 최신 앱 규격(param 객체를 JSON 문자열로 인코딩) 필수 적용
+    // 카카오내비 필수 규격 param 객체
     const paramObj = {
         destination: {
             name: cleanName,
@@ -73,18 +73,25 @@ export function openKakaoNaviDirect(lat, lng, name) {
             coordType: 'wgs84'
         }
     };
+
+    // 🌟 '유효하지 않은 URI' 에러 방지 핵심: 디벨로퍼스에 등록한 도메인으로 출처(origin) 강제 인증
+    const extrasObj = {
+        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
+    };
+
     const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
+    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
     
     const isAndroid = /Android/i.test(navigator.userAgent);
 
     if (isAndroid) {
-        // 안드로이드: JSON 파라미터가 적용된 최신 Intent URI 강제 호출 (도메인 차단 우회 및 마켓 이동)
+        // 안드로이드: param과 extras 보안 인증 헤더가 모두 포함된 최신 Intent 강제 호출
         const fallbackUrl = encodeURIComponent("market://details?id=com.locnall.KimGiSa");
-        const kakaonaviIntent = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
+        const kakaonaviIntent = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
         window.location.href = kakaonaviIntent;
     } else {
-        // iOS 등 기타 기기: 커스텀 스킴 직접 호출
-        const kakaonaviScheme = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}`;
+        // iOS 및 기타 기기
+        const kakaonaviScheme = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
         window.location.href = kakaonaviScheme;
     }
 }
