@@ -50,9 +50,9 @@ export function openTmap(lat, lng, name) {
     const encodedName = encodeURIComponent(cleanName);
     const isAndroid = /Android/i.test(navigator.userAgent);
     
+    // 정상 작동 확인된 티맵 인텐트 (마켓 이동 폴백 제거됨)
     if (isAndroid) {
-        const fallbackUrl = encodeURIComponent("market://details?id=com.skt.tmap.ku");
-        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;S.browser_fallback_url=${fallbackUrl};end;`;
+        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;end;`;
     } else {
         window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
     }
@@ -69,20 +69,35 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const encodedName = encodeURIComponent(cleanName);
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; // 카카오 REST/JS 공용 앱 키
-    const isAndroid = /Android/i.test(navigator.userAgent);
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    
+    // 카카오내비 목적지 필수 규격
+    const paramObj = {
+        destination: {
+            name: cleanName,
+            x: Number(lng),
+            y: Number(lat)
+        },
+        option: {
+            coordType: 'wgs84'
+        }
+    };
 
-    // 🌟 [핵심 수정] 카카오내비가 웹뷰를 거절하지 못하도록 도메인 출처(extras)까지 다시 합쳤습니다.
+    // 카카오내비 출처 인증 규격 (에러 방지)
     const extrasObj = {
         KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
     };
+
+    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
+    
+    const isAndroid = /Android/i.test(navigator.userAgent);
 
     if (isAndroid) {
-        const fallbackUrl = encodeURIComponent("market://details?id=com.locnall.KimGiSa");
-        // appkey, apiver(인증), name, x, y(목적지), extras(도메인우회) 6개가 모두 포함된 완벽한 인텐트
-        window.location.href = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84&extras=${encodedExtras}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
+        // 🌟 [최종 수정] 버튼 먹통을 유발하던 'S.browser_fallback_url'을 완전히 삭제했습니다.
+        // 티맵처럼 에러 없이 즉각적으로 카카오내비를 실행시킵니다.
+        const kakaonaviIntent = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
+        window.location.href = kakaonaviIntent;
         return;
     }
 
@@ -102,7 +117,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
     }
 
     // iOS 스킴 폴백
-    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84&extras=${encodedExtras}`;
+    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
 }
 
 // ==========================================
