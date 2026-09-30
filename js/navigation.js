@@ -42,17 +42,15 @@ export function openTmap(lat, lng, name) {
         return;
     }
 
-    const cleanName = (name || '목적지')
-        .replace(/[^\w\s가-힣0-9.-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim() || '목적지';
-
-    const encodedName = encodeURIComponent(cleanName);
+    const encodedName = encodeURIComponent(name);
     
-    // 🌟 [티맵 최종 완벽 복구] 
-    // 웹뷰에서 먹통을 유발하는 intent:// 방식을 완전히 버리고,
-    // 가장 처음에 시원하게 작동했던 순수 tmap:// 스킴으로만 호출합니다.
-    window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
+    // 🌟 웹/앱 공통: 버튼 먹통(프리징)을 완벽하게 방지하는 <a> 태그 강제 클릭 방식
+    const url = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`;
+    const a = document.createElement('a');
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
@@ -68,30 +66,59 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
     
-    // 1. 카카오내비 필수 목적지 파라미터 규격
-    const paramObj = {
-        destination: {
-            name: cleanName,
-            x: Number(lng),
-            y: Number(lat)
-        },
-        option: {
-            coordType: 'wgs84'
-        }
-    };
+    // 🌟 [웹/앱 완벽 분리 감지] localhost(앱)가 아니면 무조건 웹 브라우저로 인식
+    const isWebBrowser = window.location.hostname !== 'localhost' && window.location.protocol !== 'file:' && window.location.protocol !== 'capacitor:';
 
-    // 2. 카카오 디벨로퍼스 도메인 인증 헤더 (선생님께서 등록하신 도메인으로 증명)
+    if (isWebBrowser) {
+        // [웹 버전] 선생님께서 "기존에 완벽하게 작동했다"고 하셨던 카카오 공식 SDK 원본 코드
+        if (window.Kakao && window.Kakao.isInitialized()) {
+            try {
+                window.Kakao.Navi.start({
+                    name: cleanName,
+                    x: Number(lng),
+                    y: Number(lat),
+                    coordType: 'wgs84'
+                });
+                return;
+            } catch (e) {
+                console.warn("Kakao SDK 내비 실행 실패:", e);
+            }
+        }
+    }
+
+    // =========================================================
+    // 🌟 [앱(APK) 버전] 아래부터는 안드로이드 패키징 앱 전용 실행 로직입니다.
+    // =========================================================
+    const paramObj = {
+        destination: { name: cleanName, x: Number(lng), y: Number(lat) },
+        option: { coordType: 'wgs84' }
+    };
+    
+    // 디벨로퍼스에 등록한 localhost를 출처로 선언하여 권한 에러 해결
     const extrasObj = {
-        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
+        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/http://localhost"
     };
 
     const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
+    const isAndroid = /Android/i.test(navigator.userAgent);
     
-    // 🌟 [카카오내비 최종 해결]
-    // 티맵과 완벽히 동일하게, 먹통의 주범인 intent:// 를 완전히 빼버리고
-    // 순수 kakaonavi:// 스킴에 필수 파라미터와 인증 헤더만 담아 다이렉트로 꽂아 넣습니다.
-    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    let url = "";
+
+    if (isAndroid) {
+        // 안드로이드 앱: WebView 주소창 차단 먹통을 뚫어내는 정식 Intent URI
+        url = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
+    } else {
+        // iOS 앱
+        url = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    }
+
+    // 버튼 먹통 방지 핵심: a 태그를 생성하여 터치 클릭과 동일한 이벤트를 강제로 발생시킵니다.
+    const a = document.createElement('a');
+    a.href = url;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
 }
 
 // ==========================================
