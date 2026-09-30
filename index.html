@@ -227,7 +227,6 @@
         </header>
 
         <main class="flex-1 overflow-y-auto px-3 sm:px-4 py-3 hide-scrollbar bg-gray-100 relative w-full flex flex-col">
-            <!-- 🌟 수정: 메인 화면의 지도 컨테이너 및 탭 메뉴를 제거하고 리스트만 남깁니다. -->
             <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px] w-full flex-1">
                 <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-2xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
@@ -256,7 +255,7 @@
         </footer>
     </div>
 
-    <!-- 🌟 수정: 시작 지점 선택 모달 내부 (리스트/지도 뷰 전환 추가 및 모달 높이 확장) -->
+    <!-- 시작 지점 선택 모달 (지도/리스트 탭 연동) -->
     <div id="start-select-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[130] flex flex-col items-center justify-end sm:justify-center p-0 sm:p-4 pb-0 transition-opacity">
         <div class="bg-gray-100 w-full sm:max-w-md h-[85vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden animate-slide-up shadow-2xl relative">
             <div class="p-4 border-b border-gray-200 flex flex-col bg-white relative z-10 shadow-sm shrink-0">
@@ -266,24 +265,20 @@
                 </h3>
                 <p class="text-xs text-gray-500 font-bold mb-3 ml-1">지도에서 선택하면 출발 지점을 잡기 쉽습니다.</p>
                 
-                <!-- 탭 메뉴 스위치 -->
                 <div class="flex justify-center mb-1 shrink-0 w-full">
                     <div class="bg-gray-100 p-1 rounded-xl flex w-full max-w-[240px] text-[11px] font-bold shadow-inner">
-                        <button id="modal-tab-list-view" onclick="window.switchStartSelectViewMode('list')" class="flex-1 py-1.5 rounded-lg bg-white shadow text-blue-600 transition">📝 리스트 모드</button>
-                        <button id="modal-tab-map-view" onclick="window.switchStartSelectViewMode('map')" class="flex-1 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition"><i class="fa-solid fa-map-location-dot"></i> 지도 모드</button>
+                        <button id="modal-tab-list-view" onclick="window.handleStartSelectTab('list')" class="flex-1 py-1.5 rounded-lg bg-white shadow text-blue-600 transition">📝 리스트 모드</button>
+                        <button id="modal-tab-map-view" onclick="window.handleStartSelectTab('map')" class="flex-1 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition"><i class="fa-solid fa-map-location-dot"></i> 지도 모드</button>
                     </div>
                 </div>
             </div>
             
-            <!-- 리스트 뷰 영역 -->
             <div id="start-select-list" class="flex-1 overflow-y-auto hide-scrollbar p-3 space-y-2 overscroll-contain bg-gray-100"></div>
             
-            <!-- 지도 뷰 영역 -->
             <div id="start-select-map-container" class="hidden flex-1 w-full relative">
                 <div id="start-select-kakao-map" class="w-full h-full"></div>
             </div>
 
-            <!-- 하단 닫기 버튼 -->
             <div class="p-3 bg-white border-t border-gray-200 z-10 shadow-[0_-4px_10px_-1px_rgba(0,0,0,0.05)] shrink-0 pb-safe">
                 <button onclick="window.closeStartModal()" class="w-full bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-3.5 rounded-xl transition text-sm">닫기 (취소)</button>
             </div>
@@ -343,7 +338,6 @@
             </div>
             
             <div class="flex-1 overflow-y-auto p-4 hide-scrollbar flex flex-col gap-4 overscroll-contain">
-                <!-- 1. BEST 동료 주차 정보 목록 -->
                 <div>
                     <div class="flex justify-between items-center mb-2 px-1">
                         <span class="text-sm font-black text-blue-600"><i class="fa-solid fa-crown mr-1"></i>BEST 동료 현장·주차 정보</span>
@@ -353,7 +347,6 @@
                     </div>
                 </div>
 
-                <!-- 2. 주차 및 건물정보 등록/수정 -->
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-yellow-300">
                     <div class="mb-3">
                         <span class="text-xs font-black text-yellow-700"><i class="fa-solid fa-building mr-1"></i>주차 및 건물정보 등록/수정</span>
@@ -398,7 +391,6 @@
                     </div>
                 </div>
 
-                <!-- 3. 내 폰 전용 개인 메모 -->
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-emerald-300">
                     <div class="mb-2.5">
                         <div class="flex items-center justify-between">
@@ -565,7 +557,7 @@
         </div>
     </div>
 
-    <!-- 🌟 주소 확인 모달 (복사 버튼 유지) -->
+    <!-- 주소 확인 모달 -->
     <div id="address-input-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-1 bg-blue-600"></div>
