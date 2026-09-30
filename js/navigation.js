@@ -40,9 +40,10 @@ export function openTmap(lat, lng, name) {
     const isAndroid = /Android/i.test(navigator.userAgent);
     const encodedName = encodeURIComponent(name);
     
-    // 안드로이드 패키징 앱(웹뷰) 환경에서는 Intent URI를 사용해야 정상 실행 및 마켓 이동이 가능함
+    // 안드로이드 패키징 앱(웹뷰) 환경에서는 Intent URI를 사용 (미설치 시 마켓 이동 포함)
     if (isAndroid) {
-        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;end;`;
+        const fallbackUrl = encodeURIComponent("market://details?id=com.skt.tmap.ku");
+        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;S.browser_fallback_url=${fallbackUrl};end;`;
     } else {
         window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
     }
@@ -60,33 +61,32 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .trim() || '목적지';
 
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    
+    // 🌟 [핵심 수정] 카카오내비 최신 앱 규격(param 객체를 JSON 문자열로 인코딩) 필수 적용
+    const paramObj = {
+        destination: {
+            name: cleanName,
+            x: Number(lng),
+            y: Number(lat)
+        },
+        option: {
+            coordType: 'wgs84'
+        }
+    };
+    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
+    
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // 안드로이드 패키징 앱(웹뷰) 환경: 카카오 SDK의 내부 스킴 호출이 막히므로 Intent URI 강제 직접 호출
     if (isAndroid) {
-        const kakaonaviIntent = `intent://navigate?name=${encodeURIComponent(cleanName)}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
+        // 안드로이드: JSON 파라미터가 적용된 최신 Intent URI 강제 호출 (도메인 차단 우회 및 마켓 이동)
+        const fallbackUrl = encodeURIComponent("market://details?id=com.locnall.KimGiSa");
+        const kakaonaviIntent = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
         window.location.href = kakaonaviIntent;
-        return;
+    } else {
+        // iOS 등 기타 기기: 커스텀 스킴 직접 호출
+        const kakaonaviScheme = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}`;
+        window.location.href = kakaonaviScheme;
     }
-
-    // 카카오 공식 SDK 내비 연동 방식 (iOS 및 모바일 웹 브라우저용)
-    if (window.Kakao && window.Kakao.isInitialized()) {
-        try {
-            window.Kakao.Navi.start({
-                name: cleanName,
-                x: Number(lng),
-                y: Number(lat),
-                coordType: 'wgs84'
-            });
-            return;
-        } catch (e) {
-            console.warn("Kakao SDK 내비 실행 실패, 웹 스킴으로 대체 시도:", e);
-        }
-    }
-
-    // 보조 폴백: SDK 미초기화 시 스킴 직접 호출 (iOS)
-    const kakaonaviScheme = `kakaonavi://navigate?name=${encodeURIComponent(cleanName)}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
-    window.location.href = kakaonaviScheme;
 }
 
 // ==========================================
