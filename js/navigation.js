@@ -37,8 +37,25 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
-    // 정상 작동 확인된 티맵 원본 호출 방식 유지
-    window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
+    if (!lat || !lng) {
+        alert("목적지 좌표가 유효하지 않습니다.");
+        return;
+    }
+
+    const cleanName = (name || '목적지')
+        .replace(/[^\w\s가-힣0-9.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || '목적지';
+
+    const encodedName = encodeURIComponent(cleanName);
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    
+    if (isAndroid) {
+        const fallbackUrl = encodeURIComponent("market://details?id=com.skt.tmap.ku");
+        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;S.browser_fallback_url=${fallbackUrl};end;`;
+    } else {
+        window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
+    }
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
@@ -53,16 +70,13 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .trim() || '목적지';
 
     const encodedName = encodeURIComponent(cleanName);
-    
-    // 🌟 [핵심 수정] 카카오내비 네이티브 앱이 요구하는 정식 길안내 파라미터 직접 전달
-    // x: 경도(lng), y: 위도(lat), coord_type: wgs84
-    const kakaonaviScheme = `kakaonavi://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84`;
-
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; // 카카오 REST/JS 공용 앱 키
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // 안드로이드 앱(APK): 티맵과 동일하게 직접 스킴을 호출하여 목적지 길안내 즉시 실행
+    // 🌟 [핵심 수정] 카카오내비 필수 파라미터(appkey, apiver)를 인텐트 URL에 다시 포함
     if (isAndroid) {
-        window.location.href = kakaonaviScheme;
+        const fallbackUrl = encodeURIComponent("market://details?id=com.locnall.KimGiSa");
+        window.location.href = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
         return;
     }
 
@@ -81,8 +95,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // 기타 환경 폴백
-    window.location.href = kakaonaviScheme;
+    // iOS 스킴 폴백 (마찬가지로 필수 파라미터 포함)
+    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84`;
 }
 
 // ==========================================
