@@ -37,7 +37,15 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
-    window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    const encodedName = encodeURIComponent(name);
+    
+    // 안드로이드 패키징 앱(웹뷰) 환경에서는 Intent URI를 사용해야 정상 실행 및 마켓 이동이 가능함
+    if (isAndroid) {
+        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;end;`;
+    } else {
+        window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
+    }
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
@@ -51,7 +59,17 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    // 카카오 공식 SDK 내비 연동 방식
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    const isAndroid = /Android/i.test(navigator.userAgent);
+
+    // 안드로이드 패키징 앱(웹뷰) 환경: 카카오 SDK의 내부 스킴 호출이 막히므로 Intent URI 강제 직접 호출
+    if (isAndroid) {
+        const kakaonaviIntent = `intent://navigate?name=${encodeURIComponent(cleanName)}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
+        window.location.href = kakaonaviIntent;
+        return;
+    }
+
+    // 카카오 공식 SDK 내비 연동 방식 (iOS 및 모바일 웹 브라우저용)
     if (window.Kakao && window.Kakao.isInitialized()) {
         try {
             window.Kakao.Navi.start({
@@ -66,8 +84,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // 보조 폴백: SDK 미초기화 시 스킴 직접 호출
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    // 보조 폴백: SDK 미초기화 시 스킴 직접 호출 (iOS)
     const kakaonaviScheme = `kakaonavi://navigate?name=${encodeURIComponent(cleanName)}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
     window.location.href = kakaonaviScheme;
 }
