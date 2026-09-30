@@ -423,7 +423,7 @@ export function moveDestinationUp(id) {
     updateDisplayNumbers();
 
     const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone'] || "";
+    const phone = localStorage.getItem('deliveryProUserPhone') || "";
     saveRouteToFirestore(deviceId, phone, destinations);
 
     if (navigator.vibrate) navigator.vibrate(12);
@@ -451,7 +451,7 @@ export function moveDestinationDown(id) {
     updateDisplayNumbers();
 
     const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone'] || "";
+    const phone = localStorage.getItem('deliveryProUserPhone') || "";
     saveRouteToFirestore(deviceId, phone, destinations);
 
     if (navigator.vibrate) navigator.vibrate(12);
@@ -573,7 +573,7 @@ window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
 window.handleStartSelectTab = handleStartSelectTab;
-window.copyAddressModal = copyAddressModal; // 🌟 주소 복사 버튼 전역 바인딩 추가
+window.copyAddressModal = copyAddressModal;
 
 window.appActions = {
     initApp, 
