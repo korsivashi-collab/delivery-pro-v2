@@ -37,25 +37,8 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
-    if (!lat || !lng) {
-        alert("목적지 좌표가 유효하지 않습니다.");
-        return;
-    }
-
-    const cleanName = (name || '목적지')
-        .replace(/[^\w\s가-힣0-9.-]/g, ' ')
-        .replace(/\s+/g, ' ')
-        .trim() || '목적지';
-
-    const encodedName = encodeURIComponent(cleanName);
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    
-    // 🌟 [티맵 복구] 성공 확인되었던 무결점 순수 Intent URI로 복구
-    if (isAndroid) {
-        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;end;`;
-    } else {
-        window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
-    }
+    // 🌟 [티맵 100% 원상 복구] 가장 처음에 정상 작동했던 원본 코드로 되돌렸습니다.
+    window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
@@ -69,12 +52,36 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const encodedName = encodeURIComponent(cleanName);
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    
+    // 카카오내비 필수 규격 (좌표 및 옵션)
+    const paramObj = {
+        destination: {
+            name: cleanName,
+            x: Number(lng),
+            y: Number(lat)
+        },
+        option: {
+            coordType: 'wgs84'
+        }
+    };
+
+    // '유효하지 않은 URI' 에러 방지용 출처(Origin) 인증 헤더
+    const extrasObj = {
+        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
+    };
+
+    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
+    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
+    
+    // 🌟 [핵심] 티맵이 작동하는 원본 방식과 똑같이 'kakaonavi://' 스킴을 직접 호출합니다.
+    const kakaonaviScheme = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // 🌟 [카카오내비] 티맵 성공 방식과 100% 동일한 순수 인텐트 규격 적용 (충돌 요소 완전 제거)
     if (isAndroid) {
-        window.location.href = `intent://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
+        // 안드로이드 앱(APK) 내부에서는 먹통을 유발하던 SDK를 완전히 무시하고 스킴을 다이렉트로 호출
+        window.location.href = kakaonaviScheme;
         return;
     }
 
@@ -93,8 +100,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // iOS 스킴 폴백
-    window.location.href = `kakaonavi://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84`;
+    // 폴백 직접 호출
+    window.location.href = kakaonaviScheme;
 }
 
 // ==========================================
@@ -119,7 +126,7 @@ async function loadKakaoMapSdk() {
         script.onerror = () => {
             alert("지도 스크립트를 불러오는데 실패했습니다. 네트워크를 확인해주세요.");
             resolve();
-        };
+        }
         document.head.appendChild(script);
     });
 }
