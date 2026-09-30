@@ -59,50 +59,36 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const encodedName = encodeURIComponent(cleanName);
-    const KAKAO_NATIVE_KEY = "d048b59aa93cf8d4fb1c1bd9e63b6861";
+    const targetLat = Number(lat);
+    const targetLng = Number(lng);
 
-    // Capacitor 앱(네이티브) 환경 판별
-    const isApp = (typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
-                  window.location.protocol === 'file:' || 
-                  window.location.protocol === 'capacitor:' || 
-                  window.location.hostname === 'localhost';
+    // 🌟 [1순위] 카카오 공식 SDK를 통한 완벽한 길안내 연동 (웹/앱 공통 실행)
+    // 키 해시 등록이 완료되었으므로 SDK 호출 시 카카오내비 앱이 목적지와 함께 즉시 실행됩니다.
+    if (window.Kakao) {
+        if (!window.Kakao.isInitialized()) {
+            const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
+            window.Kakao.init(KAKAO_JS_KEY);
+        }
 
-    if (!isApp) {
-        // [웹 브라우저 환경] 카카오 공식 SDK 호출
-        if (window.Kakao && window.Kakao.isInitialized()) {
+        if (window.Kakao.Navi && typeof window.Kakao.Navi.start === 'function') {
             try {
                 window.Kakao.Navi.start({
                     name: cleanName,
-                    x: Number(lng),
-                    y: Number(lat),
+                    x: targetLng,
+                    y: targetLat,
                     coordType: 'wgs84'
                 });
+                return;
             } catch (e) {
-                console.warn("Kakao SDK 내비 실행 실패:", e);
+                console.warn("Kakao SDK 내비 호출 예외 발생, 다이렉트 스킴으로 전환:", e);
             }
         }
-        return; 
     }
 
-    // =========================================================
-    // 🌟 [앱(APK) 환경] 카카오내비 다이렉트 목적지 연동
-    // =========================================================
-    // name, x(경도), y(위도), coord_type(wgs84)을 최상위 쿼리로 직접 전달해야 카카오내비가 주소를 즉시 인식합니다.
-    const paramObj = {
-        destination: { name: cleanName, x: Number(lng), y: Number(lat) },
-        option: { coordType: 'wgs84' }
-    };
-    
-    const extrasObj = {
-        KA: "sdk/2.7.2 os/android lang/ko-KR device/android origin/com.deliverypro.app"
-    };
-
-    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
-    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
-    
-    // 🚨 주소/좌표(name, x, y, coord_type)와 보안 인증(appkey, param, extras)을 모두 전달
-    window.location.href = `kakaonavi://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${KAKAO_NATIVE_KEY}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    // 🌟 [2순위 폴백] 불필요한 인증 파라미터(appkey, apiver)를 제거한 순수 다이렉트 스킴 호출
+    // 티맵처럼 순수 목적지 정보만 전달하여 "인증 실패" 경고창을 원천 차단합니다.
+    const encodedName = encodeURIComponent(cleanName);
+    window.location.href = `kakaonavi://navigate?name=${encodedName}&x=${targetLng}&y=${targetLat}&coord_type=wgs84`;
 }
 
 // ==========================================
