@@ -664,25 +664,22 @@ export function openKakaoNaviDirect(lat, lng, name) {
         return;
     }
 
-    // 이모지(🏢 등) 및 특수문자를 정제하여 카카오내비 파싱 오류 방지
     const cleanName = (name || '목적지')
         .replace(/[^\w\s가-힣0-9.-]/g, ' ')
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const targetName = encodeURIComponent(cleanName);
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; // 카카오 공식 앱키
-
-    // 🌟 카카오내비 정식 필수 파라미터 규격 (appkey, apiver=1.0, coord_type=wgs84 필수)
-    const naviParams = `name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
-
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    if (isAndroid) {
-        // 안드로이드: 카카오내비 앱 패키지(com.locnall.KimGiSa) 다이렉트 인텐트 호출
-        window.location.href = `intent://navigate?${naviParams}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
+    // 🌟 카카오 공식 JS SDK(Kakao.Navi.start)를 사용하여 
+    // 티맵처럼 중간 브라우저 우회 없이 내비게이션으로 빠르고 정확하게 직행하도록 완벽 수정
+    if (window.Kakao && window.Kakao.isInitialized()) {
+        window.Kakao.Navi.start({
+            name: cleanName,
+            x: Number(lng),
+            y: Number(lat),
+            coordType: 'wgs84'
+        });
     } else {
-        // iOS 및 기타: 카카오내비 다이렉트 URL Scheme 호출
-        window.location.href = `kakaonavi://navigate?${naviParams}`;
+        alert("카카오내비 연동 모듈이 아직 준비되지 않았습니다. 앱을 새로고침 해주세요.");
     }
 }
 
