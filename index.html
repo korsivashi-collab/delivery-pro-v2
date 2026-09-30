@@ -173,10 +173,9 @@
 
     <!-- 2. 메인 앱 영역 -->
     <div id="main-app" class="hidden flex-col h-full w-full">
-        <!-- 🌟 [헤더 레이아웃]: 1열(회색 버튼군) / 2열(파란색 배지+알림 버튼) 정렬 -->
         <header class="bg-white px-2.5 pt-safe pb-2.5 shadow-[0_2px_8px_-1px_rgba(0,0,0,0.06)] z-20 flex-none border-b border-gray-200 relative w-full">
             <div class="flex flex-col gap-1.5 w-full">
-                <!-- 1열: 상단 타이틀 및 그레이 톤 액션 버튼 (지난배송, 설정, 로그아웃) -->
+                <!-- 1열: 상단 타이틀 및 그레이 톤 액션 버튼 -->
                 <div class="flex items-center justify-between gap-1 w-full min-w-0">
                     <h1 class="text-[14px] font-black text-gray-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
                         <i class="fa-solid fa-route text-blue-600 text-[15px] shrink-0"></i>
@@ -198,7 +197,7 @@
                     </div>
                 </div>
                 
-                <!-- 2열: 물류 라스트마일 + 파란색 조합 (사용기한 배지 & 알림 버튼) -->
+                <!-- 2열: 물류 라스트마일 + 파란색 배지 -->
                 <div class="flex justify-between items-center w-full min-w-0">
                     <span class="text-[10.5px] text-gray-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap ml-0.5">물류 라스트마일</span>
                     
@@ -232,13 +231,30 @@
             </div>
         </header>
 
-        <main class="flex-1 overflow-y-auto px-3 sm:px-4 py-3 hide-scrollbar bg-gray-100 relative w-full">
-            <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px] w-full">
+        <main class="flex-1 overflow-y-auto px-3 sm:px-4 py-3 hide-scrollbar bg-gray-100 relative w-full flex flex-col">
+            <!-- 🌟 추가: 뷰 모드 전환 토글 (리스트 / 지도) -->
+            <div class="flex justify-center mb-3 shrink-0">
+                <div class="bg-gray-200 p-1 rounded-xl flex inline-flex text-[11px] font-bold shadow-inner">
+                    <button id="tab-list-view" onclick="window.switchViewMode('list')" class="px-4 py-1.5 rounded-lg bg-white shadow text-blue-600 transition">📝 리스트 모드</button>
+                    <button id="tab-map-view" onclick="window.switchViewMode('map')" class="px-4 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition"><i class="fa-solid fa-map-location-dot"></i> 지도 모드</button>
+                </div>
+            </div>
+
+            <!-- 리스트 뷰 영역 -->
+            <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px] w-full flex-1">
                 <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-gray-200 rounded-2xl my-2 bg-gray-50/50">
                     <i class="fa-solid fa-receipt text-5xl mb-3 text-gray-300"></i>
                     <p class="font-bold text-xs text-gray-500 leading-relaxed">주소지를 스캔하거나 관제에서 전송되면<br>동선이 생성됩니다.</p>
                 </li>
             </ul>
+
+            <!-- 🌟 추가: 지도 뷰 영역 (초기엔 숨김 처리됨) -->
+            <div id="map-view-container" class="hidden flex-1 w-full rounded-2xl overflow-hidden shadow-inner border border-gray-200 relative min-h-[300px] mb-4">
+                <div id="kakao-map" class="w-full h-full"></div>
+                <button onclick="window.moveToCurrentLocationOnMap()" class="absolute bottom-4 right-4 bg-white text-gray-800 w-10 h-10 rounded-full shadow-lg border border-gray-200 z-10 active:bg-gray-100 flex items-center justify-center">
+                    <i class="fa-solid fa-crosshairs text-[16px]"></i>
+                </button>
+            </div>
         </main>
 
         <!-- 하단 푸터: 대형 스캔 버튼 & 스와이프 제어바 -->
@@ -313,7 +329,7 @@
         </div>
     </div>
 
-    <!-- 주차정보 보드 모달 (공용 주차 정보 + 로컬 개인 메모) -->
+    <!-- 주차정보 보드 모달 -->
     <div id="memo-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[110] flex items-end justify-center p-0 sm:items-center sm:p-4">
         <div class="bg-gray-100 w-full sm:max-w-md h-[92vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden animate-slide-up shadow-2xl relative">
             <div class="p-4 border-b border-gray-200 flex justify-between items-start bg-white relative z-10 shadow-sm shrink-0">
@@ -328,7 +344,7 @@
             </div>
             
             <div class="flex-1 overflow-y-auto p-4 hide-scrollbar flex flex-col gap-4 overscroll-contain">
-                <!-- 1. BEST 동료 주차 정보 목록 (공용) -->
+                <!-- 1. BEST 동료 주차 정보 목록 -->
                 <div>
                     <div class="flex justify-between items-center mb-2 px-1">
                         <span class="text-sm font-black text-blue-600"><i class="fa-solid fa-crown mr-1"></i>BEST 동료 현장·주차 정보</span>
@@ -338,7 +354,7 @@
                     </div>
                 </div>
 
-                <!-- 2. 주차 및 건물정보 등록/수정 (공용 메모) -->
+                <!-- 2. 주차 및 건물정보 등록/수정 -->
                 <div class="bg-white p-4 rounded-2xl shadow-sm border border-yellow-300">
                     <div class="mb-3">
                         <span class="text-xs font-black text-yellow-700"><i class="fa-solid fa-building mr-1"></i>주차 및 건물정보 등록/수정</span>
@@ -347,7 +363,6 @@
                     
                     <div class="space-y-3 mb-3">
                         <div class="grid grid-cols-2 gap-3">
-                            <!-- 🌟 주차장 높이 3단계 개편 (2.1m 이하, 2.2m, 2.3m 이상) -->
                             <div>
                                 <span class="text-[10px] font-bold text-gray-400 block mb-1">주차장 높이</span>
                                 <div class="flex gap-1">
@@ -356,8 +371,6 @@
                                     <button onclick="window.selectHeightTag(this, '2.3m 이상')" class="height-tag-btn text-[10.5px] bg-gray-50 text-gray-700 font-bold px-1 py-1.5 rounded-lg border border-gray-200 active:bg-gray-100 flex-1 text-center whitespace-nowrap">2.3m 이상</button>
                                 </div>
                             </div>
-                            
-                            <!-- 🌟 회차 시간 개편 ('무료' 제거, 10분, 15분, 30분) -->
                             <div>
                                 <span class="text-[10px] font-bold text-gray-400 block mb-1">회차 시간</span>
                                 <div class="flex flex-wrap gap-1.5">
@@ -558,7 +571,7 @@
         </div>
     </div>
 
-    <!-- 주소 확인 모달 -->
+    <!-- 🌟 수정됨: 주소 확인 모달 (복사 버튼 추가) -->
     <div id="address-input-modal" class="hidden fixed inset-0 bg-black bg-opacity-60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-1 bg-blue-600"></div>
@@ -573,7 +586,14 @@
             <div class="space-y-3 mb-5">
                 <div>
                     <label class="block text-[11px] font-bold text-gray-500 mb-1 pl-1">배송지 주소</label>
-                    <input type="text" id="manual-address-input" class="w-full bg-white border border-gray-300 text-gray-900 text-sm font-medium rounded-xl p-3.5 outline-none shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="정확한 주소를 입력하세요">
+                    <!-- 🌟 추가: 복사 버튼과 입력창 레이아웃 -->
+                    <div class="flex gap-1.5">
+                        <input type="text" id="manual-address-input" class="flex-1 min-w-0 bg-white border border-gray-300 text-gray-900 text-sm font-medium rounded-xl p-3.5 outline-none shadow-sm focus:border-blue-500 focus:ring-1 focus:ring-blue-500" placeholder="정확한 주소를 입력하세요">
+                        <button onclick="window.copyAddressModal()" class="bg-blue-50 text-blue-600 border border-blue-200 hover:bg-blue-100 rounded-xl px-3 font-black text-[10px] shadow-sm active:scale-95 shrink-0 flex flex-col items-center justify-center transition">
+                            <i class="fa-regular fa-copy text-[16px] mb-1"></i>
+                            복사
+                        </button>
+                    </div>
                 </div>
                 <div>
                     <label class="block text-[11px] font-bold text-gray-500 mb-1 pl-1">고객 연락처 (선택)</label>
