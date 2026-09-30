@@ -37,13 +37,22 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
+    if (!lat || !lng) {
+        alert("목적지 좌표가 유효하지 않습니다.");
+        return;
+    }
+
+    const cleanName = (name || '목적지')
+        .replace(/[^\w\s가-힣0-9.-]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim() || '목적지';
+
+    const encodedName = encodeURIComponent(cleanName);
     const isAndroid = /Android/i.test(navigator.userAgent);
-    const encodedName = encodeURIComponent(name);
     
-    // 안드로이드 패키징 앱(웹뷰) 환경: 티맵 Intent URI 직접 호출
+    // 🌟 [티맵 복구] 성공 확인되었던 무결점 순수 Intent URI로 복구
     if (isAndroid) {
-        const fallbackUrl = encodeURIComponent("market://details?id=com.skt.tmap.ku");
-        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;S.browser_fallback_url=${fallbackUrl};end;`;
+        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;end;`;
     } else {
         window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
     }
@@ -63,15 +72,13 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const encodedName = encodeURIComponent(cleanName);
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // 🌟 [핵심 수정] 안드로이드(APK): 먹통을 유발하던 Kakao SDK를 아예 타지 않고 티맵처럼 Intent로 직접 실행
+    // 🌟 [카카오내비] 티맵 성공 방식과 100% 동일한 순수 인텐트 규격 적용 (충돌 요소 완전 제거)
     if (isAndroid) {
-        const fallbackUrl = encodeURIComponent("market://details?id=com.locnall.KimGiSa");
-        // 카카오내비 정식 좌표 규격: x(경도/lng), y(위도/lat), coord_type=wgs84
-        window.location.href = `intent://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
+        window.location.href = `intent://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
         return;
     }
 
-    // 모바일 웹(iOS) 및 PC 브라우저: 카카오 공식 SDK 활용 (미동작 시 스킴 폴백)
+    // iOS 및 모바일 웹 브라우저 환경
     if (window.Kakao && window.Kakao.isInitialized()) {
         try {
             window.Kakao.Navi.start({
@@ -112,7 +119,7 @@ async function loadKakaoMapSdk() {
         script.onerror = () => {
             alert("지도 스크립트를 불러오는데 실패했습니다. 네트워크를 확인해주세요.");
             resolve();
-        }
+        };
         document.head.appendChild(script);
     });
 }
