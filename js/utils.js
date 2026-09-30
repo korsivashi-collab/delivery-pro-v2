@@ -100,22 +100,27 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명 주소 정밀 추출 로직 (줄바꿈 번지 연계 + '(' 괄호 발견 시 삭제 탑재)
+// 5. 도로명 주소 정밀 추출 로직 (줄바꿈 번지 연계 3중 보강 + 안전 괄호 절삭)
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let processedText = text;
 
-        // 1. 번지수 하이픈(-) 앞뒤에 줄바꿈이나 공백이 끼어있는 경우 무조건 하나의 번지수(예: 35-2)로 결합
-        processedText = processedText.replace(/(\d+)\s*[-~ㅡ]\s*[\r\n]+\s*(\d+)/g, '$1-$2');
-        processedText = processedText.replace(/(\d+)\s+[-~ㅡ]\s+(\d+)/g, '$1-$2');
+        // 🌟 [보강 1]: 줄바꿈에 걸친 번지수 하이픈 결합 (예: "19-\n2" 또는 "19 -\r\n 2" -> "19-2")
+        processedText = processedText.replace(/(\d+)\s*[-~ㅡ—–]\s*[\r\n]+[\s\t]*(\d+)/g, '$1-$2');
+        
+        // 🌟 [보강 2]: 같은 줄 내에서 공백이 끼어있는 하이픈 결합 (예: "19 - 2" -> "19-2")
+        processedText = processedText.replace(/(\d+)[\s\t]*[-~ㅡ—–][\s\t]*(\d+)/g, '$1-$2');
 
         // 줄바꿈을 공백으로 통합하여 단일 행으로 평탄화
         let flatText = processedText.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
 
+        // 🌟 [보강 3]: 평탄화 이후에도 공백 분리된 하이픈 번지수가 남아있는 경우 최종 재결합
+        flatText = flatText.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
+
         // 시/도 접두사 패턴 기반 정밀 주소 추출
-        let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:\s*-\s*\d+)?[\s\S]*?)(?=(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|\n|$))/g;
+        let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?[\s\S]*?)(?=(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|\n|$))/g;
         let matches = [...flatText.matchAll(regionPrefixedRegex)];
         
         let targetAddr = null;
@@ -123,7 +128,7 @@ export function extractAddressLogic(text) {
             targetAddr = matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
         } else {
             // 보조: 도로명 패턴으로 재탐색
-            let fallbackRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:\s*-\s*\d+)?)/g;
+            let fallbackRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?)/g;
             let fbMatches = [...flatText.matchAll(fallbackRegex)];
             if (fbMatches && fbMatches.length > 0) {
                 targetAddr = fbMatches[fbMatches.length - 1][0].trim().replace(/\s+/g, ' ');
@@ -131,16 +136,16 @@ export function extractAddressLogic(text) {
         }
 
         if (targetAddr) {
-            // 🌟 [핵심 반영]: 주소를 읽어오다가 '(' 기호를 만나면 '('부터 뒷부분을 모두 삭제
+            // 🌟 [보강 4]: 번지수(-숫자) 결합이 완전히 끝난 후, 뒤따라오는 '(' 괄호부터 뒷부분만 안전 절삭
             if (targetAddr.includes('(')) {
                 targetAddr = targetAddr.split('(')[0].trim();
             }
 
-            // 하이픈 공백 정리 (예: "35 - 2" -> "35-2")
+            // 번지수 하이픈 공백 최종 정리 (예: "19 - 2" -> "19-2")
             targetAddr = targetAddr.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
 
-            // 끝에 남은 콤마나 특수문자 정리
-            targetAddr = targetAddr.replace(/[,\s\-]+$/, '').trim();
+            // 끝에 불필요하게 남은 특수기호나 콤마, 하이픈 정리
+            targetAddr = targetAddr.replace(/[,\s\-~ㅡ—–]+$/, '').trim();
 
             return targetAddr;
         }
