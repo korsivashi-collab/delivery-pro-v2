@@ -44,7 +44,7 @@ export function openTmap(lat, lng, name) {
 
     const encodedName = encodeURIComponent(name);
     
-    // 🌟 [앱 버전 정상작동 확인됨] 티맵의 순수 스킴 다이렉트 호출
+    // 🌟 [앱 버전 티맵] 정상 작동 확인된 가장 안정적인 다이렉트 호출
     window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
 
@@ -61,11 +61,11 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
     
-    // 🌟 [웹/앱 완벽 분리 감지] localhost(앱)가 아니면 무조건 웹 브라우저로 인식
+    // 🌟 [웹/앱 완벽 분리] localhost가 아니면 웹 브라우저로 인식
     const isWebBrowser = window.location.hostname !== 'localhost' && window.location.protocol !== 'file:' && window.location.protocol !== 'capacitor:';
 
     if (isWebBrowser) {
-        // [웹 버전 정상작동 확인됨] 카카오 공식 SDK 원본 코드 실행
+        // [웹 버전 정상 작동 코드] 카카오 공식 SDK 원본 유지
         if (window.Kakao && window.Kakao.isInitialized()) {
             try {
                 window.Kakao.Navi.start({
@@ -78,20 +78,19 @@ export function openKakaoNaviDirect(lat, lng, name) {
                 console.warn("Kakao SDK 내비 실행 실패:", e);
             }
         }
-        return; // 웹 브라우저면 여기서 로직을 종료 (앱 전용 로직 실행 방지)
+        return; // 웹이면 여기서 종료
     }
 
     // =========================================================
-    // 🌟 [앱(APK) 버전] 안드로이드/iOS 패키징 앱 전용 실행 로직
+    // 🌟 [앱(APK) 버전] 카카오내비 다이렉트 스킴 호출
     // =========================================================
     
-    // 카카오내비 필수 목적지 파라미터 규격
     const paramObj = {
         destination: { name: cleanName, x: Number(lng), y: Number(lat) },
         option: { coordType: 'wgs84' }
     };
     
-    // 디벨로퍼스에 등록한 가상 도메인으로 출처 인증
+    // 카카오 디벨로퍼스 도메인 인증 헤더
     const extrasObj = {
         KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
     };
@@ -100,8 +99,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
     
     // 🚨 먹통 원인 최종 해결: 
-    // a태그 click()은 Capacitor 웹뷰가 긴 JSON URL을 악성 링크로 오인해 차단하므로,
-    // 예전에 카카오내비 앱을 열어냈던 'window.location.href' 방식으로 최상단에 직접 꽂아 넣습니다.
+    // a태그 클릭이나 intent://가 긴 JSON 파라미터를 만나면 웹뷰가 차단해버리므로,
+    // 예전에 앱을 성공적으로 켰던 window.location.href 방식으로 직접 꽂아 넣습니다.
     window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
 }
 
