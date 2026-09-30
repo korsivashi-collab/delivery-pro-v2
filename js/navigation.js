@@ -48,14 +48,11 @@ export function openTmap(lat, lng, name) {
         .trim() || '목적지';
 
     const encodedName = encodeURIComponent(cleanName);
-    const isAndroid = /Android/i.test(navigator.userAgent);
     
-    // 정상 작동 확인된 티맵 인텐트 (마켓 이동 폴백 제거됨)
-    if (isAndroid) {
-        window.location.href = `intent://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}#Intent;scheme=tmap;package=com.skt.tmap.ku;end;`;
-    } else {
-        window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
-    }
+    // 🌟 [티맵 최종 완벽 복구] 
+    // 웹뷰에서 먹통을 유발하는 intent:// 방식을 완전히 버리고,
+    // 가장 처음에 시원하게 작동했던 순수 tmap:// 스킴으로만 호출합니다.
+    window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
@@ -71,7 +68,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
     
-    // 카카오내비 목적지 필수 규격
+    // 1. 카카오내비 필수 목적지 파라미터 규격
     const paramObj = {
         destination: {
             name: cleanName,
@@ -83,7 +80,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     };
 
-    // 카카오내비 출처 인증 규격 (에러 방지)
+    // 2. 카카오 디벨로퍼스 도메인 인증 헤더 (선생님께서 등록하신 도메인으로 증명)
     const extrasObj = {
         KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
     };
@@ -91,32 +88,9 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
     
-    const isAndroid = /Android/i.test(navigator.userAgent);
-
-    if (isAndroid) {
-        // 🌟 [최종 수정] 버튼 먹통을 유발하던 'S.browser_fallback_url'을 완전히 삭제했습니다.
-        // 티맵처럼 에러 없이 즉각적으로 카카오내비를 실행시킵니다.
-        const kakaonaviIntent = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
-        window.location.href = kakaonaviIntent;
-        return;
-    }
-
-    // iOS 및 모바일 웹 브라우저 환경
-    if (window.Kakao && window.Kakao.isInitialized()) {
-        try {
-            window.Kakao.Navi.start({
-                name: cleanName,
-                x: Number(lng),
-                y: Number(lat),
-                coordType: 'wgs84'
-            });
-            return;
-        } catch (e) {
-            console.warn("Kakao SDK 내비 실행 실패:", e);
-        }
-    }
-
-    // iOS 스킴 폴백
+    // 🌟 [카카오내비 최종 해결]
+    // 티맵과 완벽히 동일하게, 먹통의 주범인 intent:// 를 완전히 빼버리고
+    // 순수 kakaonavi:// 스킴에 필수 파라미터와 인증 헤더만 담아 다이렉트로 꽂아 넣습니다.
     window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
 }
 
