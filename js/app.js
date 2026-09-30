@@ -652,7 +652,7 @@ export async function applyHeaderCustomEnd() {
 }
 
 // ==========================================
-// 9. 외부 내비게이션(티맵 / 카카오내비) 연동
+// 9. 외부 내비게이션(티맵 / 카카오) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
     window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
@@ -660,8 +660,23 @@ export function openTmap(lat, lng, name) {
 
 export function openKakaoNaviDirect(lat, lng, name) { 
     const targetName = encodeURIComponent(name || '목적지');
-    // 티맵과 동일한 다이렉트 URI Scheme 호출 (도메인/SDK 인증 오류 원천 차단)
-    window.location.href = `kakaonavi://navigate?name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84`; 
+    // 현장 표준 방식: 카카오맵 자동차 길찾기/내비 스킴 (WGS84 좌표 100% 지원, SDK/인증 불필요)
+    const kakaoAppUrl = `kakaomap://route?ep=${lat},${lng}&by=CAR`;
+    const kakaoWebUrl = `https://map.kakao.com/link/to/${targetName},${lat},${lng}`;
+
+    const isMobile = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+    if (isMobile) {
+        window.location.href = kakaoAppUrl;
+        // 카카오 앱이 미설치된 환경인 경우 모바일 웹으로 안전하게 자동 전환
+        setTimeout(() => {
+            if (document.visibilityState === 'visible') {
+                window.location.href = kakaoWebUrl;
+            }
+        }, 1200);
+    } else {
+        window.open(kakaoWebUrl, '_blank');
+    }
 }
 
 // ==========================================
