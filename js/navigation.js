@@ -44,7 +44,7 @@ export function openTmap(lat, lng, name) {
 
     const encodedName = encodeURIComponent(name);
     
-    // 🌟 [앱 버전 티맵] 정상 작동이 완벽히 입증된 순수 스킴 다이렉트 호출
+    // [앱 버전 티맵] 정상 작동이 입증된 순수 스킴 다이렉트 호출
     window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
 
@@ -59,13 +59,18 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
-    
-    // localhost 환경이 아니면 웹 브라우저로 인식 (웹/앱 완벽 분리)
-    const isWebBrowser = window.location.hostname !== 'localhost' && window.location.protocol !== 'file:' && window.location.protocol !== 'capacitor:';
+    // 🌟 [키 설정 분리] 웹용 JS 키와 안드로이드 키 해시가 등록된 네이티브 앱 키 분리 적용
+    const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    const KAKAO_NATIVE_KEY = "d048b59aa93cf8d4fb1c1bd9e63b6861"; // 🌟 방금 디벨로퍼스에 패키지/키해시를 등록한 네이티브 키
 
-    if (isWebBrowser) {
-        // [웹 버전 정상 작동 코드] 카카오 공식 SDK 원본
+    // Capacitor 앱(네이티브) 환경인지 정밀 판별
+    const isApp = (typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
+                  window.location.protocol === 'file:' || 
+                  window.location.protocol === 'capacitor:' || 
+                  window.location.hostname === 'localhost';
+
+    if (!isApp) {
+        // [웹 브라우저 환경] 카카오 공식 SDK 원본 호출
         if (window.Kakao && window.Kakao.isInitialized()) {
             try {
                 window.Kakao.Navi.start({
@@ -82,24 +87,23 @@ export function openKakaoNaviDirect(lat, lng, name) {
     }
 
     // =========================================================
-    // 🌟 [앱(APK) 버전] 카카오내비 다이렉트 호출 (티맵과 동일한 원리)
+    // 🌟 [앱(APK) 환경] 카카오내비 다이렉트 스킴 호출
     // =========================================================
-    
     const paramObj = {
         destination: { name: cleanName, x: Number(lng), y: Number(lat) },
         option: { coordType: 'wgs84' }
     };
     
+    // 카카오 디벨로퍼스에 등록된 안드로이드 패키지 정보와 일치시킴
     const extrasObj = {
-        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
+        KA: "sdk/2.7.2 os/android lang/ko-KR device/android origin/com.deliverypro.app"
     };
 
     const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
     
-    // 🚨 안드로이드 키 해시(지문) 등록만 디벨로퍼스에 완료되어 있으면, 
-    // 티맵처럼 순식간에 카카오내비 길안내 화면으로 다이렉트 진입합니다.
-    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    // 🚨 등록된 네이티브 앱 키(KAKAO_NATIVE_KEY)를 전달하여 카카오내비 보안 인증 즉시 통과
+    window.location.href = `kakaonavi://navigate?appkey=${KAKAO_NATIVE_KEY}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
 }
 
 // ==========================================
