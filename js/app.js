@@ -355,7 +355,6 @@ export function openStartSelectionModal() {
     const listEl = document.getElementById('start-select-list');
     if (!listEl) return;
     
-    // 모달을 열 때 뷰 모드를 항상 '리스트'로 초기화
     switchStartSelectViewMode('list');
 
     let html = '';
@@ -363,7 +362,7 @@ export function openStartSelectionModal() {
         const fmt = formatDisplayAddress(d.address, d.storeName);
         const title = fmt.storeName ? `[${fmt.storeName}] ${fmt.cleanAddr}` : fmt.cleanAddr;
         html += `
-            <button onclick="window.selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between active:bg-gray-100">
+            <button onclick="window.selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
                 <span class="font-bold text-gray-800 text-[14px] break-keep flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
                 <i class="fa-solid fa-check text-gray-300"></i>
             </button>
@@ -556,7 +555,6 @@ export function renderList() {
                 displayAddressHTML = `<span class="block leading-snug text-gray-900 break-keep font-extrabold text-[14px]">${formatted.cleanAddr}</span>`;
             }
 
-            // 🌟 [현재 위치와의 거리 계산]
             let distHtml = "";
             if (lastGps && lastGps.lat && lastGps.lng && dest.lat && dest.lng) {
                 const dist = calculateDistance(lastGps.lat, lastGps.lng, dest.lat, dest.lng);
@@ -581,8 +579,6 @@ export function renderList() {
                     <div class="font-bold text-gray-900 flex-1 ml-1 min-w-0 flex flex-col justify-center">
                         ${displayAddressHTML}
                     </div>
-                    
-                    <!-- 🌟 거리 표시 및 주소 수정 버튼 우측 배치 -->
                     <div class="flex items-center gap-1 shrink-0 -mr-1">
                         ${distHtml}
                         <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-gray-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[14px]"></i></button>
@@ -624,7 +620,7 @@ export function renderList() {
 }
 
 // ==========================================
-// 8. 🌟 주소 복사 (클립보드 - 상호명 제외) 및 헤더 입력 제어
+// 8. 주소 복사 (클립보드 - 상호명 제외) 및 헤더 입력 제어
 // ==========================================
 export function copyAddressModal() {
     const addrInput = document.getElementById('manual-address-input');
@@ -636,7 +632,6 @@ export function copyAddressModal() {
         return;
     }
     
-    // [상호명] 제거 처리 후 순수 주소만 복사
     let cleanAddress = rawAddress.replace(/^\[.*?\]\s*/, '').trim();
     
     if (navigator.clipboard && window.isSecureContext) {
@@ -728,7 +723,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
 }
 
 // ==========================================
-// 10. 🌟 시작 지점 선택용 카카오 지도 API 로딩 및 뷰 전환 엔진
+// 10. 🌟 초경량 최적화 지도 엔진 (CustomOverlay 렌더링 부하 완벽 제거)
 // ==========================================
 let startMapInstance = null;
 let startMapMarkers = [];
@@ -778,7 +773,6 @@ export async function switchStartSelectViewMode(mode) {
         await loadKakaoMapSdk();
         hideLoading();
         
-        // 렌더링을 위해 DOM이 표출된 후 지도 재배치
         setTimeout(() => {
             if (startMapInstance) startMapInstance.relayout();
             renderStartSelectMap();
@@ -812,7 +806,6 @@ export function renderStartSelectMap() {
         startMapInstance = new kakao.maps.Map(container, options);
     }
     
-    // 기존 마커 초기화
     startMapMarkers.forEach(m => m.setMap(null));
     startMapMarkers = [];
     
@@ -825,14 +818,14 @@ export function renderStartSelectMap() {
         const fmt = formatDisplayAddress(dest.address, dest.storeName);
         const shortName = fmt.storeName || (fmt.cleanAddr.length > 8 ? fmt.cleanAddr.substring(0, 8) + '...' : fmt.cleanAddr);
         
-        // 지도의 마커를 터치(클릭)하면 바로 출발지로 등록되는 이벤트 연결
+        // 🌟 [성능 최적화]: 그림자(shadow), 반투명 효과, 애니메이션, 각도계산(rotate-45) 등 
+        // 하드웨어 가속 부하를 크게 일으키는 모든 CSS 속성을 완벽히 제거한 초경량 마커로 변경
         const content = `
-            <div class="relative flex flex-col items-center justify-center translate-y-[-100%] pb-1 cursor-pointer" onclick="window.selectStartDest(${dest.id})">
-                <div class="bg-blue-600 text-white font-black w-8 h-8 rounded-full flex items-center justify-center text-[13px] shadow-md ring-2 ring-white z-10 hover:bg-blue-700 active:scale-95 transition">
+            <div class="flex flex-col items-center justify-center translate-y-[-100%] cursor-pointer pb-1" onclick="window.selectStartDest(${dest.id})">
+                <div class="bg-blue-600 text-white font-bold w-7 h-7 rounded-full flex items-center justify-center text-[12px] border-2 border-white">
                     출발
                 </div>
-                <div class="w-1.5 h-1.5 bg-gray-800 rotate-45 -mt-1 shadow-sm z-0"></div>
-                <div class="bg-white/95 px-2 py-0.5 rounded shadow text-[10px] font-bold text-gray-800 mt-0.5 whitespace-nowrap border border-gray-200">
+                <div class="bg-white px-1.5 py-0.5 rounded border border-gray-400 text-[10px] font-bold text-gray-800 mt-0.5 whitespace-nowrap">
                     ${shortName}
                 </div>
             </div>
@@ -842,14 +835,13 @@ export function renderStartSelectMap() {
             position: pos,
             content: content,
             yAnchor: 1,
-            clickable: true // 오버레이 클릭 허용
+            clickable: true 
         });
         
         customOverlay.setMap(startMapInstance);
         startMapMarkers.push(customOverlay);
     });
     
-    // 화면에 모든 마커가 보이도록 지도 자동 패딩
     startMapInstance.setBounds(bounds, 50, 50, 50, 50);
 }
 
@@ -895,7 +887,6 @@ window.toggleEtcTag = toggleEtcTag;
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
-// 🌟 신규 기능 전역 바인딩
 window.copyAddressModal = copyAddressModal;
 window.switchStartSelectViewMode = switchStartSelectViewMode;
 
