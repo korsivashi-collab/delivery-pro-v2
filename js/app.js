@@ -353,7 +353,6 @@ export function selectStartDest(id) {
     }
 }
 
-// 지도 탭 전환 래퍼 함수 (인라인 이벤트 호환)
 export function handleStartSelectTab(mode) {
     switchStartSelectViewMode(mode, selectStartDest);
 }
@@ -424,7 +423,7 @@ export function moveDestinationUp(id) {
     updateDisplayNumbers();
 
     const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    const phone = localStorage.getItem('deliveryProUserPhone'] || "";
     saveRouteToFirestore(deviceId, phone, destinations);
 
     if (navigator.vibrate) navigator.vibrate(12);
@@ -452,15 +451,52 @@ export function moveDestinationDown(id) {
     updateDisplayNumbers();
 
     const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    const phone = localStorage.getItem('deliveryProUserPhone'] || "";
     saveRouteToFirestore(deviceId, phone, destinations);
 
     if (navigator.vibrate) navigator.vibrate(12);
 }
 
 // ==========================================
-// 7. 종료 지점 직접 입력 제어
+// 7. 주소 복사 (클립보드 - 상호명 제외) 및 종료지 제어
 // ==========================================
+export function copyAddressModal() {
+    const addrInput = document.getElementById('manual-address-input');
+    if (!addrInput) return;
+    
+    let rawAddress = addrInput.value.trim();
+    if (!rawAddress) {
+        alert("복사할 주소가 없습니다.");
+        return;
+    }
+    
+    let cleanAddress = rawAddress.replace(/^\[.*?\]\s*/, '').trim();
+    
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(cleanAddress).then(() => {
+            alert("주소가 복사되었습니다:\n" + cleanAddress);
+        }).catch(() => fallbackCopyTextToClipboard(cleanAddress));
+    } else {
+        fallbackCopyTextToClipboard(cleanAddress);
+    }
+}
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        alert("주소가 복사되었습니다:\n" + text);
+    } catch (err) {
+        alert("주소 복사에 실패했습니다.");
+    }
+    document.body.removeChild(textArea);
+}
+
 export function toggleHeaderEndEdit() { 
     document.getElementById('header-end-edit-area')?.classList.toggle('hidden'); 
 }
@@ -537,6 +573,7 @@ window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
 window.handleStartSelectTab = handleStartSelectTab;
+window.copyAddressModal = copyAddressModal; // 🌟 주소 복사 버튼 전역 바인딩 추가
 
 window.appActions = {
     initApp, 
