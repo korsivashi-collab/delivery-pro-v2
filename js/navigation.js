@@ -1,7 +1,7 @@
 // js/navigation.js
 
 // =================================================================
-// [배송 동선 PRO] 외부 내비게이션(티맵/카카오내비) 및 카카오 지도 연동 모듈
+// [배송 동선 PRO] 외부 내비게이션(티맵/카카오내비/네이버) 및 카카오 지도 연동 모듈
 // =================================================================
 
 import { state } from './state.js';
@@ -34,7 +34,7 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 }
 
 // ==========================================
-// 1. 외부 내비게이션(티맵 / 카카오내비) 연동
+// 1. 외부 내비게이션(티맵 / 카카오내비 / 네이버) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
     if (!lat || !lng) {
@@ -43,7 +43,6 @@ export function openTmap(lat, lng, name) {
     }
 
     const encodedName = encodeURIComponent(name);
-    
     // [앱 버전 티맵] 정상 작동 순수 스킴 다이렉트 호출
     window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
@@ -61,20 +60,17 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const targetLat = Number(lat);
     const targetLng = Number(lng);
-    const encodedName = encodeURIComponent(cleanName);
 
-    // Capacitor 앱(네이티브 웹뷰) 환경 판별
     const isApp = (typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
                   window.location.protocol === 'file:' || 
                   window.location.protocol === 'capacitor:' || 
                   window.location.hostname === 'localhost' ||
                   window.location.hostname === '127.0.0.1';
 
-    // 1. 웹 브라우저 환경인 경우: 카카오 공식 JS SDK 활용
+    // 🌟 1. 웹 브라우저 환경: 카카오 공식 JS SDK 활용
     if (!isApp && window.Kakao) {
         if (!window.Kakao.isInitialized()) {
-            const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
-            window.Kakao.init(KAKAO_JS_KEY);
+            window.Kakao.init("893c5c6ec8613974d84fa75fd6d0be11");
         }
 
         if (window.Kakao.Navi && typeof window.Kakao.Navi.start === 'function') {
@@ -92,11 +88,38 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // 2. 앱(APK) 환경: 인증 검사를 트리거하는 apiver=1.0을 완전히 제거!
-    // 안드로이드 OS 인텐트(Intent)로 카카오내비 앱에 목적지 좌표 직접 주입 (인증 실패 팝업 원천 차단)
-    const intentUri = `intent://navigate?name=${encodedName}&x=${targetLng}&y=${targetLat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
-    
-    window.location.href = intentUri;
+    // 🌟 2. 앱(APK) 환경: 검증된 kakaonavi:// 스킴 복귀 + 좌표계 규격(coord_type) 정밀 교정
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11";
+
+    const paramObj = {
+        destination: {
+            name: cleanName,
+            x: targetLng,
+            y: targetLat
+        },
+        option: {
+            coord_type: "wgs84" // 🚨 카카오내비 내부 규격인 snake_case로 적용 (좌표 무효화 방지)
+        }
+    };
+
+    const extrasObj = {
+        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
+    };
+
+    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
+    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
+
+    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+}
+
+// 🌟 예비용 네이버 지도/내비 다이렉트 연동 함수 (티맵처럼 키/해시 인증 불필요)
+export function openNaverMap(lat, lng, name) {
+    if (!lat || !lng) {
+        alert("목적지 좌표가 유효하지 않습니다.");
+        return;
+    }
+    const encodedName = encodeURIComponent(name);
+    window.location.href = `nmap://navigation?dlat=${lat}&dlng=${lng}&dname=${encodedName}&appname=com.deliverypro.app`;
 }
 
 // ==========================================
