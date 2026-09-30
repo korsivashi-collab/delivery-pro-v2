@@ -5,33 +5,11 @@
 // =================================================================
 
 import { state } from './state.js';
-import { showLoading, hideLoading } from './utils.js';
+import { showLoading, hideLoading, formatDisplayAddress } from './utils.js';
 
 let startMapInstance = null;
 let startMapMarkers = [];
 let isMapSdkLoaded = false;
-
-// 상호명 분리 및 주소 원본 보존 헬퍼
-function formatDisplayAddress(rawAddress, storeName = "") {
-    let extractedStore = storeName ? String(storeName).trim() : "";
-    let cleanAddr = (rawAddress || "").trim();
-
-    const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
-    if (match) {
-        if (!extractedStore) extractedStore = match[1].trim();
-        cleanAddr = match[2].trim();
-    }
-
-    if (extractedStore && cleanAddr.startsWith(extractedStore)) {
-        cleanAddr = cleanAddr.substring(extractedStore.length).trim();
-    }
-
-    return {
-        storeName: extractedStore,
-        cleanAddr: cleanAddr,
-        fullAddr: cleanAddr
-    };
-}
 
 // ==========================================
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
@@ -51,25 +29,25 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const targetName = encodeURIComponent(cleanName);
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
-
-    const isAndroid = /Android/i.test(navigator.userAgent);
-    
-    if (isAndroid) {
-        const intentUrl = `intent://navigate?name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
-        
-        const iframe = document.createElement('iframe');
-        iframe.style.display = 'none';
-        iframe.src = intentUrl;
-        document.body.appendChild(iframe);
-        setTimeout(() => {
-            document.body.removeChild(iframe);
-        }, 1000);
-    } else {
-        const kakaonaviScheme = `kakaonavi://navigate?name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
-        window.location.href = kakaonaviScheme;
+    // 🌟 이전에 잘 작동하던 카카오 공식 SDK 내비 연동 방식으로 복원
+    if (window.Kakao && window.Kakao.isInitialized()) {
+        try {
+            window.Kakao.Navi.start({
+                name: cleanName,
+                x: Number(lng),
+                y: Number(lat),
+                coordType: 'wgs84'
+            });
+            return;
+        } catch (e) {
+            console.warn("Kakao SDK 내비 실행 실패, 웹 스킴으로 대체 시도:", e);
+        }
     }
+
+    // 보조 폴백: SDK 미초기화 시 스킴 직접 호출
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    const kakaonaviScheme = `kakaonavi://navigate?name=${encodeURIComponent(cleanName)}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
+    window.location.href = kakaonaviScheme;
 }
 
 // ==========================================
