@@ -5,9 +5,51 @@
 // =================================================================
 
 import { state } from './state.js';
-import { formatDisplayAddress, sanitizePhoneNumber } from './utils.js'; // utils 또는 app에서 공용 헬퍼 참조
 
-// 1. 거리 계산 (위경도 기반 실거리 산출)
+// 전화번호 정제 보조 함수
+function sanitizePhoneNumber(rawVal) {
+    if (!rawVal) return "";
+    let strVal = String(rawVal).trim();
+    let digits = strVal.replace(/[^0-9]/g, '');
+
+    if (digits.length < 8 || digits === '0') return "";
+
+    if (digits.length === 11 && digits.startsWith('010')) {
+        return digits.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
+    }
+    if (digits.length === 10) {
+        if (digits.startsWith('02')) {
+            return digits.replace(/(\d{2})(\d{4})(\d{4})/, '$1-$2-$3');
+        } else {
+            return digits.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
+        }
+    }
+    return strVal;
+}
+
+// 상호명 분리 및 주소 원본 보존 헬퍼
+function formatDisplayAddress(rawAddress, storeName = "") {
+    let extractedStore = storeName ? String(storeName).trim() : "";
+    let cleanAddr = (rawAddress || "").trim();
+
+    const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
+    if (match) {
+        if (!extractedStore) extractedStore = match[1].trim();
+        cleanAddr = match[2].trim();
+    }
+
+    if (extractedStore && cleanAddr.startsWith(extractedStore)) {
+        cleanAddr = cleanAddr.substring(extractedStore.length).trim();
+    }
+
+    return {
+        storeName: extractedStore,
+        cleanAddr: cleanAddr,
+        fullAddr: cleanAddr
+    };
+}
+
+// 거리 계산 (위경도 기반 실거리 산출)
 function calculateDistance(lat1, lon1, lat2, lon2) {
     if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
     const R = 6371; 
@@ -24,7 +66,7 @@ function formatDistance(distKm) {
     return distKm.toFixed(1) + "km";
 }
 
-// 2. 배송 목록 메인 렌더링 UI 업데이트
+// 배송 목록 메인 렌더링 UI 업데이트
 export function renderDestinationList(preloadBatchMemosCallback, renderMemoPreviewCallback) {
     const listEl = document.getElementById('destination-list');
     const headerEndAddr = document.getElementById('header-end-address'); 
