@@ -5,11 +5,33 @@
 // =================================================================
 
 import { state } from './state.js';
-import { showLoading, hideLoading, formatDisplayAddress } from './utils.js';
+import { showLoading, hideLoading } from './utils.js';
 
 let startMapInstance = null;
 let startMapMarkers = [];
 let isMapSdkLoaded = false;
+
+// 상호명 분리 및 주소 원본 보존 헬퍼
+function formatDisplayAddress(rawAddress, storeName = "") {
+    let extractedStore = storeName ? String(storeName).trim() : "";
+    let cleanAddr = (rawAddress || "").trim();
+
+    const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
+    if (match) {
+        if (!extractedStore) extractedStore = match[1].trim();
+        cleanAddr = match[2].trim();
+    }
+
+    if (extractedStore && cleanAddr.startsWith(extractedStore)) {
+        cleanAddr = cleanAddr.substring(extractedStore.length).trim();
+    }
+
+    return {
+        storeName: extractedStore,
+        cleanAddr: cleanAddr,
+        fullAddr: cleanAddr
+    };
+}
 
 // ==========================================
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
@@ -35,10 +57,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const isAndroid = /Android/i.test(navigator.userAgent);
     
     if (isAndroid) {
-        // 🌟 [안드로이드 카카오내비 URI 오류 완벽 방어]: 공식 가이드 스킴 및 인텐트 폴백 적용
         const intentUrl = `intent://navigate?name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
         
-        // 다이렉트 스킴 시도 후 미설치 시 마켓으로 이동하는 인텐트 실행
         const iframe = document.createElement('iframe');
         iframe.style.display = 'none';
         iframe.src = intentUrl;
@@ -47,7 +67,6 @@ export function openKakaoNaviDirect(lat, lng, name) {
             document.body.removeChild(iframe);
         }, 1000);
     } else {
-        // iOS 및 기타 환경
         const kakaonaviScheme = `kakaonavi://navigate?name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
         window.location.href = kakaonaviScheme;
     }
