@@ -97,26 +97,40 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명/지번 주소 정밀 추출 로직 (분기 도로명 및 건물번호 보존)
+// 5. 도로명/지번 주소 정밀 추출 로직 (분기 도로명 완전 보존 엔진)
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
-        // 1) 전화번호 및 타 필드 라벨 직전에 줄바꿈을 두어 한 줄 엉킴 사전 분리
+        // 1) 전화번호, 계좌, 금액 등 주소 뒤에 붙어 엉키기 쉬운 라벨/패턴 사전 분리
         let safeText = text
-            .replace(/(전화(?:번호)?|연락처|TEL|H\.?P|대표자|검수자|성명|상호|수령인|업태|종목|등록번호)\s*[:\s]/gi, '\n')
+            .replace(/(전화(?:번호)?|연락처|TEL|H\.?P|대표자|검수자|성명|상호|수령인|업태|종목|등록번호|공급|단가|수량|금액|합계)\s*[:\s]/gi, '\n')
             .replace(/(01[0-9]|0[2-8][0-9]?)[-\s]?\d{3,4}[-\s]?\d{4}/g, '\n');
 
         let flatText = safeText.replace(/\r/g, ' ').replace(/\n/g, '  ').replace(/\s+/g, ' ');
 
+        // 시/도 정규식 패턴 (전국 17개 광역자치단체)
         const sidoPattern = '(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?';
+        
+        // 시/군/구 패턴 (예: 종로구, 마포구, 안양시 동안구, 고양시 일산동구)
         const sigunguPattern = '[가-힣]+(?:구|군|시)(?:\\s+[가-힣]+(?:구|군))?';
         
-        // 🌟 분기 도로명(예: 시흥대로150길, 마포대로11길, 대학로 등) 완벽 지원
-        const roadNamePattern = '[가-힣]+(?:대로|로|길|거리)(?:\\s*\\d+(?:번)?(?:길|로))?';
+        // 🌟 [핵심 개선]: 분기 도로명과 일반 도로명의 우선순위 분리
+        // 1) 분기 도로명: 창경궁로35나길, 시흥대로150길, 퇴계로56가길, 마포대로11길, 대학로1길 등
+        //    (반드시 숫자+한글(선택)+길/로가 붙은 분기 도로명을 먼저 매칭하여 숫자가 건물번호로 조기 절삭되는 오류 원천 차단)
+        // 2) 일반 도로명: 창경궁로, 망원로, 대학로, 개운사길, 세종대로, 테헤란로 등
+        const branchRoad = '[가-힣]+(?:대로|로|길|거리)\\s*\\d+(?:-[0-9]+)?[가-힣]?(?:번)?(?:길|로)';
+        const normalRoad = '[가-힣]+(?:대로|로|길|거리)';
+        const roadNamePattern = `(?:${branchRoad}|${normalRoad})`;
+
+        // 건물 번호 패턴 (예: 1, 33, 42-4, 88)
         const buildingNumPattern = '\\d+(?:-\\d+)?';
+        
+        // 층/호수 패턴 (예: 1층, 지하1층, 201호)
         const floorUnitPattern = '(?:\\s*,?\\s*(?:지하|지상)?\\s*B?\\d+\\s*(?:층|호))?';
-        const refParensPattern = '(?:\\s*,?\\s*\\([가-힣0-9\\s,·\\.]+\\))?';
+        
+        // 참고 항목 괄호 패턴 (예: (혜화동), (망원동, 삼성화원아파트))
+        const refParensPattern = '(?:\\s*,?\\s*\\([가-힣0-9\\s,·\\.\\-~]+\\))?';
 
         // 정밀 도로명 주소 정규식
         const roadRegex = new RegExp(
@@ -124,9 +138,11 @@ export function extractAddressLogic(text) {
             'g'
         );
 
-        // 정밀 지번 주소 정규식
+        // 정밀 지번 주소 정규식 (예: 서울 종로구 혜화동 123-4 (혜화동))
+        const jibunPattern = '[가-힣0-9]+(?:동|읍|면|리|가)(?:\\s+[가-힣0-9]+(?:리))?';
+        const jibunNumPattern = '(?:산\\s*)?\\d+(?:-\\d+)?';
         const jibunRegex = new RegExp(
-            `(${sidoPattern}\\s+${sigunguPattern}\\s+[가-힣0-9\\s]+?(?:동|읍|면|리)\\s*${buildingNumPattern})${floorUnitPattern}(${refParensPattern})`,
+            `(${sidoPattern}\\s+${sigunguPattern}\\s+${jibunPattern}\\s*${jibunNumPattern})${floorUnitPattern}(${refParensPattern})`,
             'g'
         );
 
@@ -136,6 +152,7 @@ export function extractAddressLogic(text) {
         let candidate = null;
         let targetMatch = null;
 
+        // 명세표 하단/우측 공급받는자(배송지) 주소를 우선하기 위해 마지막 매칭 선택
         if (roadMatches.length > 0) {
             targetMatch = roadMatches[roadMatches.length - 1];
         } else if (jibunMatches.length > 0) {
@@ -144,19 +161,35 @@ export function extractAddressLogic(text) {
 
         if (targetMatch) {
             let baseAddr = (targetMatch[1] || '').trim();
-            let parens = (targetMatch[2] || '').trim().replace(/^,\s*/, '');
+            let parens = (targetMatch[2] || '').trim().replace(/^[,\s]+/, '');
             candidate = parens ? `${baseAddr} ${parens}` : baseAddr;
         }
 
+        // 폴백: 시/도가 생략되고 시/군/구로 바로 시작하는 경우
+        if (!candidate) {
+            const fallbackRoadRegex = new RegExp(
+                `(${sigunguPattern}\\s+${roadNamePattern}\\s*${buildingNumPattern})${floorUnitPattern}(${refParensPattern})`,
+                'g'
+            );
+            let fallbackMatches = [...flatText.matchAll(fallbackRoadRegex)];
+            if (fallbackMatches.length > 0) {
+                let fbMatch = fallbackMatches[fallbackMatches.length - 1];
+                let baseAddr = (fbMatch[1] || '').trim();
+                let parens = (fbMatch[2] || '').trim().replace(/^[,\s]+/, '');
+                candidate = parens ? `${baseAddr} ${parens}` : baseAddr;
+            }
+        }
+
         if (candidate) {
-            // 3) 후처리 정제: 전화번호 및 찌꺼기 절삭
+            // 3) 후처리 정제: 전화번호 및 찌꺼기 텍스트 절삭
             candidate = candidate
-                .replace(/\s*(?:전화|연락처|TEL|HP|핸드폰|성명|대표).*$/i, '')
+                .replace(/\s*(?:전화|연락처|TEL|HP|핸드폰|성명|대표|고객명|배송).*$/i, '')
                 .replace(/\s*(?:01[0-9]|0[2-8][0-9]?)[-\s]?\d+.*$/, '')
+                .replace(/[,\-\s]+$/, '')
                 .replace(/\s+/g, ' ')
                 .trim();
 
-            if (candidate.length >= 8) {
+            if (candidate.length >= 7) {
                 return candidate;
             }
         }
@@ -214,7 +247,7 @@ export function extractStoreNameLogic(fullText) {
                         return storeWords.join(' ');
                     }
                     
-                    // 같은 줄 우측에 내용이 없을 경우 바로 다음 줄 확인 (표 서식 대응)
+                    // 같은 줄 우측에 내용이 없을 경우 바로 다음 줄 확인 (세로형 표 대응)
                     if (i + 1 < lines.length) {
                         let nextWords = lines[i + 1].split(breakRegex).filter(w => w.length > 0);
                         let nextStoreWords = [];
