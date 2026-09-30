@@ -5,11 +5,33 @@
 // =================================================================
 
 import { state } from './state.js';
-import { showLoading, hideLoading, formatDisplayAddress } from './utils.js';
+import { showLoading, hideLoading } from './utils.js';
 
 let startMapInstance = null;
 let startMapMarkers = [];
 let isMapSdkLoaded = false;
+
+// 상호명 분리 및 주소 원본 보존 헬퍼
+function formatDisplayAddress(rawAddress, storeName = "") {
+    let extractedStore = storeName ? String(storeName).trim() : "";
+    let cleanAddr = (rawAddress || "").trim();
+
+    const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
+    if (match) {
+        if (!extractedStore) extractedStore = match[1].trim();
+        cleanAddr = match[2].trim();
+    }
+
+    if (extractedStore && cleanAddr.startsWith(extractedStore)) {
+        cleanAddr = cleanAddr.substring(extractedStore.length).trim();
+    }
+
+    return {
+        storeName: extractedStore,
+        cleanAddr: cleanAddr,
+        fullAddr: cleanAddr
+    };
+}
 
 // ==========================================
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
@@ -29,7 +51,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    // 🌟 이전에 잘 작동하던 카카오 공식 SDK 내비 연동 방식으로 복원
+    // 카카오 공식 SDK 내비 연동 방식
     if (window.Kakao && window.Kakao.isInitialized()) {
         try {
             window.Kakao.Navi.start({
