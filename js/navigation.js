@@ -62,9 +62,15 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const targetLat = Number(lat);
     const targetLng = Number(lng);
 
-    // 🌟 [1순위] 카카오 공식 SDK를 통한 완벽한 길안내 연동 (웹/앱 공통 실행)
-    // 키 해시 등록이 완료되었으므로 SDK 호출 시 카카오내비 앱이 목적지와 함께 즉시 실행됩니다.
-    if (window.Kakao) {
+    // Capacitor 앱(네이티브 웹뷰) 환경 판별
+    const isApp = (typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
+                  window.location.protocol === 'file:' || 
+                  window.location.protocol === 'capacitor:' || 
+                  window.location.hostname === 'localhost' ||
+                  window.location.hostname === '127.0.0.1';
+
+    // 🌟 1. 순수 웹 브라우저 환경: 카카오 공식 JS SDK 호출
+    if (!isApp && window.Kakao) {
         if (!window.Kakao.isInitialized()) {
             const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
             window.Kakao.init(KAKAO_JS_KEY);
@@ -80,15 +86,36 @@ export function openKakaoNaviDirect(lat, lng, name) {
                 });
                 return;
             } catch (e) {
-                console.warn("Kakao SDK 내비 호출 예외 발생, 다이렉트 스킴으로 전환:", e);
+                console.warn("Kakao SDK 내비 웹 호출 실패:", e);
             }
         }
     }
 
-    // 🌟 [2순위 폴백] 불필요한 인증 파라미터(appkey, apiver)를 제거한 순수 다이렉트 스킴 호출
-    // 티맵처럼 순수 목적지 정보만 전달하여 "인증 실패" 경고창을 원천 차단합니다.
-    const encodedName = encodeURIComponent(cleanName);
-    window.location.href = `kakaonavi://navigate?name=${encodedName}&x=${targetLng}&y=${targetLat}&coord_type=wgs84`;
+    // 🌟 2. 앱(APK / WebView) 환경: 키 해시가 등록된 네이티브 앱 키와 안드로이드 패키지 정보로 직접 연동
+    const KAKAO_NATIVE_KEY = "d048b59aa93cf8d4fb1c1bd9e63b6861";
+
+    const paramObj = {
+        destination: {
+            name: cleanName,
+            x: targetLng,
+            y: targetLat
+        },
+        option: {
+            coordType: "wgs84"
+        }
+    };
+
+    const extrasObj = {
+        KA: "sdk/2.20.0 os/android lang/ko-KR device/android origin/com.deliverypro.app"
+    };
+
+    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
+    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
+
+    // 카카오내비 안드로이드 앱 규격 스킴 호출 (좌표 연동 완벽 적용)
+    const naviScheme = `kakaonavi://navigate?appkey=${KAKAO_NATIVE_KEY}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    
+    window.location.href = naviScheme;
 }
 
 // ==========================================
