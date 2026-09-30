@@ -78,14 +78,11 @@ function sanitizePhoneNumber(rawVal) {
     let strVal = String(rawVal).trim();
     let digits = strVal.replace(/[^0-9]/g, '');
 
-    // 숫자가 8자리 미만이거나 단순 "0"인 경우 번호 없음으로 무효 처리
     if (digits.length < 8 || digits === '0') return "";
 
-    // 11자리 휴대전화 포맷팅 (010-XXXX-XXXX)
     if (digits.length === 11 && digits.startsWith('010')) {
         return digits.replace(/(\d{3})(\d{4})(\d{4})/, '$1-$2-$3');
     }
-    // 10자리 번호 포맷팅 (02-XXXX-XXXX 또는 01X-XXX-XXXX)
     if (digits.length === 10) {
         if (digits.startsWith('02')) {
             return digits.replace(/(\d{2})(\d{4})(\d{4})/, '$1-$2-$3');
@@ -103,14 +100,12 @@ function formatDisplayAddress(rawAddress, storeName = "") {
     let extractedStore = storeName ? String(storeName).trim() : "";
     let cleanAddr = (rawAddress || "").trim();
 
-    // 1. [상호] 패턴 확인 및 상호명 분리
     const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
     if (match) {
         if (!extractedStore) extractedStore = match[1].trim();
         cleanAddr = match[2].trim();
     }
 
-    // 2. 주소 앞부분에 상호명이 중복으로 붙은 경우 주소에서 상호명 제거
     if (extractedStore && cleanAddr.startsWith(extractedStore)) {
         cleanAddr = cleanAddr.substring(extractedStore.length).trim();
     }
@@ -123,10 +118,28 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 }
 
 // ==========================================
+// 0-3. 거리 계산 (위경도 기반 실거리 산출)
+// ==========================================
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    if (!lat1 || !lon1 || !lat2 || !lon2) return 0;
+    const R = 6371; 
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + 
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+}
+
+function formatDistance(distKm) {
+    if (distKm < 1) return Math.round(distKm * 1000) + "m";
+    return distKm.toFixed(1) + "km";
+}
+
+// ==========================================
 // 1. 앱 기동 및 라이프사이클 초기화
 // ==========================================
 export async function initApp() {
-    // 안드로이드 / iOS 기기 해상도 및 뷰포트 자동 최적화 즉시 구동
     initResponsiveViewport();
 
     localStorage.removeItem('deliveryPro_start_location'); 
@@ -142,7 +155,6 @@ export async function initApp() {
         initPhotoCompletion();
     }
 
-    // 🌟 delivery.js 완료/취소 발생 시 app 상태 갱신 및 관제 동기화 콜백 등록
     if (typeof setDeliveryUpdateHandler === 'function') {
         setDeliveryUpdateHandler(() => {
             updateDisplayNumbers();
@@ -152,11 +164,9 @@ export async function initApp() {
         });
     }
     
-    // 관제 센터 실시간 자동할당 동선 수신 핸들러 등록
     setRemoteRoutesHandler((newDestinations, routeData) => {
         if (!newDestinations || !Array.isArray(newDestinations)) return;
 
-        // 당일 이미 완료/취소된 이력이 있다면 중복 노출 방지 필터링
         const history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
         const todayStart = new Date().setHours(0, 0, 0, 0);
         const completedIdsOrAddrs = new Set();
@@ -168,7 +178,6 @@ export async function initApp() {
             }
         });
 
-        // 관제에서 전송된 배송지 데이터 정규화
         const formattedList = newDestinations
             .filter(d => {
                 if (d.id && completedIdsOrAddrs.has(String(d.id))) return false;
@@ -193,7 +202,6 @@ export async function initApp() {
                 };
             });
 
-        // 시작 지점이 아직 없다면 첫 번째 목적지를 기본 시작점으로 자동 고려
         if (formattedList.length > 0 && (!state.getStartLocation() || !state.getStartLocation().lat)) {
             state.setStartLocation({
                 lat: formattedList[0].lat,
@@ -202,20 +210,16 @@ export async function initApp() {
             });
         }
 
-        // 유효한 배송지가 도착했을 때만 상태 갱신
         if (formattedList.length > 0) {
-            // 관제 동선이 정상 할당되었음을 브라우저 세션에 기록
             sessionStorage.setItem('deliveryPro_has_dispatch_route', 'true');
             state.setDestinations(formattedList);
             state.updateDisplayNumbers();
             state.saveActiveData();
             renderList();
 
-            // 신규 배송지 할당 시 진동 알림
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         }
     }, () => {
-        // [핵심 2차 안전장치]: 관제로부터 실제로 동선을 수신받은 이력이 있는 경우에만 초기화 실행
         const hadDispatchRoute = sessionStorage.getItem('deliveryPro_has_dispatch_route') === 'true';
         if (hadDispatchRoute) {
             sessionStorage.removeItem('deliveryPro_has_dispatch_route');
@@ -226,7 +230,6 @@ export async function initApp() {
         }
     });
 
-    // 화면 복귀 시 관제에 새로운 배송지가 할당된 경우에만 안전하게 반영
     document.addEventListener('visibilitychange', async () => {
         if (document.visibilityState === 'visible') {
             const deviceId = getOrCreateDeviceId();
@@ -251,7 +254,6 @@ export async function initApp() {
         }
     });
 
-    // 지난 배송 복원 콜백 등록
     setRestoreDestinationHandler((itemToRestore) => {
         state.addDestination(itemToRestore);
         updateDisplayNumbers();
@@ -260,7 +262,6 @@ export async function initApp() {
         saveRouteToFirestore(deviceId, phone, state.getDestinations());
     });
 
-    // GPS 토글 스위치 콜백 등록
     setGpsToggleHandler((isChecked) => {
         if (isChecked) {
             startGpsWatcher();
@@ -436,12 +437,10 @@ export function moveDestinationUp(id) {
     const idx = destinations.findIndex(d => d.id === id);
     if (idx <= 0) return; 
 
-    // 윗 배송지와 순서 맞교환
     const temp = destinations[idx];
     destinations[idx] = destinations[idx - 1];
     destinations[idx - 1] = temp;
 
-    // 시작 지점이 설정된 상태에서 1번 항목이 변경된 경우 시작 좌표 동기화
     if (state.getStartLocation() && destinations[0]) {
         state.setStartLocation({
             lat: destinations[0].lat,
@@ -454,7 +453,6 @@ export function moveDestinationUp(id) {
     state.saveActiveData();
     updateDisplayNumbers();
 
-    // 순서 변경 사항 관제 및 클라우드 즉각 동기화
     const deviceId = getOrCreateDeviceId();
     const phone = localStorage.getItem('deliveryProUserPhone') || "";
     saveRouteToFirestore(deviceId, phone, destinations);
@@ -467,12 +465,10 @@ export function moveDestinationDown(id) {
     const idx = destinations.findIndex(d => d.id === id);
     if (idx === -1 || idx >= destinations.length - 1) return; 
 
-    // 아랫 배송지와 순서 맞교환
     const temp = destinations[idx];
     destinations[idx] = destinations[idx + 1];
     destinations[idx + 1] = temp;
 
-    // 시작 지점이 설정된 상태에서 1번 항목이 변경된 경우 시작 좌표 동기화
     if (state.getStartLocation() && destinations[0]) {
         state.setStartLocation({
             lat: destinations[0].lat,
@@ -485,7 +481,6 @@ export function moveDestinationDown(id) {
     state.saveActiveData();
     updateDisplayNumbers();
 
-    // 순서 변경 사항 관제 및 클라우드 즉각 동기화
     const deviceId = getOrCreateDeviceId();
     const phone = localStorage.getItem('deliveryProUserPhone') || "";
     saveRouteToFirestore(deviceId, phone, destinations);
@@ -503,7 +498,13 @@ export function renderList() {
     const endLocation = state.getEndLocation();
     const destinations = state.getDestinations();
     const startLocation = state.getStartLocation();
+    const lastGps = state.getLastKnownGps();
     
+    // 리스트와 함께 지도도 갱신 필요시 자동 갱신
+    if (document.getElementById('map-view-container') && !document.getElementById('map-view-container').classList.contains('hidden')) {
+        renderMapView();
+    }
+
     if (headerEndAddr) {
         headerEndAddr.innerText = endLocation.address || '설정 안 함';
         if (!endLocation.address) { 
@@ -532,9 +533,7 @@ export function renderList() {
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
-            if (dest.orderNo) {
-                li.setAttribute('data-orderno', dest.orderNo);
-            }
+            if (dest.orderNo) li.setAttribute('data-orderno', dest.orderNo);
             li.className = "bg-white p-3 rounded-2xl shadow-xs border border-gray-200 flex flex-col gap-2";
             
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
@@ -559,14 +558,20 @@ export function renderList() {
                 displayAddressHTML = `<span class="block leading-snug text-gray-900 break-keep font-extrabold text-[14px]">${formatted.cleanAddr}</span>`;
             }
 
-            let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
+            // 🌟 [현재 위치와의 거리 계산]
+            let distHtml = "";
+            if (lastGps && lastGps.lat && lastGps.lng && dest.lat && dest.lng) {
+                const dist = calculateDistance(lastGps.lat, lastGps.lng, dest.lat, dest.lng);
+                distHtml = `<span class="text-[10px] text-blue-500 font-bold bg-blue-50 px-1.5 py-0.5 rounded shadow-2xs whitespace-nowrap border border-blue-100 flex items-center h-[22px]"><i class="fa-solid fa-location-arrow mr-0.5"></i>${formatDistance(dist)}</span>`;
+            }
 
+            let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
             const isFirst = index === 0;
             const isLast = index === destinations.length - 1;
 
             li.innerHTML = `
-                <div class="flex items-center gap-1.5 pb-0.5">
-                    <div class="flex flex-col items-center justify-center gap-1 shrink-0 -ml-0.5 mr-0.5">
+                <div class="flex items-start gap-1.5 pb-0.5 mt-0.5">
+                    <div class="flex flex-col items-center justify-center gap-1 shrink-0 -ml-0.5 mr-0.5 mt-0.5">
                         <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-gray-50 hover:bg-gray-100 active:bg-gray-200 border border-gray-200 text-gray-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
                         </button>
@@ -578,7 +583,12 @@ export function renderList() {
                     <div class="font-bold text-gray-900 flex-1 ml-1 min-w-0 flex flex-col justify-center">
                         ${displayAddressHTML}
                     </div>
-                    <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 w-8 h-8 flex items-center justify-center -mr-1 shrink-0 rounded-lg active:bg-gray-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[14px]"></i></button>
+                    
+                    <!-- 🌟 거리 표시 및 주소 수정 버튼 우측 배치 -->
+                    <div class="flex items-center gap-1 shrink-0 -mr-1">
+                        ${distHtml}
+                        <button onclick="editDestinationAddress(${dest.id})" class="text-gray-400 hover:text-blue-500 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-gray-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[14px]"></i></button>
+                    </div>
                 </div>
                 
                 <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-0.5 mt-0.5"></div>
@@ -616,8 +626,46 @@ export function renderList() {
 }
 
 // ==========================================
-// 8. 종료 지점 직접 입력 제어
+// 8. 🌟 주소 복사 (클립보드 - 상호명 제외) 및 입력 제어
 // ==========================================
+export function copyAddressModal() {
+    const addrInput = document.getElementById('manual-address-input');
+    if (!addrInput) return;
+    
+    let rawAddress = addrInput.value.trim();
+    if (!rawAddress) {
+        alert("복사할 주소가 없습니다.");
+        return;
+    }
+    
+    // [상호명] 제거 처리
+    let cleanAddress = rawAddress.replace(/^\[.*?\]\s*/, '').trim();
+    
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(cleanAddress).then(() => {
+            alert("주소가 복사되었습니다:\n" + cleanAddress);
+        }).catch(() => fallbackCopyTextToClipboard(cleanAddress));
+    } else {
+        fallbackCopyTextToClipboard(cleanAddress);
+    }
+}
+
+function fallbackCopyTextToClipboard(text) {
+    const textArea = document.createElement("textarea");
+    textArea.value = text;
+    textArea.style.position = "fixed";
+    textArea.style.left = "-999999px";
+    document.body.appendChild(textArea);
+    textArea.select();
+    try {
+        document.execCommand('copy');
+        alert("주소가 복사되었습니다:\n" + text);
+    } catch (err) {
+        alert("주소 복사에 실패했습니다.");
+    }
+    document.body.removeChild(textArea);
+}
+
 export function toggleHeaderEndEdit() { 
     document.getElementById('header-end-edit-area')?.classList.toggle('hidden'); 
 }
@@ -669,22 +717,214 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    // 🌟 카카오 공식 JS SDK(Kakao.Navi.start)를 사용하여 
-    // 티맵처럼 중간 브라우저 우회 없이 내비게이션으로 빠르고 정확하게 직행하도록 완벽 수정
-    if (window.Kakao && window.Kakao.isInitialized()) {
-        window.Kakao.Navi.start({
-            name: cleanName,
-            x: Number(lng),
-            y: Number(lat),
-            coordType: 'wgs84'
-        });
+    const targetName = encodeURIComponent(cleanName);
+    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+
+    const naviParams = `name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${kakaoKey}&apiver=1.0`;
+    const isAndroid = /Android/i.test(navigator.userAgent);
+    if (isAndroid) {
+        window.location.href = `intent://navigate?${naviParams}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
     } else {
-        alert("카카오내비 연동 모듈이 아직 준비되지 않았습니다. 앱을 새로고침 해주세요.");
+        window.location.href = `kakaonavi://navigate?${naviParams}`;
     }
 }
 
 // ==========================================
-// 10. Window 전역 객체 바인딩 (HTML 인라인 이벤트 호환)
+// 10. 🌟 카카오 지도 모드 API 로딩 및 제어 엔진
+// ==========================================
+let mapInstance = null;
+let mapMarkers = [];
+let mapPolylines = [];
+let isMapSdkLoaded = false;
+
+async function loadKakaoMapSdk() {
+    return new Promise((resolve) => {
+        if (window.kakao && window.kakao.maps) {
+            isMapSdkLoaded = true;
+            resolve();
+            return;
+        }
+        const KAKAO_KEY = "893c5c6ec8613974d84fa75fd6d0be11"; 
+        const script = document.createElement('script');
+        script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
+        script.onload = () => {
+            kakao.maps.load(() => {
+                isMapSdkLoaded = true;
+                resolve();
+            });
+        };
+        script.onerror = () => {
+            alert("지도 스크립트를 불러오는데 실패했습니다. 네트워크를 확인해주세요.");
+            resolve();
+        }
+        document.head.appendChild(script);
+    });
+}
+
+export async function switchViewMode(mode) {
+    const listContainer = document.getElementById('destination-list');
+    const mapContainer = document.getElementById('map-view-container');
+    const tabList = document.getElementById('tab-list-view');
+    const tabMap = document.getElementById('tab-map-view');
+    
+    if (mode === 'map') {
+        if (listContainer) listContainer.classList.add('hidden');
+        if (mapContainer) {
+            mapContainer.classList.remove('hidden');
+            mapContainer.classList.add('flex');
+        }
+        
+        if (tabList) tabList.className = "px-4 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition";
+        if (tabMap) tabMap.className = "px-4 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
+        
+        showLoading("지도 준비 중...");
+        await loadKakaoMapSdk();
+        hideLoading();
+        
+        // 브라우저 렌더링 딜레이 후 맵 크기 재계산
+        setTimeout(() => {
+            if (mapInstance) mapInstance.relayout();
+            renderMapView();
+        }, 100);
+        
+    } else {
+        if (listContainer) listContainer.classList.remove('hidden');
+        if (mapContainer) {
+            mapContainer.classList.add('hidden');
+            mapContainer.classList.remove('flex');
+        }
+        
+        if (tabList) tabList.className = "px-4 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
+        if (tabMap) tabMap.className = "px-4 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition";
+    }
+}
+
+export function renderMapView() {
+    if (!isMapSdkLoaded || !window.kakao || !window.kakao.maps) return;
+    const container = document.getElementById('kakao-map');
+    if (!container) return;
+    
+    const destinations = state.getDestinations();
+    const startLoc = state.getStartLocation();
+    const endLoc = state.getEndLocation();
+    
+    if (!mapInstance) {
+        let centerLat = destinations.length > 0 ? destinations[0].lat : 37.566826;
+        let centerLng = destinations.length > 0 ? destinations[0].lng : 126.9786567;
+        
+        const lastGps = state.getLastKnownGps();
+        if (lastGps && lastGps.lat) { 
+            centerLat = lastGps.lat; 
+            centerLng = lastGps.lng; 
+        }
+        
+        const options = {
+            center: new kakao.maps.LatLng(centerLat, centerLng),
+            level: 5
+        };
+        mapInstance = new kakao.maps.Map(container, options);
+    }
+    
+    // 기존 마커 및 경로 라인 클리어
+    mapMarkers.forEach(m => m.setMap(null));
+    mapMarkers = [];
+    mapPolylines.forEach(p => p.setMap(null));
+    mapPolylines = [];
+    
+    if (destinations.length === 0) return;
+    
+    const bounds = new kakao.maps.LatLngBounds();
+    const linePath = [];
+    
+    destinations.forEach((dest, index) => {
+        const pos = new kakao.maps.LatLng(dest.lat, dest.lng);
+        bounds.extend(pos);
+        linePath.push(pos);
+        
+        const isStart = index === 0 && (startLoc && startLoc.lat);
+        const displayNum = isStart ? '<i class="fa-solid fa-flag text-xs"></i>' : dest.displayNumber;
+        const badgeColor = isStart ? 'bg-indigo-600' : 'bg-blue-600';
+        
+        const fmt = formatDisplayAddress(dest.address, dest.storeName);
+        const shortName = fmt.storeName || (fmt.cleanAddr.length > 8 ? fmt.cleanAddr.substring(0, 8) + '...' : fmt.cleanAddr);
+        
+        // CSS 기반의 커스텀 오버레이 마커 디자인
+        const content = `
+            <div class="relative flex flex-col items-center justify-center translate-y-[-100%] pb-1">
+                <div class="${badgeColor} text-white font-black w-7 h-7 rounded-full flex items-center justify-center text-[12px] shadow-md ring-2 ring-white z-10">
+                    ${displayNum}
+                </div>
+                <div class="w-1.5 h-1.5 bg-gray-800 rotate-45 -mt-1 shadow-sm z-0"></div>
+                <div class="bg-white/95 px-2 py-0.5 rounded shadow text-[10px] font-bold text-gray-800 mt-0.5 whitespace-nowrap border border-gray-200">
+                    ${shortName}
+                </div>
+            </div>
+        `;
+        
+        const customOverlay = new kakao.maps.CustomOverlay({
+            position: pos,
+            content: content,
+            yAnchor: 1
+        });
+        
+        customOverlay.setMap(mapInstance);
+        mapMarkers.push(customOverlay);
+    });
+    
+    // 종료 위치 핑 추가
+    if (endLoc && endLoc.lat && endLoc.address) {
+        const pos = new kakao.maps.LatLng(endLoc.lat, endLoc.lng);
+        bounds.extend(pos);
+        linePath.push(pos);
+        
+        const content = `
+            <div class="relative flex flex-col items-center justify-center translate-y-[-100%] pb-1">
+                <div class="bg-red-600 text-white font-black w-7 h-7 rounded-full flex items-center justify-center text-[11px] shadow-md ring-2 ring-white z-10">
+                    도착
+                </div>
+                <div class="w-1.5 h-1.5 bg-gray-800 rotate-45 -mt-1 shadow-sm z-0"></div>
+            </div>
+        `;
+        const customOverlay = new kakao.maps.CustomOverlay({
+            position: pos,
+            content: content,
+            yAnchor: 1
+        });
+        customOverlay.setMap(mapInstance);
+        mapMarkers.push(customOverlay);
+    }
+    
+    // 동선 연결 점선 드로잉
+    if (linePath.length > 1) {
+        const polyline = new kakao.maps.Polyline({
+            path: linePath,
+            strokeWeight: 4,
+            strokeColor: '#3b82f6',
+            strokeOpacity: 0.8,
+            strokeStyle: 'shortdash'
+        });
+        polyline.setMap(mapInstance);
+        mapPolylines.push(polyline);
+    }
+    
+    // 화면에 모든 마커가 보이도록 지도 바운드 및 패딩 자동 조절
+    mapInstance.setBounds(bounds, 50, 50, 50, 50);
+}
+
+export function moveToCurrentLocationOnMap() {
+    if (!mapInstance) return;
+    const lastGps = state.getLastKnownGps();
+    if (lastGps && lastGps.lat) {
+        const locPosition = new kakao.maps.LatLng(lastGps.lat, lastGps.lng);
+        mapInstance.panTo(locPosition);
+    } else {
+        alert('현재 위치 정보를 파악할 수 없습니다. GPS 설정 등을 확인해 주세요.');
+    }
+}
+
+
+// ==========================================
+// 11. Window 전역 객체 바인딩 (HTML 인라인 이벤트 호환)
 // ==========================================
 window.logout = logout;
 window.renderList = renderList;
@@ -704,7 +944,6 @@ window.reportMemo = reportMemo;
 window.savePersonalMemo = savePersonalMemo;
 window.deletePersonalMemo = deletePersonalMemo;
 
-// delivery 모듈 관련 전역 바인딩
 window.cancelDestination = cancelDestination;
 window.completeDestination = completeDestination;
 window.selectCompletionTag = selectCompletionTag;
@@ -726,6 +965,11 @@ window.toggleEtcTag = toggleEtcTag;
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
+// 🌟 신규 기능 전역 노출
+window.copyAddressModal = copyAddressModal;
+window.switchViewMode = switchViewMode;
+window.moveToCurrentLocationOnMap = moveToCurrentLocationOnMap;
+
 window.appActions = {
     initApp, 
     optimizeRouteAction, 
@@ -733,5 +977,6 @@ window.appActions = {
     renderList,
     updateDisplayNumbers,
     moveDestinationUp,
-    moveDestinationDown
+    moveDestinationDown,
+    switchViewMode
 };
