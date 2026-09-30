@@ -98,14 +98,16 @@ export function confirmCompletion(photoUrl = null) {
         finalTag = "사진 완료";
     }
 
+    // 🌟 [핵심 수정]: 모달을 닫기 전에 삭제할 대상 ID를 변수에 먼저 안전하게 백업합니다.
+    const targetId = pendingCompletionId;
     const destinations = state.getDestinations();
-    const item = destinations.find(d => d.id === pendingCompletionId);
+    const item = destinations.find(d => d.id === targetId);
     if (!item) { 
         closeCompletionModal(); 
         return; 
     }
 
-    // 모달 즉시 닫기
+    // 모달 닫기 (내부에서 pendingCompletionId가 null이 되어도 targetId가 안전하게 유지됨)
     closeCompletionModal();
 
     // 🌟 [1단계: 로딩 없는 즉각 화면 처리 및 순간 GPS 캡처]
@@ -126,8 +128,9 @@ export function confirmCompletion(photoUrl = null) {
 
     // 지난배송 이력 즉시 등록 및 리스트 제거
     archiveCompletedDelivery(item, finalTag, null, photoUrl);
-    state.removeDestination(pendingCompletionId);
+    state.removeDestination(targetId); // 🌟 확실하게 targetId로 삭제
     state.updateDisplayNumbers();
+    state.saveActiveData(); // 🌟 로컬 스토리지에 즉시 저장 동기화
     if (typeof window.renderList === 'function') window.renderList();
     
     // 잔여 배송 목록 관제 서버 즉시 동기화
@@ -171,6 +174,7 @@ export function cancelDestination(id) {
     // 1. 화면 및 리스트에서 즉시 제거
     state.removeDestination(id);
     state.updateDisplayNumbers();
+    state.saveActiveData(); // 🌟 로컬 스토리지 즉시 동기화
     if (typeof window.renderList === 'function') window.renderList();
 
     const deviceId = getOrCreateDeviceId();
@@ -263,6 +267,7 @@ export function initPhotoCompletion() {
         // 메인 리스트에서 즉시 제거 및 순번 재정렬
         state.removeDestination(targetId);
         state.updateDisplayNumbers();
+        state.saveActiveData(); // 🌟 로컬 스토리지 즉시 동기화
         if (typeof window.renderList === 'function') window.renderList();
 
         // 관제 서버 잔여 배송 목록 즉시 동기화

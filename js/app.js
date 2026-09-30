@@ -45,15 +45,18 @@ import {
     deletePersonalMemo
 } from './memo.js';
 
-import { 
+// delivery.js 네임스페이스 및 핸들러 안전 임포트 (순환 참조 방어)
+import * as deliveryModule from './delivery.js';
+const { 
     completeDestination, 
     selectCompletionTag, 
     closeCompletionModal, 
     triggerPhotoCompletion, 
     confirmCompletion, 
     cancelDestination, 
-    initPhotoCompletion 
-} from './delivery.js';
+    initPhotoCompletion,
+    setDeliveryUpdateHandler 
+} = deliveryModule;
 
 import { 
     initCameraScan, 
@@ -134,7 +137,20 @@ export async function initApp() {
     checkUnreadNotices();
     initMemoEvents();
     initCameraScan();
-    initPhotoCompletion(); 
+    
+    if (typeof initPhotoCompletion === 'function') {
+        initPhotoCompletion();
+    }
+
+    // 🌟 delivery.js 완료/취소 발생 시 app 상태 갱신 및 관제 동기화 콜백 등록
+    if (typeof setDeliveryUpdateHandler === 'function') {
+        setDeliveryUpdateHandler(() => {
+            updateDisplayNumbers();
+            const deviceId = getOrCreateDeviceId();
+            const phone = localStorage.getItem('deliveryProUserPhone') || "";
+            saveRouteToFirestore(deviceId, phone, state.getDestinations());
+        });
+    }
     
     // 관제 센터 실시간 자동할당 동선 수신 핸들러 등록
     setRemoteRoutesHandler((newDestinations, routeData) => {
@@ -188,19 +204,18 @@ export async function initApp() {
 
         // 유효한 배송지가 도착했을 때만 상태 갱신
         if (formattedList.length > 0) {
-            // 🌟 관제 동선이 정상 할당되었음을 브라우저 세션에 안전하게 기록
+            // 관제 동선이 정상 할당되었음을 브라우저 세션에 기록
             sessionStorage.setItem('deliveryPro_has_dispatch_route', 'true');
             state.setDestinations(formattedList);
             state.updateDisplayNumbers();
             state.saveActiveData();
             renderList();
 
-            // 관리자로부터 신규 배송지 할당 시 진동 알림
+            // 신규 배송지 할당 시 진동 알림
             if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
         }
     }, () => {
-        // 🌟 [핵심 2차 안전장치]: 관제로부터 실제로 동선을 수신받은 이력이 있는 경우에만 초기화 실행!
-        // 기사님이 직접 수동 스캔했거나, 단순 새로고침(F5) 시에는 로컬 목록을 안전하게 보존합니다.
+        // [핵심 2차 안전장치]: 관제로부터 실제로 동선을 수신받은 이력이 있는 경우에만 초기화 실행
         const hadDispatchRoute = sessionStorage.getItem('deliveryPro_has_dispatch_route') === 'true';
         if (hadDispatchRoute) {
             sessionStorage.removeItem('deliveryPro_has_dispatch_route');
@@ -240,6 +255,9 @@ export async function initApp() {
     setRestoreDestinationHandler((itemToRestore) => {
         state.addDestination(itemToRestore);
         updateDisplayNumbers();
+        const deviceId = getOrCreateDeviceId();
+        const phone = localStorage.getItem('deliveryProUserPhone') || "";
+        saveRouteToFirestore(deviceId, phone, state.getDestinations());
     });
 
     // GPS 토글 스위치 콜백 등록
@@ -260,6 +278,7 @@ export async function initApp() {
 // ==========================================
 export function updateDisplayNumbers() {
     state.updateDisplayNumbers();
+    state.saveActiveData();
     renderList();
 }
 
@@ -432,7 +451,13 @@ export function moveDestinationUp(id) {
     }
 
     state.setDestinations(destinations);
+    state.saveActiveData();
     updateDisplayNumbers();
+
+    // 순서 변경 사항 관제 및 클라우드 즉각 동기화
+    const deviceId = getOrCreateDeviceId();
+    const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    saveRouteToFirestore(deviceId, phone, destinations);
 
     if (navigator.vibrate) navigator.vibrate(12);
 }
@@ -457,7 +482,13 @@ export function moveDestinationDown(id) {
     }
 
     state.setDestinations(destinations);
+    state.saveActiveData();
     updateDisplayNumbers();
+
+    // 순서 변경 사항 관제 및 클라우드 즉각 동기화
+    const deviceId = getOrCreateDeviceId();
+    const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    saveRouteToFirestore(deviceId, phone, destinations);
 
     if (navigator.vibrate) navigator.vibrate(12);
 }
@@ -640,6 +671,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
 // ==========================================
 window.logout = logout;
 window.renderList = renderList;
+window.updateDisplayNumbers = updateDisplayNumbers;
 window.verifyLicense = verifyLicense;
 window.openTrialModal = openTrialModal;
 window.closeTrialModal = closeTrialModal;
@@ -654,19 +686,22 @@ window.likeMemo = likeMemo;
 window.reportMemo = reportMemo;
 window.savePersonalMemo = savePersonalMemo;
 window.deletePersonalMemo = deletePersonalMemo;
+
+// delivery 모듈 관련 전역 바인딩
 window.cancelDestination = cancelDestination;
 window.completeDestination = completeDestination;
 window.selectCompletionTag = selectCompletionTag;
 window.closeCompletionModal = closeCompletionModal;
 window.triggerPhotoCompletion = triggerPhotoCompletion;
 window.confirmCompletion = confirmCompletion;
+window.initPhotoCompletion = initPhotoCompletion;
+
 window.editDestinationAddress = editDestinationAddress;
 window.openTmap = openTmap;
 window.openKakaoNaviDirect = openKakaoNaviDirect;
 window.closeStartModal = closeStartModal;
 window.selectStartDest = selectStartDest;
 window.optimizeRoute = optimizeRouteAction;
-window.initPhotoCompletion = initPhotoCompletion;
 window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
@@ -679,6 +714,7 @@ window.appActions = {
     optimizeRouteAction, 
     getDeviceRealGPS, 
     renderList,
+    updateDisplayNumbers,
     moveDestinationUp,
     moveDestinationDown
 };
