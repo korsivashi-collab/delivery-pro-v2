@@ -94,7 +94,7 @@ function sanitizePhoneNumber(rawVal) {
 }
 
 // ==========================================
-// 0-2. 상호명 분리 및 주소 원본 보존 헬퍼 (주소 절삭 방지)
+// 0-2. 상호명 분리 및 주소 원본 보존 헬퍼
 // ==========================================
 function formatDisplayAddress(rawAddress, storeName = "") {
     let extractedStore = storeName ? String(storeName).trim() : "";
@@ -344,7 +344,7 @@ function initSwipeButton() {
 }
 
 // ==========================================
-// 4. 출발지 선택 모달 제어
+// 4. 시작 지점 선택 모달 제어 (리스트/지도 통합)
 // ==========================================
 export function openStartSelectionModal() {
     const destinations = state.getDestinations();
@@ -355,12 +355,15 @@ export function openStartSelectionModal() {
     const listEl = document.getElementById('start-select-list');
     if (!listEl) return;
     
+    // 모달을 열 때 뷰 모드를 항상 '리스트'로 초기화
+    switchStartSelectViewMode('list');
+
     let html = '';
     destinations.forEach(d => {
         const fmt = formatDisplayAddress(d.address, d.storeName);
         const title = fmt.storeName ? `[${fmt.storeName}] ${fmt.cleanAddr}` : fmt.cleanAddr;
         html += `
-            <button onclick="selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
+            <button onclick="window.selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between active:bg-gray-100">
                 <span class="font-bold text-gray-800 text-[14px] break-keep flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${title}</span>
                 <i class="fa-solid fa-check text-gray-300"></i>
             </button>
@@ -500,11 +503,6 @@ export function renderList() {
     const startLocation = state.getStartLocation();
     const lastGps = state.getLastKnownGps();
     
-    // 리스트와 함께 지도도 갱신 필요시 자동 갱신
-    if (document.getElementById('map-view-container') && !document.getElementById('map-view-container').classList.contains('hidden')) {
-        renderMapView();
-    }
-
     if (headerEndAddr) {
         headerEndAddr.innerText = endLocation.address || '설정 안 함';
         if (!endLocation.address) { 
@@ -626,7 +624,7 @@ export function renderList() {
 }
 
 // ==========================================
-// 8. 🌟 주소 복사 (클립보드 - 상호명 제외) 및 입력 제어
+// 8. 🌟 주소 복사 (클립보드 - 상호명 제외) 및 헤더 입력 제어
 // ==========================================
 export function copyAddressModal() {
     const addrInput = document.getElementById('manual-address-input');
@@ -638,7 +636,7 @@ export function copyAddressModal() {
         return;
     }
     
-    // [상호명] 제거 처리
+    // [상호명] 제거 처리 후 순수 주소만 복사
     let cleanAddress = rawAddress.replace(/^\[.*?\]\s*/, '').trim();
     
     if (navigator.clipboard && window.isSecureContext) {
@@ -730,11 +728,10 @@ export function openKakaoNaviDirect(lat, lng, name) {
 }
 
 // ==========================================
-// 10. 🌟 카카오 지도 모드 API 로딩 및 제어 엔진
+// 10. 🌟 시작 지점 선택용 카카오 지도 API 로딩 및 뷰 전환 엔진
 // ==========================================
-let mapInstance = null;
-let mapMarkers = [];
-let mapPolylines = [];
+let startMapInstance = null;
+let startMapMarkers = [];
 let isMapSdkLoaded = false;
 
 async function loadKakaoMapSdk() {
@@ -761,11 +758,11 @@ async function loadKakaoMapSdk() {
     });
 }
 
-export async function switchViewMode(mode) {
-    const listContainer = document.getElementById('destination-list');
-    const mapContainer = document.getElementById('map-view-container');
-    const tabList = document.getElementById('tab-list-view');
-    const tabMap = document.getElementById('tab-map-view');
+export async function switchStartSelectViewMode(mode) {
+    const listContainer = document.getElementById('start-select-list');
+    const mapContainer = document.getElementById('start-select-map-container');
+    const tabList = document.getElementById('modal-tab-list-view');
+    const tabMap = document.getElementById('modal-tab-map-view');
     
     if (mode === 'map') {
         if (listContainer) listContainer.classList.add('hidden');
@@ -774,17 +771,17 @@ export async function switchViewMode(mode) {
             mapContainer.classList.add('flex');
         }
         
-        if (tabList) tabList.className = "px-4 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition";
-        if (tabMap) tabMap.className = "px-4 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
+        if (tabList) tabList.className = "flex-1 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition";
+        if (tabMap) tabMap.className = "flex-1 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
         
-        showLoading("지도 준비 중...");
+        showLoading("지도 불러오는 중...");
         await loadKakaoMapSdk();
         hideLoading();
         
-        // 브라우저 렌더링 딜레이 후 맵 크기 재계산
+        // 렌더링을 위해 DOM이 표출된 후 지도 재배치
         setTimeout(() => {
-            if (mapInstance) mapInstance.relayout();
-            renderMapView();
+            if (startMapInstance) startMapInstance.relayout();
+            renderStartSelectMap();
         }, 100);
         
     } else {
@@ -794,65 +791,45 @@ export async function switchViewMode(mode) {
             mapContainer.classList.remove('flex');
         }
         
-        if (tabList) tabList.className = "px-4 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
-        if (tabMap) tabMap.className = "px-4 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition";
+        if (tabList) tabList.className = "flex-1 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
+        if (tabMap) tabMap.className = "flex-1 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition";
     }
 }
 
-export function renderMapView() {
+export function renderStartSelectMap() {
     if (!isMapSdkLoaded || !window.kakao || !window.kakao.maps) return;
-    const container = document.getElementById('kakao-map');
+    const container = document.getElementById('start-select-kakao-map');
     if (!container) return;
     
     const destinations = state.getDestinations();
-    const startLoc = state.getStartLocation();
-    const endLoc = state.getEndLocation();
-    
-    if (!mapInstance) {
-        let centerLat = destinations.length > 0 ? destinations[0].lat : 37.566826;
-        let centerLng = destinations.length > 0 ? destinations[0].lng : 126.9786567;
-        
-        const lastGps = state.getLastKnownGps();
-        if (lastGps && lastGps.lat) { 
-            centerLat = lastGps.lat; 
-            centerLng = lastGps.lng; 
-        }
-        
+    if (destinations.length === 0) return;
+
+    if (!startMapInstance) {
         const options = {
-            center: new kakao.maps.LatLng(centerLat, centerLng),
+            center: new kakao.maps.LatLng(destinations[0].lat, destinations[0].lng),
             level: 5
         };
-        mapInstance = new kakao.maps.Map(container, options);
+        startMapInstance = new kakao.maps.Map(container, options);
     }
     
-    // 기존 마커 및 경로 라인 클리어
-    mapMarkers.forEach(m => m.setMap(null));
-    mapMarkers = [];
-    mapPolylines.forEach(p => p.setMap(null));
-    mapPolylines = [];
-    
-    if (destinations.length === 0) return;
+    // 기존 마커 초기화
+    startMapMarkers.forEach(m => m.setMap(null));
+    startMapMarkers = [];
     
     const bounds = new kakao.maps.LatLngBounds();
-    const linePath = [];
     
-    destinations.forEach((dest, index) => {
+    destinations.forEach((dest) => {
         const pos = new kakao.maps.LatLng(dest.lat, dest.lng);
         bounds.extend(pos);
-        linePath.push(pos);
-        
-        const isStart = index === 0 && (startLoc && startLoc.lat);
-        const displayNum = isStart ? '<i class="fa-solid fa-flag text-xs"></i>' : dest.displayNumber;
-        const badgeColor = isStart ? 'bg-indigo-600' : 'bg-blue-600';
         
         const fmt = formatDisplayAddress(dest.address, dest.storeName);
         const shortName = fmt.storeName || (fmt.cleanAddr.length > 8 ? fmt.cleanAddr.substring(0, 8) + '...' : fmt.cleanAddr);
         
-        // CSS 기반의 커스텀 오버레이 마커 디자인
+        // 지도의 마커를 터치(클릭)하면 바로 출발지로 등록되는 이벤트 연결
         const content = `
-            <div class="relative flex flex-col items-center justify-center translate-y-[-100%] pb-1">
-                <div class="${badgeColor} text-white font-black w-7 h-7 rounded-full flex items-center justify-center text-[12px] shadow-md ring-2 ring-white z-10">
-                    ${displayNum}
+            <div class="relative flex flex-col items-center justify-center translate-y-[-100%] pb-1 cursor-pointer" onclick="window.selectStartDest(${dest.id})">
+                <div class="bg-blue-600 text-white font-black w-8 h-8 rounded-full flex items-center justify-center text-[13px] shadow-md ring-2 ring-white z-10 hover:bg-blue-700 active:scale-95 transition">
+                    출발
                 </div>
                 <div class="w-1.5 h-1.5 bg-gray-800 rotate-45 -mt-1 shadow-sm z-0"></div>
                 <div class="bg-white/95 px-2 py-0.5 rounded shadow text-[10px] font-bold text-gray-800 mt-0.5 whitespace-nowrap border border-gray-200">
@@ -864,64 +841,17 @@ export function renderMapView() {
         const customOverlay = new kakao.maps.CustomOverlay({
             position: pos,
             content: content,
-            yAnchor: 1
+            yAnchor: 1,
+            clickable: true // 오버레이 클릭 허용
         });
         
-        customOverlay.setMap(mapInstance);
-        mapMarkers.push(customOverlay);
+        customOverlay.setMap(startMapInstance);
+        startMapMarkers.push(customOverlay);
     });
     
-    // 종료 위치 핑 추가
-    if (endLoc && endLoc.lat && endLoc.address) {
-        const pos = new kakao.maps.LatLng(endLoc.lat, endLoc.lng);
-        bounds.extend(pos);
-        linePath.push(pos);
-        
-        const content = `
-            <div class="relative flex flex-col items-center justify-center translate-y-[-100%] pb-1">
-                <div class="bg-red-600 text-white font-black w-7 h-7 rounded-full flex items-center justify-center text-[11px] shadow-md ring-2 ring-white z-10">
-                    도착
-                </div>
-                <div class="w-1.5 h-1.5 bg-gray-800 rotate-45 -mt-1 shadow-sm z-0"></div>
-            </div>
-        `;
-        const customOverlay = new kakao.maps.CustomOverlay({
-            position: pos,
-            content: content,
-            yAnchor: 1
-        });
-        customOverlay.setMap(mapInstance);
-        mapMarkers.push(customOverlay);
-    }
-    
-    // 동선 연결 점선 드로잉
-    if (linePath.length > 1) {
-        const polyline = new kakao.maps.Polyline({
-            path: linePath,
-            strokeWeight: 4,
-            strokeColor: '#3b82f6',
-            strokeOpacity: 0.8,
-            strokeStyle: 'shortdash'
-        });
-        polyline.setMap(mapInstance);
-        mapPolylines.push(polyline);
-    }
-    
-    // 화면에 모든 마커가 보이도록 지도 바운드 및 패딩 자동 조절
-    mapInstance.setBounds(bounds, 50, 50, 50, 50);
+    // 화면에 모든 마커가 보이도록 지도 자동 패딩
+    startMapInstance.setBounds(bounds, 50, 50, 50, 50);
 }
-
-export function moveToCurrentLocationOnMap() {
-    if (!mapInstance) return;
-    const lastGps = state.getLastKnownGps();
-    if (lastGps && lastGps.lat) {
-        const locPosition = new kakao.maps.LatLng(lastGps.lat, lastGps.lng);
-        mapInstance.panTo(locPosition);
-    } else {
-        alert('현재 위치 정보를 파악할 수 없습니다. GPS 설정 등을 확인해 주세요.');
-    }
-}
-
 
 // ==========================================
 // 11. Window 전역 객체 바인딩 (HTML 인라인 이벤트 호환)
@@ -965,10 +895,9 @@ window.toggleEtcTag = toggleEtcTag;
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
-// 🌟 신규 기능 전역 노출
+// 🌟 신규 기능 전역 바인딩
 window.copyAddressModal = copyAddressModal;
-window.switchViewMode = switchViewMode;
-window.moveToCurrentLocationOnMap = moveToCurrentLocationOnMap;
+window.switchStartSelectViewMode = switchStartSelectViewMode;
 
 window.appActions = {
     initApp, 
@@ -977,6 +906,5 @@ window.appActions = {
     renderList,
     updateDisplayNumbers,
     moveDestinationUp,
-    moveDestinationDown,
-    switchViewMode
+    moveDestinationDown
 };
