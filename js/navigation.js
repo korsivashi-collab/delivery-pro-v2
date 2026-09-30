@@ -44,7 +44,7 @@ export function openTmap(lat, lng, name) {
 
     const encodedName = encodeURIComponent(name);
     
-    // 🌟 [앱 버전 티맵] 정상 작동 확인된 가장 안정적인 다이렉트 호출
+    // 🌟 [앱 버전 티맵] 정상 작동이 완벽히 입증된 순수 스킴 다이렉트 호출
     window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
 
@@ -61,11 +61,11 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
     
-    // 🌟 [웹/앱 완벽 분리] localhost가 아니면 웹 브라우저로 인식
+    // localhost 환경이 아니면 웹 브라우저로 인식 (웹/앱 완벽 분리)
     const isWebBrowser = window.location.hostname !== 'localhost' && window.location.protocol !== 'file:' && window.location.protocol !== 'capacitor:';
 
     if (isWebBrowser) {
-        // [웹 버전 정상 작동 코드] 카카오 공식 SDK 원본 유지
+        // [웹 버전 정상 작동 코드] 카카오 공식 SDK 원본
         if (window.Kakao && window.Kakao.isInitialized()) {
             try {
                 window.Kakao.Navi.start({
@@ -78,11 +78,11 @@ export function openKakaoNaviDirect(lat, lng, name) {
                 console.warn("Kakao SDK 내비 실행 실패:", e);
             }
         }
-        return; // 웹이면 여기서 종료
+        return; 
     }
 
     // =========================================================
-    // 🌟 [앱(APK) 버전] 카카오내비 다이렉트 스킴 호출
+    // 🌟 [앱(APK) 버전] 카카오내비 다이렉트 호출 (티맵과 동일한 원리)
     // =========================================================
     
     const paramObj = {
@@ -90,7 +90,6 @@ export function openKakaoNaviDirect(lat, lng, name) {
         option: { coordType: 'wgs84' }
     };
     
-    // 카카오 디벨로퍼스 도메인 인증 헤더
     const extrasObj = {
         KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
     };
@@ -98,9 +97,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
     
-    // 🚨 먹통 원인 최종 해결: 
-    // a태그 클릭이나 intent://가 긴 JSON 파라미터를 만나면 웹뷰가 차단해버리므로,
-    // 예전에 앱을 성공적으로 켰던 window.location.href 방식으로 직접 꽂아 넣습니다.
+    // 🚨 안드로이드 키 해시(지문) 등록만 디벨로퍼스에 완료되어 있으면, 
+    // 티맵처럼 순식간에 카카오내비 길안내 화면으로 다이렉트 진입합니다.
     window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
 }
 
