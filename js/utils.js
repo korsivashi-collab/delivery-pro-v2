@@ -51,6 +51,9 @@ export function toBase64_SafeCompress(file) {
                 const ctx = canvas.getContext('2d'); 
                 
                 // [핵심 OCR 전처리]: 속도 저하 없이 하드웨어 가속으로 이미지 품질 극대화
+                // 1. grayscale(100%): 황색 명세표 등 컬러 노이즈 제거
+                // 2. contrast(150%): 글자와 배경의 명암비를 높여 선명도 극대화
+                // 3. brightness(110%): 차량 내부 등 어두운 환경 보정
                 ctx.filter = 'grayscale(100%) contrast(150%) brightness(110%)';
                 
                 ctx.drawImage(img, 0, 0, width, height);
@@ -97,101 +100,49 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명/지번 주소 정밀 추출 로직 (분기 도로명 완전 보존 엔진)
+// 5. 도로명 주소 정밀 추출 로직 (줄바꿈 번지 연계 + '(' 괄호 발견 시 삭제 탑재)
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
-        // 1) 전화번호, 계좌, 금액 등 주소 뒤에 붙어 엉키기 쉬운 라벨/패턴 사전 분리
-        let safeText = text
-            .replace(/(전화(?:번호)?|연락처|TEL|H\.?P|대표자|검수자|성명|상호|수령인|업태|종목|등록번호|공급|단가|수량|금액|합계)\s*[:\s]/gi, '\n')
-            .replace(/(01[0-9]|0[2-8][0-9]?)[-\s]?\d{3,4}[-\s]?\d{4}/g, '\n');
+        let processedText = text;
 
-        let flatText = safeText.replace(/\r/g, ' ').replace(/\n/g, '  ').replace(/\s+/g, ' ');
+        // 1. 번지수 하이픈(-) 앞뒤에 줄바꿈이나 공백이 끼어있는 경우 무조건 하나의 번지수(예: 35-2)로 결합
+        processedText = processedText.replace(/(\d+)\s*[-~ㅡ]\s*[\r\n]+\s*(\d+)/g, '$1-$2');
+        processedText = processedText.replace(/(\d+)\s+[-~ㅡ]\s+(\d+)/g, '$1-$2');
 
-        // 시/도 정규식 패턴 (전국 17개 광역자치단체)
-        const sidoPattern = '(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?';
+        // 줄바꿈을 공백으로 통합하여 단일 행으로 평탄화
+        let flatText = processedText.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+
+        // 시/도 접두사 패턴 기반 정밀 주소 추출
+        let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:\s*-\s*\d+)?[\s\S]*?)(?=(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|\n|$))/g;
+        let matches = [...flatText.matchAll(regionPrefixedRegex)];
         
-        // 시/군/구 패턴 (예: 종로구, 마포구, 안양시 동안구, 고양시 일산동구)
-        const sigunguPattern = '[가-힣]+(?:구|군|시)(?:\\s+[가-힣]+(?:구|군))?';
-        
-        // 🌟 [핵심 개선]: 분기 도로명과 일반 도로명의 우선순위 분리
-        // 1) 분기 도로명: 창경궁로35나길, 시흥대로150길, 퇴계로56가길, 마포대로11길, 대학로1길 등
-        //    (반드시 숫자+한글(선택)+길/로가 붙은 분기 도로명을 먼저 매칭하여 숫자가 건물번호로 조기 절삭되는 오류 원천 차단)
-        // 2) 일반 도로명: 창경궁로, 망원로, 대학로, 개운사길, 세종대로, 테헤란로 등
-        const branchRoad = '[가-힣]+(?:대로|로|길|거리)\\s*\\d+(?:-[0-9]+)?[가-힣]?(?:번)?(?:길|로)';
-        const normalRoad = '[가-힣]+(?:대로|로|길|거리)';
-        const roadNamePattern = `(?:${branchRoad}|${normalRoad})`;
-
-        // 건물 번호 패턴 (예: 1, 33, 42-4, 88)
-        const buildingNumPattern = '\\d+(?:-\\d+)?';
-        
-        // 층/호수 패턴 (예: 1층, 지하1층, 201호)
-        const floorUnitPattern = '(?:\\s*,?\\s*(?:지하|지상)?\\s*B?\\d+\\s*(?:층|호))?';
-        
-        // 참고 항목 괄호 패턴 (예: (혜화동), (망원동, 삼성화원아파트))
-        const refParensPattern = '(?:\\s*,?\\s*\\([가-힣0-9\\s,·\\.\\-~]+\\))?';
-
-        // 정밀 도로명 주소 정규식
-        const roadRegex = new RegExp(
-            `(${sidoPattern}\\s+${sigunguPattern}\\s+${roadNamePattern}\\s*${buildingNumPattern})${floorUnitPattern}(${refParensPattern})`,
-            'g'
-        );
-
-        // 정밀 지번 주소 정규식 (예: 서울 종로구 혜화동 123-4 (혜화동))
-        const jibunPattern = '[가-힣0-9]+(?:동|읍|면|리|가)(?:\\s+[가-힣0-9]+(?:리))?';
-        const jibunNumPattern = '(?:산\\s*)?\\d+(?:-\\d+)?';
-        const jibunRegex = new RegExp(
-            `(${sidoPattern}\\s+${sigunguPattern}\\s+${jibunPattern}\\s*${jibunNumPattern})${floorUnitPattern}(${refParensPattern})`,
-            'g'
-        );
-
-        let roadMatches = [...flatText.matchAll(roadRegex)];
-        let jibunMatches = [...flatText.matchAll(jibunRegex)];
-
-        let candidate = null;
-        let targetMatch = null;
-
-        // 명세표 하단/우측 공급받는자(배송지) 주소를 우선하기 위해 마지막 매칭 선택
-        if (roadMatches.length > 0) {
-            targetMatch = roadMatches[roadMatches.length - 1];
-        } else if (jibunMatches.length > 0) {
-            targetMatch = jibunMatches[jibunMatches.length - 1];
-        }
-
-        if (targetMatch) {
-            let baseAddr = (targetMatch[1] || '').trim();
-            let parens = (targetMatch[2] || '').trim().replace(/^[,\s]+/, '');
-            candidate = parens ? `${baseAddr} ${parens}` : baseAddr;
-        }
-
-        // 폴백: 시/도가 생략되고 시/군/구로 바로 시작하는 경우
-        if (!candidate) {
-            const fallbackRoadRegex = new RegExp(
-                `(${sigunguPattern}\\s+${roadNamePattern}\\s*${buildingNumPattern})${floorUnitPattern}(${refParensPattern})`,
-                'g'
-            );
-            let fallbackMatches = [...flatText.matchAll(fallbackRoadRegex)];
-            if (fallbackMatches.length > 0) {
-                let fbMatch = fallbackMatches[fallbackMatches.length - 1];
-                let baseAddr = (fbMatch[1] || '').trim();
-                let parens = (fbMatch[2] || '').trim().replace(/^[,\s]+/, '');
-                candidate = parens ? `${baseAddr} ${parens}` : baseAddr;
+        let targetAddr = null;
+        if (matches && matches.length > 0) {
+            targetAddr = matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
+        } else {
+            // 보조: 도로명 패턴으로 재탐색
+            let fallbackRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:\s*-\s*\d+)?)/g;
+            let fbMatches = [...flatText.matchAll(fallbackRegex)];
+            if (fbMatches && fbMatches.length > 0) {
+                targetAddr = fbMatches[fbMatches.length - 1][0].trim().replace(/\s+/g, ' ');
             }
         }
 
-        if (candidate) {
-            // 3) 후처리 정제: 전화번호 및 찌꺼기 텍스트 절삭
-            candidate = candidate
-                .replace(/\s*(?:전화|연락처|TEL|HP|핸드폰|성명|대표|고객명|배송).*$/i, '')
-                .replace(/\s*(?:01[0-9]|0[2-8][0-9]?)[-\s]?\d+.*$/, '')
-                .replace(/[,\-\s]+$/, '')
-                .replace(/\s+/g, ' ')
-                .trim();
-
-            if (candidate.length >= 7) {
-                return candidate;
+        if (targetAddr) {
+            // 🌟 [핵심 반영]: 주소를 읽어오다가 '(' 기호를 만나면 '('부터 뒷부분을 모두 삭제
+            if (targetAddr.includes('(')) {
+                targetAddr = targetAddr.split('(')[0].trim();
             }
+
+            // 하이픈 공백 정리 (예: "35 - 2" -> "35-2")
+            targetAddr = targetAddr.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
+
+            // 끝에 남은 콤마나 특수문자 정리
+            targetAddr = targetAddr.replace(/[,\s\-]+$/, '').trim();
+
+            return targetAddr;
         }
     } catch (e) {
         console.error("주소 추출 오류:", e);
@@ -200,7 +151,7 @@ export function extractAddressLogic(text) {
 }
 
 // ==========================================
-// 6. 상호명 라벨 정밀 추출 로직 (행정구역 오인 방지 및 복합 상호명 보존)
+// 6. 상호명 라벨 정밀 추출 로직
 // ==========================================
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
@@ -218,8 +169,7 @@ export function extractStoreNameLogic(fullText) {
             '법인명'
         ];
         
-        const stopLabels = /(성명|대표자|대표|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|수량|단가|총액|규격|제조사|원산지|단위|합계)/;
-        const adminKeywords = /^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|시)?$/;
+        const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|수량|단가|총액|규격|제조사|원산지|단위|합계)/;
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
         // [1차 알고리즘] 줄 단위 라벨 우측 탐색
@@ -232,37 +182,26 @@ export function extractStoreNameLogic(fullText) {
                     rightSide = rightSide.replace(/^[:\s\-\=\|\/]+/, '');
                     
                     let words = rightSide.split(breakRegex).filter(w => w.length > 0);
-                    let storeWords = [];
                     for (let w of words) {
                         let candidate = w.replace(/[^\w가-힣]/g, '');
-                        if (!candidate) continue;
                         if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
                         if (stopLabels.test(candidate)) break;
-                        if (adminKeywords.test(candidate)) break;
                         if (/^\d+$/.test(candidate)) continue;
-                        storeWords.push(candidate);
-                        if (storeWords.length >= 3) break;
-                    }
-                    if (storeWords.length > 0) {
-                        return storeWords.join(' ');
+                        if (candidate.length >= 2) {
+                            return candidate;
+                        }
                     }
                     
-                    // 같은 줄 우측에 내용이 없을 경우 바로 다음 줄 확인 (세로형 표 대응)
                     if (i + 1 < lines.length) {
                         let nextWords = lines[i + 1].split(breakRegex).filter(w => w.length > 0);
-                        let nextStoreWords = [];
                         for (let w of nextWords) {
                             let candidate = w.replace(/[^\w가-힣]/g, '');
-                            if (!candidate) continue;
                             if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
                             if (stopLabels.test(candidate)) break;
-                            if (adminKeywords.test(candidate)) break;
                             if (/^\d+$/.test(candidate)) continue;
-                            nextStoreWords.push(candidate);
-                            if (nextStoreWords.length >= 3) break;
-                        }
-                        if (nextStoreWords.length > 0) {
-                            return nextStoreWords.join(' ');
+                            if (candidate.length >= 2) {
+                                return candidate;
+                            }
                         }
                     }
                 }
@@ -274,22 +213,19 @@ export function extractStoreNameLogic(fullText) {
         for (let i = 0; i < tokens.length; i++) {
             let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
             if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
-                let tokenStoreWords = [];
                 for (let j = i + 1; j < Math.min(tokens.length, i + 6); j++) {
                     let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
                     if (cleanNext.length === 0) continue;
                     if (anchors.some(a => cleanNext === a || cleanNext.includes(a))) continue;
                     if (stopLabels.test(cleanNext)) break;
-                    if (adminKeywords.test(cleanNext)) break;
                     if (/^\d+$/.test(cleanNext)) continue;
-                    tokenStoreWords.push(cleanNext);
-                    if (tokenStoreWords.length >= 3) break;
-                }
-                if (tokenStoreWords.length > 0) {
-                    return tokenStoreWords.join(' ');
+                    if (cleanNext.length >= 2) {
+                        return cleanNext;
+                    }
                 }
             }
         }
+
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
