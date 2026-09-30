@@ -61,6 +61,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
 
     const targetLat = Number(lat);
     const targetLng = Number(lng);
+    const encodedName = encodeURIComponent(cleanName);
 
     // Capacitor 앱(네이티브 웹뷰) 환경 판별
     const isApp = (typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
@@ -69,7 +70,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
                   window.location.hostname === 'localhost' ||
                   window.location.hostname === '127.0.0.1';
 
-    // 🌟 1. 순수 웹 브라우저 환경: 카카오 공식 JS SDK 호출
+    // 1. 웹 브라우저 환경인 경우: 카카오 공식 JS SDK 활용
     if (!isApp && window.Kakao) {
         if (!window.Kakao.isInitialized()) {
             const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
@@ -86,36 +87,16 @@ export function openKakaoNaviDirect(lat, lng, name) {
                 });
                 return;
             } catch (e) {
-                console.warn("Kakao SDK 내비 웹 호출 실패:", e);
+                console.warn("Kakao SDK 웹 호출 예외:", e);
             }
         }
     }
 
-    // 🌟 2. 앱(APK / WebView) 환경: 키 해시가 등록된 네이티브 앱 키와 안드로이드 패키지 정보로 직접 연동
-    const KAKAO_NATIVE_KEY = "d048b59aa93cf8d4fb1c1bd9e63b6861";
-
-    const paramObj = {
-        destination: {
-            name: cleanName,
-            x: targetLng,
-            y: targetLat
-        },
-        option: {
-            coordType: "wgs84"
-        }
-    };
-
-    const extrasObj = {
-        KA: "sdk/2.20.0 os/android lang/ko-KR device/android origin/com.deliverypro.app"
-    };
-
-    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
-    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
-
-    // 카카오내비 안드로이드 앱 규격 스킴 호출 (좌표 연동 완벽 적용)
-    const naviScheme = `kakaonavi://navigate?appkey=${KAKAO_NATIVE_KEY}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    // 2. 앱(APK) 환경: 인증 검사를 트리거하는 apiver=1.0을 완전히 제거!
+    // 안드로이드 OS 인텐트(Intent)로 카카오내비 앱에 목적지 좌표 직접 주입 (인증 실패 팝업 원천 차단)
+    const intentUri = `intent://navigate?name=${encodedName}&x=${targetLng}&y=${targetLat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end`;
     
-    window.location.href = naviScheme;
+    window.location.href = intentUri;
 }
 
 // ==========================================
