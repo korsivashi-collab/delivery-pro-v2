@@ -659,11 +659,9 @@ export function openTmap(lat, lng, name) {
 }
 
 export function openKakaoNaviDirect(lat, lng, name) { 
-    if (window.Kakao && window.Kakao.isInitialized()) {
-        window.Kakao.Navi.start({ name: name, x: lng, y: lat, coordType: 'wgs84' });
-    } else {
-        alert("카카오 내비 모듈 오류입니다.");
-    }
+    const targetName = encodeURIComponent(name || '목적지');
+    // 티맵과 동일한 다이렉트 URI Scheme 호출 (도메인/SDK 인증 오류 원천 차단)
+    window.location.href = `kakaonavi://navigate?name=${targetName}&x=${lng}&y=${lat}&coord_type=wgs84`; 
 }
 
 // ==========================================
