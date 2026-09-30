@@ -73,10 +73,16 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; // 카카오 REST/JS 공용 앱 키
     const isAndroid = /Android/i.test(navigator.userAgent);
 
-    // 🌟 [핵심 수정] 카카오내비 필수 파라미터(appkey, apiver)를 인텐트 URL에 다시 포함
+    // 🌟 [핵심 수정] 카카오내비가 웹뷰를 거절하지 못하도록 도메인 출처(extras)까지 다시 합쳤습니다.
+    const extrasObj = {
+        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
+    };
+    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
+
     if (isAndroid) {
         const fallbackUrl = encodeURIComponent("market://details?id=com.locnall.KimGiSa");
-        window.location.href = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
+        // appkey, apiver(인증), name, x, y(목적지), extras(도메인우회) 6개가 모두 포함된 완벽한 인텐트
+        window.location.href = `intent://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84&extras=${encodedExtras}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;S.browser_fallback_url=${fallbackUrl};end;`;
         return;
     }
 
@@ -95,8 +101,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // iOS 스킴 폴백 (마찬가지로 필수 파라미터 포함)
-    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84`;
+    // iOS 스킴 폴백
+    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84&extras=${encodedExtras}`;
 }
 
 // ==========================================
