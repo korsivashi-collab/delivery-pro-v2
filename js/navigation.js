@@ -44,7 +44,7 @@ export function openTmap(lat, lng, name) {
 
     const encodedName = encodeURIComponent(name);
     
-    // [앱 버전 티맵] 정상 작동이 입증된 순수 스킴 다이렉트 호출
+    // [앱 버전 티맵] 정상 작동 순수 스킴 다이렉트 호출
     window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
 
@@ -59,18 +59,17 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    // 🌟 [키 설정 분리] 웹용 JS 키와 안드로이드 키 해시가 등록된 네이티브 앱 키 분리 적용
-    const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11"; 
-    const KAKAO_NATIVE_KEY = "d048b59aa93cf8d4fb1c1bd9e63b6861"; // 🌟 방금 디벨로퍼스에 패키지/키해시를 등록한 네이티브 키
+    const encodedName = encodeURIComponent(cleanName);
+    const KAKAO_NATIVE_KEY = "d048b59aa93cf8d4fb1c1bd9e63b6861";
 
-    // Capacitor 앱(네이티브) 환경인지 정밀 판별
+    // Capacitor 앱(네이티브) 환경 판별
     const isApp = (typeof window.Capacitor !== 'undefined' && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) ||
                   window.location.protocol === 'file:' || 
                   window.location.protocol === 'capacitor:' || 
                   window.location.hostname === 'localhost';
 
     if (!isApp) {
-        // [웹 브라우저 환경] 카카오 공식 SDK 원본 호출
+        // [웹 브라우저 환경] 카카오 공식 SDK 호출
         if (window.Kakao && window.Kakao.isInitialized()) {
             try {
                 window.Kakao.Navi.start({
@@ -87,14 +86,14 @@ export function openKakaoNaviDirect(lat, lng, name) {
     }
 
     // =========================================================
-    // 🌟 [앱(APK) 환경] 카카오내비 다이렉트 스킴 호출
+    // 🌟 [앱(APK) 환경] 카카오내비 다이렉트 목적지 연동
     // =========================================================
+    // name, x(경도), y(위도), coord_type(wgs84)을 최상위 쿼리로 직접 전달해야 카카오내비가 주소를 즉시 인식합니다.
     const paramObj = {
         destination: { name: cleanName, x: Number(lng), y: Number(lat) },
         option: { coordType: 'wgs84' }
     };
     
-    // 카카오 디벨로퍼스에 등록된 안드로이드 패키지 정보와 일치시킴
     const extrasObj = {
         KA: "sdk/2.7.2 os/android lang/ko-KR device/android origin/com.deliverypro.app"
     };
@@ -102,8 +101,8 @@ export function openKakaoNaviDirect(lat, lng, name) {
     const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
     const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
     
-    // 🚨 등록된 네이티브 앱 키(KAKAO_NATIVE_KEY)를 전달하여 카카오내비 보안 인증 즉시 통과
-    window.location.href = `kakaonavi://navigate?appkey=${KAKAO_NATIVE_KEY}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    // 🚨 주소/좌표(name, x, y, coord_type)와 보안 인증(appkey, param, extras)을 모두 전달
+    window.location.href = `kakaonavi://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84&appkey=${KAKAO_NATIVE_KEY}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
 }
 
 // ==========================================
