@@ -37,7 +37,7 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // 1. 외부 내비게이션(티맵 / 카카오내비) 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
-    // 🌟 [티맵 100% 원상 복구] 가장 처음에 정상 작동했던 원본 코드로 되돌렸습니다.
+    // 정상 작동 확인된 티맵 원본 호출 방식 유지
     window.location.href = `tmap://route?goalname=${encodeURIComponent(name)}&goalx=${lng}&goaly=${lat}`; 
 }
 
@@ -52,35 +52,16 @@ export function openKakaoNaviDirect(lat, lng, name) {
         .replace(/\s+/g, ' ')
         .trim() || '목적지';
 
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11"; 
+    const encodedName = encodeURIComponent(cleanName);
     
-    // 카카오내비 필수 규격 (좌표 및 옵션)
-    const paramObj = {
-        destination: {
-            name: cleanName,
-            x: Number(lng),
-            y: Number(lat)
-        },
-        option: {
-            coordType: 'wgs84'
-        }
-    };
-
-    // '유효하지 않은 URI' 에러 방지용 출처(Origin) 인증 헤더
-    const extrasObj = {
-        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
-    };
-
-    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
-    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
-    
-    // 🌟 [핵심] 티맵이 작동하는 원본 방식과 똑같이 'kakaonavi://' 스킴을 직접 호출합니다.
-    const kakaonaviScheme = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    // 🌟 [핵심 수정] 카카오내비 네이티브 앱이 요구하는 정식 길안내 파라미터 직접 전달
+    // x: 경도(lng), y: 위도(lat), coord_type: wgs84
+    const kakaonaviScheme = `kakaonavi://navigate?name=${encodedName}&x=${lng}&y=${lat}&coord_type=wgs84`;
 
     const isAndroid = /Android/i.test(navigator.userAgent);
 
+    // 안드로이드 앱(APK): 티맵과 동일하게 직접 스킴을 호출하여 목적지 길안내 즉시 실행
     if (isAndroid) {
-        // 안드로이드 앱(APK) 내부에서는 먹통을 유발하던 SDK를 완전히 무시하고 스킴을 다이렉트로 호출
         window.location.href = kakaonaviScheme;
         return;
     }
@@ -100,7 +81,7 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // 폴백 직접 호출
+    // 기타 환경 폴백
     window.location.href = kakaonaviScheme;
 }
 
@@ -126,7 +107,7 @@ async function loadKakaoMapSdk() {
         script.onerror = () => {
             alert("지도 스크립트를 불러오는데 실패했습니다. 네트워크를 확인해주세요.");
             resolve();
-        }
+        };
         document.head.appendChild(script);
     });
 }
