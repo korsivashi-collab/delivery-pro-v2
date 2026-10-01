@@ -10,9 +10,9 @@ import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state } from './state.js';
 
-// 분리된 모듈 임포트
+// 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 임포트)
 import { renderDestinationList } from './ui.js';
-import { openTmap, openKakaoNaviDirect, switchStartSelectViewMode } from './navigation.js';
+import { openTmap, openNaverMap, switchStartSelectViewMode } from './navigation.js';
 
 // 서브 모듈 기능들 가져오기
 import { 
@@ -561,7 +561,8 @@ window.initPhotoCompletion = initPhotoCompletion;
 
 window.editDestinationAddress = editDestinationAddress;
 window.openTmap = openTmap;
-window.openKakaoNaviDirect = openKakaoNaviDirect;
+// 🌟 카카오내비 전역 바인딩을 네이버 내비로 교체
+window.openNaverMap = openNaverMap;
 window.closeStartModal = closeStartModal;
 window.selectStartDest = selectStartDest;
 window.optimizeRoute = optimizeRouteAction;
