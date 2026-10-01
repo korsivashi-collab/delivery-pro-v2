@@ -20,7 +20,6 @@
     
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <script src="https://t1.kakaocdn.net/kakao_js_sdk/2.7.2/kakao.min.js"></script>
     
     <style>
         :root { --vh: 1vh; --app-scale: 1; }
@@ -68,8 +67,7 @@
 
     <script type="module">
         import { initApp } from './js/app.js';
-        const KAKAO_JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11";
-        if (window.Kakao && !window.Kakao.isInitialized()) window.Kakao.init(KAKAO_JS_KEY); 
+        // 카카오내비 SDK 완전 삭제 완료. 앱 실행만 초기화합니다.
         window.onload = () => initApp();
     </script>
 </head>
@@ -308,10 +306,12 @@
 
             <div class="space-y-2 mt-4">
                 <div class="grid grid-cols-2 gap-2">
+                    <!-- Data/Input 액션인 사진전송은 블루톤으로 유지 -->
                     <button onclick="window.triggerPhotoCompletion()" id="btn-photo-comp" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer">
                         <span class="flex items-center gap-1 font-black text-sm"><i class="fa-solid fa-camera"></i> 사진 전송</span>
                         <span id="photo-comp-subtext" class="text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter">관제/일반 모두 사용 가능</span>
                     </button>
+                    <!-- 긍정 액션인 완료는 에메랄드톤 유지 -->
                     <button onclick="window.confirmCompletion(null)" class="bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl shadow-md text-sm active:scale-95 transition flex items-center justify-center gap-1.5">
                         <i class="fa-solid fa-check"></i> 완료 확정
                     </button>
