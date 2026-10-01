@@ -100,49 +100,70 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명 주소 정밀 추출 로직 (9-29 안정 베이스 + 전국 광역 확장)
+// 5. 도로명 주소 정밀 추출 로직 (대원칙 1:1 철저 준수)
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let processedText = text;
 
-        // 🌟 줄바꿈이나 공백으로 분리된 번지수(-숫자) 자동 결합 보정 (예: "19-\n2" -> "19-2")
+        // 🌟 [원칙 2]: 숫자 뒤 -, 공백 뒤 -, 줄바꿈 뒤 숫자 결합 (19- \n 2, 19 - 2, 19 - \n 2 -> 19-2)
         processedText = processedText.replace(/(\d+)\s*[-~ㅡ—–]\s*[\r\n]+[\s\t]*(\d+)/g, '$1-$2');
-        processedText = processedText.replace(/(\d+)[\s\t]*[-~ㅡ—–][\s\t]*(\d+)/g, '$1-$2');
+        processedText = processedText.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2');
 
-        // 단일 행 평탄화
+        // 줄바꿈을 공백으로 평탄화
         let flatText = processedText.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
-        flatText = flatText.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
 
-        // 전국 광역 지자체 패턴 (풀네임 및 축약어 모두 지원)
+        // 평탄화 후 남아있는 공백 분리 번지수 재결합
+        flatText = flatText.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2');
+
+        // 🌟 [원칙 1]: 대한민국 행정구역 인식 시 그 지점부터 뒷부분을 끝까지 읽어옴
         const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
 
-        // [1순위] 9-29 기반 안정적인 전국 정규 주소 패턴
-        // (시/도 + 시/군/구 + 도로명/읍/면/리/동/가 + 번지수)
-        const standardAddressRegex = new RegExp(
-            `(${provincePattern}\\s+(?:[가-힣\\s]+?(?:구|군|시)\\s+)?[가-힣a-zA-Z0-9\\s,\\-\\(\\)]+?(?:로|길|동|읍|면|리|가)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?)`,
-            'g'
-        );
+        const startRegex = new RegExp(`(^|\\s)(${provincePattern}\\b|${provincePattern}\\s)`, 'i');
+        const startMatch = flatText.match(startRegex);
 
-        let matches = [...flatText.matchAll(standardAddressRegex)];
-        if (matches && matches.length > 0) {
-            let bestAddr = matches[0][0].trim();
-            for (let m of matches) {
-                let candidate = m[0].trim();
-                if (candidate.length > bestAddr.length) {
-                    bestAddr = candidate;
-                }
+        let rawAddressBlock = null;
+
+        if (startMatch) {
+            // 행정구역 시작 위치부터 뒷부분 텍스트 추출
+            const startIndex = startMatch.index + (startMatch[1] ? startMatch[1].length : 0);
+            let textFromProvince = flatText.substring(startIndex).trim();
+
+            // 다음 필드 라벨(연락처, 상호, 배송지명 등) 직전까지만 수집
+            const stopLabels = /(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
+            const stopMatch = textFromProvince.search(stopLabels);
+            if (stopMatch !== -1) {
+                rawAddressBlock = textFromProvince.substring(0, stopMatch).trim();
+            } else {
+                rawAddressBlock = textFromProvince.trim();
             }
-            return bestAddr.replace(/[,\s\-~ㅡ—–]+$/, '').trim();
+        } else {
+            // 시/도가 생략된 경우 (예: "천안시 서북구 ...", "성북구 개운사길 ...")
+            const localRegex = /(?:[가-힣]{2,6}(?:시|군|구))\s+[가-힣0-9\s,\-\(\)]+/;
+            const localMatch = flatText.match(localRegex);
+            if (localMatch) {
+                const stopLabels = /(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
+                const stopMatch = localMatch[0].search(stopLabels);
+                rawAddressBlock = (stopMatch !== -1 ? localMatch[0].substring(0, stopMatch) : localMatch[0]).trim();
+            }
         }
 
-        // [2순위] 시/도가 생략되고 바로 '시/군/구'부터 시작하는 주소 보조 탐색
-        const noProvinceRegex = /((?:[가-힣]{2,6}(?:시|군|구))\s+[가-힣0-9\s]+?(?:로|길|동|읍|면|리|가)\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?)/g;
-        let noProvMatches = [...flatText.matchAll(noProvinceRegex)];
-        if (noProvMatches && noProvMatches.length > 0) {
-            return noProvMatches[0][0].trim().replace(/[,\s\-~ㅡ—–]+$/, '');
+        if (!rawAddressBlock) return null;
+
+        // 🌟 [원칙 1-1]: 주소지를 읽어오다가 '('가 인식되면 '('부터 그 뒷부분은 전부 삭제
+        if (rawAddressBlock.includes('(')) {
+            rawAddressBlock = rawAddressBlock.split('(')[0].trim();
         }
+
+        // 번지수 뒤에 잔여 텍스트(층, 호수 등)가 남아있을 경우 도로명과 번지수까지만 정밀 정돈
+        const addrRegex = /^([가-힣a-zA-Z0-9\s]+?(?:대로|로|길|번길|동|읍|면|리|가)\s*(?:산\s*)?\d+(?:-\d+)?(?:번지)?)/;
+        const finalMatch = rawAddressBlock.match(addrRegex);
+        if (finalMatch) {
+            return finalMatch[1].trim().replace(/\s+/g, ' ');
+        }
+
+        return rawAddressBlock.replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
 
     } catch (e) {
         console.error("주소 추출 오류:", e);
