@@ -100,81 +100,50 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명/지번 주소 전국 통합 정밀 추출 로직
+// 5. 도로명 주소 정밀 추출 로직 (9-29 안정 베이스 + 전국 광역 확장)
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let processedText = text;
 
-        // 🌟 [보강 1]: 줄바꿈에 걸친 번지수 하이픈 결합 (예: "19-\n2" 또는 "19 -\r\n 2" -> "19-2")
+        // 🌟 줄바꿈이나 공백으로 분리된 번지수(-숫자) 자동 결합 보정 (예: "19-\n2" -> "19-2")
         processedText = processedText.replace(/(\d+)\s*[-~ㅡ—–]\s*[\r\n]+[\s\t]*(\d+)/g, '$1-$2');
-        
-        // 🌟 [보강 2]: 같은 줄 내에서 공백이 끼어있는 하이픈 결합 (예: "19 - 2" -> "19-2")
         processedText = processedText.replace(/(\d+)[\s\t]*[-~ㅡ—–][\s\t]*(\d+)/g, '$1-$2');
 
-        // 줄바꿈을 공백으로 통합하여 단일 행으로 평탄화
+        // 단일 행 평탄화
         let flatText = processedText.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
-
-        // 🌟 [보강 3]: 평탄화 이후에도 공백 분리된 하이픈 번지수가 남아있는 경우 최종 재결합
         flatText = flatText.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
 
-        // 전국 광역 지자체 패턴 (풀네임 및 축약어 모두 완벽 지원)
+        // 전국 광역 지자체 패턴 (풀네임 및 축약어 모두 지원)
         const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
 
-        // 주소 탐색 중단 라벨 (다음 항목명)
-        const stopPattern = '(?=(?:\\s+(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|품명|비고|메모|박스|수량|운송장)|\\n|$))';
-
-        let targetAddr = null;
-
-        // [1순위] 광역시/도 접두사가 포함된 전국 주소 (도로명 및 지번/읍/면/리/산 번지 모두 지원)
-        const regexLevel1 = new RegExp(
-            `(${provincePattern}\\s+[가-힣0-9\\s]+?(?:로|길|동|읍|면|리)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?(?:\\s*[가-힣a-zA-Z0-9\\-\\s]+?)?)${stopPattern}`,
+        // [1순위] 9-29 기반 안정적인 전국 정규 주소 패턴
+        // (시/도 + 시/군/구 + 도로명/읍/면/리/동/가 + 번지수)
+        const standardAddressRegex = new RegExp(
+            `(${provincePattern}\\s+(?:[가-힣\\s]+?(?:구|군|시)\\s+)?[가-힣a-zA-Z0-9\\s,\\-\\(\\)]+?(?:로|길|동|읍|면|리|가)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?)`,
             'g'
         );
-        let matches = [...flatText.matchAll(regexLevel1)];
+
+        let matches = [...flatText.matchAll(standardAddressRegex)];
         if (matches && matches.length > 0) {
-            targetAddr = matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
-        }
-
-        // [2순위] 시/도가 생략되고 바로 '시/군/구'부터 시작하는 전국 지방 주소 대응 (예: "천안시 서북구 쌍용동 123", "포항시 북구 장량로 45", "김해시 진영읍 ...")
-        if (!targetAddr) {
-            const regexLevel2 = new RegExp(
-                `([가-힣]{2,6}(?:시|군|구)\\s+[가-힣0-9\\s]+?(?:로|길|동|읍|면|리)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?(?:\\s*[가-힣a-zA-Z0-9\\-\\s]+?)?)${stopPattern}`,
-                'g'
-            );
-            let matches2 = [...flatText.matchAll(regexLevel2)];
-            if (matches2 && matches2.length > 0) {
-                targetAddr = matches2[matches2.length - 1][0].trim().replace(/\s+/g, ' ');
+            let bestAddr = matches[0][0].trim();
+            for (let m of matches) {
+                let candidate = m[0].trim();
+                if (candidate.length > bestAddr.length) {
+                    bestAddr = candidate;
+                }
             }
+            return bestAddr.replace(/[,\s\-~ㅡ—–]+$/, '').trim();
         }
 
-        // [3순위] 보조 폴백: 일반 도로명/지번 패턴 탐색
-        if (!targetAddr) {
-            const fallbackRegex = new RegExp(
-                `(${provincePattern}?[가-힣a-zA-Z0-9\\s,\\-\\(\\)]+?(?:로|길|동|읍|면|리)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?)`,
-                'g'
-            );
-            let fbMatches = [...flatText.matchAll(fallbackRegex)];
-            if (fbMatches && fbMatches.length > 0) {
-                targetAddr = fbMatches[fbMatches.length - 1][0].trim().replace(/\s+/g, ' ');
-            }
+        // [2순위] 시/도가 생략되고 바로 '시/군/구'부터 시작하는 주소 보조 탐색
+        const noProvinceRegex = /((?:[가-힣]{2,6}(?:시|군|구))\s+[가-힣0-9\s]+?(?:로|길|동|읍|면|리|가)\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?)/g;
+        let noProvMatches = [...flatText.matchAll(noProvinceRegex)];
+        if (noProvMatches && noProvMatches.length > 0) {
+            return noProvMatches[0][0].trim().replace(/[,\s\-~ㅡ—–]+$/, '');
         }
 
-        if (targetAddr) {
-            // 🌟 [보강 4]: 괄호('(')가 포함된 경우 뒷부분 상세 안전 절삭
-            if (targetAddr.includes('(')) {
-                targetAddr = targetAddr.split('(')[0].trim();
-            }
-
-            // 번지수 하이픈 공백 최종 정리 (예: "19 - 2" -> "19-2")
-            targetAddr = targetAddr.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
-
-            // 끝에 불필요하게 남은 특수기호나 콤마, 하이픈 정리
-            targetAddr = targetAddr.replace(/[,\s\-~ㅡ—–]+$/, '').trim();
-
-            return targetAddr;
-        }
     } catch (e) {
         console.error("주소 추출 오류:", e);
     } 
@@ -189,6 +158,7 @@ export function extractStoreNameLogic(fullText) {
     try {
         let lines = fullText.split(/\n/);
         
+        // 탐색 대상 라벨 키워드
         const anchors = [
             '배송지명(간판명)', 
             '상호(법인명)', 
@@ -200,10 +170,13 @@ export function extractStoreNameLogic(fullText) {
             '법인명'
         ];
         
+        // 수집을 즉시 차단하는 경계선 라벨
         const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|수량|단가|총액|규격|제조사|원산지|단위|합계)/;
+        
+        // 텍스트 분리 기호
         const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
 
-        // [1차 알고리즘] 줄 단위 라벨 우측 탐색
+        // [1차 알고리즘] 줄 단위 라벨 우측 탐색 (표 서식 대응 포함)
         for (let i = 0; i < lines.length; i++) {
             let line = lines[i];
             for (let anchor of anchors) {
@@ -223,6 +196,7 @@ export function extractStoreNameLogic(fullText) {
                         }
                     }
                     
+                    // 같은 줄 우측에 내용이 없을 경우 바로 다음 줄 확인 (세로형 표 대응)
                     if (i + 1 < lines.length) {
                         let nextWords = lines[i + 1].split(breakRegex).filter(w => w.length > 0);
                         for (let w of nextWords) {
