@@ -1,7 +1,7 @@
 // js/app.js
 
 // =================================================================
-// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (모듈화 완료 버전)
+// [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (네이버 내비 완벽 대응)
 // =================================================================
 
 import { calculateOptimizedRoute } from './optimizer.js';
@@ -10,7 +10,7 @@ import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state } from './state.js';
 
-// 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 임포트)
+// 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 연동)
 import { renderDestinationList } from './ui.js';
 import { openTmap, openNaverMap, switchStartSelectViewMode } from './navigation.js';
 
@@ -323,11 +323,25 @@ export function openStartSelectionModal() {
 
     let html = '';
     destinations.forEach(d => {
-        const fmt = d.address;
+        // 상호명 추출 및 주소 정제
+        let storeName = d.storeName ? String(d.storeName).trim() : "";
+        let cleanAddr = (d.address || "").trim();
+        const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
+        if (match) {
+            if (!storeName) storeName = match[1].trim();
+            cleanAddr = match[2].trim();
+        }
+        if (storeName && cleanAddr.startsWith(storeName)) {
+            cleanAddr = cleanAddr.substring(storeName.length).trim();
+        }
+
         html += `
-            <button onclick="window.selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-gray-50 border border-gray-200 p-4 rounded-xl shadow-sm transition flex items-center justify-between mb-2 active:bg-gray-100">
-                <span class="font-bold text-gray-800 text-[14px] break-keep flex-1 pr-2"><i class="fa-solid fa-location-dot text-gray-400 mr-2"></i>${fmt}</span>
-                <i class="fa-solid fa-check text-gray-300"></i>
+            <button onclick="window.selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-slate-50 border border-slate-200 p-3.5 rounded-2xl shadow-xs transition flex items-center justify-between mb-2 active:bg-slate-100">
+                <div class="flex-1 pr-2 min-w-0">
+                    ${storeName ? `<span class="text-blue-600 font-extrabold text-[12px] block mb-0.5 leading-none">🏢 ${storeName}</span>` : ''}
+                    <span class="font-bold text-slate-900 text-[13.5px] break-keep block leading-snug">${cleanAddr}</span>
+                </div>
+                <i class="fa-solid fa-chevron-right text-slate-300 text-xs shrink-0 ml-1"></i>
             </button>
         `;
     });
@@ -561,8 +575,10 @@ window.initPhotoCompletion = initPhotoCompletion;
 
 window.editDestinationAddress = editDestinationAddress;
 window.openTmap = openTmap;
-// 🌟 카카오내비 전역 바인딩을 네이버 내비로 교체
 window.openNaverMap = openNaverMap;
+// 구버전 인라인 HTML 호환용 폴백 바인딩
+window.openKakaoNaviDirect = openNaverMap;
+
 window.closeStartModal = closeStartModal;
 window.selectStartDest = selectStartDest;
 window.optimizeRoute = optimizeRouteAction;

@@ -1,7 +1,7 @@
 // js/ui.js
 
 // =================================================================
-// [배송 동선 PRO] UI 렌더링 및 화면 조작 전담 모듈 (고대비 3-포인트 테마)
+// [배송 동선 PRO] UI 렌더링 및 화면 조작 전담 모듈 (네이버 내비 & 고대비 시인성 테마)
 // =================================================================
 
 import { state } from './state.js';
@@ -107,13 +107,13 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             if (dest.orderNo) li.setAttribute('data-orderno', dest.orderNo);
             li.className = "bg-white p-3 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col gap-2";
             
-            // 번호 뱃지: 출발지는 인디고 플래그, 일반 순번은 정갈한 딥 슬레이트
+            // 번호 뱃지: 출발지는 인디고 깃발, 일반 순번은 딥 슬레이트
             let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
                 `<div class="bg-indigo-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] shadow-xs shrink-0 ring-2 ring-indigo-100"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
                 `<div class="bg-slate-900 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-xs shrink-0">${dest.displayNumber}</div>`;
             
             let customerPhoneStr = sanitizePhoneNumber(dest.phone || ""); 
-            // 글자 크기를 한 단계 낮추고 고정폭(font-mono)으로 뭉침 현상 원천 차단
+            // 🌟 폰트 크기를 한 단계 낮추고 고정폭(font-mono) 적용으로 자간 여백 확보
             let dynamicTextSize = "text-[10.5px]"; 
             if (customerPhoneStr.length >= 13) dynamicTextSize = "text-[9.5px]"; 
             else if (customerPhoneStr.length >= 11) dynamicTextSize = "text-[10px]";
@@ -166,14 +166,14 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                 
                 <div class="flex flex-col gap-1.5 mt-0.5 pt-2 border-t border-slate-100">
                     <div class="flex gap-1.5 h-[40px]">
-                        <!-- 전화: 쾌적한 가독성 확보(font-mono), 눈이 편안한 소프트 에메랄드 -->
+                        <!-- 전화: 가독성 확보(font-mono, 폰트사이즈 최적화), 편안한 소프트 에메랄드 -->
                         ${customerPhoneStr ? `<a href="tel:${customerPhoneStr}" class="flex-none w-[104px] bg-emerald-50 text-emerald-900 border border-emerald-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-emerald-100 transition px-1 phone-number-box"><i class="fa-solid fa-phone mr-1 text-[10px] text-emerald-600 shrink-0"></i><span class="${dynamicTextSize} font-bold font-mono tracking-tight whitespace-nowrap">${customerPhoneStr}</span></a>` : `<div class="flex-none w-[104px] bg-slate-50 text-slate-400 border border-slate-200 rounded-xl shadow-2xs flex items-center justify-center px-1"><i class="fa-solid fa-phone-slash mr-1 text-[10px] shrink-0"></i><span class="text-[9.5px] font-bold whitespace-nowrap">번호 없음</span></div>`}
                         
-                        <!-- 문자 / 메모: 단정하고 일체감 있는 라이트 슬레이트 베이스 -->
+                        <!-- 문자 / 메모: 일체감 있는 라이트 슬레이트 베이스 -->
                         <a href="sms:${customerPhoneStr}" class="flex-1 min-w-0 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-slate-200 transition flex-nowrap ${!customerPhoneStr ? 'opacity-30 pointer-events-none' : ''}"><i class="fa-solid fa-comment-sms text-[12px] text-sky-600 shrink-0"></i><span class="text-[12px] font-bold whitespace-nowrap tracking-tight">문자</span></a>
                         <button onclick="openMemoModal(${dest.id})" class="flex-1 min-w-0 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-slate-200 transition flex-nowrap"><i class="fa-solid fa-pen-to-square text-[12px] text-amber-500 shrink-0"></i><span class="text-[12px] font-bold whitespace-nowrap tracking-tight">메모</span></button>
                         
-                        <!-- 완료: 0.1초 만에 터치해야 하는 핵심 주동작 버튼 (솔리드 블루) -->
+                        <!-- 완료: 즉각적인 반응을 돕는 솔리드 블루 -->
                         <button onclick="completeDestination(${dest.id})" class="flex-1 min-w-0 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs flex items-center justify-center gap-1 active:bg-blue-800 transition flex-nowrap"><i class="fa-solid fa-check text-[13px] shrink-0"></i><span class="text-[12px] font-black whitespace-nowrap tracking-tight">완료</span></button>
                     </div>
                     <div class="flex gap-1.5 h-[36px]">
@@ -182,10 +182,11 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                             <div class="w-px h-3.5 bg-slate-200 shrink-0"></div>
                             <div class="flex-1 grid grid-cols-2 gap-1 h-full">
                                 <button onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-slate-900 text-white text-[11px] font-bold rounded-lg active:bg-black flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-map-location-dot text-[10px] shrink-0"></i> 티맵</button>
-                                <button onclick="openKakaoNaviDirect(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#FEE500] text-[#191919] text-[11px] font-bold rounded-lg border border-yellow-400 active:bg-yellow-400 flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 카카오</button>
+                                <!-- 🌟 카카오내비 완전 대체: 네이버 내비게이션 버튼 연동 -->
+                                <button onclick="openNaverMap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#03C75A] hover:bg-[#02B351] text-white text-[11px] font-bold rounded-lg border border-[#02B351] active:bg-[#029b46] flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 네이버</button>
                             </div>
                         </div>
-                        <!-- 취소/삭제: 은은한 소프트 로즈 -->
+                        <!-- 취소/삭제: 경고성 소프트 로즈 -->
                         <button onclick="cancelDestination(${dest.id})" class="w-[42px] shrink-0 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-rose-100 transition" title="배송 취소"><i class="fa-solid fa-trash-can text-[13px] shrink-0"></i></button>
                     </div>
                 </div>`;
