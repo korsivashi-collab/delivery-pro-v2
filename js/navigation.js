@@ -88,28 +88,12 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // 🌟 2. 앱(APK) 환경: 검증된 kakaonavi:// 스킴 복귀 + 좌표계 규격(coord_type) 정밀 교정
+    // 🌟 2. 앱(APK) 환경: 카카오내비 표준 쿼리스트링 스킴 적용 (주소/좌표 누락 방지)
     const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11";
+    const encodedName = encodeURIComponent(cleanName);
 
-    const paramObj = {
-        destination: {
-            name: cleanName,
-            x: targetLng,
-            y: targetLat
-        },
-        option: {
-            coord_type: "wgs84" // 🚨 카카오내비 내부 규격인 snake_case로 적용 (좌표 무효화 방지)
-        }
-    };
-
-    const extrasObj = {
-        KA: "sdk/2.7.2 os/javascript lang/ko-KR device/android origin/https://deliverypro.app"
-    };
-
-    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
-    const encodedExtras = encodeURIComponent(JSON.stringify(extrasObj));
-
-    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&apiver=1.0&param=${encodedParam}&extras=${encodedExtras}`;
+    // 표준 내비게이션 스킴으로 목적지 명칭과 좌표(경도, 위도)를 직접 전달
+    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&name=${encodedName}&x=${targetLng}&y=${targetLat}&coord_type=wgs84`;
 }
 
 // 🌟 예비용 네이버 지도/내비 다이렉트 연동 함수 (티맵처럼 키/해시 인증 불필요)
