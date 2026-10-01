@@ -100,7 +100,7 @@ export function extractPhoneLogic(text) {
 }
 
 // ==========================================
-// 5. 도로명 주소 정밀 추출 로직 (줄바꿈 번지 연계 3중 보강 + 안전 괄호 절삭)
+// 5. 도로명/지번 주소 전국 통합 정밀 추출 로직
 // ==========================================
 export function extractAddressLogic(text) {
     if (!text || typeof text !== 'string') return null;
@@ -119,16 +119,42 @@ export function extractAddressLogic(text) {
         // 🌟 [보강 3]: 평탄화 이후에도 공백 분리된 하이픈 번지수가 남아있는 경우 최종 재결합
         flatText = flatText.replace(/(\d+)\s*-\s*(\d+)/g, '$1-$2');
 
-        // 시/도 접두사 패턴 기반 정밀 주소 추출
-        let regionPrefixedRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|도|특별자치도|시)?\s+[가-힣\s]+(?:구|군|시)\s+[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?[\s\S]*?)(?=(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|\n|$))/g;
-        let matches = [...flatText.matchAll(regionPrefixedRegex)];
-        
+        // 전국 광역 지자체 패턴 (풀네임 및 축약어 모두 완벽 지원)
+        const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
+
+        // 주소 탐색 중단 라벨 (다음 항목명)
+        const stopPattern = '(?=(?:\\s+(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|품명|비고|메모|박스|수량|운송장)|\\n|$))';
+
         let targetAddr = null;
+
+        // [1순위] 광역시/도 접두사가 포함된 전국 주소 (도로명 및 지번/읍/면/리/산 번지 모두 지원)
+        const regexLevel1 = new RegExp(
+            `(${provincePattern}\\s+[가-힣0-9\\s]+?(?:로|길|동|읍|면|리)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?(?:\\s*[가-힣a-zA-Z0-9\\-\\s]+?)?)${stopPattern}`,
+            'g'
+        );
+        let matches = [...flatText.matchAll(regexLevel1)];
         if (matches && matches.length > 0) {
             targetAddr = matches[matches.length - 1][0].trim().replace(/\s+/g, ' ');
-        } else {
-            // 보조: 도로명 패턴으로 재탐색
-            let fallbackRegex = /((?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[가-힣a-zA-Z0-9\s,\-\(\)]+(?:로|길|동|읍|면|리)\s*\d+(?:-\d+)?)/g;
+        }
+
+        // [2순위] 시/도가 생략되고 바로 '시/군/구'부터 시작하는 전국 지방 주소 대응 (예: "천안시 서북구 쌍용동 123", "포항시 북구 장량로 45", "김해시 진영읍 ...")
+        if (!targetAddr) {
+            const regexLevel2 = new RegExp(
+                `([가-힣]{2,6}(?:시|군|구)\\s+[가-힣0-9\\s]+?(?:로|길|동|읍|면|리)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?(?:\\s*[가-힣a-zA-Z0-9\\-\\s]+?)?)${stopPattern}`,
+                'g'
+            );
+            let matches2 = [...flatText.matchAll(regexLevel2)];
+            if (matches2 && matches2.length > 0) {
+                targetAddr = matches2[matches2.length - 1][0].trim().replace(/\s+/g, ' ');
+            }
+        }
+
+        // [3순위] 보조 폴백: 일반 도로명/지번 패턴 탐색
+        if (!targetAddr) {
+            const fallbackRegex = new RegExp(
+                `(${provincePattern}?[가-힣a-zA-Z0-9\\s,\\-\\(\\)]+?(?:로|길|동|읍|면|리)\\s*(?:산\\s*)?\\d+(?:-\\d+)?(?:번지)?)`,
+                'g'
+            );
             let fbMatches = [...flatText.matchAll(fallbackRegex)];
             if (fbMatches && fbMatches.length > 0) {
                 targetAddr = fbMatches[fbMatches.length - 1][0].trim().replace(/\s+/g, ' ');
@@ -136,7 +162,7 @@ export function extractAddressLogic(text) {
         }
 
         if (targetAddr) {
-            // 🌟 [보강 4]: 번지수(-숫자) 결합이 완전히 끝난 후, 뒤따라오는 '(' 괄호부터 뒷부분만 안전 절삭
+            // 🌟 [보강 4]: 괄호('(')가 포함된 경우 뒷부분 상세 안전 절삭
             if (targetAddr.includes('(')) {
                 targetAddr = targetAddr.split('(')[0].trim();
             }
