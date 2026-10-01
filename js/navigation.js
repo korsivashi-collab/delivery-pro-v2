@@ -43,7 +43,6 @@ export function openTmap(lat, lng, name) {
     }
 
     const encodedName = encodeURIComponent(name);
-    // [앱 버전 티맵] 정상 작동 순수 스킴 다이렉트 호출
     window.location.href = `tmap://route?goalname=${encodedName}&goalx=${lng}&goaly=${lat}`; 
 }
 
@@ -67,10 +66,17 @@ export function openKakaoNaviDirect(lat, lng, name) {
                   window.location.hostname === 'localhost' ||
                   window.location.hostname === '127.0.0.1';
 
-    // 🌟 1. 웹 브라우저 환경: 카카오 공식 JS SDK 활용
+    // 🚨 [중요 확인 사항] 카카오 디벨로퍼스 콘솔의 '요약 정보' 탭에서 확인!
+    const JS_KEY = "893c5c6ec8613974d84fa75fd6d0be11"; // JavaScript 키 (웹 브라우저용)
+    
+    // 👇 만약 893c5c6ec8613974d84fa75fd6d0be11 이 'JavaScript 키'라면, 
+    // 아래 변수에는 반드시 콘솔에 있는 "네이티브 앱 키"를 복사해서 넣어주셔야 합니다!!
+    const NATIVE_APP_KEY = "893c5c6ec8613974d84fa75fd6d0be11"; 
+
+    // [웹 환경] 카카오 공식 JS SDK 활용
     if (!isApp && window.Kakao) {
         if (!window.Kakao.isInitialized()) {
-            window.Kakao.init("893c5c6ec8613974d84fa75fd6d0be11");
+            window.Kakao.init(JS_KEY);
         }
 
         if (window.Kakao.Navi && typeof window.Kakao.Navi.start === 'function') {
@@ -88,15 +94,26 @@ export function openKakaoNaviDirect(lat, lng, name) {
         }
     }
 
-    // 🌟 2. 앱(APK) 환경: 카카오내비 표준 쿼리스트링 스킴 적용 (주소/좌표 누락 방지)
-    const kakaoKey = "893c5c6ec8613974d84fa75fd6d0be11";
-    const encodedName = encodeURIComponent(cleanName);
+    // [앱(APK) 환경] 카카오내비 전용 JSON 파라미터 및 안드로이드 공식 Intent 규격 적용
+    const paramObj = {
+        destination: {
+            name: cleanName,
+            x: targetLng,
+            y: targetLat
+        },
+        option: {
+            coord_type: "wgs84"
+        }
+    };
 
-    // 표준 내비게이션 스킴으로 목적지 명칭과 좌표(경도, 위도)를 직접 전달
-    window.location.href = `kakaonavi://navigate?appkey=${kakaoKey}&name=${encodedName}&x=${targetLng}&y=${targetLat}&coord_type=wgs84`;
+    const encodedParam = encodeURIComponent(JSON.stringify(paramObj));
+    
+    // 안드로이드 Intent 스킴 (앱 간 데이터 전달의 가장 안정적인 방식)
+    const intentUrl = `intent://navigate?appkey=${NATIVE_APP_KEY}&apiver=1.0&param=${encodedParam}#Intent;scheme=kakaonavi;package=com.locnall.KimGiSa;end;`;
+
+    window.location.href = intentUrl;
 }
 
-// 🌟 예비용 네이버 지도/내비 다이렉트 연동 함수 (티맵처럼 키/해시 인증 불필요)
 export function openNaverMap(lat, lng, name) {
     if (!lat || !lng) {
         alert("목적지 좌표가 유효하지 않습니다.");
