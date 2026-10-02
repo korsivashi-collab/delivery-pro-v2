@@ -108,7 +108,7 @@ export function extractPhoneLogic(text) {
 // ==========================================
 function extractAddressByLayout(pages) {
     const delivery = [];
-    let classified = false;
+    const supplier = [];
     const center = item => (item.box.top + item.box.bottom) / 2;
     const union = parts => ({ left: Math.min(...parts.map(item => item.box.left)), right: Math.max(...parts.map(item => item.box.right)), top: Math.min(...parts.map(item => item.box.top)), bottom: Math.max(...parts.map(item => item.box.bottom)) });
     for (const page of Array.isArray(pages) ? pages : []) {
@@ -176,20 +176,21 @@ function extractAddressByLayout(pages) {
                 return (sameRow || below) && x >= label.box.left - 2 * height && (!rightColumn || x < rightColumn.box.left - 0.5 * height);
             }).map(label => ({ label, distance: Math.max(0, cell.box.top - label.box.bottom) / height + Math.abs(cell.box.left - label.box.left) / height * 0.25 })).sort((a, b) => a.distance - b.distance);
             if (!applicable.length) continue;
-            classified = true;
-            if (applicable[1] && applicable[0].label.role !== applicable[1].label.role && applicable[1].distance - applicable[0].distance < 1) continue;
+            const rival = applicable.find(item => item.label.role !== applicable[0].label.role);
+            if (rival && rival.distance - applicable[0].distance < 1) continue;
             if (applicable[0].label.role === 'delivery') delivery.push(address);
+            else supplier.push(address);
         }
     }
     const unique = [...new Set(delivery)];
-    return { handled: classified, address: unique.length === 1 ? unique[0] : null };
+    return { address: unique.length === 1 ? unique[0] : null, supplier: [...new Set(supplier)].filter(address => !delivery.includes(address)) };
 }
 
 export function extractAddressLogic(text, pages = []) {
     if (!text || typeof text !== 'string') return null;
     try {
         const layout = extractAddressByLayout(pages);
-        if (layout.handled) return layout.address;
+        if (layout.address) return layout.address;
         let processedText = text;
 
         // [원칙 2] 줄바꿈 및 공백에 걸친 번지수 결합 (19-\n2, 19 - 2, 19 - \n 2 -> 19-2)
@@ -211,9 +212,20 @@ export function extractAddressLogic(text, pages = []) {
         const stopLabels = /(?:\s+)(?:배\s*송\s*지|수\s*령\s*지|납\s*품\s*처|발\s*송\s*지|본\s*사|간판명|상\s*호|업체명|성\s*명|대표자|담당자|사업자번호|등록번호|업태|종목|연락처|전화|010|받는\s*분|수령인|구매자|고객명|공\s*급|금액|수량|단가|총액|품명|비고|메모|박스)/;
         const labelRegex = /공\s*급\s*받\s*는\s*자|배\s*송\s*지|수\s*령\s*지|받는\s*분|납\s*품\s*처|공\s*급\s*자|발\s*송\s*지|본\s*사/g;
         const labels = [...flatText.matchAll(labelRegex)];
-        let bestAddress = null;
-        let bestScore = -Infinity;
-        const deliveryCandidates = new Set();
+        // HEAD의 행정구역 생략형 도로명/지번 후보 경로를 복원.
+        const shortAddressRegex = /[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?/g;
+        const shortMatches = [...flatText.matchAll(shortAddressRegex)];
+        for (const match of shortMatches) {
+            const preceding = starts.filter(start => start <= match.index).pop();
+            const prefix = preceding === undefined ? '' : flatText.substring(preceding, match.index);
+            const hasEarlierAddress = shortMatches.some(other => other.index >= preceding && other.index < match.index);
+            if (preceding === undefined || prefix.search(stopLabels) !== -1 || hasEarlierAddress) starts.push(match.index);
+        }
+        starts.sort((a, b) => a - b);
+        // 상세주소 차이와 OCR 공백 차이에도 같은 기본 주소의 공급자 판정을 유지.
+        const addressKey = address => (address.match(shortAddressRegex) || []).join(' ').replace(/\s/g, '');
+        const supplierKeys = new Set(layout.supplier.map(addressKey).filter(Boolean));
+        const candidates = new Map();
 
         for (let i = 0; i < starts.length; i++) {
             const start = starts[i];
@@ -222,7 +234,7 @@ export function extractAddressLogic(text, pages = []) {
             if (stopIndex !== -1) address = address.substring(0, stopIndex).trim();
             // 기존 괄호 절삭 및 공백/특수문자 정돈 유지
             address = address.split('(')[0].replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
-            if (!address) continue;
+            if (!address || !addressKey(address)) continue;
 
             // 선행 역할 필드는 다음 역할 라벨이 나타날 때까지 유지.
             const nearbyLabels = labels.filter(label => label.index + label[0].length <= start);
@@ -231,15 +243,12 @@ export function extractAddressLogic(text, pages = []) {
             if (nearestLabel) {
                 score = /^(?:공급받는자|배송지|수령지|받는분|납품처)$/.test(nearestLabel[0].replace(/\s/g, '')) ? 100 : -100;
             }
-            if (score !== 100) continue;
-            deliveryCandidates.add(address);
-            // 서로 다른 배송지 후보가 여러 개면 아래에서 자동 확정을 보류.
-            if (score > bestScore) {
-                bestScore = score;
-                bestAddress = address;
-            }
+            if (score < 0 || supplierKeys.has(addressKey(address))) continue;
+            candidates.set(address, Math.max(score, candidates.get(address) ?? -Infinity));
         }
-        return deliveryCandidates.size === 1 ? bestAddress : null;
+        const bestScore = Math.max(...candidates.values());
+        const best = [...candidates].filter(([, score]) => score === bestScore);
+        return best.length === 1 ? best[0][0] : null;
 
     } catch (e) {
         console.error("주소 추출 오류:", e);
