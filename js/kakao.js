@@ -1,4 +1,4 @@
-import { isStoreNameAddressText } from './utils.js';
+import { isStoreNameAddressText, logStoreNameDiagnostic } from './utils.js';
 
 // js/kakao.js
 
@@ -207,7 +207,8 @@ function getLevenshteinDistance(s1, s2) {
 // 5. 1단계: 순서 동일률 기반 상호 매칭 (2글자 상호 100% 필수, 3글자 이상 50% 허용)
 // ==========================================
 export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, addressStr = '') {
-    if (!rawOCRText || !places || !places.length) return null;
+    logStoreNameDiagnostic('카카오 입력 후보', { places, threshold, addressStr });
+    if (!rawOCRText || !places || !places.length) { logStoreNameDiagnostic('카카오 선택 결과', { selected: null, reason: 'OCR 원문 또는 카카오 후보 없음' }); return null; }
     const clean = value => value.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
     const addressKey = clean(addressStr);
     const evidence = [];
@@ -236,17 +237,19 @@ export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, address
         const normalized = clean(nameText);
         if (normalized.length >= 2 && /[A-Za-z가-힣]/.test(normalized)) evidence.push(normalized);
     }
-    if (!evidence.length) return null;
+    logStoreNameDiagnostic('카카오 매칭 근거', { evidence });
+    if (!evidence.length) { logStoreNameDiagnostic('카카오 선택 결과', { selected: null, candidates: places.map(place => ({ place, score: null, reason: '주소 외 OCR 매칭 근거 없음' })) }); return null; }
     const ranked = [];
     for (const place of [...new Set(places)]) {
-        if (isStoreNameAddressText(place)) continue;
+        if (isStoreNameAddressText(place)) { logStoreNameDiagnostic('카카오 후보', { place, score: null, rejected: true, reason: '장소명 자체가 주소 패턴: 점수 계산 전 탈락' }); continue; }
         const fullName = clean(place);
-        if (fullName.length < 2) continue;
+        if (fullName.length < 2) { logStoreNameDiagnostic('카카오 후보', { place, score: null, rejected: true, reason: '정규화 이름 길이 2 미만' }); continue; }
         const core = clean(place.trim().split(/\s+/)[0]);
         let score = 0;
+        const matchEvidence = [];
         for (const text of evidence) {
-            if (text.includes(fullName)) score = Math.max(score, 100);
-            else if (core.length >= 3 && text.includes(core)) score = Math.max(score, 90);
+            if (text.includes(fullName)) { matchEvidence.push({ text, points: 100, reason: '장소명 전체 포함' }); score = Math.max(score, 100); }
+            else if (core.length >= 3 && text.includes(core)) { matchEvidence.push({ text, points: 90, reason: '장소명 첫 단어 포함' }); score = Math.max(score, 90); }
             else if (fullName.length >= 3) {
                 // 전체 문서 연결 문자열 대신 주소를 제외한 개별 줄 안에서만 비교
                 for (let i = 0; i < text.length; i++) {
@@ -254,16 +257,19 @@ export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, address
                         const part = text.slice(i, i + size);
                         if (part.length < 3) continue;
                         const similarity = 100 * (1 - getLevenshteinDistance(fullName, part) / Math.max(fullName.length, part.length));
+                        if (similarity > score) matchEvidence.push({ text, part, points: similarity, reason: '편집거리 유사도 최고값 갱신' });
                         score = Math.max(score, similarity);
                     }
                 }
             }
         }
         if (/상가|아파트|빌딩|타워|센터/.test(place)) score -= 8;
+        logStoreNameDiagnostic('카카오 후보', { place, score, evidence: matchEvidence, buildingPenalty: /상가|아파트|빌딩|타워|센터/.test(place) ? -8 : 0, minimumScore: Math.max(85, threshold), rejected: score < Math.max(85, threshold), reason: score < Math.max(85, threshold) ? '최소 점수 미달' : '최종 순위 비교 대상' });
         if (score >= Math.max(85, threshold)) ranked.push({ place, score });
     }
     ranked.sort((a, b) => b.score - a.score);
-    if (!ranked.length || (ranked[1] && ranked[0].score - ranked[1].score < 10)) return null;
+    if (!ranked.length || (ranked[1] && ranked[0].score - ranked[1].score < 10)) { logStoreNameDiagnostic('카카오 선택 결과', { selected: null, reason: !ranked.length ? '기준점 통과 후보 없음' : '상위 후보 점수 차 10점 미만', ranked }); return null; }
+    logStoreNameDiagnostic('카카오 선택 결과', { selected: ranked[0].place, ranked, eliminated: ranked.slice(1).map(candidate => ({ ...candidate, reason: '선택 후보보다 낮은 점수' })) });
     return ranked[0].place;
 }
 

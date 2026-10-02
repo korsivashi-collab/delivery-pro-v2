@@ -8,7 +8,8 @@ import {
     toBase64_SafeCompress, 
     extractPhoneLogic, 
     extractAddressLogic, 
-    extractStoreNameLogic, 
+    extractStoreNameLogic,
+    logStoreNameDiagnostic, 
     showLoading, 
     hideLoading 
 } from './utils.js';
@@ -336,6 +337,7 @@ export function initCameraScan() {
 
         // 3. 명확한 OCR 상호 우선, 없을 때만 카카오 장소명으로 보완
         let finalStoreName = null;
+        let diagnosticPath = '빈 값';
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
@@ -353,7 +355,9 @@ export function initCameraScan() {
                         if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) isGarbage = true;
                         if (extracted.length < 2 || /^\d+$/.test(extracted)) isGarbage = true;
 
+                        logStoreNameDiagnostic('OCR 후단 검증', { candidate: extracted, rejected: isGarbage, reason: isGarbage ? '성명/수령인 문맥 또는 층수/길이/숫자 필터 해당' : '기존 후단 필터 통과' });
                         if (!isGarbage) finalStoreName = extracted;
+                        if (finalStoreName) diagnosticPath = 'OCR';
                     }
                 }
 
@@ -366,11 +370,15 @@ export function initCameraScan() {
                         finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces, rawOCRText);
                     }
                 }
+                if (finalStoreName && diagnosticPath !== 'OCR') diagnosticPath = '카카오';
             } catch (error) {
+                logStoreNameDiagnostic('선택 과정 오류', { message: error.message });
                 console.error("상호명 매칭 오류:", error);
             }
             hideLoading();
         }
+
+        logStoreNameDiagnostic('최종 결과', { selected: finalStoreName, path: diagnosticPath });
 
         // 4. 배송 목록 추가 및 렌더링 + 관제 센터 서버 동기화
         if (coords) {

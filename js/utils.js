@@ -1,3 +1,12 @@
+// 상호 진단 로그의 유일한 출력 지점. false로 바꾸면 전체 출력을 끔.
+const STORE_NAME_DIAGNOSTICS_ENABLED = true;
+export function logStoreNameDiagnostic(stage, details) {
+    if (!STORE_NAME_DIAGNOSTICS_ENABLED) return;
+    try {
+        console.log('[OCR 상호 진단] ' + stage, JSON.parse(JSON.stringify(details)));
+    } catch (_) { /* 진단 실패가 인식 동작에 영향을 주지 않도록 함 */ }
+}
+
 // js/utils.js
 
 // ==========================================
@@ -166,6 +175,7 @@ export function extractStoreNameLogic(fullText) {
         const stopLabels = /(?:^|[\s|])(?:성명|대표자|사업장|주\s*소|업태|종목|전화|연락처|등록번호|사업자\s*(?:등록)?번호|공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처|받는\s*분|수령인|고객명|금액|수량|단가|총액|규격|제조사|원산지|단위|합계|품명|비고|상\s*호|간판명|업\s*체\s*명|법\s*인\s*명)(?=\s|[:：|\(]|$)/;
         const fieldValues = /\b\d{3}\s*-\s*\d{2}\s*-\s*\d{5}\b|\b0\d{1,3}[\s.-]*\d{3,4}[\s.-]*\d{4}\b|\d[\d,]*\s*(?:원|개|EA|박스|kg)(?=\s|$|[,;|])|\b\d{8,13}\b|\b\d{1,3}(?:,\d{3})+\b/i;
         const candidates = [];
+        logStoreNameDiagnostic('OCR 라벨 주변 원문', { contexts: lines.map((line, index) => ({ line: index + 1, labelLine: line, surroundingText: lines.slice(Math.max(0, index - 1), index + 3).join('\n') })).filter(item => anchor.test(item.labelLine)) });
         let section = '';
 
         for (let i = 0; i < lines.length; i++) {
@@ -189,7 +199,7 @@ export function extractStoreNameLogic(fullText) {
                     const address = isStoreNameAddressText(namePart);
                     const otherField = namePart.match(fieldValues) || namePart.match(/^\d[\d,.\s]*$/);
                     if (address || otherField) {
-                        if (parts.length) break;
+                        if (parts.length) { logStoreNameDiagnostic('OCR 결합 제외', { line: j + 1, text: namePart, reason: address ? '주소 패턴' : '수치 필드' }); break; }
                         contamination += address ? 100 : 60;
                         if (otherField) namePart = namePart.slice(0, otherField.index).trim();
                     }
@@ -200,12 +210,22 @@ export function extractStoreNameLogic(fullText) {
                     if (boundary < part.length || address || otherField) break;
                 }
                 const name = parts.join(' ').replace(/\s+/g, ' ').trim();
-                if (name.length < 2 || !/[A-Za-z가-힣]/.test(name)) continue;
+                if (name.length < 2 || !/[A-Za-z가-힣]/.test(name)) { logStoreNameDiagnostic('OCR 후보', { name, score: null, label: label[0], line: i + 1, parts, rejected: true, reason: '최소 길이 또는 문자 조건 미충족: 점수 계산 전 탈락' }); continue; }
                 let score = 100 - distance * 10 - contamination;
                 if (/배송지명|간판명/.test(label[0]) || /공급받는|배송지|수령지|납품처/.test(currentSection)) score += 15;
                 if (/^(?:공급자|발송지|본사)$/.test(currentSection)) score -= 80;
                 if (/상가|아파트|빌딩|타워|센터/.test(name)) score -= 8;
                 if (/^(?:주식회사|유한회사|법인명|\(주\)|㈜)$/.test(name) || /^(?:지하|지상)?\s*B?\d+\s*층$/i.test(name)) score -= 100;
+                logStoreNameDiagnostic('OCR 후보', { name, score, label: label[0], line: i + 1, parts, section: currentSection,
+                    adjustments: [
+                        { reason: '상호 라벨 기본점수', points: 100 },
+                        { reason: '라벨과 첫 후보 줄 거리', points: -distance * 10 },
+                        { reason: '주소 또는 수치 혼입', points: -contamination },
+                        { reason: '배송처 문맥 또는 간판 라벨', points: /배송지명|간판명/.test(label[0]) || /공급받는|배송지|수령지|납품처/.test(currentSection) ? 15 : 0 },
+                        { reason: '공급자/발송지/본사 문맥', points: /^(?:공급자|발송지|본사)$/.test(currentSection) ? -80 : 0 },
+                        { reason: '건물명 관련 단어 의심', points: /상가|아파트|빌딩|타워|센터/.test(name) ? -8 : 0 },
+                        { reason: '법인 접두사만 존재하거나 층수', points: /^(?:주식회사|유한회사|법인명|\(주\)|㈜)$/.test(name) || /^(?:지하|지상)?\s*B?\d+\s*층$/i.test(name) ? -100 : 0 }
+                    ], rejected: score < 75, reason: score < 75 ? 'OCR 신뢰도 기준 75점 미만' : '최종 순위 비교 대상' });
                 candidates.push({ name, score });
             }
             if (sections.length) section = sections[sections.length - 1][0];
@@ -213,8 +233,10 @@ export function extractStoreNameLogic(fullText) {
         const ranked = [...new Set(candidates.map(candidate => candidate.name))]
             .map(name => ({ name, score: Math.max(...candidates.filter(candidate => candidate.name === name).map(candidate => candidate.score)) }))
             .sort((a, b) => b.score - a.score);
-        if (!ranked.length || ranked[0].score < 75) return null;
-        if (ranked[1] && ranked[0].score - ranked[1].score < 10) return null;
+        logStoreNameDiagnostic('OCR 전체 후보와 순위', { candidates, ranked, minimumScore: 75, minimumMargin: 10 });
+        if (!ranked.length || ranked[0].score < 75) { logStoreNameDiagnostic('OCR 선택 결과', { selected: null, reason: !ranked.length ? '유효 후보 없음' : '최고 점수 75점 미만', ranked }); return null; }
+        if (ranked[1] && ranked[0].score - ranked[1].score < 10) { logStoreNameDiagnostic('OCR 선택 결과', { selected: null, reason: '상위 후보 점수 차 10점 미만', ranked }); return null; }
+        logStoreNameDiagnostic('OCR 선택 결과', { selected: ranked[0].name, ranked, eliminated: ranked.slice(1).map(candidate => ({ ...candidate, reason: '선택 후보보다 낮은 점수' })) });
         return ranked[0].name;
     } catch (e) {
         console.error("상호 추출 오류:", e);
