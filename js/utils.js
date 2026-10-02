@@ -341,19 +341,16 @@ export function extractStoreNameByLayout(pages = []) {
             const rightLimit = nextLabel ? nextLabel.box.left : 1;
             if (label.type === 'store') {
                 const glyphHeight = median(label.items.map(item => item.box.bottom - item.box.top));
-                const top = label.box.top - 0.5 * glyphHeight;
-                let localRight = items.filter(item => !labelItems.has(item) && item.box.left >= label.box.right &&
-                    overlapY(item.box, label.box) >= 0.5 &&
-                    Math.abs(center(item) - center(label)) <= 0.75 * Math.max(glyphHeight, item.box.bottom - item.box.top))
-                    .sort((a, b) => a.box.left - b.box.left);
-                if (!localRight.length) {
-                    const belowRow = rows.find(row => row.box.top >= label.box.bottom && row.box.top - label.box.bottom <= 2 * glyphHeight &&
-                        row.items.some(item => !labelItems.has(item) && item.box.left >= label.box.right && item.box.left - label.box.right <= glyphHeight));
-                    if (belowRow) localRight = belowRow.items.filter(item => !labelItems.has(item) && item.box.left >= label.box.right);
-                }
-                // 우측 필드가 없으면 가까운 첫 값 묶음의 폭만 사용. 페이지 끝까지 확장하지 않음.
-                const localGroup = localRight.length && localRight[0].box.left - label.box.right <= 6 * glyphHeight ? adjacentItems(localRight, glyphHeight) : [];
-                const right = nextLabel ? nextLabel.box.left : localGroup.length ? union(localGroup).right : label.box.right;
+                // 우측 경계의 근거는 주변 필드 라벨만 사용. 근거가 없으면 텍스트 fallback.
+                const columnLabel = labels.filter(other => other !== label && other.box.left > label.box.right &&
+                    other.box.top >= label.box.bottom && other.box.top - label.box.bottom <= 3.5 * glyphHeight)
+                    .sort((a, b) => a.box.left - b.box.left || a.box.top - b.box.top)[0];
+                const rightBoundary = nextLabel || columnLabel;
+                const right = rightBoundary ? rightBoundary.box.left : label.box.right;
+                const fieldGlyphs = items.filter(item => /[A-Za-z가-힣]/.test(item.text) && item.box.left >= label.box.left &&
+                    item.box.left < right && Math.abs(center(item) - label.row.center) <= 1.5 * glyphHeight && !isStoreNameAddressText(item.text));
+                const generalHeight = fieldGlyphs.length ? median(fieldGlyphs.map(item => item.box.bottom - item.box.top)) : label.row.height;
+                const top = label.row.center - 1.5 * generalHeight;
                 const bottomLimit = label.box.bottom + 3.5 * glyphHeight;
                 const lowerFields = labels.filter(other => other !== label && other.box.top >= label.box.bottom &&
                     other.box.top < bottomLimit && other.box.left < right &&
@@ -364,18 +361,35 @@ export function extractStoreNameByLayout(pages = []) {
                     .filter(entry => entry.tokens.length && isStoreNameAddressText(entry.tokens.map(item => item.text).join(' ')))
                     .map(entry => ({ top: Math.min(...entry.tokens.map(item => item.box.top)), reason: '기존 주소 판정으로 확인된 줄' }));
                 const lowerBoundary = [...lowerFields, ...addressRows].sort((a, b) => a.top - b.top)[0];
+                const addressItems = new Set(rows.filter(row => row.box.top >= label.box.top + 0.5 * glyphHeight && row.box.top < bottomLimit &&
+                    isStoreNameAddressText(row.items.filter(item => item.box.right > label.box.right && item.box.left < right).map(item => item.text).join(' ')))
+                    .flatMap(row => row.items));
                 const region = { left: label.box.right, right, top, bottom: lowerBoundary ? lowerBoundary.top : bottomLimit };
-                const regionReason = item => item.box.left < region.left ? '상호 영역 왼쪽 밖' : item.box.right > region.right ? '상호 영역 오른쪽 밖' :
-                    item.box.top < region.top ? '상호 영역 위쪽 밖' : item.box.bottom > region.bottom ? '상호 영역 아래쪽 밖' : null;
+                const containment = item => {
+                    const width = Math.max(0, Math.min(item.box.right, region.right) - Math.max(item.box.left, region.left));
+                    const vertical = Math.max(0, Math.min(item.box.bottom, region.bottom) - Math.max(item.box.top, region.top));
+                    return width * vertical / ((item.box.right - item.box.left) * (item.box.bottom - item.box.top));
+                };
+                const regionReason = item => {
+                    const x = (item.box.left + item.box.right) / 2;
+                    const y = center(item);
+                    if (!rightBoundary) return '우측 필드 경계 불명확: 텍스트 fallback';
+                    if (addressItems.has(item)) return '기존 주소 판정으로 확인된 줄: 경계 완화 대상 아님';
+                    if (x < region.left) return '상호 영역 왼쪽 밖';
+                    if (x >= region.right) return '상호 영역 오른쪽 밖';
+                    if (y < region.top) return '상호 영역 위쪽 밖';
+                    if (y >= region.bottom) return '상호 영역 아래쪽 밖';
+                    return containment(item) >= 0.7 ? null : '상호 영역 포함 비율 70% 미만';
+                };
                 const nearby = items.filter(item => item.box.right >= label.box.left && item.box.left <= rightLimit &&
                     item.box.bottom >= top && item.box.top <= bottomLimit);
                 const inside = nearby.filter(item => !labelItems.has(item) && !regionReason(item));
                 if (trace) {
                     trace.rightLimit = rightLimit;
                     trace.region = region;
-                    trace.boundaries = { left: '복합 라벨 오른쪽 끝', right: nextLabel ? { reason: '같은 필드 행의 다음 라벨', label: nextLabel.text } : '다음 라벨 없음: 인접한 첫 값 묶음 폭',
-                        top: '라벨 상단 - 글자 높이 중앙값의 0.5배', bottom: lowerBoundary || { reason: '하단 경계 불명확: 라벨 하단 + 글자 높이 중앙값의 3.5배' } };
-                    trace.regionTokens = nearby.map(item => ({ text: item.text, box: item.box, inside: !labelItems.has(item) && !regionReason(item), reason: labelItems.has(item) ? '라벨 구성 토큰' : regionReason(item) || '상호 영역 안' }));
+                    trace.boundaries = { left: '복합 라벨 오른쪽 끝', right: rightBoundary ? { reason: nextLabel ? '같은 필드 행의 다음 라벨' : '인접한 아래 행의 오른쪽 필드 열', label: rightBoundary.text } : '우측 필드 경계 불명확: 텍스트 fallback',
+                        top: { reason: '같은 필드 행 중심선 - 일반 글자 높이 중앙값의 1.5배', center: label.row.center, generalHeight }, bottom: lowerBoundary || { reason: '하단 경계 불명확: 라벨 하단 + 글자 높이 중앙값의 3.5배' } };
+                    trace.regionTokens = nearby.map(item => ({ text: item.text, box: item.box, containment: containment(item), inside: !labelItems.has(item) && !regionReason(item), reason: labelItems.has(item) ? '라벨 구성 토큰' : regionReason(item) || '중심점과 포함 비율 통과' }));
                     trace.regionTokens.forEach((entry, index) => { if (!entry.inside) trace.excluded.push({ token: nearby[index], reason: entry.reason }); });
                 }
                 const sameBand = inside.filter(item => overlapY(item.box, label.box) >= 0.5 &&
