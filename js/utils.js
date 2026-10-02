@@ -292,90 +292,79 @@ export function extractStoreNameFromAddressSuffix(fullText) {
 // 9. 2D 좌표 기반 상호 추출 엔진 (범용 회전/상대위치 탐색)
 // ==========================================
 export function extractStoreNameByLayout(pages = []) {
-    const candidates = [];
-    const excludedTextSegments = [];
-
-    const storeLabelRegex = /^(?:배송지명(?:간판명|\(간판명\))?|간판명|상\s*호(?:\(법인명\)|명)?|법\s*인\s*명|업\s*체\s*명|거래처명|가맹점명|매장명)$/;
-    const stopLabelRegex = /^(?:성명|대표자|대표|담당자|주소|사업장|전화|연락처|등록번호|사업자번호|금액|수량|단가|총액|공급자|출하처)$/;
-
-    for (const page of (Array.isArray(pages) ? pages : [])) {
-        const tokens = (page.tokens?.length ? page.tokens : page.lines || []).filter(item => 
-            item.text?.trim() && item.box && Object.values(item.box).every(Number.isFinite)
-        );
-
+    const candidates = [], excludedTextSegments = [], cells = [];
+    const compact = text => text.replace(/[\s:：=|()（）]/g, '');
+    const fieldType = text => {
+        if (/^(?:배송지명(?:간판명)?|상호(?:법인명|명)?|법인명|업체명|매장명|간판명|거래처명|가맹점명)$/.test(text)) return 'store';
+        if (/^(?:주소|사업장주소|배송주소)$/.test(text)) return 'address';
+        if (/^(?:연락처|전화|전화번호)$/.test(text)) return 'phone';
+        if (/^(?:성명|대표자|담당자|등록번호|사업자등록번호|업태|종목|금액|수량|단가|총액|공급자|공급받는자)$/.test(text)) return 'other';
+        return null;
+    };
+    const union = parts => ({ left: Math.min(...parts.map(t => t.box.left)), right: Math.max(...parts.map(t => t.box.right)), top: Math.min(...parts.map(t => t.box.top)), bottom: Math.max(...parts.map(t => t.box.bottom)) });
+    const center = t => (t.box.top + t.box.bottom) / 2;
+    for (const page of Array.isArray(pages) ? pages : []) {
+        const tokens = (page.tokens?.length ? page.tokens : page.lines || []).filter(t => t?.text?.trim() && t.box && Object.values(t.box).every(Number.isFinite) && t.box.right > t.box.left && t.box.bottom > t.box.top);
         if (!tokens.length) continue;
-
-        const heights = tokens.map(t => t.box.bottom - t.box.top).sort((a, b) => a - b);
-        const medianHeight = heights[Math.floor(heights.length / 2)] || 0.02;
-
-        // 1) 상호 라벨 탐색
-        const storeLabels = [];
-        for (let i = 0; i < tokens.length; i++) {
-            let combined = "";
-            let parts = [];
-            for (let j = i; j < Math.min(tokens.length, i + 4); j++) {
-                parts.push(tokens[j]);
-                combined = parts.map(p => p.text.replace(/[\s:：=|()]/g, '')).join('');
-                if (storeLabelRegex.test(combined)) {
-                    storeLabels.push({
-                        text: combined,
-                        box: {
-                            left: Math.min(...parts.map(p => p.box.left)),
-                            top: Math.min(...parts.map(p => p.box.top)),
-                            right: Math.max(...parts.map(p => p.box.right)),
-                            bottom: Math.max(...parts.map(p => p.box.bottom))
-                        }
-                    });
-                    break;
+        const heights = tokens.map(t => t.box.bottom - t.box.top).sort((x, y) => x - y);
+        const h = heights[Math.floor(heights.length / 2)];
+        const rows = [], used = new Set();
+        for (const line of page.tokens?.length ? page.lines || [] : []) {
+            const parts = tokens.filter(t => !used.has(t) && (t.textSegments || []).some(segment => (line.textSegments || []).some(anchor => anchor.start <= segment.start && anchor.end >= segment.end)));
+            if (parts.length) { rows.push(parts); parts.forEach(t => used.add(t)); }
+        }
+        for (const token of [...tokens].sort((x, y) => center(x) - center(y) || x.box.left - y.box.left)) {
+            if (used.has(token)) continue;
+            const row = rows.find(parts => Math.abs(center({ box: union(parts) }) - center(token)) <= 0.5 * h);
+            if (row) row.push(token); else rows.push([token]);
+        }
+        rows.sort((x, y) => union(x).top - union(y).top);
+        const labels = [], labelTokens = new Set();
+        rows.forEach((row, rowIndex) => {
+            row.sort((x, y) => x.box.left - y.box.left);
+            for (let i = 0; i < row.length; i++) {
+                let longest = null;
+                for (let j = i; j < Math.min(row.length, i + 12); j++) {
+                    if (j > i && row[j].box.left - row[j - 1].box.right > 2 * h) break;
+                    const parts = row.slice(i, j + 1);
+                    const text = compact(parts.map(t => t.text).join(''));
+                    const type = fieldType(text);
+                    if (type) longest = { type, text, parts, box: union(parts), rowIndex, end: j };
+                }
+                if (longest) {
+                    labels.push(longest);
+                    longest.parts.forEach(t => labelTokens.add(t));
+                    i = longest.end;
                 }
             }
-        }
-
-        // 2) 회전 무관 2방향(우측/하단) 상대 좌표 탐색
-        for (const label of storeLabels) {
-            const labelCenterY = (label.box.top + label.box.bottom) / 2;
-
-            // [우측 방향 탐색]
-            const rightCandidates = tokens.filter(t => {
-                const tCenterY = (t.box.top + t.box.bottom) / 2;
-                return Math.abs(tCenterY - labelCenterY) <= 0.85 * medianHeight &&
-                       t.box.left >= label.box.right - 0.2 * medianHeight &&
-                       t.box.left - label.box.right <= 6.5 * medianHeight;
-            }).sort((a, b) => a.box.left - b.box.left);
-
-            // [하단 방향 탐색]
-            const belowCandidates = tokens.filter(t => {
-                return t.box.top >= label.box.bottom - 0.2 * medianHeight &&
-                       t.box.top - label.box.bottom <= 2.8 * medianHeight &&
-                       Math.abs(t.box.left - label.box.left) <= 1.5 * medianHeight;
-            }).sort((a, b) => a.box.left - b.box.left);
-
-            const evalTokens = rightCandidates.length > 0 ? rightCandidates : belowCandidates;
-            const collectedWords = [];
-
-            for (const item of evalTokens) {
-                const cleanWord = item.text.replace(/[\s:：=|]/g, '').trim();
-                if (stopLabelRegex.test(cleanWord)) break;
-                if (cleanWord) collectedWords.push(item.text.trim());
+        });
+        for (const label of labels) {
+            const nextRight = labels.filter(other => other.rowIndex === label.rowIndex && other.box.left > label.box.right).sort((x, y) => x.box.left - y.box.left)[0];
+            const right = nextRight?.box.left ?? Infinity;
+            const first = rows[label.rowIndex].filter(t => !labelTokens.has(t) && t.box.left >= label.box.right - 0.2 * h && t.box.right <= right);
+            let parts = [...first];
+            let previousBox = first.length ? union(first) : label.box;
+            const valueLeft = first.length ? previousBox.left : label.box.left;
+            for (let r = label.rowIndex + 1; r < rows.length; r++) {
+                const rowBox = union(rows[r]);
+                if (rowBox.top - previousBox.bottom > 1.5 * h) break;
+                if (labels.some(other => other.rowIndex === r && other.box.left < right && other.box.right >= Math.min(label.box.left, valueLeft) - h)) break;
+                const continuation = rows[r].filter(t => !labelTokens.has(t) && t.box.left >= valueLeft - h && t.box.right <= right);
+                if (!continuation.length || Math.abs(union(continuation).left - valueLeft) > h) break;
+                if (label.type === 'store' && isStoreNameAddressText(continuation.map(t => t.text).join(' '))) break;
+                parts.push(...continuation);
+                previousBox = union(continuation);
             }
-
-            const candidateName = collectedWords.join(' ').replace(/\s+/g, ' ').trim();
-            if (candidateName && !isInvalidStoreCandidate(candidateName)) {
-                candidates.push({
-                    name: candidateName,
-                    score: 95,
-                    source: 'layout'
-                });
-            }
+            const value = parts.map(t => t.text.trim()).join(' ').replace(/\s+/g, ' ').trim();
+            const cell = { page: page.pageNumber, label: label.text, type: label.type, box: parts.length ? union(parts) : null, value, tokenCount: parts.length };
+            cells.push(cell);
+            if (label.type === 'address') parts.forEach(t => excludedTextSegments.push(...(t.textSegments || [])));
+            if (label.type === 'store' && value && !isInvalidStoreCandidate(value)) candidates.push({ name: value, score: 95, source: 'layout-cell', cell });
         }
     }
-
-    candidates.sort((a, b) => b.score - a.score);
-    return {
-        name: candidates[0]?.name || null,
-        candidates,
-        excludedTextSegments
-    };
+    const names = [...new Set(candidates.map(c => c.name))];
+    logStoreNameDiagnostic('가상 셀', { cells, candidates, excludedTextSegments, ambiguous: names.length > 1 });
+    return { name: names.length === 1 ? names[0] : null, candidates, excludedTextSegments };
 }
 
 // ==========================================

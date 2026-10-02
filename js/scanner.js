@@ -300,9 +300,13 @@ export function initCameraScan() {
                 storeDecision.layoutCandidate = layoutResult.name;
 
                 // 3-2. 명시적 상호 라벨의 텍스트 값 추출
+                let storeOCRText = rawOCRText;
+                for (const segment of [...(layoutResult.excludedTextSegments || [])].sort((a, b) => b.start - a.start)) {
+                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
+                }
                 let textStore = null;
                 try { 
-                    textStore = extractStoreNameLogic(rawOCRText); 
+                    textStore = extractStoreNameLogic(storeOCRText); 
                 } catch (err) {}
                 storeDecision.textCandidate = textStore;
 
