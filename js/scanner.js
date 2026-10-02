@@ -8,15 +8,18 @@ import {
     toBase64_SafeCompress, 
     extractPhoneLogic, 
     extractAddressLogic, 
-    extractStoreNameLogic, 
+    extractStoreNameLogic,
+    extractStoreNameByLayout,
+    logStoreNameDiagnostic, 
     showLoading, 
     hideLoading 
 } from './utils.js';
 import { 
     geocodeAddress, 
     getPOIsByAddress, 
-    findStoreNameFromOCR,
-    findOverlappingPOIFromAddress
+    matchOCRStoreCandidate,
+    assessOCRStoreCandidate,
+    STORE_NAME_MATCH_THRESHOLD
 } from './kakao.js';
 import { state } from './state.js';
 import { 
@@ -67,7 +70,7 @@ export function checkScanLimit() {
 // ==========================================
 // 2. 서버 OCR API 통신
 // ==========================================
-export async function performOCR(base64Data) {
+export async function performOCR(base64Data, includeLayout = false) {
     const response = await fetch('/api/ocr', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
@@ -77,7 +80,10 @@ export async function performOCR(base64Data) {
     
     if (data.error) throw new Error(data.error);
     if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
-    if (data.responses && data.responses[0].fullTextAnnotation) return data.responses[0].fullTextAnnotation.text;
+    if (data.responses && data.responses[0].fullTextAnnotation) {
+        const annotation = data.responses[0].fullTextAnnotation;
+        return includeLayout ? { text: annotation.text, pages: annotation.pages || [] } : annotation.text;
+    }
     
     throw new Error("사진에서 글자를 찾을 수 없습니다.");
 }
@@ -291,6 +297,7 @@ export function initCameraScan() {
 
         let addressStr = null; 
         let rawOCRText = ""; 
+        let ocrPages = [];
         let extractedPhone = null;
         
         // 1. OCR 판독
@@ -298,8 +305,10 @@ export function initCameraScan() {
         try {
             const base64Image = await toBase64_SafeCompress(file);
             const imageContent = base64Image.split(',')[1];
-            rawOCRText = await performOCR(imageContent);
-            addressStr = extractAddressLogic(rawOCRText);
+            const ocrResult = await performOCR(imageContent, true);
+            rawOCRText = ocrResult.text;
+            ocrPages = ocrResult.pages;
+            addressStr = extractAddressLogic(rawOCRText, ocrPages);
             extractedPhone = extractPhoneLogic(rawOCRText);
             hideLoading();
         } catch (error) {
@@ -334,45 +343,56 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 순수 주소 기반 3단계 순차 파이프라인
+        // 3. 후보 수집과 최종 선택을 분리. 위치/텍스트 결과를 즉시 확정하지 않는다.
         let finalStoreName = null;
-
+        let diagnosticPath = '빈 값';
+        const storeDecision = { version: 'store-selection-v2', rawOCRText, positionCandidates: [], textCandidate: null, kakaoCandidates: [], similarities: [], kakaoCalled: false, kakaoStatus: 'not-called', reason: '' };
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                let addressPlaces = await getPOIsByAddress(addressStr);
-
-                // [1단계] 순서 동일률 50% 이상 핵심 상호 매칭
-                let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
-                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, addressPlaces, 50);
-
-                // [2단계] 주소지 영역 텍스트와 공식 주소 POI 간 중복(교집합) 매칭
-                if (!finalStoreName) {
-                    let addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
-                    finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
+                let positionResult = { name: null, candidates: [], excludedTextSegments: [] };
+                try { positionResult = extractStoreNameByLayout(ocrPages); }
+                catch (error) { storeDecision.positionError = error.message; }
+                storeDecision.positionCandidate = positionResult.name;
+                storeDecision.positionCandidates = positionResult.candidates || [];
+                let storeOCRText = rawOCRText;
+                for (const segment of [...(positionResult.excludedTextSegments || [])].sort((a, b) => b.start - a.start)) {
+                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
                 }
-
-                // [3단계] 표 라벨 정밀 추출 및 가비지 필터링
+                let textCandidate = null;
+                try { textCandidate = extractStoreNameLogic(storeOCRText); }
+                catch (error) { storeDecision.textError = error.message; }
+                storeDecision.textCandidate = textCandidate;
+                const names = [...new Set([positionResult.name, ...storeDecision.positionCandidates.map(item => item.name), textCandidate].filter(Boolean))];
+                const assessments = names.map(name => assessOCRStoreCandidate(name, storeOCRText));
+                storeDecision.assessments = assessments;
+                const trusted = assessments.filter(item => item.trustworthy);
+                let result = { places: [], buildingNames: [] };
+                // 비용 최적화보다 검증을 우선: 주소당 장소 검색은 이 지점에서 1회만 수행.
+                storeDecision.kakaoCalled = true;
+                try {
+                    result = await getPOIsByAddress(addressStr, true);
+                    storeDecision.kakaoStatus = result.status || (result.places.length ? 'success' : 'empty');
+                } catch (error) { storeDecision.kakaoStatus = 'failed'; storeDecision.kakaoError = error.message; }
+                storeDecision.kakaoCandidates = result.places;
+                finalStoreName = matchOCRStoreCandidate(names, result.places, STORE_NAME_MATCH_THRESHOLD, rawOCRText, storeDecision);
+                if (finalStoreName) { diagnosticPath = 'ocr-kakao-match'; storeDecision.reason = '70% 이상 일치 장소가 유일함'; }
                 if (!finalStoreName) {
-                    let extracted = extractStoreNameLogic(rawOCRText);
-                    if (extracted) {
-                        let isGarbage = false;
-                        let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        let textForRegex = rawOCRText.replace(/\n/g, ' ');
-
-                        let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
-                        if (blockRegex.test(textForRegex)) isGarbage = true;
-                        if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) isGarbage = true;
-                        if (extracted.length < 2 || /^\d+$/.test(extracted)) isGarbage = true;
-
-                        if (!isGarbage) finalStoreName = extracted;
-                    }
+                    const buildings = [...new Set([coords?.road_address?.building_name, coords?.building_name, ...result.buildingNames].filter(Boolean))];
+                    if (buildings.length === 1) { finalStoreName = buildings[0]; diagnosticPath = 'kakao-building'; storeDecision.reason = '장소 매칭 실패 후 명시적 건물명 하나'; }
                 }
-            } catch (error) {
-                console.error("상호명 매칭 오류:", error);
-            }
+                if (!finalStoreName && !result.places.length && trusted.length === 1) {
+                    finalStoreName = trusted[0].name;
+                    diagnosticPath = 'ocr-trusted-fallback';
+                    storeDecision.reason = '장소 조회 실패/빈 결과이며 상호 필드 전체와 일치하는 OCR 후보가 유일함';
+                }
+                if (!finalStoreName) storeDecision.reason = '유일한 장소 매칭/건물명/신뢰 가능한 OCR fallback 없음';
+            } catch (error) { storeDecision.reason = '선택 오류'; storeDecision.error = error.message; }
             hideLoading();
         }
+        storeDecision.selected = finalStoreName;
+        storeDecision.source = diagnosticPath;
+        logStoreNameDiagnostic('상호 선택 구조', storeDecision);
 
         // 4. 배송 목록 추가 및 렌더링 + 관제 센터 서버 동기화
         if (coords) {
