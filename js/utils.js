@@ -335,9 +335,74 @@ export function extractStoreNameByLayout(pages = []) {
         };
         const valuesFor = (label, trace) => {
             const height = label.box.bottom - label.box.top;
-            const nextLabel = labels.filter(other => other !== label && overlapY(other.box, label.box) >= 0.5 && other.box.left >= label.box.right)
+            const nextLabel = labels.filter(other => other !== label && overlapY(other.box, label.box) >= 0.5 && other.box.left >= label.box.right &&
+                (label.type !== 'store' || Math.abs(center(other) - center(label)) <= 0.75 * Math.max(height, other.box.bottom - other.box.top)))
                 .sort((a, b) => a.box.left - b.box.left)[0];
             const rightLimit = nextLabel ? nextLabel.box.left : 1;
+            if (label.type === 'store') {
+                const glyphHeight = median(label.items.map(item => item.box.bottom - item.box.top));
+                const top = label.box.top - 0.5 * glyphHeight;
+                let localRight = items.filter(item => !labelItems.has(item) && item.box.left >= label.box.right &&
+                    overlapY(item.box, label.box) >= 0.5 &&
+                    Math.abs(center(item) - center(label)) <= 0.75 * Math.max(glyphHeight, item.box.bottom - item.box.top))
+                    .sort((a, b) => a.box.left - b.box.left);
+                if (!localRight.length) {
+                    const belowRow = rows.find(row => row.box.top >= label.box.bottom && row.box.top - label.box.bottom <= 2 * glyphHeight &&
+                        row.items.some(item => !labelItems.has(item) && item.box.left >= label.box.right && item.box.left - label.box.right <= glyphHeight));
+                    if (belowRow) localRight = belowRow.items.filter(item => !labelItems.has(item) && item.box.left >= label.box.right);
+                }
+                // 우측 필드가 없으면 가까운 첫 값 묶음의 폭만 사용. 페이지 끝까지 확장하지 않음.
+                const localGroup = localRight.length && localRight[0].box.left - label.box.right <= 6 * glyphHeight ? adjacentItems(localRight, glyphHeight) : [];
+                const right = nextLabel ? nextLabel.box.left : localGroup.length ? union(localGroup).right : label.box.right;
+                const bottomLimit = label.box.bottom + 3.5 * glyphHeight;
+                const lowerFields = labels.filter(other => other !== label && other.box.top >= label.box.bottom &&
+                    other.box.top < bottomLimit && other.box.left < right &&
+                    (other.box.right > label.box.right || Math.abs(other.box.left - label.box.left) <= glyphHeight))
+                    .map(other => ({ top: other.box.top, reason: '다음 행 필드 라벨', label: other.text }));
+                const addressRows = rows.filter(row => row.box.top >= label.box.top + 0.5 * glyphHeight && row.box.top < bottomLimit)
+                    .map(row => ({ row, tokens: row.items.filter(item => item.box.right > label.box.right && item.box.left < right) }))
+                    .filter(entry => entry.tokens.length && isStoreNameAddressText(entry.tokens.map(item => item.text).join(' ')))
+                    .map(entry => ({ top: Math.min(...entry.tokens.map(item => item.box.top)), reason: '기존 주소 판정으로 확인된 줄' }));
+                const lowerBoundary = [...lowerFields, ...addressRows].sort((a, b) => a.top - b.top)[0];
+                const region = { left: label.box.right, right, top, bottom: lowerBoundary ? lowerBoundary.top : bottomLimit };
+                const regionReason = item => item.box.left < region.left ? '상호 영역 왼쪽 밖' : item.box.right > region.right ? '상호 영역 오른쪽 밖' :
+                    item.box.top < region.top ? '상호 영역 위쪽 밖' : item.box.bottom > region.bottom ? '상호 영역 아래쪽 밖' : null;
+                const nearby = items.filter(item => item.box.right >= label.box.left && item.box.left <= rightLimit &&
+                    item.box.bottom >= top && item.box.top <= bottomLimit);
+                const inside = nearby.filter(item => !labelItems.has(item) && !regionReason(item));
+                if (trace) {
+                    trace.rightLimit = rightLimit;
+                    trace.region = region;
+                    trace.boundaries = { left: '복합 라벨 오른쪽 끝', right: nextLabel ? { reason: '같은 필드 행의 다음 라벨', label: nextLabel.text } : '다음 라벨 없음: 인접한 첫 값 묶음 폭',
+                        top: '라벨 상단 - 글자 높이 중앙값의 0.5배', bottom: lowerBoundary || { reason: '하단 경계 불명확: 라벨 하단 + 글자 높이 중앙값의 3.5배' } };
+                    trace.regionTokens = nearby.map(item => ({ text: item.text, box: item.box, inside: !labelItems.has(item) && !regionReason(item), reason: labelItems.has(item) ? '라벨 구성 토큰' : regionReason(item) || '상호 영역 안' }));
+                    trace.regionTokens.forEach((entry, index) => { if (!entry.inside) trace.excluded.push({ token: nearby[index], reason: entry.reason }); });
+                }
+                const sameBand = inside.filter(item => overlapY(item.box, label.box) >= 0.5 &&
+                    Math.abs(center(item) - center(label)) <= 0.75 * Math.max(glyphHeight, item.box.bottom - item.box.top))
+                    .sort((a, b) => a.box.left - b.box.left || center(a) - center(b));
+                if (trace) trace.initial = sameBand;
+                let valueItems = adjacentItems(sameBand, height, trace);
+                let mode = 'right';
+                if (!valueItems.length) {
+                    mode = 'below';
+                    const firstRow = rows.find(row => row.box.top >= label.box.bottom && row.box.top - label.box.bottom <= 2 * height && row.items.some(item => inside.includes(item)));
+                    if (firstRow) valueItems = adjacentItems(firstRow.items.filter(item => inside.includes(item)), height, trace);
+                }
+                if (!valueItems.length) return { items: [], mode };
+                const firstBox = union(valueItems);
+                const secondRow = rows.find(row => row.box.top >= firstBox.bottom && row.box.top - firstBox.bottom <= 1.5 * height && row.items.some(item => inside.includes(item)));
+                if (secondRow) {
+                    const secondItems = adjacentItems(secondRow.items.filter(item => inside.includes(item) && item.box.left >= firstBox.left - height), height, trace);
+                    if (secondItems.length) {
+                        const secondBox = union(secondItems);
+                        const fieldBetween = labels.some(other => other !== label && other.box.top >= label.box.top && other.box.top < secondBox.bottom && other.box.right > firstBox.left - height && other.box.left < right);
+                        if (!fieldBetween && Math.abs(secondBox.left - firstBox.left) <= height && !isStoreNameAddressText(secondItems.map(item => item.text).join(' '))) valueItems.push(...secondItems);
+                        else if (trace) secondItems.forEach(token => trace.excluded.push({ token, reason: '기존 두 줄 결합 조건 미충족' }));
+                    }
+                }
+                return { items: valueItems, mode, gap: mode === 'right' ? firstBox.left - label.box.right : firstBox.top - label.box.bottom, height };
+            }
             const filterItems = (source, leftLimit) => source.filter(item => {
                 const reason = labelItems.has(item) ? '라벨 구성 토큰' : item.box.left < leftLimit ? '값 영역 왼쪽 경계 밖' : item.box.right > rightLimit ? '다음 필드의 왼쪽 경계 초과' : null;
                 if (trace && reason) trace.excluded.push({ token: item, reason });
@@ -407,6 +472,7 @@ export function extractStoreNameByLayout(pages = []) {
             const detailToken = item => `${JSON.stringify(item.text)} / x=${item.box.left}..${item.box.right} / y=${item.box.top}..${item.box.bottom} / confidence=${item.confidence}`;
             logStoreNameDiagnostic('상호 상세진단', {
                 page: page.pageNumber, label: label.text, labelBox: label.box,
+                storeRegion: trace.region, boundaryReasons: trace.boundaries, tokenRegionDecisions: trace.regionTokens,
                 initialRightTokens: trace.initial.map(detailToken),
                 excludedTokens: trace.excluded.filter(({ token }) => label.items.includes(token) ||
                     (token.box.right >= label.box.left && token.box.left < trace.rightLimit))
