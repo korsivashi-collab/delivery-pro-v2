@@ -107,6 +107,7 @@ export function extractPhoneLogic(text) {
 // 5. 도로명 주소 정밀 추출 로직 (알고리즘 원칙 100% 엄격 준수)
 // ==========================================
 export function extractAddressLogic(text) {
+    const addressDiagnostic = { rawOCRText: text, rawAddressBlock: null, coreRegex: null, coreMatch: null, finalAddress: null };
     if (!text || typeof text !== 'string') return null;
     try {
         let processedText = text;
@@ -153,19 +154,31 @@ export function extractAddressLogic(text) {
             }
         }
 
+        addressDiagnostic.rawAddressBlock = rawAddressBlock;
         if (!rawAddressBlock) return null;
 
-        // [원칙 3] '('가 인식되면 '('부터 그 뒷부분은 무조건 전부 삭제
-        if (rawAddressBlock.includes('(')) {
-            rawAddressBlock = rawAddressBlock.split('(')[0].trim();
-        }
+        // 모든 도로명/지번에 공통: 괄호 또는 마침표부터 이후 제거. 번지 하이픈은 유지.
+        rawAddressBlock = rawAddressBlock.split(/[(.]/)[0].trim();
 
         // 끝부분에 남은 특수문자/공백만 정돈하여 순수 주소 반환
-        return rawAddressBlock.replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
+        // 내비게이션 주소는 도로명+건물번호 또는 지번+번지에서 끝낸다.
+        const roadCoreRegex = /(?:[가-힣A-Za-z0-9·.]+(?:대로|로)(?:\s*\d+(?:번|가)?길)?|[가-힣A-Za-z0-9·.]+길)\s*\d+(?:-\d+)?/;
+        const parcelCoreRegex = /[가-힣A-Za-z0-9·]+(?:동|읍|면|리)\s+(?:산\s*)?\d+(?:-\d+)?/;
+        const roadMatch = rawAddressBlock.match(roadCoreRegex);
+        const coreMatch = roadMatch || rawAddressBlock.match(parcelCoreRegex);
+        addressDiagnostic.coreRegex = roadMatch ? roadCoreRegex.source : parcelCoreRegex.source;
+        addressDiagnostic.coreMatch = coreMatch ? { value: coreMatch[0], index: coreMatch.index } : null;
+        if (!coreMatch) return null;
+        const finalAddress = rawAddressBlock.slice(0, coreMatch.index + coreMatch[0].length)
+            .replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
+        addressDiagnostic.finalAddress = finalAddress;
+        return finalAddress;
 
     } catch (e) {
         console.error("주소 추출 오류:", e);
-    } 
+    } finally {
+        try { console.log('[OCR 주소 진단] 주소 핵심 추출 ' + JSON.stringify(addressDiagnostic)); } catch (_) { /* 진단 오류는 인식과 분리 */ }
+    }
     return null;
 }
 
