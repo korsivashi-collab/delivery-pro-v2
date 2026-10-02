@@ -345,11 +345,16 @@ export function initCameraScan() {
         // 3. 명확한 OCR 상호 우선, 없을 때만 카카오 장소명으로 보완
         let finalStoreName = null;
         let diagnosticPath = '빈 값';
+        // 이 스캔의 장소 조회 결과(Promise)를 공유해 중복 요청을 막는다.
+        let storePlacesPromise = null;
+        const getStorePlacesOnce = () => storePlacesPromise ??= getPOIsByAddress(addressStr);
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                const positionResult = extractStoreNameByLayout(ocrPages);
+                let positionResult = { name: null, excludedTextSegments: [] };
+                try { positionResult = extractStoreNameByLayout(ocrPages); }
+                catch (error) { logStoreNameDiagnostic('OCR 위치 오류', { message: error.message }); }
                 let storeOCRText = rawOCRText;
                 // 위치로 식별한 사람 필드 값만 fallback에서 가림. 주소·전화번호는 원문 사용.
                 for (const segment of [...positionResult.excludedTextSegments].sort((a, b) => b.start - a.start)) {
@@ -361,7 +366,9 @@ export function initCameraScan() {
                 }
                 // [1단계] OCR 라벨 상호 추출 및 기존 가비지 필터링
                 if (!finalStoreName) {
-                    let extracted = extractStoreNameLogic(storeOCRText);
+                    let extracted = null;
+                    try { extracted = extractStoreNameLogic(storeOCRText); }
+                    catch (error) { logStoreNameDiagnostic('OCR 텍스트 오류', { message: error.message }); }
                     if (extracted) {
                         let isGarbage = false;
                         let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -379,7 +386,8 @@ export function initCameraScan() {
                 }
 
                 if (!finalStoreName) {
-                    const addressPlaces = await getPOIsByAddress(addressStr);
+                    logStoreNameDiagnostic('카카오 최후 fallback', { reason: 'OCR 위치와 텍스트 상호 모두 실패', maximumRequests: 1 });
+                    const addressPlaces = await getStorePlacesOnce();
                     // 주소 문맥을 원문에 유지해 주소 다음 줄의 건물명도 제외할 수 있게 함
                     finalStoreName = findStoreNameFromOCR(storeOCRText, addressPlaces, 85, addressStr);
                     if (!finalStoreName) {

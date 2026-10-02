@@ -154,7 +154,7 @@ export async function getPOIsByAddress(addressStr) {
         let cleanAddr = addressStr.replace(/\[.*?\]/g, '').trim();
         let res = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanAddr)}`, { 
             headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
-        });
+        }, 0); // 상호 최후 fallback은 재시도 없이 요청 1회만 사용
         if (res && res.ok) {
             let data = await res.json();
             if (data.documents) places.push(...data.documents.map(d => d.place_name));
