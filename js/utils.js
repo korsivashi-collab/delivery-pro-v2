@@ -74,7 +74,7 @@ export function toBase64_SafeCompress(file) {
 // ==========================================
 // 4. 범용 문서 영역 자동 분할 엔진 (3-Zone Partitioning)
 // ==========================================
-export function extractDocumentZones(fullText) {
+export function extractDocumentZones(fullText, includeStoreLabels = false) {
     if (!fullText || typeof fullText !== 'string') {
         return { supplierZone: "", recipientZone: "", tableZone: "", cleanTargetText: "" };
     }
@@ -116,7 +116,7 @@ export function extractDocumentZones(fullText) {
             tableLines.push(line);
         } else {
             // 구역 판별 전 헤더 라인 중 배송처 관련 라벨이 있으면 배송처로 편입
-            if (/배송지명|간판명|상호|주소|연락처/.test(line)) {
+            if (/배송지명|간판명|상호|주소|연락처/.test(line) || (includeStoreLabels && /업\s*체\s*명|매\s*장\s*명|법\s*인\s*명|가맹점명/.test(line))) {
                 recipientLines.push(line);
             }
         }
@@ -283,38 +283,8 @@ export function isInvalidStoreCandidate(text) {
 // ==========================================
 // 8. 주소 후미 상호명 범용 추출 엔진 (2차 백업)
 // ==========================================
+// 호환용 함수: 주소 후미는 상호 후보로 추정하지 않는다.
 export function extractStoreNameFromAddressSuffix(fullText) {
-    if (!fullText) return null;
-    try {
-        const lines = fullText.split(/\r?\n/);
-        for (let line of lines) {
-            if (!/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주|로|길|동\b)/.test(line)) continue;
-
-            let cleanLine = line.replace(/^.*?(?:주\s*소)\s*[:：|]?/, '').replace(/\[\d{5}\]|\b\d{5}\b/g, '').trim();
-
-            const addrCorePattern = /(?:(?:대로|로|길)\s*\d+(?:-\d+)?|(?:동|읍|면|리)\s+\d+(?:-\d+)?)/;
-            const match = cleanLine.match(addrCorePattern);
-            if (!match) continue;
-
-            let suffix = cleanLine.substring(match.index + match[0].length).trim();
-            // 법정동 괄호 (예: (응암동), (남가좌동)) 제거
-            suffix = suffix.replace(/^\([가-힣0-9\s·]+\)/, '').trim();
-            // 층/호수 제거
-            suffix = suffix.replace(/^(?:지하|지상)?\s*B?\d+\s*층\s*/i, '').trim();
-            suffix = suffix.replace(/^\d+(?:-\d+)?\s*호\s*/i, '').trim();
-
-            const stopMatch = suffix.search(/(?:배송지명|간판명|상호|연락처|전화|010|대표자|성명|금액|수량|단가)/);
-            if (stopMatch !== -1) suffix = suffix.substring(0, stopMatch).trim();
-
-            suffix = suffix.replace(/^[:：=\-|\s]+/, '').trim();
-
-            if (suffix && !isInvalidStoreCandidate(suffix) && suffix.length >= 2) {
-                return suffix;
-            }
-        }
-    } catch (e) {
-        console.warn("주소 후미 상호 추출 오류:", e);
-    }
     return null;
 }
 
@@ -325,7 +295,7 @@ export function extractStoreNameByLayout(pages = []) {
     const candidates = [];
     const excludedTextSegments = [];
 
-    const storeLabelRegex = /^(?:배송지명(?:\(간판명\))?|간판명|상\s*호(?:\(법인명\)|명)?|법\s*인\s*명|업\s*체\s*명|배송처|거래처|납품처|수령처|가맹점명?|매장명)$/;
+    const storeLabelRegex = /^(?:배송지명(?:간판명|\(간판명\))?|간판명|상\s*호(?:\(법인명\)|명)?|법\s*인\s*명|업\s*체\s*명|거래처명|가맹점명|매장명)$/;
     const stopLabelRegex = /^(?:성명|대표자|대표|담당자|주소|사업장|전화|연락처|등록번호|사업자번호|금액|수량|단가|총액|공급자|출하처)$/;
 
     for (const page of (Array.isArray(pages) ? pages : [])) {
@@ -415,12 +385,12 @@ export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         // 1단계: 배송처 영역(Recipient Zone)으로 텍스트 한정
-        const zones = extractDocumentZones(fullText);
+        const zones = extractDocumentZones(fullText, true);
         const targetText = zones.cleanTargetText || fullText;
 
         const lines = targetText.split(/\r?\n/);
         
-        const anchorRegex = /(?:배송지명\s*(?:\(\s*간판명\s*\))?|간판명|상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|업\s*체\s*명|법\s*인\s*명|배송처|거래처명?|납품처|수령처|가맹점명?|매장명)/;
+        const anchorRegex = /(?:배송지명\s*(?:\(\s*간판명\s*\))?|간판명|상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|업\s*체\s*명|법\s*인\s*명|거래처명|가맹점명|매장명)/;
         const stopPattern = /(?:성명|대표자|사업장|주\s*소|업태|종목|전화|연락처|등록번호|사업자번호|공급|금액|수량|단가|총액|규격|합계|품명|비고)/;
 
         const candidates = [];
@@ -456,12 +426,7 @@ export function extractStoreNameLogic(fullText) {
             }
         }
 
-        // 2단계 백업: 주소란 후미 상호 탐색
-        const addressSuffixStore = extractStoreNameFromAddressSuffix(targetText);
-        if (addressSuffixStore) {
-            candidates.push({ name: addressSuffixStore, score: 80 });
-        }
-
+        // 명시적 상호 라벨에서 수집한 값만 선택한다.
         if (candidates.length > 0) {
             candidates.sort((a, b) => b.score - a.score);
             logStoreNameDiagnostic('범용 상호 추출 완료', candidates);

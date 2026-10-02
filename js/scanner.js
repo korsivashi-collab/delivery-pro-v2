@@ -299,7 +299,7 @@ export function initCameraScan() {
                 } catch (err) {}
                 storeDecision.layoutCandidate = layoutResult.name;
 
-                // 3-2. 배송처 영역(Recipient Zone) 및 주소 후미 상호 추출
+                // 3-2. 명시적 상호 라벨의 텍스트 값 추출
                 let textStore = null;
                 try { 
                     textStore = extractStoreNameLogic(rawOCRText); 
@@ -317,7 +317,7 @@ export function initCameraScan() {
 
                 // [경로 A] 카카오 등록 장소와 70% 이상 일치 시 공식 장소명 채택
                 if (ocrCandidates.length > 0 && kakaoResult.places && kakaoResult.places.length > 0) {
-                    finalStoreName = matchOCRStoreCandidate(ocrCandidates, kakaoResult.places, STORE_NAME_MATCH_THRESHOLD, rawOCRText, storeDecision);
+                    finalStoreName = matchOCRStoreCandidate(ocrCandidates, kakaoResult.places, STORE_NAME_MATCH_THRESHOLD, ocrCandidates.join('\n'), storeDecision);
                     if (finalStoreName) {
                         storeDecision.kakaoMatched = true;
                         storeDecision.source = 'kakao-poi-match';
@@ -331,12 +331,6 @@ export function initCameraScan() {
                         finalStoreName = validOcrCandidate;
                         storeDecision.source = 'ocr-direct-fallback';
                     }
-                }
-
-                // [경로 C] 최후 보루: 카카오 공식 건물명이 단일하게 존재하는 경우
-                if (!finalStoreName && kakaoResult.buildingNames && kakaoResult.buildingNames.length === 1) {
-                    finalStoreName = kakaoResult.buildingNames[0];
-                    storeDecision.source = 'kakao-building';
                 }
 
             } catch (error) {
