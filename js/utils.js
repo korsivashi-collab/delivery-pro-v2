@@ -184,13 +184,76 @@ export function extractStoreNameByLayout(pages = []) {
         const items = (page.tokens?.length ? page.tokens : page.lines || []).filter(item => item.text?.trim() && item.box &&
             Object.values(item.box).every(Number.isFinite) && item.box.right > item.box.left && item.box.bottom > item.box.top);
         const rows = [];
-        for (const item of [...items].sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)) {
-            let row = rows.find(row => overlapY(row.box, item.box) >= 0.5);
-            if (!row) { row = { items: [], box: item.box }; rows.push(row); }
-            row.items.push(item);
+        const median = values => {
+            const sorted = [...values].sort((a, b) => a - b);
+            const middle = Math.floor(sorted.length / 2);
+            return sorted.length % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2;
+        };
+        const center = item => (item.box.top + item.box.bottom) / 2;
+        const updateRow = row => {
             row.box = union(row.items);
+            row.center = median(row.items.map(center));
+            row.height = median(row.items.map(item => item.box.bottom - item.box.top));
+        };
+        const membership = new Map();
+        const lineGroups = new Map();
+        const unassigned = [];
+        for (const item of items) {
+            const segments = (item.textSegments || []).filter(segment => Number.isFinite(segment.start) && Number.isFinite(segment.end) && segment.end > segment.start);
+            const length = segments.reduce((sum, segment) => sum + segment.end - segment.start, 0);
+            const matches = (page.tokens?.length && length ? page.lines || [] : []).map((line, index) => {
+                // 여러 line의 anchor가 겹치면 소속을 단정하지 않고 좌표 추정으로 넘김.
+                const covered = segments.reduce((sum, segment) => sum + (line.textSegments || []).reduce((part, anchor) =>
+                    part + Math.max(0, Math.min(segment.end, anchor.end) - Math.max(segment.start, anchor.start)), 0), 0);
+                return { index, coverage: Math.min(1, covered / length) };
+            }).filter(match => match.coverage >= 0.8);
+            if (matches.length === 1) {
+                const index = matches[0].index;
+                if (!lineGroups.has(index)) lineGroups.set(index, { items: [], lineIndices: [index] });
+                lineGroups.get(index).items.push(item);
+                membership.set(item, { source: 'line textSegments', lineIndex: index });
+            } else {
+                unassigned.push(item);
+                membership.set(item, { source: 'token geometry', reason: length ? 'line 소속 누락 또는 중복' : 'textSegments 없음' });
+            }
         }
-        rows.sort((a, b) => a.box.top - b.box.top);
+        for (const group of lineGroups.values()) {
+            updateRow(group);
+            rows.push(group);
+        }
+        // OCR line이 별도 셀을 나타내더라도 같은 중심선의 셀은 같은 물리적 행으로 묶음.
+        rows.sort((a, b) => a.center - b.center);
+        for (let i = 0; i < rows.length; i++) {
+            for (let j = i + 1; j < rows.length;) {
+                if (Math.abs(rows[i].center - rows[j].center) <= 0.35 * Math.min(rows[i].height, rows[j].height)) {
+                    rows[i].items.push(...rows[j].items);
+                    rows[i].lineIndices.push(...rows[j].lineIndices);
+                    rows.splice(j, 1);
+                    updateRow(rows[i]);
+                } else j++;
+            }
+        }
+        for (const item of [...unassigned].sort((a, b) => center(a) - center(b) || a.box.left - b.box.left)) {
+            const height = item.box.bottom - item.box.top;
+            const nearby = rows.filter(row => Math.abs(row.center - center(item)) <= 0.35 * Math.min(row.height, height))
+                .sort((a, b) => Math.abs(a.center - center(item)) - Math.abs(b.center - center(item)));
+            const row = nearby[0] || { items: [], lineIndices: [] };
+            if (!nearby.length) rows.push(row);
+            row.items.push(item);
+            updateRow(row);
+        }
+        rows.sort((a, b) => a.center - b.center || a.box.left - b.box.left);
+        const rowOf = new Map();
+        rows.forEach((row, index) => {
+            row.items.sort((a, b) => a.box.left - b.box.left || center(a) - center(b));
+            row.items.forEach(item => rowOf.set(item, index));
+        });
+        const describe = item => ({ text: item.text, box: item.box, row: rowOf.get(item), ...membership.get(item) });
+        logStoreNameDiagnostic('위치 읽기 순서', {
+            page: page.pageNumber,
+            before: items.map(describe),
+            after: rows.flatMap(row => row.items).map(describe)
+        });
         const labels = [];
         for (const row of rows) {
             row.items.sort((a, b) => a.box.left - b.box.left);
@@ -255,8 +318,10 @@ export function extractStoreNameByLayout(pages = []) {
         logStoreNameDiagnostic('위치 라벨과 제외 영역', { page: page.pageNumber, labels: labels.map(label => ({ text: label.text, type: label.type, box: label.box })), excludedTextSegments });
         for (const label of labels.filter(label => label.type === 'store')) {
             const value = valuesFor(label);
-            const parts = value.items.filter(item => !personItems.has(item));
+            const unsortedParts = value.items.filter(item => !personItems.has(item));
+            const parts = [...unsortedParts].sort((a, b) => rowOf.get(a) - rowOf.get(b) || a.box.left - b.box.left || center(a) - center(b));
             const name = parts.map(item => item.text.trim()).join(' ').replace(/\s+/g, ' ').trim();
+            logStoreNameDiagnostic('위치 상호 결합 순서', { page: page.pageNumber, label: label.text, before: items.filter(item => unsortedParts.includes(item)).map(describe), after: parts.map(describe), combinedText: name });
             const confidenceItems = [...label.items, ...parts];
             const confidences = confidenceItems.map(item => item.confidence);
             const completeConfidence = confidences.length > 0 && confidences.every(confidence => typeof confidence === 'number' && confidence >= 0 && confidence <= 1);
