@@ -190,7 +190,7 @@ export function extractAddressLogic(text, pages = []) {
     if (!text || typeof text !== 'string') return null;
     try {
         const layout = extractAddressByLayout(pages);
-        if (layout.address) return layout.address;
+        // 위치 결과는 텍스트 후보의 우선순위에만 반영한다.
         let processedText = text;
 
         // [원칙 2] 줄바꿈 및 공백에 걸친 번지수 결합 (19-\n2, 19 - 2, 19 - \n 2 -> 19-2)
@@ -203,28 +203,30 @@ export function extractAddressLogic(text, pages = []) {
         // 평탄화 후 잔여 공백 하이픈 최종 결합
         flatText = flatText.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2');
 
-        // 대한민국 행정구역으로 시작하는 주소 후보 수집
-        const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
-
-        // 시/도 생략형도 함께 수집하고, 같은 주소의 시/군/구는 별도 후보로 나누지 않음
-        const startRegex = new RegExp(`(^|[\\s\\[\\(])((?:${provincePattern}|[가-힣]{2,6}(?:시|군|구))\\s+(?:[가-힣]{1,10}(?:시|군|구)\\s+)*)`, 'g');
-        const starts = [...flatText.matchAll(startRegex)].map(match => match.index + match[1].length);
+        // HEAD의 주 정규식과 보조 정규식을 기본 후보 생성 경로로 사용.
+        const legacyAddressRegex = /(([가-힣]+(?:시|도))?\s*[가-힣]+(?:시|군|구)\s+[가-힣a-zA-Z0-9\s]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?)/g;
+        const shortAddressRegex = /[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?/g;
+        // 역할/필드 경계를 넘어 두 주소를 하나로 묶지 않도록 영역별로 검색.
+        const boundaries = [...flatText.matchAll(/공\s*급\s*받\s*는\s*자|공\s*급\s*자|배\s*송\s*지|수\s*령\s*지|납\s*품\s*처|받는\s*분|발\s*송\s*지|본\s*사|주\s*소/g)];
+        const regionStarts = [0, ...boundaries.map(match => match.index + match[0].length)];
+        const starts = [];
+        for (let region = 0; region < regionStarts.length; region++) {
+            const offset = regionStarts[region];
+            const chunk = flatText.slice(offset, boundaries[region]?.index ?? flatText.length);
+            const fullMatches = [...chunk.matchAll(legacyAddressRegex)];
+            for (const match of fullMatches) starts.push(offset + match.index + match[0].length - match[0].trimStart().length);
+            for (const match of chunk.matchAll(shortAddressRegex)) {
+                if (!fullMatches.some(full => match.index >= full.index && match.index < full.index + full[0].length)) starts.push(offset + match.index);
+            }
+        }
         const stopLabels = /(?:\s+)(?:배\s*송\s*지|수\s*령\s*지|납\s*품\s*처|발\s*송\s*지|본\s*사|간판명|상\s*호|업체명|성\s*명|대표자|담당자|사업자번호|등록번호|업태|종목|연락처|전화|010|받는\s*분|수령인|구매자|고객명|공\s*급|금액|수량|단가|총액|품명|비고|메모|박스)/;
         const labelRegex = /공\s*급\s*받\s*는\s*자|배\s*송\s*지|수\s*령\s*지|받는\s*분|납\s*품\s*처|공\s*급\s*자|발\s*송\s*지|본\s*사/g;
         const labels = [...flatText.matchAll(labelRegex)];
-        // HEAD의 행정구역 생략형 도로명/지번 후보 경로를 복원.
-        const shortAddressRegex = /[가-힣a-zA-Z0-9]+(?:동|읍|면|리|대로|로|길)\s*\d+(?:-\d+)?/g;
-        const shortMatches = [...flatText.matchAll(shortAddressRegex)];
-        for (const match of shortMatches) {
-            const preceding = starts.filter(start => start <= match.index).pop();
-            const prefix = preceding === undefined ? '' : flatText.substring(preceding, match.index);
-            const hasEarlierAddress = shortMatches.some(other => other.index >= preceding && other.index < match.index);
-            if (preceding === undefined || prefix.search(stopLabels) !== -1 || hasEarlierAddress) starts.push(match.index);
-        }
         starts.sort((a, b) => a - b);
         // 상세주소 차이와 OCR 공백 차이에도 같은 기본 주소의 공급자 판정을 유지.
         const addressKey = address => (address.match(shortAddressRegex) || []).join(' ').replace(/\s/g, '');
         const supplierKeys = new Set(layout.supplier.map(addressKey).filter(Boolean));
+        const deliveryKey = layout.address ? addressKey(layout.address) : null;
         const candidates = new Map();
 
         for (let i = 0; i < starts.length; i++) {
@@ -243,12 +245,16 @@ export function extractAddressLogic(text, pages = []) {
             if (nearestLabel) {
                 score = /^(?:공급받는자|배송지|수령지|받는분|납품처)$/.test(nearestLabel[0].replace(/\s/g, '')) ? 100 : -100;
             }
-            if (score < 0 || supplierKeys.has(addressKey(address))) continue;
+            // 공급자 판정은 강한 감점이며 텍스트 후보 자체는 보존.
+            if (supplierKeys.has(addressKey(address))) score -= 100;
+            if (deliveryKey && addressKey(address) === deliveryKey) score += 200;
             candidates.set(address, Math.max(score, candidates.get(address) ?? -Infinity));
         }
         const bestScore = Math.max(...candidates.values());
         const best = [...candidates].filter(([, score]) => score === bestScore);
-        return best.length === 1 ? best[0][0] : null;
+        if (bestScore < 0) return null;
+        // 역할이 불명확하면 HEAD처럼 마지막 텍스트 주소를 안전망으로 사용.
+        return best.length ? best[best.length - 1][0] : null;
 
     } catch (e) {
         console.error("주소 추출 오류:", e);
