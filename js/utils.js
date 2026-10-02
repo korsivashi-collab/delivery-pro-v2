@@ -106,9 +106,90 @@ export function extractPhoneLogic(text) {
 // ==========================================
 // 5. 도로명 주소 정밀 추출 로직 (알고리즘 원칙 100% 엄격 준수)
 // ==========================================
-export function extractAddressLogic(text) {
+function extractAddressByLayout(pages) {
+    const delivery = [];
+    let classified = false;
+    const center = item => (item.box.top + item.box.bottom) / 2;
+    const union = parts => ({ left: Math.min(...parts.map(item => item.box.left)), right: Math.max(...parts.map(item => item.box.right)), top: Math.min(...parts.map(item => item.box.top)), bottom: Math.max(...parts.map(item => item.box.bottom)) });
+    for (const page of Array.isArray(pages) ? pages : []) {
+        const tokens = (page.tokens?.length ? page.tokens : page.lines || []).filter(item => item.text?.trim() && item.box && Object.values(item.box).every(Number.isFinite) && item.box.right > item.box.left && item.box.bottom > item.box.top);
+        if (!tokens.length) continue;
+        const heights = tokens.map(item => item.box.bottom - item.box.top).sort((a, b) => a - b);
+        const height = heights[Math.floor(heights.length / 2)];
+        const groups = [];
+        const used = new Set();
+        // OCR line으로 먼저 묶고, line 정보가 없는 토큰만 상대 좌표로 묶음.
+        for (const line of page.tokens?.length ? page.lines || [] : []) {
+            const parts = tokens.filter(item => !used.has(item) && (item.textSegments || []).some(segment => (line.textSegments || []).some(anchor => anchor.start <= segment.start && anchor.end >= segment.end)));
+            if (parts.length) { groups.push(parts); parts.forEach(item => used.add(item)); }
+        }
+        for (const token of [...tokens].sort((a, b) => center(a) - center(b) || a.box.left - b.box.left)) {
+            if (used.has(token)) continue;
+            const group = groups.find(parts => Math.abs(center({ box: union(parts) }) - center(token)) <= 0.5 * height);
+            if (group) group.push(token); else groups.push([token]);
+        }
+        const cells = [];
+        for (const group of groups) {
+            let parts = [];
+            for (const token of group.sort((a, b) => a.box.left - b.box.left)) {
+                if (parts.length && token.box.left - parts[parts.length - 1].box.right > 3 * height) { cells.push({ parts, box: union(parts) }); parts = []; }
+                parts.push(token);
+            }
+            if (parts.length) cells.push({ parts, box: union(parts) });
+        }
+        const roles = [];
+        for (const seed of tokens) {
+            const row = tokens.filter(item => item.box.left >= seed.box.left && Math.abs(center(item) - center(seed)) <= 0.7 * height).sort((a, b) => a.box.left - b.box.left);
+            const parts = [];
+            for (const item of row.slice(0, 8)) {
+                if (parts.length && item.box.left - parts[parts.length - 1].box.right > 2 * height) break;
+                parts.push(item);
+                const compact = parts.map(part => part.text).join('').replace(/[\s:：|]/g, '');
+                if (/^(?:공급받는자|배송지|수령지|납품처|받는분|공급자|발송지|본사)$/.test(compact)) roles.push({ role: /^(?:공급자|발송지|본사)$/.test(compact) ? 'supplier' : 'delivery', box: union(parts) });
+            }
+        }
+        for (const cell of cells) {
+            let cellText = cell.parts.map(item => item.text).join(' ');
+            // 주소가 다음 line으로 이어질 때만 같은 열의 인접 줄을 연결.
+            // 새 역할/다른 필드 또는 또 다른 주소가 시작되면 경계를 넘지 않음.
+            if (extractAddressLogic('배송지 ' + cellText)) {
+                let previous = cell;
+                for (let continuation = 0; continuation < 2; continuation++) {
+                    const next = cells.filter(other => other !== previous && other.box.top >= previous.box.bottom &&
+                        other.box.top - previous.box.bottom <= 1.5 * height && Math.abs(other.box.left - cell.box.left) <= height)
+                        .sort((a, b) => a.box.top - b.box.top)[0];
+                    if (!next) break;
+                    const nextText = next.parts.map(item => item.text).join(' ');
+                    if (/공\s*급|배송지|수령지|납품처|상\s*호|성\s*명|대표|담당자|주\s*소|전화|연락처|등록번호|사업자|업태|종목|금액|수량|품명/.test(nextText) || extractAddressLogic('배송지 ' + nextText)) break;
+                    cellText += '\n' + nextText;
+                    previous = next;
+                }
+            }
+            cellText = cellText.replace(/공\s*급\s*받\s*는\s*자|배\s*송\s*지|수\s*령\s*지|납\s*품\s*처|공\s*급\s*자|발\s*송\s*지|본\s*사/g, ' ');
+            const address = extractAddressLogic('배송지 ' + cellText);
+            if (!address) continue;
+            const applicable = roles.filter(label => {
+                const sameRow = Math.abs(center(label) - center(cell)) <= height && label.box.left <= cell.box.right;
+                const below = cell.box.top >= label.box.bottom - 0.5 * height && cell.box.top - label.box.bottom <= 30 * height;
+                const rightColumn = roles.filter(other => other !== label && Math.abs(center(other) - center(label)) <= height && other.box.left > label.box.right).sort((a, b) => a.box.left - b.box.left)[0];
+                const x = (cell.box.left + cell.box.right) / 2;
+                return (sameRow || below) && x >= label.box.left - 2 * height && (!rightColumn || x < rightColumn.box.left - 0.5 * height);
+            }).map(label => ({ label, distance: Math.max(0, cell.box.top - label.box.bottom) / height + Math.abs(cell.box.left - label.box.left) / height * 0.25 })).sort((a, b) => a.distance - b.distance);
+            if (!applicable.length) continue;
+            classified = true;
+            if (applicable[1] && applicable[0].label.role !== applicable[1].label.role && applicable[1].distance - applicable[0].distance < 1) continue;
+            if (applicable[0].label.role === 'delivery') delivery.push(address);
+        }
+    }
+    const unique = [...new Set(delivery)];
+    return { handled: classified, address: unique.length === 1 ? unique[0] : null };
+}
+
+export function extractAddressLogic(text, pages = []) {
     if (!text || typeof text !== 'string') return null;
     try {
+        const layout = extractAddressByLayout(pages);
+        if (layout.handled) return layout.address;
         let processedText = text;
 
         // [원칙 2] 줄바꿈 및 공백에 걸친 번지수 결합 (19-\n2, 19 - 2, 19 - \n 2 -> 19-2)
@@ -127,11 +208,12 @@ export function extractAddressLogic(text) {
         // 시/도 생략형도 함께 수집하고, 같은 주소의 시/군/구는 별도 후보로 나누지 않음
         const startRegex = new RegExp(`(^|[\\s\\[\\(])((?:${provincePattern}|[가-힣]{2,6}(?:시|군|구))\\s+(?:[가-힣]{1,10}(?:시|군|구)\\s+)*)`, 'g');
         const starts = [...flatText.matchAll(startRegex)].map(match => match.index + match[1].length);
-        const stopLabels = /(?:\s+)(?:배송지|수령지|납품처|발송지|본사|간판명|상호|업체명|연락처|전화|010|받는\s*분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
-        const labelRegex = /배송지|수령지|받는\s*분|납품처|공급자|발송지|본사/g;
+        const stopLabels = /(?:\s+)(?:배\s*송\s*지|수\s*령\s*지|납\s*품\s*처|발\s*송\s*지|본\s*사|간판명|상\s*호|업체명|성\s*명|대표자|담당자|사업자번호|등록번호|업태|종목|연락처|전화|010|받는\s*분|수령인|구매자|고객명|공\s*급|금액|수량|단가|총액|품명|비고|메모|박스)/;
+        const labelRegex = /공\s*급\s*받\s*는\s*자|배\s*송\s*지|수\s*령\s*지|받는\s*분|납\s*품\s*처|공\s*급\s*자|발\s*송\s*지|본\s*사/g;
         const labels = [...flatText.matchAll(labelRegex)];
         let bestAddress = null;
         let bestScore = -Infinity;
+        const deliveryCandidates = new Set();
 
         for (let i = 0; i < starts.length; i++) {
             const start = starts[i];
@@ -142,22 +224,22 @@ export function extractAddressLogic(text) {
             address = address.split('(')[0].replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
             if (!address) continue;
 
-            // 직전 주소와 현재 주소 사이의 가장 가까운 선행 라벨만 적용
-            // 다음 주소의 라벨이 현재 후보에 섞이지 않도록 범위를 제한
-            const contextStart = Math.max(i > 0 ? starts[i - 1] : 0, start - 100);
-            const nearbyLabels = labels.filter(label => label.index >= contextStart && label.index + label[0].length <= start);
+            // 선행 역할 필드는 다음 역할 라벨이 나타날 때까지 유지.
+            const nearbyLabels = labels.filter(label => label.index + label[0].length <= start);
             const nearestLabel = nearbyLabels[nearbyLabels.length - 1];
             let score = 0;
             if (nearestLabel) {
-                score = /^(?:배송지|수령지|받는\s*분|납품처)$/.test(nearestLabel[0]) ? 100 : -100;
+                score = /^(?:공급받는자|배송지|수령지|받는분|납품처)$/.test(nearestLabel[0].replace(/\s/g, '')) ? 100 : -100;
             }
-            // 동점이면 기존과 같이 문서에서 먼저 나온 주소 선택
+            if (score !== 100) continue;
+            deliveryCandidates.add(address);
+            // 서로 다른 배송지 후보가 여러 개면 아래에서 자동 확정을 보류.
             if (score > bestScore) {
                 bestScore = score;
                 bestAddress = address;
             }
         }
-        return bestAddress;
+        return deliveryCandidates.size === 1 ? bestAddress : null;
 
     } catch (e) {
         console.error("주소 추출 오류:", e);

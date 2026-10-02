@@ -307,7 +307,7 @@ export function initCameraScan() {
             const ocrResult = await performOCR(imageContent, true);
             rawOCRText = ocrResult.text;
             ocrPages = ocrResult.pages;
-            addressStr = extractAddressLogic(rawOCRText);
+            addressStr = extractAddressLogic(rawOCRText, ocrPages);
             extractedPhone = extractPhoneLogic(rawOCRText);
             hideLoading();
         } catch (error) {
