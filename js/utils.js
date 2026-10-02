@@ -167,6 +167,124 @@ export function extractAddressLogic(text) {
 // ==========================================
 // 6. 상호명 라벨 정밀 추출 로직
 // ==========================================
+// 페이지의 상대 좌표와 글자 높이로 값 영역을 구성. 기존 텍스트 판정은 별도 유지.
+export function extractStoreNameByLayout(pages = []) {
+    const candidates = [];
+    const excludedTextSegments = [];
+    const overlapY = (a, b) => Math.max(0, Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top)) / Math.min(a.bottom - a.top, b.bottom - b.top);
+    const union = items => ({ left: Math.min(...items.map(item => item.box.left)), top: Math.min(...items.map(item => item.box.top)), right: Math.max(...items.map(item => item.box.right)), bottom: Math.max(...items.map(item => item.box.bottom)) });
+    const labelType = text => {
+        const compact = text.replace(/[\s:：=|]/g, '');
+        if (/^(?:상호(?:\(법인명\)|명)?|법인명|업체명|배송지명(?:\(간판명\))?|간판명)$/.test(compact)) return 'store';
+        if (/^(?:성명|대표자|대표|담당자|받는분|수령인|고객명)$/.test(compact)) return 'person';
+        if (/^(?:주소|사업장|전화|연락처|사업자(?:등록)?번호|등록번호|금액|수량|단가|총액|업태|종목|공급자|공급받는자)$/.test(compact)) return 'other';
+        return null;
+    };
+    for (const page of Array.isArray(pages) ? pages : []) {
+        const items = (page.tokens?.length ? page.tokens : page.lines || []).filter(item => item.text?.trim() && item.box &&
+            Object.values(item.box).every(Number.isFinite) && item.box.right > item.box.left && item.box.bottom > item.box.top);
+        const rows = [];
+        for (const item of [...items].sort((a, b) => a.box.top - b.box.top || a.box.left - b.box.left)) {
+            let row = rows.find(row => overlapY(row.box, item.box) >= 0.5);
+            if (!row) { row = { items: [], box: item.box }; rows.push(row); }
+            row.items.push(item);
+            row.box = union(row.items);
+        }
+        rows.sort((a, b) => a.box.top - b.box.top);
+        const labels = [];
+        for (const row of rows) {
+            row.items.sort((a, b) => a.box.left - b.box.left);
+            for (let i = 0; i < row.items.length; i++) {
+                let found = null;
+                const parts = [];
+                for (let j = i; j < Math.min(row.items.length, i + 10); j++) {
+                    const item = row.items[j];
+                    if (j > i && item.box.left - row.items[j - 1].box.right > 2 * (item.box.bottom - item.box.top)) break;
+                    parts.push(item);
+                    const type = labelType(parts.map(part => part.text).join(''));
+                    if (type) found = { type, items: [...parts], box: union(parts), text: parts.map(part => part.text).join(' '), row };
+                }
+                if (found) { labels.push(found); i += found.items.length - 1; }
+            }
+        }
+        const labelItems = new Set(labels.flatMap(label => label.items));
+        const adjacentItems = (items, height) => {
+            const result = [];
+            for (const item of items) {
+                if (result.length && item.box.left - result[result.length - 1].box.right > 2 * height) break;
+                result.push(item);
+            }
+            return result;
+        };
+        const valuesFor = label => {
+            const height = label.box.bottom - label.box.top;
+            const nextLabel = labels.filter(other => other !== label && overlapY(other.box, label.box) >= 0.5 && other.box.left >= label.box.right)
+                .sort((a, b) => a.box.left - b.box.left)[0];
+            const rightLimit = nextLabel ? nextLabel.box.left : 1;
+            let valueItems = adjacentItems(label.row.items.filter(item => !labelItems.has(item) && item.box.left >= label.box.right && item.box.right <= rightLimit), height);
+            let mode = 'right';
+            let firstRow = label.row;
+            if (!valueItems.length) {
+                mode = 'below';
+                firstRow = rows.find(row => row.box.top >= label.box.bottom && row.box.top - label.box.bottom <= 2 * height &&
+                    row.items.some(item => !labelItems.has(item) && Math.abs(item.box.left - label.box.left) <= height && item.box.right <= rightLimit));
+                if (firstRow) valueItems = adjacentItems(firstRow.items.filter(item => !labelItems.has(item) && item.box.left >= label.box.left - height && item.box.right <= rightLimit), height);
+            }
+            if (!valueItems.length) return { items: [], mode };
+            const firstBox = union(valueItems);
+            const secondRow = rows.find(row => row.box.top >= firstBox.bottom && row.box.top - firstBox.bottom <= 1.5 * height);
+            if (secondRow) {
+                const secondItems = adjacentItems(secondRow.items.filter(item => !labelItems.has(item) && item.box.right <= rightLimit && item.box.left >= firstBox.left - height), height);
+                if (secondItems.length) {
+                    const secondBox = union(secondItems);
+                    const fieldBetween = labels.some(other => other !== label && other.box.top >= label.box.top && other.box.top < secondBox.bottom &&
+                        other.box.right > firstBox.left - height && other.box.left < rightLimit);
+                    // 두 줄은 같은 값 열에 정렬되고 중간에 다른 필드가 없을 때만 결합.
+                    if (!fieldBetween && Math.abs(secondBox.left - firstBox.left) <= height && !isStoreNameAddressText(secondItems.map(item => item.text).join(' '))) valueItems.push(...secondItems);
+                }
+            }
+            return { items: valueItems, mode, gap: mode === 'right' ? firstBox.left - label.box.right : firstBox.top - label.box.bottom, height };
+        };
+        const personItems = new Set();
+        for (const label of labels.filter(label => label.type === 'person')) {
+            for (const item of valuesFor(label).items) {
+                personItems.add(item);
+                excludedTextSegments.push(...(item.textSegments || []));
+            }
+        }
+        logStoreNameDiagnostic('위치 라벨과 제외 영역', { page: page.pageNumber, labels: labels.map(label => ({ text: label.text, type: label.type, box: label.box })), excludedTextSegments });
+        for (const label of labels.filter(label => label.type === 'store')) {
+            const value = valuesFor(label);
+            const parts = value.items.filter(item => !personItems.has(item));
+            const name = parts.map(item => item.text.trim()).join(' ').replace(/\s+/g, ' ').trim();
+            const confidenceItems = [...label.items, ...parts];
+            const confidences = confidenceItems.map(item => item.confidence);
+            const completeConfidence = confidences.length > 0 && confidences.every(confidence => typeof confidence === 'number' && confidence >= 0 && confidence <= 1);
+            const confidence = completeConfidence ? confidences.reduce((sum, confidence) => sum + confidence, 0) / confidences.length : 0;
+            const adjustments = [
+                { reason: '상호 라벨', points: 35 },
+                { reason: value.mode === 'right' ? '오른쪽 같은 행' : '라벨 아래 정렬', points: value.mode === 'right' ? 30 : 20 },
+                { reason: '상대 거리', points: Math.max(0, 10 - (value.gap || 0) / (value.height || 1) * 2) },
+                { reason: 'OCR confidence', points: confidence * 25 },
+                { reason: '주소 또는 번호/수치 혼입', points: isStoreNameAddressText(name) || /\d{3}-\d{2}-\d{5}|0\d{1,3}[\s.-]*\d{3,4}[\s.-]*\d{4}|\d[\d,]*\s*(?:원|개|kg)(?=\s|$)/.test(name) ? -100 : 0 },
+                { reason: '건물명 관련 단어 의심', points: /상가|아파트|빌딩|타워|센터/.test(name) ? -8 : 0 }
+            ];
+            const score = adjustments.reduce((sum, adjustment) => sum + adjustment.points, 0);
+            const validName = name.length >= 2 && /[A-Za-z가-힣]/.test(name) && !/^(?:주식회사|유한회사|\(주\)|㈜)$/.test(name);
+            const closeEnough = value.height > 0 && value.gap / value.height <= 6;
+            const reliable = validName && closeEnough && completeConfidence && confidence >= 0.7 && Math.min(...confidences) >= 0.5 && score >= 75;
+            const candidate = { name, score, confidence, reliable, page: page.pageNumber, box: parts.length ? union(parts) : null, adjustments, reason: reliable ? '선택 비교 대상' : !validName ? '유효한 상호 값 없음' : !closeEnough ? '라벨과 값 사이 거리 과다' : !completeConfidence || confidence < 0.7 || Math.min(...confidences) < 0.5 ? 'confidence 부족' : '점수 75 미만' };
+            candidates.push(candidate);
+            logStoreNameDiagnostic('위치 상호 후보', candidate);
+        }
+    }
+    const ranked = candidates.filter(candidate => candidate.reliable).sort((a, b) => b.score - a.score);
+    const rival = ranked.find(candidate => candidate.name !== ranked[0]?.name);
+    const name = ranked.length && (!rival || ranked[0].score - rival.score >= 10) ? ranked[0].name : null;
+    logStoreNameDiagnostic('위치 선택 결과', { selected: name, ranked, reason: name ? '신뢰도와 후보 간 점수 차 통과' : '후보 부족 또는 후보 간 점수 차 부족: 텍스트 fallback' });
+    return { name, candidates, excludedTextSegments };
+}
+
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {

@@ -9,6 +9,7 @@ import {
     extractPhoneLogic, 
     extractAddressLogic, 
     extractStoreNameLogic,
+    extractStoreNameByLayout,
     logStoreNameDiagnostic, 
     showLoading, 
     hideLoading 
@@ -68,7 +69,7 @@ export function checkScanLimit() {
 // ==========================================
 // 2. 서버 OCR API 통신
 // ==========================================
-export async function performOCR(base64Data) {
+export async function performOCR(base64Data, includeLayout = false) {
     const response = await fetch('/api/ocr', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
@@ -78,7 +79,10 @@ export async function performOCR(base64Data) {
     
     if (data.error) throw new Error(data.error);
     if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
-    if (data.responses && data.responses[0].fullTextAnnotation) return data.responses[0].fullTextAnnotation.text;
+    if (data.responses && data.responses[0].fullTextAnnotation) {
+        const annotation = data.responses[0].fullTextAnnotation;
+        return includeLayout ? { text: annotation.text, pages: annotation.pages || [] } : annotation.text;
+    }
     
     throw new Error("사진에서 글자를 찾을 수 없습니다.");
 }
@@ -292,6 +296,7 @@ export function initCameraScan() {
 
         let addressStr = null; 
         let rawOCRText = ""; 
+        let ocrPages = [];
         let extractedPhone = null;
         
         // 1. OCR 판독
@@ -299,7 +304,9 @@ export function initCameraScan() {
         try {
             const base64Image = await toBase64_SafeCompress(file);
             const imageContent = base64Image.split(',')[1];
-            rawOCRText = await performOCR(imageContent);
+            const ocrResult = await performOCR(imageContent, true);
+            rawOCRText = ocrResult.text;
+            ocrPages = ocrResult.pages;
             addressStr = extractAddressLogic(rawOCRText);
             extractedPhone = extractPhoneLogic(rawOCRText);
             hideLoading();
@@ -342,13 +349,23 @@ export function initCameraScan() {
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
+                const positionResult = extractStoreNameByLayout(ocrPages);
+                let storeOCRText = rawOCRText;
+                // 위치로 식별한 사람 필드 값만 fallback에서 가림. 주소·전화번호는 원문 사용.
+                for (const segment of [...positionResult.excludedTextSegments].sort((a, b) => b.start - a.start)) {
+                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
+                }
+                if (positionResult.name) {
+                    finalStoreName = positionResult.name;
+                    diagnosticPath = 'OCR 위치';
+                }
                 // [1단계] OCR 라벨 상호 추출 및 기존 가비지 필터링
                 if (!finalStoreName) {
-                    let extracted = extractStoreNameLogic(rawOCRText);
+                    let extracted = extractStoreNameLogic(storeOCRText);
                     if (extracted) {
                         let isGarbage = false;
                         let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        let textForRegex = rawOCRText.replace(/\n/g, ' ');
+                        let textForRegex = storeOCRText.replace(/\n/g, ' ');
 
                         let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
                         if (blockRegex.test(textForRegex)) isGarbage = true;
@@ -357,20 +374,20 @@ export function initCameraScan() {
 
                         logStoreNameDiagnostic('OCR 후단 검증', { candidate: extracted, rejected: isGarbage, reason: isGarbage ? '성명/수령인 문맥 또는 층수/길이/숫자 필터 해당' : '기존 후단 필터 통과' });
                         if (!isGarbage) finalStoreName = extracted;
-                        if (finalStoreName) diagnosticPath = 'OCR';
+                        if (finalStoreName) diagnosticPath = 'OCR 텍스트';
                     }
                 }
 
                 if (!finalStoreName) {
                     const addressPlaces = await getPOIsByAddress(addressStr);
                     // 주소 문맥을 원문에 유지해 주소 다음 줄의 건물명도 제외할 수 있게 함
-                    finalStoreName = findStoreNameFromOCR(rawOCRText, addressPlaces, 85, addressStr);
+                    finalStoreName = findStoreNameFromOCR(storeOCRText, addressPlaces, 85, addressStr);
                     if (!finalStoreName) {
-                        const addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
-                        finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces, rawOCRText);
+                        const addressAreaText = extractAddressAreaText(storeOCRText, addressStr);
+                        finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces, storeOCRText);
                     }
                 }
-                if (finalStoreName && diagnosticPath !== 'OCR') diagnosticPath = '카카오';
+                if (finalStoreName && diagnosticPath === '빈 값') diagnosticPath = '카카오';
             } catch (error) {
                 logStoreNameDiagnostic('선택 과정 오류', { message: error.message });
                 console.error("상호명 매칭 오류:", error);
