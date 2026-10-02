@@ -3,7 +3,8 @@ const STORE_NAME_DIAGNOSTICS_ENABLED = true;
 export function logStoreNameDiagnostic(stage, details) {
     if (!STORE_NAME_DIAGNOSTICS_ENABLED) return;
     try {
-        console.log('[OCR 상호 진단] ' + stage, JSON.parse(JSON.stringify(details)));
+        if (stage === '상호 상세진단') console.log('[OCR 상호 상세진단] ' + JSON.stringify(details));
+        else console.log('[OCR 상호 진단] ' + stage, JSON.parse(JSON.stringify(details)));
     } catch (_) { /* 진단 실패가 인식 동작에 영향을 주지 않도록 함 */ }
 }
 
@@ -321,39 +322,52 @@ export function extractStoreNameByLayout(pages = []) {
             logStoreNameDiagnostic('위치 복합 라벨 결합', { page: page.pageNumber, label: label.text, parts: composite.map(describe), box: label.box });
         }
         const labelItems = new Set(labels.flatMap(label => label.items));
-        const adjacentItems = (items, height) => {
+        const adjacentItems = (items, height, trace) => {
             const result = [];
             for (const item of items) {
-                if (result.length && item.box.left - result[result.length - 1].box.right > 2 * height) break;
+                if (result.length && item.box.left - result[result.length - 1].box.right > 2 * height) {
+                    if (trace) items.slice(result.length).forEach(token => trace.excluded.push({ token, reason: '앞 토큰과의 간격이 글자 높이의 2배 초과: 이후 수집 중단' }));
+                    break;
+                }
                 result.push(item);
             }
             return result;
         };
-        const valuesFor = label => {
+        const valuesFor = (label, trace) => {
             const height = label.box.bottom - label.box.top;
             const nextLabel = labels.filter(other => other !== label && overlapY(other.box, label.box) >= 0.5 && other.box.left >= label.box.right)
                 .sort((a, b) => a.box.left - b.box.left)[0];
             const rightLimit = nextLabel ? nextLabel.box.left : 1;
-            let valueItems = adjacentItems(label.row.items.filter(item => !labelItems.has(item) && item.box.left >= label.box.right && item.box.right <= rightLimit), height);
+            const filterItems = (source, leftLimit) => source.filter(item => {
+                const reason = labelItems.has(item) ? '라벨 구성 토큰' : item.box.left < leftLimit ? '값 영역 왼쪽 경계 밖' : item.box.right > rightLimit ? '다음 필드의 왼쪽 경계 초과' : null;
+                if (trace && reason) trace.excluded.push({ token: item, reason });
+                return !reason;
+            });
+            if (trace) {
+                trace.initial = label.row.items.filter(item => item.box.right > label.box.right && item.box.left < rightLimit);
+                trace.rightLimit = rightLimit;
+            }
+            let valueItems = adjacentItems(filterItems(label.row.items, label.box.right), height, trace);
             let mode = 'right';
             let firstRow = label.row;
             if (!valueItems.length) {
                 mode = 'below';
                 firstRow = rows.find(row => row.box.top >= label.box.bottom && row.box.top - label.box.bottom <= 2 * height &&
                     row.items.some(item => !labelItems.has(item) && Math.abs(item.box.left - label.box.left) <= height && item.box.right <= rightLimit));
-                if (firstRow) valueItems = adjacentItems(firstRow.items.filter(item => !labelItems.has(item) && item.box.left >= label.box.left - height && item.box.right <= rightLimit), height);
+                if (firstRow) valueItems = adjacentItems(filterItems(firstRow.items, label.box.left - height), height, trace);
             }
             if (!valueItems.length) return { items: [], mode };
             const firstBox = union(valueItems);
             const secondRow = rows.find(row => row.box.top >= firstBox.bottom && row.box.top - firstBox.bottom <= 1.5 * height);
             if (secondRow) {
-                const secondItems = adjacentItems(secondRow.items.filter(item => !labelItems.has(item) && item.box.right <= rightLimit && item.box.left >= firstBox.left - height), height);
+                const secondItems = adjacentItems(filterItems(secondRow.items, firstBox.left - height), height, trace);
                 if (secondItems.length) {
                     const secondBox = union(secondItems);
                     const fieldBetween = labels.some(other => other !== label && other.box.top >= label.box.top && other.box.top < secondBox.bottom &&
                         other.box.right > firstBox.left - height && other.box.left < rightLimit);
                     // 두 줄은 같은 값 열에 정렬되고 중간에 다른 필드가 없을 때만 결합.
                     if (!fieldBetween && Math.abs(secondBox.left - firstBox.left) <= height && !isStoreNameAddressText(secondItems.map(item => item.text).join(' '))) valueItems.push(...secondItems);
+                    else if (trace) secondItems.forEach(token => trace.excluded.push({ token, reason: fieldBetween ? '두 줄 사이 다른 필드 존재' : Math.abs(secondBox.left - firstBox.left) > height ? '두 번째 줄의 왼쪽 정렬 불일치' : '두 번째 줄이 주소 패턴' }));
                 }
             }
             return { items: valueItems, mode, gap: mode === 'right' ? firstBox.left - label.box.right : firstBox.top - label.box.bottom, height };
@@ -367,10 +381,28 @@ export function extractStoreNameByLayout(pages = []) {
         }
         logStoreNameDiagnostic('위치 라벨과 제외 영역', { page: page.pageNumber, labels: labels.map(label => ({ text: label.text, type: label.type, box: label.box })), excludedTextSegments });
         for (const label of labels.filter(label => label.type === 'store')) {
-            const value = valuesFor(label);
+            const trace = { initial: [], excluded: [] };
+            const value = valuesFor(label, trace);
             const unsortedParts = value.items.filter(item => !personItems.has(item));
+            value.items.filter(item => personItems.has(item)).forEach(token => trace.excluded.push({ token, reason: '사람 필드의 값 영역' }));
             const parts = [...unsortedParts].sort((a, b) => rowOf.get(a) - rowOf.get(b) || a.box.left - b.box.left || center(a) - center(b));
             const name = parts.map(item => item.text.trim()).join(' ').replace(/\s+/g, ' ').trim();
+            const labelHeight = label.box.bottom - label.box.top;
+            items.filter(item => !label.row.items.includes(item) && !value.items.includes(item) && !labelItems.has(item) &&
+                item.box.left >= label.box.right && item.box.left < trace.rightLimit &&
+                Math.abs(center(item) - center(label)) <= 1.75 * labelHeight &&
+                !trace.excluded.some(entry => entry.token === item))
+                .forEach(token => trace.excluded.push({ token, reason: '라벨 행 소속 아님: 아래 줄 수집/결합 결과에도 포함되지 않음' }));
+            // 상세진단은 문자열 한 개로 출력하며 상호 라벨 주변의 값 영역만 기록.
+            const detailToken = item => `${JSON.stringify(item.text)} / x=${item.box.left}..${item.box.right} / y=${item.box.top}..${item.box.bottom} / confidence=${item.confidence}`;
+            logStoreNameDiagnostic('상호 상세진단', {
+                page: page.pageNumber, label: label.text, labelBox: label.box,
+                initialRightTokens: trace.initial.map(detailToken),
+                excludedTokens: trace.excluded.filter(({ token }) => label.items.includes(token) ||
+                    (token.box.right >= label.box.left && token.box.left < trace.rightLimit))
+                    .map(({ token, reason }) => `${JSON.stringify(token.text)} / ${reason}`),
+                finalTokenOrder: parts.map(detailToken), combinedText: name
+            });
             logStoreNameDiagnostic('위치 상호 결합 순서', { page: page.pageNumber, label: label.text, before: items.filter(item => unsortedParts.includes(item)).map(describe), after: parts.map(describe), combinedText: name });
             const confidenceItems = [...label.items, ...parts];
             const confidences = confidenceItems.map(item => item.confidence);
