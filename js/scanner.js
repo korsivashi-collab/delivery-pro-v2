@@ -334,25 +334,13 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 상호명 순수 주소 기반 3단계 순차 파이프라인
+        // 3. 명확한 OCR 상호 우선, 없을 때만 카카오 장소명으로 보완
         let finalStoreName = null;
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                let addressPlaces = await getPOIsByAddress(addressStr);
-
-                // [1단계] 순서 동일률 50% 이상 핵심 상호 매칭
-                let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
-                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, addressPlaces, 50);
-
-                // [2단계] 주소지 영역 텍스트와 공식 주소 POI 간 중복(교집합) 매칭
-                if (!finalStoreName) {
-                    let addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
-                    finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
-                }
-
-                // [3단계] 표 라벨 정밀 추출 및 가비지 필터링
+                // [1단계] OCR 라벨 상호 추출 및 기존 가비지 필터링
                 if (!finalStoreName) {
                     let extracted = extractStoreNameLogic(rawOCRText);
                     if (extracted) {
@@ -366,6 +354,16 @@ export function initCameraScan() {
                         if (extracted.length < 2 || /^\d+$/.test(extracted)) isGarbage = true;
 
                         if (!isGarbage) finalStoreName = extracted;
+                    }
+                }
+
+                if (!finalStoreName) {
+                    const addressPlaces = await getPOIsByAddress(addressStr);
+                    const textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
+                    finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, addressPlaces, 50);
+                    if (!finalStoreName) {
+                        const addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
+                        finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
                     }
                 }
             } catch (error) {

@@ -161,74 +161,46 @@ export function extractAddressLogic(text) {
 export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
-        let lines = fullText.split(/\n/);
-        
-        const anchors = [
-            '배송지명(간판명)', 
-            '상호(법인명)', 
-            '배송지명', 
-            '간판명', 
-            '상호명', 
-            '상호', 
-            '업체명', 
-            '법인명'
-        ];
-        
-        const stopLabels = /(성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|공급|금액|수량|단가|총액|규격|제조사|원산지|단위|합계)/;
-        const breakRegex = /[\s\(\)\[\]\{\}\<\>\/,\+|;:]+/;
+        const lines = fullText.split(/\r?\n/);
+        const anchor = /배송지명\s*(?:\(\s*간판명\s*\))?|간판명|상호\s*(?:\(\s*법인명\s*\)|명)?|업체명|법인명/;
+        const stopLabels = /(?:^|[\s|])(?:성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|사업자\s*(?:등록)?번호|공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처|받는\s*분|수령인|고객명|금액|수량|단가|총액|규격|제조사|원산지|단위|합계|품명|비고|상호|간판명|업체명|법인명)(?=\s|[:：|\(]|$)/;
+        const candidates = [];
+        let section = '';
 
         for (let i = 0; i < lines.length; i++) {
-            let line = lines[i];
-            for (let anchor of anchors) {
-                if (line.includes(anchor)) {
-                    let idx = line.indexOf(anchor);
-                    let rightSide = line.substring(idx + anchor.length).trim();
-                    rightSide = rightSide.replace(/^[:\s\-\=\|\/]+/, '');
-                    
-                    let words = rightSide.split(breakRegex).filter(w => w.length > 0);
-                    for (let w of words) {
-                        let candidate = w.replace(/[^\w가-힣]/g, '');
-                        if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
-                        if (stopLabels.test(candidate)) break;
-                        if (/^\d+$/.test(candidate)) continue;
-                        if (candidate.length >= 2) {
-                            return candidate;
-                        }
-                    }
-                    
-                    if (i + 1 < lines.length) {
-                        let nextWords = lines[i + 1].split(breakRegex).filter(w => w.length > 0);
-                        for (let w of nextWords) {
-                            let candidate = w.replace(/[^\w가-힣]/g, '');
-                            if (anchors.some(a => a.includes(candidate) || candidate.includes(a))) continue;
-                            if (stopLabels.test(candidate)) break;
-                            if (/^\d+$/.test(candidate)) continue;
-                            if (candidate.length >= 2) {
-                                return candidate;
-                            }
-                        }
-                    }
+            const sections = [...lines[i].matchAll(/공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처/g)];
+            const labels = [...lines[i].matchAll(new RegExp(anchor.source, 'g'))];
+            for (const label of labels) {
+                const precedingSections = sections.filter(match => match.index < label.index);
+                const currentSection = precedingSections.length ? precedingSections[precedingSections.length - 1][0] : section;
+                const parts = [];
+                // 라벨 뒤의 같은 줄과 이어지는 줄에서 최대 두 줄의 상호를 수집
+                for (let j = i; j < lines.length && j <= i + 2 && parts.length < 2; j++) {
+                    let part = j === i ? lines[j].slice(label.index + label[0].length) : lines[j];
+                    part = part.replace(/^[\s:：=|/\-]+/, '').trim();
+                    if (!part) continue;
+                    const stop = part.search(stopLabels);
+                    const pipe = part.indexOf('|');
+                    const boundary = Math.min(stop < 0 ? part.length : stop, pipe < 0 ? part.length : pipe);
+                    const namePart = part.slice(0, boundary).trim();
+                    if (namePart) parts.push(namePart);
+                    if (boundary < part.length) break;
                 }
+                const name = parts.join(' ').replace(/\s+/g, ' ').trim();
+                // 필드명, 숫자, 법인 접두사만 있는 값은 명확한 상호로 취급하지 않음
+                if (name.length < 2 || !/[A-Za-z가-힣]/.test(name) || /^(?:주식회사|유한회사|법인명|\(주\)|㈜)$/.test(name) || /^(?:지하|지상)?\s*B?\d+\s*층$/i.test(name)) continue;
+                const supplier = /^(?:공급자|발송지|본사)$/.test(currentSection);
+                const score = supplier ? -20 : /배송지명|간판명/.test(label[0]) || /공급받는|배송지|수령지|납품처/.test(currentSection) ? 20 : 10;
+                candidates.push({ name, score });
             }
+            if (sections.length) section = sections[sections.length - 1][0];
         }
-
-        let tokens = fullText.split(breakRegex).filter(t => t.trim().length > 0);
-        for (let i = 0; i < tokens.length; i++) {
-            let cleanTok = tokens[i].replace(/[^\w가-힣]/g, '');
-            if (anchors.some(a => cleanTok === a || cleanTok.includes(a))) {
-                for (let j = i + 1; j < Math.min(tokens.length, i + 6); j++) {
-                    let cleanNext = tokens[j].replace(/[^\w가-힣]/g, '');
-                    if (cleanNext.length === 0) continue;
-                    if (anchors.some(a => cleanNext === a || cleanNext.includes(a))) continue;
-                    if (stopLabels.test(cleanNext)) break;
-                    if (/^\d+$/.test(cleanNext)) continue;
-                    if (cleanNext.length >= 2) {
-                        return cleanNext;
-                    }
-                }
-            }
-        }
-
+        const usable = candidates.filter(candidate => candidate.score >= 0);
+        if (!usable.length) return null;
+        const bestScore = Math.max(...usable.map(candidate => candidate.score));
+        const names = [...new Set(usable.filter(candidate => candidate.score === bestScore).map(candidate => candidate.name))];
+        // 같은 우선순위에서 서로 다른 상호가 나오면 fallback으로 넘김
+        return names.length === 1 ? names[0] : null;
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
