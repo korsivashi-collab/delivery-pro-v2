@@ -22,6 +22,67 @@ const processorId = 'acd7355012d6c4a9';
 
 const resourceName = `projects/${projectId}/locations/${location}/processors/${processorId}`;
 
+// 구조 진단 출력은 이 함수에 모음. false로 바꾸면 전체 출력을 끔.
+const OCR_STRUCTURE_DIAGNOSTICS_ENABLED = true;
+function logOcrResponseStructure(document) {
+    if (!OCR_STRUCTURE_DIAGNOSTICS_ENABLED) return;
+    try {
+        const pages = Array.isArray(document?.pages) ? document.pages : [];
+        const fields = ['tokens', 'lines', 'blocks', 'tables', 'formFields'];
+        const summary = {
+            pages: { present: Array.isArray(document?.pages), count: pages.length },
+            boundingPoly: { presentCount: 0, usableCount: 0, available: false },
+            confidence: { presentCount: 0, usableCount: 0, available: false }
+        };
+        for (const field of fields) {
+            summary[field] = {
+                present: pages.some(page => Array.isArray(page?.[field])),
+                presentOnPages: pages.filter(page => Array.isArray(page?.[field])).length,
+                count: pages.reduce((count, page) => count + (Array.isArray(page?.[field]) ? page[field].length : 0), 0)
+            };
+        }
+        // Layout (표 셀과 폼의 fieldName/fieldValue 포함)의 메타데이터만 집계.
+        // 원문, 좌표값, 이미지, 개별 confidence 값은 출력하지 않음.
+        const stack = [...pages];
+        while (stack.length) {
+            const node = stack.pop();
+            if (!node || typeof node !== 'object') continue;
+            if (node.boundingPoly || node.textAnchor) {
+                if (node.boundingPoly) {
+                    summary.boundingPoly.presentCount++;
+                    const polygons = [node.boundingPoly.normalizedVertices, node.boundingPoly.vertices];
+                    if (polygons.some(vertices => {
+                        if (!Array.isArray(vertices) || vertices.length < 3 || !vertices.every(vertex =>
+                            vertex && Number.isFinite(vertex.x ?? 0) && Number.isFinite(vertex.y ?? 0))) return false;
+                        const xs = vertices.map(vertex => vertex.x ?? 0);
+                        const ys = vertices.map(vertex => vertex.y ?? 0);
+                        return Math.max(...xs) > Math.min(...xs) && Math.max(...ys) > Math.min(...ys);
+                    })) {
+                        summary.boundingPoly.usableCount++;
+                    }
+                }
+                if (node.confidence !== undefined && node.confidence !== null) {
+                    summary.confidence.presentCount++;
+                    if (typeof node.confidence === 'number' && Number.isFinite(node.confidence) && node.confidence >= 0 && node.confidence <= 1) {
+                        summary.confidence.usableCount++;
+                    }
+                }
+            }
+            for (const [key, value] of Object.entries(node)) {
+                if (['text', 'textAnchor', 'image', 'boundingPoly'].includes(key)) continue;
+                if (Array.isArray(value)) stack.push(...value);
+                else if (value && typeof value === 'object') stack.push(value);
+            }
+        }
+        summary.boundingPoly.available = summary.boundingPoly.usableCount > 0;
+        summary.confidence.available = summary.confidence.usableCount > 0;
+        console.log('[OCR 응답 구조 진단]', summary);
+    } catch (_) {
+        // 진단 실패로 기존 OCR 응답이 변경되지 않도록 함.
+        console.log('[OCR 응답 구조 진단] 집계 실패');
+    }
+}
+
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
@@ -51,6 +112,7 @@ module.exports = async function handler(req, res) {
         // Enterprise Document AI OCR 호출
         const [result] = await client.processDocument(request);
         const { document } = result;
+        logOcrResponseStructure(document);
 
         if (!document || !document.text) {
             return res.status(404).json({ error: "사진에서 텍스트를 찾을 수 없습니다." });
