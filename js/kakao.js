@@ -1,3 +1,5 @@
+import { isStoreNameAddressText } from './utils.js';
+
 // js/kakao.js
 
 const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
@@ -204,72 +206,69 @@ function getLevenshteinDistance(s1, s2) {
 // ==========================================
 // 5. 1단계: 순서 동일률 기반 상호 매칭 (2글자 상호 100% 필수, 3글자 이상 50% 허용)
 // ==========================================
-export function findStoreNameFromOCR(rawOCRText, places, threshold = 50) {
-    if (!rawOCRText || !places || places.length === 0) return null;
-
-    let fullCleanOCR = rawOCRText.replace(/[^\w가-힣]/g, '');
-    let bestMatch = null;
-    let highestSim = 0;
-
-    for (let place of places) {
-        let cleanPlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
-        if (cleanPlace.length <= 1) continue; 
-        
-        // 100% 완전 포함 시 즉시 확정 반환
-        if (fullCleanOCR.includes(cleanPlace)) return place;
-
-        // 지점명('~점') 및 띄어쓰기 뒷부분 분리 후 핵심 상호 추출
-        let corePlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').trim().split(/\s+/)[0];
-        corePlace = corePlace.replace(/[가-힣0-9]{1,4}점$/, '').replace(/[^\w가-힣]/g, '');
-        if (corePlace.length <= 1) corePlace = cleanPlace;
-
-        if (fullCleanOCR.includes(corePlace)) return place;
-
-        let targetWord = corePlace.length >= 2 ? corePlace : cleanPlace;
-        let targetLen = targetWord.length;
-        if (fullCleanOCR.length < targetLen - 1) continue;
-
-        let effectiveThreshold = (targetLen <= 2) ? 100 : threshold;
-
-        for (let i = 0; i <= fullCleanOCR.length - targetLen + 1; i++) {
-            for (let j = Math.max(2, targetLen - 1); j <= targetLen + 2; j++) {
-                let subStr = fullCleanOCR.substring(i, i + j);
-                if (subStr.length < 2) continue;
-
-                let dist = getLevenshteinDistance(targetWord, subStr);
-                let maxLen = Math.max(targetWord.length, subStr.length);
-                let sim = ((maxLen - dist) / maxLen) * 100;
-
-                if (sim >= effectiveThreshold && sim > highestSim) {
-                    highestSim = sim;
-                    bestMatch = place;
+export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, addressStr = '') {
+    if (!rawOCRText || !places || !places.length) return null;
+    const clean = value => value.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
+    const addressKey = clean(addressStr);
+    const evidence = [];
+    let addressContinuation = false;
+    let section = '';
+    for (const line of rawOCRText.split(/\r?\n/)) {
+        const sections = [...line.matchAll(/공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처/g)];
+        if (sections.length) section = sections[sections.length - 1][0];
+        if (/^(?:공급자|발송지|본사)$/.test(section)) continue;
+        const hasLabel = /상\s*호|법\s*인\s*명|업\s*체\s*명|간판명|배송지명/.test(line);
+        if (isStoreNameAddressText(line) || (addressKey && clean(line).includes(addressKey))) {
+            addressContinuation = true;
+            continue;
+        }
+        // 주소 다음 줄의 건물명도 주소 문맥으로 취급. 명시적 상호 라벨은 예외.
+        if (addressContinuation && !hasLabel) {
+            if (line.trim()) addressContinuation = false;
+            continue;
+        }
+        addressContinuation = false;
+        if (/전화|연락처|사업자|금액|수량|단가|총액|합계|품명|대표자|성명/.test(line) && !hasLabel) continue;
+        const nameText = line.replace(/^.*?(?:상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|법\s*인\s*명|업\s*체\s*명|간판명|배송지명)\s*[:：|]?/, '')
+            .split(/\s+(?:주\s*소|전화|연락처|사업자|금액|수량|단가|대표자|성명)/)[0];
+        // OCR 단계에서 수치 혼입으로 낮게 평가한 후보를 fallback에서 재확정하지 않음
+        if (/\b\d{3}\s*-\s*\d{2}\s*-\s*\d{5}\b|\b0\d{1,3}[\s.-]*\d{3,4}[\s.-]*\d{4}\b|\b\d{8,13}\b|\d[\d,]*\s*(?:원|개|EA|박스|kg)(?=\s|$|[,;|])|\b\d{1,3}(?:,\d{3})+\b/i.test(nameText)) continue;
+        const normalized = clean(nameText);
+        if (normalized.length >= 2 && /[A-Za-z가-힣]/.test(normalized)) evidence.push(normalized);
+    }
+    if (!evidence.length) return null;
+    const ranked = [];
+    for (const place of [...new Set(places)]) {
+        if (isStoreNameAddressText(place)) continue;
+        const fullName = clean(place);
+        if (fullName.length < 2) continue;
+        const core = clean(place.trim().split(/\s+/)[0]);
+        let score = 0;
+        for (const text of evidence) {
+            if (text.includes(fullName)) score = Math.max(score, 100);
+            else if (core.length >= 3 && text.includes(core)) score = Math.max(score, 90);
+            else if (fullName.length >= 3) {
+                // 전체 문서 연결 문자열 대신 주소를 제외한 개별 줄 안에서만 비교
+                for (let i = 0; i < text.length; i++) {
+                    for (let size = Math.max(3, fullName.length - 1); size <= fullName.length + 1; size++) {
+                        const part = text.slice(i, i + size);
+                        if (part.length < 3) continue;
+                        const similarity = 100 * (1 - getLevenshteinDistance(fullName, part) / Math.max(fullName.length, part.length));
+                        score = Math.max(score, similarity);
+                    }
                 }
             }
         }
+        if (/상가|아파트|빌딩|타워|센터/.test(place)) score -= 8;
+        if (score >= Math.max(85, threshold)) ranked.push({ place, score });
     }
-    return bestMatch;
+    ranked.sort((a, b) => b.score - a.score);
+    if (!ranked.length || (ranked[1] && ranked[0].score - ranked[1].score < 10)) return null;
+    return ranked[0].place;
 }
 
-// ==========================================
-// 6. 2단계: 주소지 영역 텍스트와 POI 간 중복(교집합) 매칭
-// ==========================================
-export function findOverlappingPOIFromAddress(addressAreaText, places) {
-    if (!addressAreaText || !places || places.length === 0) return null;
-    let cleanAddr = addressAreaText.replace(/[^\w가-힣]/g, '');
-
-    for (let place of places) {
-        let cleanPlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
-        if (cleanPlace.length <= 1) continue;
-
-        if (cleanAddr.includes(cleanPlace)) {
-            return place;
-        }
-
-        let corePlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').trim().split(/\s+/)[0];
-        corePlace = corePlace.replace(/[^\w가-힣]/g, '');
-        if (corePlace.length >= 2 && cleanAddr.includes(corePlace)) {
-            return place;
-        }
-    }
-    return null;
+// 주소 영역의 일치만으로 상호를 확정하지 않고 별도의 OCR 상호 근거를 요구
+export function findOverlappingPOIFromAddress(addressAreaText, places, nonAddressText = '') {
+    if (!nonAddressText) return null;
+    return findStoreNameFromOCR(nonAddressText, places, 85, addressAreaText);
 }

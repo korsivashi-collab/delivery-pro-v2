@@ -359,11 +359,11 @@ export function initCameraScan() {
 
                 if (!finalStoreName) {
                     const addressPlaces = await getPOIsByAddress(addressStr);
-                    const textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
-                    finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, addressPlaces, 50);
+                    // 주소 문맥을 원문에 유지해 주소 다음 줄의 건물명도 제외할 수 있게 함
+                    finalStoreName = findStoreNameFromOCR(rawOCRText, addressPlaces, 85, addressStr);
                     if (!finalStoreName) {
                         const addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
-                        finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
+                        finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces, rawOCRText);
                     }
                 }
             } catch (error) {

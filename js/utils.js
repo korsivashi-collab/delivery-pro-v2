@@ -162,8 +162,9 @@ export function extractStoreNameLogic(fullText) {
     if (!fullText || typeof fullText !== 'string') return null;
     try {
         const lines = fullText.split(/\r?\n/);
-        const anchor = /배송지명\s*(?:\(\s*간판명\s*\))?|간판명|상호\s*(?:\(\s*법인명\s*\)|명)?|업체명|법인명/;
-        const stopLabels = /(?:^|[\s|])(?:성명|대표자|사업장|주소|업태|종목|전화|연락처|등록번호|사업자\s*(?:등록)?번호|공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처|받는\s*분|수령인|고객명|금액|수량|단가|총액|규격|제조사|원산지|단위|합계|품명|비고|상호|간판명|업체명|법인명)(?=\s|[:：|\(]|$)/;
+        const anchor = /배송지명\s*(?:\(\s*간판명\s*\))?|간판명|상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|업\s*체\s*명|법\s*인\s*명/;
+        const stopLabels = /(?:^|[\s|])(?:성명|대표자|사업장|주\s*소|업태|종목|전화|연락처|등록번호|사업자\s*(?:등록)?번호|공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처|받는\s*분|수령인|고객명|금액|수량|단가|총액|규격|제조사|원산지|단위|합계|품명|비고|상\s*호|간판명|업\s*체\s*명|법\s*인\s*명)(?=\s|[:：|\(]|$)/;
+        const fieldValues = /\b\d{3}\s*-\s*\d{2}\s*-\s*\d{5}\b|\b0\d{1,3}[\s.-]*\d{3,4}[\s.-]*\d{4}\b|\d[\d,]*\s*(?:원|개|EA|박스|kg)(?=\s|$|[,;|])|\b\d{8,13}\b|\b\d{1,3}(?:,\d{3})+\b/i;
         const candidates = [];
         let section = '';
 
@@ -174,7 +175,8 @@ export function extractStoreNameLogic(fullText) {
                 const precedingSections = sections.filter(match => match.index < label.index);
                 const currentSection = precedingSections.length ? precedingSections[precedingSections.length - 1][0] : section;
                 const parts = [];
-                // 라벨 뒤의 같은 줄과 이어지는 줄에서 최대 두 줄의 상호를 수집
+                let contamination = 0;
+                let distance = 0;
                 for (let j = i; j < lines.length && j <= i + 2 && parts.length < 2; j++) {
                     let part = j === i ? lines[j].slice(label.index + label[0].length) : lines[j];
                     part = part.replace(/^[\s:：=|/\-]+/, '').trim();
@@ -182,29 +184,48 @@ export function extractStoreNameLogic(fullText) {
                     const stop = part.search(stopLabels);
                     const pipe = part.indexOf('|');
                     const boundary = Math.min(stop < 0 ? part.length : stop, pipe < 0 ? part.length : pipe);
-                    const namePart = part.slice(0, boundary).trim();
-                    if (namePart) parts.push(namePart);
-                    if (boundary < part.length) break;
+                    let namePart = part.slice(0, boundary).trim();
+                    // 다음 줄이 주소·수치 항목이면 결합하지 않고, 같은 줄에 혼입되면 감점
+                    const address = isStoreNameAddressText(namePart);
+                    const otherField = namePart.match(fieldValues) || namePart.match(/^\d[\d,.\s]*$/);
+                    if (address || otherField) {
+                        if (parts.length) break;
+                        contamination += address ? 100 : 60;
+                        if (otherField) namePart = namePart.slice(0, otherField.index).trim();
+                    }
+                    if (namePart) {
+                        if (!parts.length) distance = j - i;
+                        parts.push(namePart);
+                    }
+                    if (boundary < part.length || address || otherField) break;
                 }
                 const name = parts.join(' ').replace(/\s+/g, ' ').trim();
-                // 필드명, 숫자, 법인 접두사만 있는 값은 명확한 상호로 취급하지 않음
-                if (name.length < 2 || !/[A-Za-z가-힣]/.test(name) || /^(?:주식회사|유한회사|법인명|\(주\)|㈜)$/.test(name) || /^(?:지하|지상)?\s*B?\d+\s*층$/i.test(name)) continue;
-                const supplier = /^(?:공급자|발송지|본사)$/.test(currentSection);
-                const score = supplier ? -20 : /배송지명|간판명/.test(label[0]) || /공급받는|배송지|수령지|납품처/.test(currentSection) ? 20 : 10;
+                if (name.length < 2 || !/[A-Za-z가-힣]/.test(name)) continue;
+                let score = 100 - distance * 10 - contamination;
+                if (/배송지명|간판명/.test(label[0]) || /공급받는|배송지|수령지|납품처/.test(currentSection)) score += 15;
+                if (/^(?:공급자|발송지|본사)$/.test(currentSection)) score -= 80;
+                if (/상가|아파트|빌딩|타워|센터/.test(name)) score -= 8;
+                if (/^(?:주식회사|유한회사|법인명|\(주\)|㈜)$/.test(name) || /^(?:지하|지상)?\s*B?\d+\s*층$/i.test(name)) score -= 100;
                 candidates.push({ name, score });
             }
             if (sections.length) section = sections[sections.length - 1][0];
         }
-        const usable = candidates.filter(candidate => candidate.score >= 0);
-        if (!usable.length) return null;
-        const bestScore = Math.max(...usable.map(candidate => candidate.score));
-        const names = [...new Set(usable.filter(candidate => candidate.score === bestScore).map(candidate => candidate.name))];
-        // 같은 우선순위에서 서로 다른 상호가 나오면 fallback으로 넘김
-        return names.length === 1 ? names[0] : null;
+        const ranked = [...new Set(candidates.map(candidate => candidate.name))]
+            .map(name => ({ name, score: Math.max(...candidates.filter(candidate => candidate.name === name).map(candidate => candidate.score)) }))
+            .sort((a, b) => b.score - a.score);
+        if (!ranked.length || ranked[0].score < 75) return null;
+        if (ranked[1] && ranked[0].score - ranked[1].score < 10) return null;
+        return ranked[0].name;
     } catch (e) {
         console.error("상호 추출 오류:", e);
     }
     return null;
+}
+
+// 상호 후보 판정 전용이며 기존 주소·전화번호 추출에는 사용하지 않음
+export function isStoreNameAddressText(text) {
+    if (!text) return false;
+    return /(?:^|\s)주\s*소\s*[:：]?|[가-힣A-Za-z0-9]+(?:대로|로|길)\s*\d+|[가-힣]+(?:동|읍|면|리)\s+(?:산\s*)?\d+(?:-\d+)?|(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|특별자치도|도)?\s+[가-힣]+(?:시|군|구)|[가-힣]+(?:시|군|구)\s+[^\n]*\d+|\[\d{5}\]/.test(text);
 }
 
 // ==========================================
