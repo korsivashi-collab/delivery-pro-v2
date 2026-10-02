@@ -83,6 +83,33 @@ function logOcrResponseStructure(document) {
     }
 }
 
+// 원문 응답은 유지하고, 상호 판정에 필요한 가벼운 레이아웃 정보만 추가.
+function getOcrLayoutPages(document) {
+    const getText = layout => (layout?.textAnchor?.textSegments || []).map(segment =>
+        document.text.slice(Number(segment.startIndex || 0), Number(segment.endIndex || 0))).join('');
+    return (document.pages || []).map((page, index) => {
+        const serialize = item => {
+            const layout = item.layout || {};
+            const poly = layout.boundingPoly || {};
+            let vertices = poly.normalizedVertices;
+            if (!Array.isArray(vertices) || !vertices.length) {
+                const width = page.image?.width || page.dimension?.width;
+                const height = page.image?.height || page.dimension?.height;
+                vertices = width && height ? (poly.vertices || []).map(vertex => ({ x: (vertex.x || 0) / width, y: (vertex.y || 0) / height })) : [];
+            }
+            const xs = (vertices || []).map(vertex => vertex.x ?? 0);
+            const ys = (vertices || []).map(vertex => vertex.y ?? 0);
+            return {
+                text: getText(layout),
+                box: xs.length >= 3 ? { left: Math.min(...xs), top: Math.min(...ys), right: Math.max(...xs), bottom: Math.max(...ys) } : null,
+                confidence: typeof layout.confidence === 'number' ? layout.confidence : null,
+                textSegments: (layout.textAnchor?.textSegments || []).map(segment => ({ start: Number(segment.startIndex || 0), end: Number(segment.endIndex || 0) }))
+            };
+        };
+        return { pageNumber: page.pageNumber || index + 1, tokens: (page.tokens || []).map(serialize), lines: (page.lines || []).map(serialize) };
+    });
+}
+
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
@@ -122,7 +149,8 @@ module.exports = async function handler(req, res) {
         return res.status(200).json({
             responses: [{
                 fullTextAnnotation: {
-                    text: document.text
+                    text: document.text,
+                    pages: getOcrLayoutPages(document)
                 }
             }]
         });
