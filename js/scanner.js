@@ -17,8 +17,8 @@ import {
 import { 
     geocodeAddress, 
     getPOIsByAddress, 
-    findStoreNameFromOCR,
-    findOverlappingPOIFromAddress
+    matchOCRStoreCandidate,
+    STORE_NAME_MATCH_THRESHOLD
 } from './kakao.js';
 import { state } from './state.js';
 import { 
@@ -345,9 +345,10 @@ export function initCameraScan() {
         // 3. 명확한 OCR 상호 우선, 없을 때만 카카오 장소명으로 보완
         let finalStoreName = null;
         let diagnosticPath = '빈 값';
+        let ocrStoreCandidate = null;
         // 이 스캔의 장소 조회 결과(Promise)를 공유해 중복 요청을 막는다.
         let storePlacesPromise = null;
-        const getStorePlacesOnce = () => storePlacesPromise ??= getPOIsByAddress(addressStr);
+        const getStorePlacesOnce = () => storePlacesPromise ??= getPOIsByAddress(addressStr, true);
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
@@ -362,7 +363,7 @@ export function initCameraScan() {
                 }
                 if (positionResult.name) {
                     finalStoreName = positionResult.name;
-                    diagnosticPath = 'OCR 위치';
+                    diagnosticPath = 'ocr-layout';
                 }
                 // [1단계] OCR 라벨 상호 추출 및 기존 가비지 필터링
                 if (!finalStoreName) {
@@ -380,22 +381,24 @@ export function initCameraScan() {
                         if (extracted.length < 2 || /^\d+$/.test(extracted)) isGarbage = true;
 
                         logStoreNameDiagnostic('OCR 후단 검증', { candidate: extracted, rejected: isGarbage, reason: isGarbage ? '성명/수령인 문맥 또는 층수/길이/숫자 필터 해당' : '기존 후단 필터 통과' });
-                        if (!isGarbage) finalStoreName = extracted;
-                        if (finalStoreName) diagnosticPath = 'OCR 텍스트';
+                        if (!isGarbage) ocrStoreCandidate = extracted;
                     }
                 }
 
+                let addressPlaces = { places: [], buildingNames: [] };
+                if (!finalStoreName && ocrStoreCandidate) {
+                    addressPlaces = await getStorePlacesOnce();
+                    finalStoreName = matchOCRStoreCandidate(ocrStoreCandidate, addressPlaces.places, STORE_NAME_MATCH_THRESHOLD);
+                    if (finalStoreName) diagnosticPath = 'ocr-kakao-match';
+                }
                 if (!finalStoreName) {
-                    logStoreNameDiagnostic('카카오 최후 fallback', { reason: 'OCR 위치와 텍스트 상호 모두 실패', maximumRequests: 1 });
-                    const addressPlaces = await getStorePlacesOnce();
-                    // 주소 문맥을 원문에 유지해 주소 다음 줄의 건물명도 제외할 수 있게 함
-                    finalStoreName = findStoreNameFromOCR(storeOCRText, addressPlaces, 85, addressStr);
-                    if (!finalStoreName) {
-                        const addressAreaText = extractAddressAreaText(storeOCRText, addressStr);
-                        finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces, storeOCRText);
+                    // 기존 조회에서 제공된 명시적 건물명만 재사용. 별도 검색 없음.
+                    const buildingName = coords?.road_address?.building_name || coords?.building_name || addressPlaces.buildingNames[0];
+                    if (buildingName) {
+                        finalStoreName = buildingName;
+                        diagnosticPath = 'kakao-building';
                     }
                 }
-                if (finalStoreName && diagnosticPath === '빈 값') diagnosticPath = '카카오';
             } catch (error) {
                 logStoreNameDiagnostic('선택 과정 오류', { message: error.message });
                 console.error("상호명 매칭 오류:", error);

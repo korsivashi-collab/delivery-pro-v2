@@ -147,9 +147,24 @@ export async function coordToAddress(x, y) {
 // ==========================================
 // 3. 주소지 기반 등록 상호/POI 목록 조회
 // ==========================================
-export async function getPOIsByAddress(addressStr) {
-    if (!addressStr) return [];
+// 상호 후보 전체 문자열 간 정규화 편집거리 기준(추후 80으로 조정 가능).
+export const STORE_NAME_MATCH_THRESHOLD = 70;
+export function matchOCRStoreCandidate(candidate, places, threshold = STORE_NAME_MATCH_THRESHOLD) {
+    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
+    const name = normalize(candidate);
+    if (!name) return null;
+    const ranked = [...new Set(places || [])].map(place => {
+        const target = normalize(place);
+        return { place, score: target ? 100 * (1 - getLevenshteinDistance(name, target) / Math.max(name.length, target.length)) : 0 };
+    }).sort((a, b) => b.score - a.score);
+    logStoreNameDiagnostic('OCR 후보 카카오 비교', { candidate, threshold, ranked });
+    return ranked[0]?.score >= threshold ? ranked[0].place : null;
+}
+
+export async function getPOIsByAddress(addressStr, includeDetails = false) {
+    if (!addressStr) return includeDetails ? { places: [], buildingNames: [] } : [];
     let places = [];
+    const buildingNames = [];
     try {
         let cleanAddr = addressStr.replace(/\[.*?\]/g, '').trim();
         let res = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanAddr)}`, { 
@@ -157,10 +172,16 @@ export async function getPOIsByAddress(addressStr) {
         }, 0); // 상호 최후 fallback은 재시도 없이 요청 1회만 사용
         if (res && res.ok) {
             let data = await res.json();
-            if (data.documents) places.push(...data.documents.map(d => d.place_name));
+            if (data.documents) {
+                places.push(...data.documents.map(d => d.place_name));
+                for (const doc of data.documents) {
+                    const building = doc.road_address?.building_name || doc.building_name;
+                    if (building) buildingNames.push(building);
+                }
+            }
         }
     } catch(e) {}
-    return [...new Set(places)];
+    return includeDetails ? { places: [...new Set(places)], buildingNames: [...new Set(buildingNames)] } : [...new Set(places)];
 }
 
 // ==========================================
