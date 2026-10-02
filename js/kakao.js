@@ -149,16 +149,44 @@ export async function coordToAddress(x, y) {
 // ==========================================
 // 상호 후보 전체 문자열 간 정규화 편집거리 기준(추후 80으로 조정 가능).
 export const STORE_NAME_MATCH_THRESHOLD = 70;
-export function matchOCRStoreCandidate(candidate, places, threshold = STORE_NAME_MATCH_THRESHOLD) {
-    const normalize = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[^a-z0-9가-힣]/g, '');
-    const name = normalize(candidate);
-    if (!name) return null;
+export function normalizeStoreMatchText(value) {
+    return String(value || '').normalize('NFKC').toLowerCase()
+        .replace(/\(\s*주\s*\)|\(\s*유\s*\)|주\s*식\s*회\s*사|유\s*한\s*회\s*사/g, '')
+        .replace(/[^a-z0-9가-힣]/g, '');
+}
+export function isCompleteOCRStoreName(value) {
+    const name = normalizeStoreMatchText(value);
+    return name.length >= 3 && /[a-z가-힣]/.test(name);
+}
+export function matchOCRStoreCandidate(candidate, places, threshold = STORE_NAME_MATCH_THRESHOLD, rawOCRText = '') {
+    const name = normalizeStoreMatchText(candidate);
+    const raw = normalizeStoreMatchText(rawOCRText);
+    // 짧은 정상 상호는 일반 문장 내 우연한 부분 일치 대신 독립 줄/상호 필드의 정확한 근거를 요구.
+    const shortEvidence = String(rawOCRText || '').split(/\r?\n/).map(line => normalizeStoreMatchText(
+        line.replace(/^.*?(?:상\s*호(?:\s*\(법인명\))?|업체명|간판명|배송지명)\s*[:：|]?/, '')
+            .split(/\s+(?:주소|성명|대표자|전화|연락처)/)[0]
+    ));
     const ranked = [...new Set(places || [])].map(place => {
-        const target = normalize(place);
-        return { place, score: target ? 100 * (1 - getLevenshteinDistance(name, target) / Math.max(name.length, target.length)) : 0 };
+        const target = normalizeStoreMatchText(place);
+        let score = name && target ? 100 * (1 - getLevenshteinDistance(name, target) / Math.max(name.length, target.length)) : 0;
+        if (target.length === 2 && shortEvidence.includes(target)) score = 100;
+        // 원문 전체 길이와 비교하지 않고 장소명 길이에 가까운 구간을 비교한다.
+        if (target.length >= 3) {
+            for (let start = 0; start < raw.length; start++) {
+                for (let size = Math.max(3, Math.ceil(target.length * threshold / 100)); size <= target.length + 1; size++) {
+                    const part = raw.slice(start, start + size);
+                    if (part.length < 3) continue;
+                    score = Math.max(score, 100 * (1 - getLevenshteinDistance(part, target) / Math.max(part.length, target.length)));
+                }
+            }
+        }
+        return { place, score };
     }).sort((a, b) => b.score - a.score);
-    logStoreNameDiagnostic('OCR 후보 카카오 비교', { candidate, threshold, ranked });
-    return ranked[0]?.score >= threshold ? ranked[0].place : null;
+    logStoreNameDiagnostic('OCR 후보 카카오 비교', { candidate, threshold, ranked, fullTextEvidence: !!raw });
+    if (!ranked.length || ranked[0].score < threshold) return null;
+    const rival = ranked.find(item => normalizeStoreMatchText(item.place) !== normalizeStoreMatchText(ranked[0].place));
+    if (rival && Math.abs(rival.score - ranked[0].score) < 1e-9) return null;
+    return ranked[0].place;
 }
 
 export async function getPOIsByAddress(addressStr, includeDetails = false) {
