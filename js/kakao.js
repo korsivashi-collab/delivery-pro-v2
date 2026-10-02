@@ -1,4 +1,4 @@
-import { isStoreNameAddressText, logStoreNameDiagnostic } from './utils.js';
+import { isStoreNameAddressText, findStoreNamePersonField, logStoreNameDiagnostic } from './utils.js';
 
 // js/kakao.js
 
@@ -214,11 +214,16 @@ export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, address
     const evidence = [];
     let addressContinuation = false;
     let section = '';
+    let personFieldContinuation = false;
     for (const line of rawOCRText.split(/\r?\n/)) {
         const sections = [...line.matchAll(/공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처/g)];
         if (sections.length) section = sections[sections.length - 1][0];
         if (/^(?:공급자|발송지|본사)$/.test(section)) continue;
         const hasLabel = /상\s*호|법\s*인\s*명|업\s*체\s*명|간판명|배송지명/.test(line);
+        if (hasLabel || sections.length || /주소|주\s*소|전화|연락처|사업자|금액|수량|단가|총액|합계|품명/.test(line)) personFieldContinuation = false;
+        if (personFieldContinuation) { logStoreNameDiagnostic('카카오 근거 제외', { text: line, reason: '사람 필드 값의 연속 줄' }); continue; }
+        const linePersonField = findStoreNamePersonField(line, !hasLabel);
+        if (linePersonField && !hasLabel && linePersonField.index === 0) { personFieldContinuation = true; logStoreNameDiagnostic('카카오 근거 제외', { text: line, ...linePersonField }); continue; }
         if (isStoreNameAddressText(line) || (addressKey && clean(line).includes(addressKey))) {
             addressContinuation = true;
             continue;
@@ -230,8 +235,14 @@ export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, address
         }
         addressContinuation = false;
         if (/전화|연락처|사업자|금액|수량|단가|총액|합계|품명|대표자|성명/.test(line) && !hasLabel) continue;
-        const nameText = line.replace(/^.*?(?:상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|법\s*인\s*명|업\s*체\s*명|간판명|배송지명)\s*[:：|]?/, '')
+        let nameText = line.replace(/^.*?(?:상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|법\s*인\s*명|업\s*체\s*명|간판명|배송지명)\s*[:：|]?/, '')
             .split(/\s+(?:주\s*소|전화|연락처|사업자|금액|수량|단가|대표자|성명)/)[0];
+        const personField = findStoreNamePersonField(nameText, !hasLabel);
+        if (personField) {
+            logStoreNameDiagnostic('카카오 사람 필드 경계', { text: nameText, ...personField });
+            nameText = nameText.slice(0, personField.index).trim();
+            personFieldContinuation = true;
+        }
         // OCR 단계에서 수치 혼입으로 낮게 평가한 후보를 fallback에서 재확정하지 않음
         if (/\b\d{3}\s*-\s*\d{2}\s*-\s*\d{5}\b|\b0\d{1,3}[\s.-]*\d{3,4}[\s.-]*\d{4}\b|\b\d{8,13}\b|\d[\d,]*\s*(?:원|개|EA|박스|kg)(?=\s|$|[,;|])|\b\d{1,3}(?:,\d{3})+\b/i.test(nameText)) continue;
         const normalized = clean(nameText);

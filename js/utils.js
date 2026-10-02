@@ -193,7 +193,9 @@ export function extractStoreNameLogic(fullText) {
                     if (!part) continue;
                     const stop = part.search(stopLabels);
                     const pipe = part.indexOf('|');
-                    const boundary = Math.min(stop < 0 ? part.length : stop, pipe < 0 ? part.length : pipe);
+                    const personField = findStoreNamePersonField(part, j !== i);
+                    const boundary = Math.min(stop < 0 ? part.length : stop, pipe < 0 ? part.length : pipe, personField ? personField.index : part.length);
+                    if (personField) logStoreNameDiagnostic('사람 필드 경계', { line: j + 1, text: part, ...personField });
                     let namePart = part.slice(0, boundary).trim();
                     // 다음 줄이 주소·수치 항목이면 결합하지 않고, 같은 줄에 혼입되면 감점
                     const address = isStoreNameAddressText(namePart);
@@ -245,6 +247,27 @@ export function extractStoreNameLogic(fullText) {
 }
 
 // 상호 후보 판정 전용이며 기존 주소·전화번호 추출에는 사용하지 않음
+// 상호 판정 전용: 이름 자체가 아닌 사람 필드 라벨과 구분자를 찾음
+export function findStoreNamePersonField(text, allowLeadingBareLabel = true) {
+    const labels = '성\\s*명|대\\s*표\\s*자|담\\s*당\\s*자|대\\s*표';
+    const matches = [];
+    for (const match of text.matchAll(new RegExp('(' + labels + ')\\s*[:：=|]', 'g'))) {
+        matches.push({ index: match.index, label: match[1], reason: '사람 필드 라벨과 명시적 구분자' });
+    }
+    for (const match of text.matchAll(new RegExp('(^|[\\s|;])(' + labels + ')(?=\\s|$)', 'g'))) {
+        const index = match.index + match[1].length;
+        // 상호 라벨 바로 뒤의 "대표 유통"은 단어만으로 절삭하지 않음
+        if (index === 0 && !allowLeadingBareLabel && match[2].replace(/\s/g, '') === '대표' && text.slice(match[0].length).trim()) continue;
+        matches.push({ index, label: match[2], reason: '사람 필드 라벨과 공백/줄 경계' });
+    }
+    for (const match of text.matchAll(/(^|[\s|;])(성\s*명|대\s*표\s*자|담\s*당\s*자)(?=[가-힣])/g)) {
+        const index = match.index + match[1].length;
+        if (index > 0 || allowLeadingBareLabel) matches.push({ index, label: match[2], reason: '필드 경계 뒤 라벨과 값 공백 누락' });
+    }
+    matches.sort((a, b) => a.index - b.index);
+    return matches[0] || null;
+}
+
 export function isStoreNameAddressText(text) {
     if (!text) return false;
     return /(?:^|\s)주\s*소\s*[:：]?|[가-힣A-Za-z0-9]+(?:대로|로|길)\s*\d+|[가-힣]+(?:동|읍|면|리)\s+(?:산\s*)?\d+(?:-\d+)?|(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)(?:특별시|광역시|특별자치시|특별자치도|도)?\s+[가-힣]+(?:시|군|구)|[가-힣]+(?:시|군|구)\s+[^\n]*\d+|\[\d{5}\]/.test(text);
