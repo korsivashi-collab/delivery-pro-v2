@@ -111,47 +111,43 @@ export function extractAddressLogic(text) {
         // 평탄화 후 잔여 공백 하이픈 최종 결합
         flatText = flatText.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2');
 
-        // [원칙 1] 대한민국 행정구역 인식 시 그 지점부터 끝까지 읽어옴
+        // 대한민국 행정구역으로 시작하는 주소 후보 수집
         const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
 
-        const startRegex = new RegExp(`(^|[\\s\\[\\(])(${provincePattern}(?:\\s+|$))`, 'i');
-        const startMatch = flatText.match(startRegex);
+        // 시/도 생략형도 함께 수집하고, 같은 주소의 시/군/구는 별도 후보로 나누지 않음
+        const startRegex = new RegExp(`(^|[\\s\\[\\(])((?:${provincePattern}|[가-힣]{2,6}(?:시|군|구))\\s+(?:[가-힣]{1,10}(?:시|군|구)\\s+)*)`, 'g');
+        const starts = [...flatText.matchAll(startRegex)].map(match => match.index + match[1].length);
+        const stopLabels = /(?:\s+)(?:배송지|수령지|납품처|발송지|본사|간판명|상호|업체명|연락처|전화|010|받는\s*분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
+        const labelRegex = /배송지|수령지|받는\s*분|납품처|공급자|발송지|본사/g;
+        const labels = [...flatText.matchAll(labelRegex)];
+        let bestAddress = null;
+        let bestScore = -Infinity;
 
-        let rawAddressBlock = null;
+        for (let i = 0; i < starts.length; i++) {
+            const start = starts[i];
+            let address = flatText.substring(start, starts[i + 1] ?? flatText.length).trim();
+            const stopIndex = address.search(stopLabels);
+            if (stopIndex !== -1) address = address.substring(0, stopIndex).trim();
+            // 기존 괄호 절삭 및 공백/특수문자 정돈 유지
+            address = address.split('(')[0].replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
+            if (!address) continue;
 
-        if (startMatch) {
-            // 행정구역 시작 위치부터 뒷부분 텍스트 추출
-            const startIndex = startMatch.index + (startMatch[1] ? startMatch[1].length : 0);
-            let textFromProvince = flatText.substring(startIndex).trim();
-
-            // 다음 필드 라벨(배송지명, 상호, 연락처 등) 직전까지만 수집
-            const stopLabels = /(?:\s+)(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
-            const stopMatch = textFromProvince.search(stopLabels);
-            if (stopMatch !== -1) {
-                rawAddressBlock = textFromProvince.substring(0, stopMatch).trim();
-            } else {
-                rawAddressBlock = textFromProvince.trim();
+            // 직전 주소와 현재 주소 사이의 가장 가까운 선행 라벨만 적용
+            // 다음 주소의 라벨이 현재 후보에 섞이지 않도록 범위를 제한
+            const contextStart = Math.max(i > 0 ? starts[i - 1] : 0, start - 100);
+            const nearbyLabels = labels.filter(label => label.index >= contextStart && label.index + label[0].length <= start);
+            const nearestLabel = nearbyLabels[nearbyLabels.length - 1];
+            let score = 0;
+            if (nearestLabel) {
+                score = /^(?:배송지|수령지|받는\s*분|납품처)$/.test(nearestLabel[0]) ? 100 : -100;
             }
-        } else {
-            // 시/도 명칭 생략형 (예: "천안시 서북구 ...", "성북구 개운사길 ...")
-            const localRegex = /(?:[가-힣]{2,6}(?:시|군|구))\s+[가-힣0-9\s,\-\(\)]+/;
-            const localMatch = flatText.match(localRegex);
-            if (localMatch) {
-                const stopLabels = /(?:\s+)(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
-                const stopMatch = localMatch[0].search(stopLabels);
-                rawAddressBlock = (stopMatch !== -1 ? localMatch[0].substring(0, stopMatch) : localMatch[0]).trim();
+            // 동점이면 기존과 같이 문서에서 먼저 나온 주소 선택
+            if (score > bestScore) {
+                bestScore = score;
+                bestAddress = address;
             }
         }
-
-        if (!rawAddressBlock) return null;
-
-        // [원칙 3] '('가 인식되면 '('부터 그 뒷부분은 무조건 전부 삭제
-        if (rawAddressBlock.includes('(')) {
-            rawAddressBlock = rawAddressBlock.split('(')[0].trim();
-        }
-
-        // 끝부분에 남은 특수문자/공백만 정돈하여 순수 주소 반환
-        return rawAddressBlock.replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
+        return bestAddress;
 
     } catch (e) {
         console.error("주소 추출 오류:", e);
