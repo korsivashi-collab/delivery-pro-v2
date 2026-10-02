@@ -343,11 +343,21 @@ export function extractStoreNameByLayout(pages = []) {
                 if (trace && reason) trace.excluded.push({ token: item, reason });
                 return !reason;
             });
+            // 상호 라벨의 행 소속이 나뉘어도 같은 세로 값 띠의 토큰을 함께 수집.
+            // 사람 필드 수집과 아래 줄 결합은 기존 행 기준을 그대로 사용.
+            const labelTokenHeight = median(label.items.map(item => item.box.bottom - item.box.top));
+            const rightSource = label.type === 'store' ? items.filter(item => {
+                if (label.row.items.includes(item)) return true;
+                const tokenHeight = item.box.bottom - item.box.top;
+                return tokenHeight >= 0.5 * labelTokenHeight && tokenHeight <= 2 * labelTokenHeight &&
+                    overlapY(item.box, label.box) >= 0.5 &&
+                    Math.abs(center(item) - center(label)) <= 0.75 * Math.max(labelTokenHeight, tokenHeight);
+            }).sort((a, b) => a.box.left - b.box.left || center(a) - center(b)) : label.row.items;
             if (trace) {
-                trace.initial = label.row.items.filter(item => item.box.right > label.box.right && item.box.left < rightLimit);
+                trace.initial = rightSource.filter(item => item.box.right > label.box.right && item.box.left < rightLimit);
                 trace.rightLimit = rightLimit;
             }
-            let valueItems = adjacentItems(filterItems(label.row.items, label.box.right), height, trace);
+            let valueItems = adjacentItems(filterItems(rightSource, label.box.right), height, trace);
             let mode = 'right';
             let firstRow = label.row;
             if (!valueItems.length) {
