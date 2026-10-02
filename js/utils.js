@@ -270,6 +270,56 @@ export function extractStoreNameByLayout(pages = []) {
                 if (found) { labels.push(found); i += found.items.length - 1; }
             }
         }
+        // 행/line 소속이 조금 달라도 인접한 라벨 조각을 상대 위치로 다시 결합.
+        // 허용 문자열은 필드 라벨뿐이며 상호 값 토큰은 이 결합에 사용하지 않음.
+        const compactLabelPart = item => item.text.replace(/[\s:：=|]/g, '');
+        const compositeTargets = ['상호(법인명)', '상호법인명'];
+        const consumedCompositeItems = new Set();
+        for (const seed of items) {
+            if (consumedCompositeItems.has(seed)) continue;
+            let composite = null;
+            for (const target of compositeTargets) {
+                if (!target.startsWith(compactLabelPart(seed))) continue;
+                const findParts = parts => {
+                    const text = parts.map(compactLabelPart).join('');
+                    if (text === target) return parts;
+                    if (!target.startsWith(text) || parts.length >= 10) return null;
+                    const last = parts[parts.length - 1];
+                    const height = median(parts.map(item => item.box.bottom - item.box.top));
+                    const bounds = union(parts);
+                    const nextItems = items.filter(item => {
+                        if (parts.includes(item) || consumedCompositeItems.has(item) || !target.startsWith(text + compactLabelPart(item))) return false;
+                        const itemHeight = item.box.bottom - item.box.top;
+                        const scale = Math.max(height, itemHeight);
+                        const sameBand = Math.abs(center(item) - center(last)) <= 0.75 * scale &&
+                            item.box.left >= last.box.right - 0.5 * scale && item.box.left - last.box.right <= 3 * scale;
+                        const below = center(item) > center(last) + 0.5 * scale && center(item) - center(last) <= 1.75 * scale &&
+                            item.box.left >= bounds.left - scale && item.box.left <= bounds.right + scale;
+                        if (!sameBand && !below) return false;
+                        if (Math.max(bounds.bottom, item.box.bottom) - Math.min(bounds.top, item.box.top) > 3 * scale) return false;
+                        // 다른 필드 경계를 가로질러 라벨 조각을 결합하지 않음
+                        return !labels.some(label => label.type !== 'store' && !label.items.some(part => parts.includes(part)) &&
+                            label.box.left >= last.box.right && label.box.right <= item.box.left && overlapY(label.box, last.box) >= 0.5);
+                    }).sort((a, b) => (Math.abs(center(a) - center(last)) + Math.abs(a.box.left - last.box.right)) -
+                        (Math.abs(center(b) - center(last)) + Math.abs(b.box.left - last.box.right)));
+                    for (const next of nextItems) {
+                        const result = findParts([...parts, next]);
+                        if (result) return result;
+                    }
+                    return null;
+                };
+                composite = findParts([seed]);
+                if (composite) break;
+            }
+            if (!composite) continue;
+            composite.forEach(item => consumedCompositeItems.add(item));
+            for (let index = labels.length - 1; index >= 0; index--) {
+                if (labels[index].type === 'store' && labels[index].items.some(item => composite.includes(item))) labels.splice(index, 1);
+            }
+            const label = { type: 'store', items: composite, box: union(composite), text: '상호(법인명)', row: rows[rowOf.get(seed)] };
+            labels.push(label);
+            logStoreNameDiagnostic('위치 복합 라벨 결합', { page: page.pageNumber, label: label.text, parts: composite.map(describe), box: label.box });
+        }
         const labelItems = new Set(labels.flatMap(label => label.items));
         const adjacentItems = (items, height) => {
             const result = [];
