@@ -2,14 +2,14 @@
 
 // =================================================================
 // [배송 동선 PRO] 카메라 스캔 및 AI 하이브리드 주소/상호명 매칭 전담 모듈
-// =================================================================
-
+// ==========================================
 import { 
     toBase64_SafeCompress, 
     extractPhoneLogic, 
     extractAddressLogic, 
     extractStoreNameLogic,
     extractStoreNameByLayout,
+    isInvalidStoreCandidate,
     logStoreNameDiagnostic, 
     showLoading, 
     hideLoading 
@@ -182,80 +182,13 @@ export async function editDestinationAddress(id) {
     state.saveActiveData(); 
     if (typeof window.renderList === 'function') window.renderList();
 
-    // 🌟 수정된 경로를 관제 센터 서버에도 즉시 동기화
     const deviceId = getOrCreateDeviceId();
     const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
     saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
 }
 
 // ==========================================
-// 5-1. 상호 매칭 전 주소 칸(셀) 일괄 삭제 헬퍼 (1단계용)
-// ==========================================
-function removeAddressCellFromOCR(rawText, addressStr) {
-    if (!rawText) return "";
-    let cleaned = rawText;
-
-    const nextFieldPattern = "(?=\\n\\s*(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가)|배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|$)";
-
-    // 1) '주소' 라벨로 시작하는 영역 제거
-    const addrLabelRegex = new RegExp(`(주소[\\s\\:\\|\\-]*(\\[\\d{5}\\]|\\d{5})?[\\s\\S]*?)${nextFieldPattern}`, 'i');
-    if (addrLabelRegex.test(cleaned)) {
-        cleaned = cleaned.replace(addrLabelRegex, ' ');
-    }
-
-    // 2) 우편번호 영역 제거
-    const zipRegex = new RegExp(`((\\[\\d{5}\\]|\\b\\d{5}\\b)[\\s\\S]*?)${nextFieldPattern}`, 'i');
-    if (zipRegex.test(cleaned)) {
-        cleaned = cleaned.replace(zipRegex, ' ');
-    }
-
-    // 3) 인식된 도로명 주소부터 다음 필드 직전까지 제거
-    if (addressStr) {
-        let safeAddr = addressStr.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const directAddrRegex = new RegExp(`(${safeAddr}[\\s\\S]*?)${nextFieldPattern}`, 'i');
-        if (directAddrRegex.test(cleaned)) {
-            cleaned = cleaned.replace(directAddrRegex, ' ');
-        }
-    }
-
-    if (!cleaned || cleaned.trim().length === 0) {
-        return rawText;
-    }
-
-    return cleaned;
-}
-
-// ==========================================
-// 5-2. 주소지 영역 텍스트 추출 헬퍼 (2단계용)
-// ==========================================
-function extractAddressAreaText(rawOCRText, addressStr) {
-    if (!rawOCRText) return "";
-
-    const nextFieldPattern = "(?=\\n\\s*(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가)|배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|$)";
-    const addrLabelRegex = new RegExp(`(주소[\\s\\:\\|\\-]*[\\s\\S]*?)${nextFieldPattern}`, 'i');
-    const match = rawOCRText.match(addrLabelRegex);
-    if (match && match[1]) {
-        return match[1];
-    }
-
-    if (addressStr) {
-        const lines = rawOCRText.split(/\n/);
-        const cleanAddr = addressStr.replace(/[^\w가-힣]/g, '');
-        for (let i = 0; i < lines.length; i++) {
-            const cleanLine = lines[i].replace(/[^\w가-힣]/g, '');
-            if (cleanLine.includes(cleanAddr) || (cleanAddr.length >= 6 && cleanLine.includes(cleanAddr.substring(0, 6)))) {
-                let block = lines[i];
-                if (i + 1 < lines.length) block += " " + lines[i + 1];
-                return block;
-            }
-        }
-    }
-
-    return addressStr || "";
-}
-
-// ==========================================
-// 6. 카메라 스캔 및 순수 주소 기반 3단계 판독 파이프라인
+// 5. 카메라 스캔 및 AI 하이브리드 판독 파이프라인
 // ==========================================
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
@@ -265,7 +198,7 @@ export function initCameraScan() {
         const file = e.target.files[0];
         if (!file) return;
 
-        // 🌟 [보안 및 라이선스 1회 단발성 검증] 스캔 전 계정 유효성 점검
+        // 계정 유효성 검증
         const deviceId = getOrCreateDeviceId();
         try {
             const isBlocked = await checkIfDeviceBlocked(deviceId);
@@ -300,15 +233,17 @@ export function initCameraScan() {
         let ocrPages = [];
         let extractedPhone = null;
         
-        // 1. OCR 판독
+        // 1단계: OCR 원격 판독 (텍스트 및 공간 좌표 추출)
         showLoading("사진 판독 중...");
         try {
             const base64Image = await toBase64_SafeCompress(file);
             const imageContent = base64Image.split(',')[1];
             const ocrResult = await performOCR(imageContent, true);
-            rawOCRText = ocrResult.text;
-            ocrPages = ocrResult.pages;
-            addressStr = extractAddressLogic(rawOCRText, ocrPages);
+            
+            rawOCRText = ocrResult.text || "";
+            ocrPages = ocrResult.pages || [];
+            
+            addressStr = extractAddressLogic(rawOCRText);
             extractedPhone = extractPhoneLogic(rawOCRText);
             hideLoading();
         } catch (error) {
@@ -327,7 +262,7 @@ export function initCameraScan() {
             extractedPhone = result.phone;
         }
 
-        // 2. 주소 좌표 획득
+        // 2단계: 카카오 주소 지오코딩 (위도/경도 좌표 획득)
         let coords = null;
         while (!coords) {
             try {
@@ -343,60 +278,81 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 후보 수집과 최종 선택을 분리. 위치/텍스트 결과를 즉시 확정하지 않는다.
+        // 3단계: 범용 상호명 다중 슬롯 추출 및 카카오 매칭
         let finalStoreName = null;
-        let diagnosticPath = '빈 값';
-        const storeDecision = { version: 'store-selection-v2', rawOCRText, positionCandidates: [], textCandidate: null, kakaoCandidates: [], similarities: [], kakaoCalled: false, kakaoStatus: 'not-called', reason: '' };
+        const storeDecision = { 
+            rawOCRText, 
+            layoutCandidate: null, 
+            textCandidate: null, 
+            kakaoMatched: false,
+            selected: null,
+            source: '' 
+        };
+
         if (addressStr && rawOCRText) {
-            showLoading("상호명 AI 매칭 중...");
+            showLoading("상호명 분석 중...");
             try {
-                let positionResult = { name: null, candidates: [], excludedTextSegments: [] };
-                try { positionResult = extractStoreNameByLayout(ocrPages); }
-                catch (error) { storeDecision.positionError = error.message; }
-                storeDecision.positionCandidate = positionResult.name;
-                storeDecision.positionCandidates = positionResult.candidates || [];
-                let storeOCRText = rawOCRText;
-                for (const segment of [...(positionResult.excludedTextSegments || [])].sort((a, b) => b.start - a.start)) {
-                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
-                }
-                let textCandidate = null;
-                try { textCandidate = extractStoreNameLogic(storeOCRText); }
-                catch (error) { storeDecision.textError = error.message; }
-                storeDecision.textCandidate = textCandidate;
-                const names = [...new Set([positionResult.name, ...storeDecision.positionCandidates.map(item => item.name), textCandidate].filter(Boolean))];
-                const assessments = names.map(name => assessOCRStoreCandidate(name, storeOCRText));
-                storeDecision.assessments = assessments;
-                const trusted = assessments.filter(item => item.trustworthy);
-                let result = { places: [], buildingNames: [] };
-                // 비용 최적화보다 검증을 우선: 주소당 장소 검색은 이 지점에서 1회만 수행.
-                storeDecision.kakaoCalled = true;
+                // 3-1. 2D 좌표 기반 상호 추출 (회전 대응)
+                let layoutResult = { name: null, candidates: [] };
+                try { 
+                    layoutResult = extractStoreNameByLayout(ocrPages); 
+                } catch (err) {}
+                storeDecision.layoutCandidate = layoutResult.name;
+
+                // 3-2. 배송처 영역(Recipient Zone) 및 주소 후미 상호 추출
+                let textStore = null;
+                try { 
+                    textStore = extractStoreNameLogic(rawOCRText); 
+                } catch (err) {}
+                storeDecision.textCandidate = textStore;
+
+                // 후보 풀 구성 (레이아웃 상호 -> 텍스트 영역 상호)
+                const ocrCandidates = [...new Set([layoutResult.name, textStore].filter(Boolean))];
+
+                // 3-3. 카카오 POI 조회 (보정용 교차 검증)
+                let kakaoResult = { places: [], buildingNames: [] };
                 try {
-                    result = await getPOIsByAddress(addressStr, true);
-                    storeDecision.kakaoStatus = result.status || (result.places.length ? 'success' : 'empty');
-                } catch (error) { storeDecision.kakaoStatus = 'failed'; storeDecision.kakaoError = error.message; }
-                storeDecision.kakaoCandidates = result.places;
-                finalStoreName = matchOCRStoreCandidate(names, result.places, STORE_NAME_MATCH_THRESHOLD, rawOCRText, storeDecision);
-                if (finalStoreName) { diagnosticPath = 'ocr-kakao-match'; storeDecision.reason = '70% 이상 일치 장소가 유일함'; }
+                    kakaoResult = await getPOIsByAddress(addressStr, true);
+                } catch (err) {}
+
+                // [경로 A] 카카오 등록 장소와 70% 이상 일치 시 공식 장소명 채택
+                if (ocrCandidates.length > 0 && kakaoResult.places && kakaoResult.places.length > 0) {
+                    finalStoreName = matchOCRStoreCandidate(ocrCandidates, kakaoResult.places, STORE_NAME_MATCH_THRESHOLD, rawOCRText, storeDecision);
+                    if (finalStoreName) {
+                        storeDecision.kakaoMatched = true;
+                        storeDecision.source = 'kakao-poi-match';
+                    }
+                }
+
+                // [경로 B] 카카오 장소 검색에 없는 경우: OCR 추출 상호를 100% 보존 (절대 버리지 않음)
                 if (!finalStoreName) {
-                    const buildings = [...new Set([coords?.road_address?.building_name, coords?.building_name, ...result.buildingNames].filter(Boolean))];
-                    if (buildings.length === 1) { finalStoreName = buildings[0]; diagnosticPath = 'kakao-building'; storeDecision.reason = '장소 매칭 실패 후 명시적 건물명 하나'; }
+                    const validOcrCandidate = ocrCandidates.find(c => !isInvalidStoreCandidate(c));
+                    if (validOcrCandidate) {
+                        finalStoreName = validOcrCandidate;
+                        storeDecision.source = 'ocr-direct-fallback';
+                    }
                 }
-                if (!finalStoreName && !result.places.length && trusted.length === 1) {
-                    finalStoreName = trusted[0].name;
-                    diagnosticPath = 'ocr-trusted-fallback';
-                    storeDecision.reason = '장소 조회 실패/빈 결과이며 상호 필드 전체와 일치하는 OCR 후보가 유일함';
+
+                // [경로 C] 최후 보루: 카카오 공식 건물명이 단일하게 존재하는 경우
+                if (!finalStoreName && kakaoResult.buildingNames && kakaoResult.buildingNames.length === 1) {
+                    finalStoreName = kakaoResult.buildingNames[0];
+                    storeDecision.source = 'kakao-building';
                 }
-                if (!finalStoreName) storeDecision.reason = '유일한 장소 매칭/건물명/신뢰 가능한 OCR fallback 없음';
-            } catch (error) { storeDecision.reason = '선택 오류'; storeDecision.error = error.message; }
+
+            } catch (error) {
+                console.error("상호 추출 오류:", error);
+            }
             hideLoading();
         }
-        storeDecision.selected = finalStoreName;
-        storeDecision.source = diagnosticPath;
-        logStoreNameDiagnostic('상호 선택 구조', storeDecision);
 
-        // 4. 배송 목록 추가 및 렌더링 + 관제 센터 서버 동기화
+        storeDecision.selected = finalStoreName;
+        logStoreNameDiagnostic('상호 최종 결정', storeDecision);
+
+        // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
+            
+            // 상호명이 확인된 경우 [상호명] 주소 형식으로 조합
             if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
                 resolvedAddress = `[${finalStoreName}] ${resolvedAddress}`;
             }
@@ -418,7 +374,7 @@ export function initCameraScan() {
             state.saveActiveData(); 
             if (typeof window.renderList === 'function') window.renderList();
 
-            // 🌟 새로 스캔된 배송지를 관제 센터 서버(routes/{deviceId})에도 즉시 동기화
+            // 관제 센터 서버(routes/{deviceId}) 실시간 동기화
             const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
             saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
             
