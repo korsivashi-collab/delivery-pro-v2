@@ -1,5 +1,3 @@
-import { isStoreNameAddressText, findStoreNamePersonField, logStoreNameDiagnostic } from './utils.js';
-
 // js/kakao.js
 
 const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
@@ -147,69 +145,20 @@ export async function coordToAddress(x, y) {
 // ==========================================
 // 3. 주소지 기반 등록 상호/POI 목록 조회
 // ==========================================
-// 상호 후보 전체 문자열 간 정규화 편집거리 기준(추후 80으로 조정 가능).
-export const STORE_NAME_MATCH_THRESHOLD = 70;
-export function normalizeStoreMatchText(value) {
-    return String(value || '').normalize('NFKC').toLowerCase()
-        .replace(/\(\s*주\s*\)|\(\s*유\s*\)|주\s*식\s*회\s*사|유\s*한\s*회\s*사/g, '')
-        .replace(/[^a-z0-9가-힣]/g, '');
-}
-export function isCompleteOCRStoreName(value) {
-    const name = normalizeStoreMatchText(value);
-    return name.length >= 3 && /[a-z가-힣]/.test(name);
-}
-export function matchOCRStoreCandidate(candidate, places, threshold = STORE_NAME_MATCH_THRESHOLD, rawOCRText = '') {
-    const name = normalizeStoreMatchText(candidate);
-    const raw = normalizeStoreMatchText(rawOCRText);
-    // 짧은 정상 상호는 일반 문장 내 우연한 부분 일치 대신 독립 줄/상호 필드의 정확한 근거를 요구.
-    const shortEvidence = String(rawOCRText || '').split(/\r?\n/).map(line => normalizeStoreMatchText(
-        line.replace(/^.*?(?:상\s*호(?:\s*\(법인명\))?|업체명|간판명|배송지명)\s*[:：|]?/, '')
-            .split(/\s+(?:주소|성명|대표자|전화|연락처)/)[0]
-    ));
-    const ranked = [...new Set(places || [])].map(place => {
-        const target = normalizeStoreMatchText(place);
-        let score = name && target ? 100 * (1 - getLevenshteinDistance(name, target) / Math.max(name.length, target.length)) : 0;
-        if (target.length === 2 && shortEvidence.includes(target)) score = 100;
-        // 원문 전체 길이와 비교하지 않고 장소명 길이에 가까운 구간을 비교한다.
-        if (target.length >= 3) {
-            for (let start = 0; start < raw.length; start++) {
-                for (let size = Math.max(3, Math.ceil(target.length * threshold / 100)); size <= target.length + 1; size++) {
-                    const part = raw.slice(start, start + size);
-                    if (part.length < 3) continue;
-                    score = Math.max(score, 100 * (1 - getLevenshteinDistance(part, target) / Math.max(part.length, target.length)));
-                }
-            }
-        }
-        return { place, score };
-    }).sort((a, b) => b.score - a.score);
-    logStoreNameDiagnostic('OCR 후보 카카오 비교', { candidate, threshold, ranked, fullTextEvidence: !!raw });
-    if (!ranked.length || ranked[0].score < threshold) return null;
-    const rival = ranked.find(item => normalizeStoreMatchText(item.place) !== normalizeStoreMatchText(ranked[0].place));
-    if (rival && Math.abs(rival.score - ranked[0].score) < 1e-9) return null;
-    return ranked[0].place;
-}
-
-export async function getPOIsByAddress(addressStr, includeDetails = false) {
-    if (!addressStr) return includeDetails ? { places: [], buildingNames: [] } : [];
+export async function getPOIsByAddress(addressStr) {
+    if (!addressStr) return [];
     let places = [];
-    const buildingNames = [];
     try {
         let cleanAddr = addressStr.replace(/\[.*?\]/g, '').trim();
         let res = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanAddr)}`, { 
             headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
-        }, 0); // 상호 최후 fallback은 재시도 없이 요청 1회만 사용
+        });
         if (res && res.ok) {
             let data = await res.json();
-            if (data.documents) {
-                places.push(...data.documents.map(d => d.place_name));
-                for (const doc of data.documents) {
-                    const building = doc.road_address?.building_name || doc.building_name;
-                    if (building) buildingNames.push(building);
-                }
-            }
+            if (data.documents) places.push(...data.documents.map(d => d.place_name));
         }
     } catch(e) {}
-    return includeDetails ? { places: [...new Set(places)], buildingNames: [...new Set(buildingNames)] } : [...new Set(places)];
+    return [...new Set(places)];
 }
 
 // ==========================================
@@ -255,86 +204,72 @@ function getLevenshteinDistance(s1, s2) {
 // ==========================================
 // 5. 1단계: 순서 동일률 기반 상호 매칭 (2글자 상호 100% 필수, 3글자 이상 50% 허용)
 // ==========================================
-export function findStoreNameFromOCR(rawOCRText, places, threshold = 85, addressStr = '') {
-    logStoreNameDiagnostic('카카오 입력 후보', { places, threshold, addressStr });
-    if (!rawOCRText || !places || !places.length) { logStoreNameDiagnostic('카카오 선택 결과', { selected: null, reason: 'OCR 원문 또는 카카오 후보 없음' }); return null; }
-    const clean = value => value.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
-    const addressKey = clean(addressStr);
-    const evidence = [];
-    let addressContinuation = false;
-    let section = '';
-    let personFieldContinuation = false;
-    for (const line of rawOCRText.split(/\r?\n/)) {
-        const sections = [...line.matchAll(/공급받는\s*자|공급자|발송지|본사|배송지|수령지|납품처/g)];
-        if (sections.length) section = sections[sections.length - 1][0];
-        if (/^(?:공급자|발송지|본사)$/.test(section)) continue;
-        const hasLabel = /상\s*호|법\s*인\s*명|업\s*체\s*명|간판명|배송지명/.test(line);
-        if (hasLabel || sections.length || /주소|주\s*소|전화|연락처|사업자|금액|수량|단가|총액|합계|품명/.test(line)) personFieldContinuation = false;
-        if (personFieldContinuation) { logStoreNameDiagnostic('카카오 근거 제외', { text: line, reason: '사람 필드 값의 연속 줄' }); continue; }
-        const linePersonField = findStoreNamePersonField(line, !hasLabel);
-        if (linePersonField && !hasLabel && linePersonField.index === 0) { personFieldContinuation = true; logStoreNameDiagnostic('카카오 근거 제외', { text: line, ...linePersonField }); continue; }
-        if (isStoreNameAddressText(line) || (addressKey && clean(line).includes(addressKey))) {
-            addressContinuation = true;
-            continue;
-        }
-        // 주소 다음 줄의 건물명도 주소 문맥으로 취급. 명시적 상호 라벨은 예외.
-        if (addressContinuation && !hasLabel) {
-            if (line.trim()) addressContinuation = false;
-            continue;
-        }
-        addressContinuation = false;
-        if (/전화|연락처|사업자|금액|수량|단가|총액|합계|품명|대표자|성명/.test(line) && !hasLabel) continue;
-        let nameText = line.replace(/^.*?(?:상\s*호\s*(?:\(\s*법\s*인\s*명\s*\)|명)?|법\s*인\s*명|업\s*체\s*명|간판명|배송지명)\s*[:：|]?/, '')
-            .split(/\s+(?:주\s*소|전화|연락처|사업자|금액|수량|단가|대표자|성명)/)[0];
-        const personField = findStoreNamePersonField(nameText, !hasLabel);
-        if (personField) {
-            logStoreNameDiagnostic('카카오 사람 필드 경계', { text: nameText, ...personField });
-            nameText = nameText.slice(0, personField.index).trim();
-            personFieldContinuation = true;
-        }
-        // OCR 단계에서 수치 혼입으로 낮게 평가한 후보를 fallback에서 재확정하지 않음
-        if (/\b\d{3}\s*-\s*\d{2}\s*-\s*\d{5}\b|\b0\d{1,3}[\s.-]*\d{3,4}[\s.-]*\d{4}\b|\b\d{8,13}\b|\d[\d,]*\s*(?:원|개|EA|박스|kg)(?=\s|$|[,;|])|\b\d{1,3}(?:,\d{3})+\b/i.test(nameText)) continue;
-        const normalized = clean(nameText);
-        if (normalized.length >= 2 && /[A-Za-z가-힣]/.test(normalized)) evidence.push(normalized);
-    }
-    logStoreNameDiagnostic('카카오 매칭 근거', { evidence });
-    if (!evidence.length) { logStoreNameDiagnostic('카카오 선택 결과', { selected: null, candidates: places.map(place => ({ place, score: null, reason: '주소 외 OCR 매칭 근거 없음' })) }); return null; }
-    const ranked = [];
-    for (const place of [...new Set(places)]) {
-        if (isStoreNameAddressText(place)) { logStoreNameDiagnostic('카카오 후보', { place, score: null, rejected: true, reason: '장소명 자체가 주소 패턴: 점수 계산 전 탈락' }); continue; }
-        const fullName = clean(place);
-        if (fullName.length < 2) { logStoreNameDiagnostic('카카오 후보', { place, score: null, rejected: true, reason: '정규화 이름 길이 2 미만' }); continue; }
-        const core = clean(place.trim().split(/\s+/)[0]);
-        let score = 0;
-        const matchEvidence = [];
-        for (const text of evidence) {
-            if (text.includes(fullName)) { matchEvidence.push({ text, points: 100, reason: '장소명 전체 포함' }); score = Math.max(score, 100); }
-            else if (core.length >= 3 && text.includes(core)) { matchEvidence.push({ text, points: 90, reason: '장소명 첫 단어 포함' }); score = Math.max(score, 90); }
-            else if (fullName.length >= 3) {
-                // 전체 문서 연결 문자열 대신 주소를 제외한 개별 줄 안에서만 비교
-                for (let i = 0; i < text.length; i++) {
-                    for (let size = Math.max(3, fullName.length - 1); size <= fullName.length + 1; size++) {
-                        const part = text.slice(i, i + size);
-                        if (part.length < 3) continue;
-                        const similarity = 100 * (1 - getLevenshteinDistance(fullName, part) / Math.max(fullName.length, part.length));
-                        if (similarity > score) matchEvidence.push({ text, part, points: similarity, reason: '편집거리 유사도 최고값 갱신' });
-                        score = Math.max(score, similarity);
-                    }
+export function findStoreNameFromOCR(rawOCRText, places, threshold = 50) {
+    if (!rawOCRText || !places || places.length === 0) return null;
+
+    let fullCleanOCR = rawOCRText.replace(/[^\w가-힣]/g, '');
+    let bestMatch = null;
+    let highestSim = 0;
+
+    for (let place of places) {
+        let cleanPlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
+        if (cleanPlace.length <= 1) continue; 
+        
+        // 100% 완전 포함 시 즉시 확정 반환
+        if (fullCleanOCR.includes(cleanPlace)) return place;
+
+        // 지점명('~점') 및 띄어쓰기 뒷부분 분리 후 핵심 상호 추출
+        let corePlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').trim().split(/\s+/)[0];
+        corePlace = corePlace.replace(/[가-힣0-9]{1,4}점$/, '').replace(/[^\w가-힣]/g, '');
+        if (corePlace.length <= 1) corePlace = cleanPlace;
+
+        if (fullCleanOCR.includes(corePlace)) return place;
+
+        let targetWord = corePlace.length >= 2 ? corePlace : cleanPlace;
+        let targetLen = targetWord.length;
+        if (fullCleanOCR.length < targetLen - 1) continue;
+
+        let effectiveThreshold = (targetLen <= 2) ? 100 : threshold;
+
+        for (let i = 0; i <= fullCleanOCR.length - targetLen + 1; i++) {
+            for (let j = Math.max(2, targetLen - 1); j <= targetLen + 2; j++) {
+                let subStr = fullCleanOCR.substring(i, i + j);
+                if (subStr.length < 2) continue;
+
+                let dist = getLevenshteinDistance(targetWord, subStr);
+                let maxLen = Math.max(targetWord.length, subStr.length);
+                let sim = ((maxLen - dist) / maxLen) * 100;
+
+                if (sim >= effectiveThreshold && sim > highestSim) {
+                    highestSim = sim;
+                    bestMatch = place;
                 }
             }
         }
-        if (/상가|아파트|빌딩|타워|센터/.test(place)) score -= 8;
-        logStoreNameDiagnostic('카카오 후보', { place, score, evidence: matchEvidence, buildingPenalty: /상가|아파트|빌딩|타워|센터/.test(place) ? -8 : 0, minimumScore: Math.max(85, threshold), rejected: score < Math.max(85, threshold), reason: score < Math.max(85, threshold) ? '최소 점수 미달' : '최종 순위 비교 대상' });
-        if (score >= Math.max(85, threshold)) ranked.push({ place, score });
     }
-    ranked.sort((a, b) => b.score - a.score);
-    if (!ranked.length || (ranked[1] && ranked[0].score - ranked[1].score < 10)) { logStoreNameDiagnostic('카카오 선택 결과', { selected: null, reason: !ranked.length ? '기준점 통과 후보 없음' : '상위 후보 점수 차 10점 미만', ranked }); return null; }
-    logStoreNameDiagnostic('카카오 선택 결과', { selected: ranked[0].place, ranked, eliminated: ranked.slice(1).map(candidate => ({ ...candidate, reason: '선택 후보보다 낮은 점수' })) });
-    return ranked[0].place;
+    return bestMatch;
 }
 
-// 주소 영역의 일치만으로 상호를 확정하지 않고 별도의 OCR 상호 근거를 요구
-export function findOverlappingPOIFromAddress(addressAreaText, places, nonAddressText = '') {
-    if (!nonAddressText) return null;
-    return findStoreNameFromOCR(nonAddressText, places, 85, addressAreaText);
+// ==========================================
+// 6. 2단계: 주소지 영역 텍스트와 POI 간 중복(교집합) 매칭
+// ==========================================
+export function findOverlappingPOIFromAddress(addressAreaText, places) {
+    if (!addressAreaText || !places || places.length === 0) return null;
+    let cleanAddr = addressAreaText.replace(/[^\w가-힣]/g, '');
+
+    for (let place of places) {
+        let cleanPlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').replace(/[^\w가-힣]/g, '');
+        if (cleanPlace.length <= 1) continue;
+
+        if (cleanAddr.includes(cleanPlace)) {
+            return place;
+        }
+
+        let corePlace = place.replace(/\(.*?\)/g, '').replace(/주식회사|유한회사/g, '').trim().split(/\s+/)[0];
+        corePlace = corePlace.replace(/[^\w가-힣]/g, '');
+        if (corePlace.length >= 2 && cleanAddr.includes(corePlace)) {
+            return place;
+        }
+    }
+    return null;
 }

@@ -8,17 +8,15 @@ import {
     toBase64_SafeCompress, 
     extractPhoneLogic, 
     extractAddressLogic, 
-    extractStoreNameLogic,
-    extractStoreNameByLayout,
-    logStoreNameDiagnostic, 
+    extractStoreNameLogic, 
     showLoading, 
     hideLoading 
 } from './utils.js';
 import { 
     geocodeAddress, 
     getPOIsByAddress, 
-    matchOCRStoreCandidate,
-    STORE_NAME_MATCH_THRESHOLD
+    findStoreNameFromOCR,
+    findOverlappingPOIFromAddress
 } from './kakao.js';
 import { state } from './state.js';
 import { 
@@ -69,7 +67,7 @@ export function checkScanLimit() {
 // ==========================================
 // 2. 서버 OCR API 통신
 // ==========================================
-export async function performOCR(base64Data, includeLayout = false) {
+export async function performOCR(base64Data) {
     const response = await fetch('/api/ocr', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
@@ -79,10 +77,7 @@ export async function performOCR(base64Data, includeLayout = false) {
     
     if (data.error) throw new Error(data.error);
     if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
-    if (data.responses && data.responses[0].fullTextAnnotation) {
-        const annotation = data.responses[0].fullTextAnnotation;
-        return includeLayout ? { text: annotation.text, pages: annotation.pages || [] } : annotation.text;
-    }
+    if (data.responses && data.responses[0].fullTextAnnotation) return data.responses[0].fullTextAnnotation.text;
     
     throw new Error("사진에서 글자를 찾을 수 없습니다.");
 }
@@ -296,7 +291,6 @@ export function initCameraScan() {
 
         let addressStr = null; 
         let rawOCRText = ""; 
-        let ocrPages = [];
         let extractedPhone = null;
         
         // 1. OCR 판독
@@ -304,10 +298,8 @@ export function initCameraScan() {
         try {
             const base64Image = await toBase64_SafeCompress(file);
             const imageContent = base64Image.split(',')[1];
-            const ocrResult = await performOCR(imageContent, true);
-            rawOCRText = ocrResult.text;
-            ocrPages = ocrResult.pages;
-            addressStr = extractAddressLogic(rawOCRText, ocrPages);
+            rawOCRText = await performOCR(imageContent);
+            addressStr = extractAddressLogic(rawOCRText);
             extractedPhone = extractPhoneLogic(rawOCRText);
             hideLoading();
         } catch (error) {
@@ -342,71 +334,45 @@ export function initCameraScan() {
             }
         }
 
-        // 3. 명확한 OCR 상호 우선, 없을 때만 카카오 장소명으로 보완
+        // 3. 상호명 순수 주소 기반 3단계 순차 파이프라인
         let finalStoreName = null;
-        let diagnosticPath = '빈 값';
-        let ocrStoreCandidate = null;
-        // 이 스캔의 장소 조회 결과(Promise)를 공유해 중복 요청을 막는다.
-        let storePlacesPromise = null;
-        const getStorePlacesOnce = () => storePlacesPromise ??= getPOIsByAddress(addressStr, true);
 
         if (addressStr && rawOCRText) {
             showLoading("상호명 AI 매칭 중...");
             try {
-                let positionResult = { name: null, excludedTextSegments: [] };
-                try { positionResult = extractStoreNameByLayout(ocrPages); }
-                catch (error) { logStoreNameDiagnostic('OCR 위치 오류', { message: error.message }); }
-                let storeOCRText = rawOCRText;
-                // 위치로 식별한 사람 필드 값만 fallback에서 가림. 주소·전화번호는 원문 사용.
-                for (const segment of [...positionResult.excludedTextSegments].sort((a, b) => b.start - a.start)) {
-                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
-                }
-                if (positionResult.name) {
-                    finalStoreName = positionResult.name;
-                    diagnosticPath = 'ocr-layout';
-                }
-                // [1단계] OCR 라벨 상호 추출 및 기존 가비지 필터링
+                let addressPlaces = await getPOIsByAddress(addressStr);
+
+                // [1단계] 순서 동일률 50% 이상 핵심 상호 매칭
+                let textWithoutAddressCell = removeAddressCellFromOCR(rawOCRText, addressStr);
+                finalStoreName = findStoreNameFromOCR(textWithoutAddressCell, addressPlaces, 50);
+
+                // [2단계] 주소지 영역 텍스트와 공식 주소 POI 간 중복(교집합) 매칭
                 if (!finalStoreName) {
-                    let extracted = null;
-                    try { extracted = extractStoreNameLogic(storeOCRText); }
-                    catch (error) { logStoreNameDiagnostic('OCR 텍스트 오류', { message: error.message }); }
+                    let addressAreaText = extractAddressAreaText(rawOCRText, addressStr);
+                    finalStoreName = findOverlappingPOIFromAddress(addressAreaText, addressPlaces);
+                }
+
+                // [3단계] 표 라벨 정밀 추출 및 가비지 필터링
+                if (!finalStoreName) {
+                    let extracted = extractStoreNameLogic(rawOCRText);
                     if (extracted) {
                         let isGarbage = false;
                         let safeExtracted = extracted.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                        let textForRegex = storeOCRText.replace(/\n/g, ' ');
+                        let textForRegex = rawOCRText.replace(/\n/g, ' ');
 
                         let blockRegex = new RegExp(`(성\\s*명|받\\s*는\\s*분|수\\s*령\\s*인|고\\s*객\\s*명)\\s*[:\\-\\.\\|\\s]*${safeExtracted}`);
                         if (blockRegex.test(textForRegex)) isGarbage = true;
                         if (/^(지하|지상)?\s*B?[0-9]+\s*층$/.test(extracted)) isGarbage = true;
                         if (extracted.length < 2 || /^\d+$/.test(extracted)) isGarbage = true;
 
-                        logStoreNameDiagnostic('OCR 후단 검증', { candidate: extracted, rejected: isGarbage, reason: isGarbage ? '성명/수령인 문맥 또는 층수/길이/숫자 필터 해당' : '기존 후단 필터 통과' });
-                        if (!isGarbage) ocrStoreCandidate = extracted;
-                    }
-                }
-
-                let addressPlaces = { places: [], buildingNames: [] };
-                if (!finalStoreName && ocrStoreCandidate) {
-                    addressPlaces = await getStorePlacesOnce();
-                    finalStoreName = matchOCRStoreCandidate(ocrStoreCandidate, addressPlaces.places, STORE_NAME_MATCH_THRESHOLD);
-                    if (finalStoreName) diagnosticPath = 'ocr-kakao-match';
-                }
-                if (!finalStoreName) {
-                    // 기존 조회에서 제공된 명시적 건물명만 재사용. 별도 검색 없음.
-                    const buildingName = coords?.road_address?.building_name || coords?.building_name || addressPlaces.buildingNames[0];
-                    if (buildingName) {
-                        finalStoreName = buildingName;
-                        diagnosticPath = 'kakao-building';
+                        if (!isGarbage) finalStoreName = extracted;
                     }
                 }
             } catch (error) {
-                logStoreNameDiagnostic('선택 과정 오류', { message: error.message });
                 console.error("상호명 매칭 오류:", error);
             }
             hideLoading();
         }
-
-        logStoreNameDiagnostic('최종 결과', { selected: finalStoreName, path: diagnosticPath });
 
         // 4. 배송 목록 추가 및 렌더링 + 관제 센터 서버 동기화
         if (coords) {
