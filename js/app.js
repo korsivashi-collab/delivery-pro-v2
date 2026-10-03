@@ -13,7 +13,7 @@ import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './sta
 
 // 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 연동)
 import { renderDestinationList } from './ui.js';
-import { openTmap, openNaverMap, switchStartSelectViewMode } from './navigation.js';
+import { openTmap, openNaverMap, switchStartSelectViewMode, cancelStartMapLoad } from './navigation.js';
 
 // 서브 모듈 기능들 가져오기
 import { 
@@ -295,6 +295,7 @@ export function openStartSelectionModal() {
 }
 
 export function closeStartModal() { 
+    cancelStartMapLoad();
     document.getElementById('start-select-modal')?.classList.add('hidden'); 
 }
 

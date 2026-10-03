@@ -5,11 +5,15 @@
 // =================================================================
 
 import { state, hasValidDeliveryCoordinates } from './state.js';
-import { showLoading, hideLoading } from './utils.js';
+import { showLoading, hideLoading, withRequestDeadline } from './utils.js';
 
 let startMapInstance = null;
 let startMapMarkers = [];
 let isMapSdkLoaded = false;
+let mapSdkPromise = null;
+let mapViewGeneration = 0;
+let mapViewController = null;
+export const MAP_SDK_TIMEOUT_MS = 15000;
 
 // 상호명 분리 및 주소 원본 보존 헬퍼
 function formatDisplayAddress(rawAddress, storeName = "") {
@@ -68,33 +72,51 @@ export function openNaverMap(lat, lng, name) {
 // 2. 카카오 지도 SDK 동적 로드 (출발지 선택 지도용)
 // ==========================================
 async function loadKakaoMapSdk() {
-    return new Promise((resolve) => {
-        if (window.kakao && window.kakao.maps) {
-            isMapSdkLoaded = true;
-            resolve();
-            return;
-        }
+    if (isMapSdkLoaded && window.kakao?.maps) return;
+    if (mapSdkPromise) return mapSdkPromise;
+    let script = null;
+    const promise = new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = error => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            if (script) { script.onload = null; script.onerror = null; if (error) script.remove(); }
+            if (error) reject(error);
+            else { isMapSdkLoaded = true; resolve(); }
+        };
+        const timer = setTimeout(() => {
+            const error = new Error('지도 불러오기 대기 시간이 초과되었습니다.'); error.name = 'TimeoutError'; finish(error);
+        }, MAP_SDK_TIMEOUT_MS);
+        const initialize = () => {
+            if (settled) return;
+            try { window.kakao.maps.load(() => finish()); }
+            catch (error) { finish(error); }
+        };
+        if (window.kakao?.maps) { initialize(); return; }
         const KAKAO_KEY = "893c5c6ec8613974d84fa75fd6d0be11"; 
-        const script = document.createElement('script');
+        script = document.createElement('script');
         script.src = `https://dapi.kakao.com/v2/maps/sdk.js?appkey=${KAKAO_KEY}&autoload=false`;
-        script.onload = () => {
-            kakao.maps.load(() => {
-                isMapSdkLoaded = true;
-                resolve();
-            });
-        };
-        script.onerror = () => {
-            alert("지도 스크립트를 불러오는데 실패했습니다. 네트워크를 확인해주세요.");
-            resolve();
-        };
+        script.onload = initialize;
+        script.onerror = () => finish(new Error('지도 스크립트를 불러오지 못했습니다.'));
         document.head.appendChild(script);
     });
+    mapSdkPromise = promise;
+    try { await promise; }
+    finally { if (mapSdkPromise === promise) mapSdkPromise = null; }
+}
+
+export function cancelStartMapLoad() {
+    mapViewGeneration++;
+    if (mapViewController) { mapViewController.abort(); mapViewController = null; hideLoading(); }
 }
 
 // ==========================================
 // 3. 시작 지점 선택 뷰 모드 전환 (리스트 <-> 지도)
 // ==========================================
 export async function switchStartSelectViewMode(mode, selectStartDestCallback) {
+    cancelStartMapLoad();
+    const generation = mapViewGeneration;
     const listContainer = document.getElementById('start-select-list');
     const mapContainer = document.getElementById('start-select-map-container');
     const tabList = document.getElementById('modal-tab-list-view');
@@ -110,11 +132,24 @@ export async function switchStartSelectViewMode(mode, selectStartDestCallback) {
         if (tabList) tabList.className = "flex-1 py-1.5 rounded-lg text-gray-500 hover:text-gray-700 transition font-bold";
         if (tabMap) tabMap.className = "flex-1 py-1.5 rounded-lg bg-white shadow text-blue-600 transition font-bold";
         
-        showLoading("지도 불러오는 중...");
-        await loadKakaoMapSdk();
-        hideLoading();
+        const controller = new AbortController();
+        mapViewController = controller;
+        showLoading("지도 불러오는 중...", () => switchStartSelectViewMode('list', selectStartDestCallback));
+        try {
+            await withRequestDeadline(() => loadKakaoMapSdk(), MAP_SDK_TIMEOUT_MS, { signal: controller.signal, label: '지도 로딩' });
+            if (generation !== mapViewGeneration) return;
+        } catch (error) {
+            if (generation === mapViewGeneration && error.name !== 'AbortError') {
+                alert('지도를 불러오지 못했습니다. 목록에서 배송지를 선택해 주세요.');
+                await switchStartSelectViewMode('list', selectStartDestCallback);
+            }
+            return;
+        } finally {
+            if (generation === mapViewGeneration) { mapViewController = null; hideLoading(); }
+        }
         
         setTimeout(() => {
+            if (generation !== mapViewGeneration || document.getElementById('start-select-modal')?.classList.contains('hidden')) return;
             if (startMapInstance) startMapInstance.relayout();
             renderStartSelectMap(selectStartDestCallback);
         }, 120);

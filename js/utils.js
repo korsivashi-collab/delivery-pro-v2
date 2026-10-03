@@ -15,16 +15,52 @@ export function logStoreNameDiagnostic(stage, details) {
 // ==========================================
 // 1. 공통 로딩 오버레이 제어 함수
 // ==========================================
-export function showLoading(text) { 
+export function showLoading(text, onCancel = null) { 
     const elText = document.getElementById('loading-text');
     const elOverlay = document.getElementById('loading-overlay');
     if (elText) elText.innerText = text; 
     if (elOverlay) elOverlay.classList.remove('hidden'); 
+    const cancel = document.getElementById('loading-cancel');
+    if (cancel) {
+        cancel.onclick = onCancel;
+        if (onCancel) cancel.classList.remove('hidden');
+        else cancel.classList.add('hidden');
+    }
 }
 
 export function hideLoading() { 
     const elOverlay = document.getElementById('loading-overlay');
     if (elOverlay) elOverlay.classList.add('hidden'); 
+    const cancel = document.getElementById('loading-cancel');
+    if (cancel) { cancel.onclick = null; cancel.classList.add('hidden'); }
+}
+
+// 외부 작업과 본문 읽기를 같은 상한으로 제한한다. 취소를 무시하는 작업도 호출자는 종료된다.
+export function withRequestDeadline(run, timeoutMs, { signal, label = '요청' } = {}) {
+    return new Promise((resolve, reject) => {
+        const controller = new AbortController();
+        let settled = false, timer = null;
+        const finish = (error, value) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', cancel);
+            if (error) { controller.abort(); reject(error); }
+            else resolve(value);
+        };
+        const cancel = () => {
+            const error = new Error('요청이 취소되었습니다.'); error.name = 'AbortError'; finish(error);
+        };
+        if (signal?.aborted) { cancel(); return; }
+        signal?.addEventListener('abort', cancel, { once: true });
+        timer = setTimeout(() => {
+            const error = new Error(`${label} 대기 시간이 초과되었습니다.`); error.name = 'TimeoutError'; finish(error);
+        }, timeoutMs);
+        Promise.resolve().then(() => {
+            if (settled) return;
+            return run(controller.signal);
+        }).then(value => finish(null, value), error => finish(error));
+    });
 }
 
 // ==========================================

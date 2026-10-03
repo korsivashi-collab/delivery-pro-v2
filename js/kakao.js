@@ -1,4 +1,4 @@
-import { isStoreNameAddressText, findStoreNamePersonField, logStoreNameDiagnostic } from './utils.js';
+import { isStoreNameAddressText, findStoreNamePersonField, logStoreNameDiagnostic, withRequestDeadline } from './utils.js';
 
 // js/kakao.js
 
@@ -41,10 +41,18 @@ function saveGeoCache(cache) {
 // 0-1. 지수 백오프(Exponential Backoff with Jitter) 429 방어 통신 래퍼
 // ==========================================
 async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+    return withRequestDeadline(async signal => {
     const delays = [200, 500, 1000];
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        let responseReceived = false;
         try {
-            const res = await fetch(url, options);
+            const res = await withRequestDeadline(async requestSignal => {
+                const response = await fetch(url, { ...options, signal: requestSignal });
+                responseReceived = true;
+                // 성공 응답의 본문까지 읽어야 fetch 이후 JSON pending도 상한에 포함된다.
+                const data = response.ok ? await response.json() : null;
+                return { ok: response.ok, status: response.status, json: async () => data };
+            }, KAKAO_REQUEST_TIMEOUT_MS, { signal, label: 'Kakao 조회' });
             // 429 Too Many Requests (호출 폭주) 또는 5xx 일시적 서버 오류 발생 시 재시도
             if (res.status === 429 || (res.status >= 500 && res.status <= 599)) {
                 if (attempt < maxRetries) {
@@ -56,6 +64,7 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
             }
             return res;
         } catch (err) {
+            if (responseReceived || err.name === 'TimeoutError' || err.name === 'AbortError') throw err;
             if (attempt < maxRetries) {
                 const jitter = Math.floor(Math.random() * 50);
                 const delay = (delays[attempt] || 1000) + jitter;
@@ -65,12 +74,17 @@ async function fetchWithRetry(url, options = {}, maxRetries = 3) {
             throw err;
         }
     }
+    }, KAKAO_OPERATION_TIMEOUT_MS, { signal: options.signal, label: 'Kakao 조회' });
 }
+
+export const KAKAO_REQUEST_TIMEOUT_MS = 10000;
+export const KAKAO_OPERATION_TIMEOUT_MS = 25000;
 
 // ==========================================
 // 1. 주소 지오코딩 (캐시 우선 확인 & 429 지수 백오프 탑재)
 // ==========================================
-export async function geocodeAddress(address) {
+export async function geocodeAddress(address, { signal } = {}) {
+    return withRequestDeadline(async requestSignal => {
     if (!address) throw new Error('주소가 비어 있습니다.');
     const cleanKey = address.replace(/\[.*?\]/g, '').trim();
     if (!cleanKey) throw new Error('유효한 주소가 아닙니다.');
@@ -83,7 +97,7 @@ export async function geocodeAddress(address) {
 
     // 🌟 2단계: 카카오 1차 정밀 도로명/지번 주소 검색 (지수 백오프 적용)
     let response = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(cleanKey)}`, { 
-        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
+        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal: requestSignal
     });
     
     if (response && response.ok) {
@@ -102,7 +116,7 @@ export async function geocodeAddress(address) {
     
     // 🌟 3단계: 카카오 2차 키워드 검색 (순수 도로명/지번 추출)
     response = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanKey)}`, { 
-        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
+        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal: requestSignal
     });
     
     if (response && response.ok) {
@@ -122,6 +136,7 @@ export async function geocodeAddress(address) {
     }
 
     throw new Error('검색 실패');
+    }, KAKAO_OPERATION_TIMEOUT_MS, { signal, label: '주소 조회' });
 }
 
 // ==========================================
@@ -206,7 +221,7 @@ export function assessOCRStoreCandidate(name, rawText) {
     return { name, normalized, fields, trustworthy, reason: !normalized ? '이름 근거 없음' : longerField ? '더 긴 상호 필드의 일부만 추출됨' : trustworthy ? '독립 상호 필드 전체와 일치' : '상호 필드 전체 일치/유일성 미확인' };
 }
 
-export async function getPOIsByAddress(addressStr, includeDetails = false) {
+export async function getPOIsByAddress(addressStr, includeDetails = false, { signal } = {}) {
     if (!addressStr) return includeDetails ? { places: [], buildingNames: [] } : [];
     let places = [];
     const buildingNames = [];
@@ -214,7 +229,7 @@ export async function getPOIsByAddress(addressStr, includeDetails = false) {
     try {
         let cleanAddr = addressStr.replace(/\[.*?\]/g, '').trim();
         let res = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanAddr)}`, { 
-            headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` } 
+            headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal
         }, 0); // 상호 최후 fallback은 재시도 없이 요청 1회만 사용
         if (res && res.ok) {
             status = 'empty';

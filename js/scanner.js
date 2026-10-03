@@ -12,7 +12,8 @@ import {
     isInvalidStoreCandidate,
     logStoreNameDiagnostic, 
     showLoading, 
-    hideLoading 
+    hideLoading,
+    withRequestDeadline
 } from './utils.js';
 import { 
     geocodeAddress, 
@@ -71,13 +72,17 @@ export function checkScanLimit() {
 // ==========================================
 // 2. 서버 OCR API 통신
 // ==========================================
-export async function performOCR(base64Data, includeLayout = false) {
-    const response = await fetch('/api/ocr', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ imageContent: base64Data }) 
-    });
-    const data = await response.json();
+export const OCR_REQUEST_TIMEOUT_MS = 60000;
+export async function performOCR(base64Data, includeLayout = false, { signal } = {}) {
+    const data = await withRequestDeadline(async requestSignal => {
+        const response = await fetch('/api/ocr', { 
+            method: 'POST', 
+            headers: { 'Content-Type': 'application/json' }, 
+            body: JSON.stringify({ imageContent: base64Data }),
+            signal: requestSignal
+        });
+        return response.json();
+    }, OCR_REQUEST_TIMEOUT_MS, { signal, label: '사진 판독' });
     
     if (data.error) throw new Error(data.error);
     if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
@@ -92,8 +97,9 @@ export async function performOCR(base64Data, includeLayout = false) {
 // ==========================================
 // 3. 주소 수동 입력/수정 모달
 // ==========================================
-export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isEditMode = false) {
+export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isEditMode = false, signal = null) {
     return new Promise((resolve) => {
+        if (signal?.aborted) { resolve(null); return; }
         const modal = document.getElementById('address-input-modal');
         const addrInput = document.getElementById('manual-address-input');
         const phoneInput = document.getElementById('manual-phone-input');
@@ -119,7 +125,7 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
         if (phoneInput) phoneInput.value = defaultPhone || "";
         if (modal) modal.classList.remove('hidden');
         
-        setTimeout(() => { if (addrInput) addrInput.focus(); }, 100);
+        const focusTimer = setTimeout(() => { if (addrInput) addrInput.focus(); }, 100);
 
         const onConfirm = () => { 
             cleanup(); 
@@ -130,6 +136,8 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
             resolve(null); 
         };
         const cleanup = () => { 
+            clearTimeout(focusTimer);
+            signal?.removeEventListener('abort', onCancel);
             btnConfirm.removeEventListener('click', onConfirm); 
             btnCancel.removeEventListener('click', onCancel); 
             if (modal) modal.classList.add('hidden'); 
@@ -137,6 +145,7 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
         
         btnConfirm.addEventListener('click', onConfirm); 
         btnCancel.addEventListener('click', onCancel);
+        signal?.addEventListener('abort', onCancel, { once: true });
     });
 }
 
@@ -281,6 +290,8 @@ function runScanOCRPipelines(snapshot) {
         labeledStoreName: store.finalStoreName };
 }
 
+let activeScanRequest = null;
+
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
     if (!cameraInput) return;
@@ -288,6 +299,29 @@ export function initCameraScan() {
     cameraInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        activeScanRequest?.controller.abort();
+        if (activeScanRequest?.loading) hideLoading();
+        const scan = { controller: new AbortController(), owner: state.getRouteOwnerId(), loading: false };
+        activeScanRequest = scan;
+        const signal = scan.controller.signal;
+        const assertCurrent = () => {
+            if (signal.aborted || activeScanRequest !== scan || scan.owner !== state.getRouteOwnerId()) {
+                const error = new Error('스캔이 취소되었습니다.'); error.name = 'AbortError'; throw error;
+            }
+        };
+        const showScanLoading = text => {
+            assertCurrent(); scan.loading = true;
+            showLoading(text, () => { scan.controller.abort(); if (activeScanRequest === scan) hideScanLoading(); });
+        };
+        const hideScanLoading = () => {
+            if (activeScanRequest === scan && scan.loading) { scan.loading = false; hideLoading(); }
+        };
+        const promptScanAddress = async (...args) => {
+            assertCurrent();
+            const result = await promptAddressCustom(...args, signal);
+            assertCurrent(); return result;
+        };
+        try {
 
         // 계정 유효성 검증
         const deviceId = getOrCreateDeviceId();
@@ -317,6 +351,7 @@ export function initCameraScan() {
             }
         }
 
+        assertCurrent();
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
         let addressStr = null; 
@@ -328,11 +363,12 @@ export function initCameraScan() {
         let kakaoPlaceSearchAttempted = false;
         
         // 1단계: OCR 원격 판독 (텍스트 및 공간 좌표 추출)
-        showLoading("사진 판독 중...");
+        showScanLoading("사진 판독 중...");
         try {
-            const base64Image = await toBase64_SafeCompress(file);
+            const base64Image = await withRequestDeadline(() => toBase64_SafeCompress(file), 15000, { signal, label: '사진 준비' });
             const imageContent = base64Image.split(',')[1];
-            const ocrResult = await performOCR(imageContent, true);
+            const ocrResult = await performOCR(imageContent, true, { signal });
+            assertCurrent();
             
             const ocrSnapshot = createScanOCRSnapshot(ocrResult);
             rawOCRText = ocrSnapshot.rawOCRText;
@@ -345,10 +381,10 @@ export function initCameraScan() {
                 addressStr
             });
             extractedPhone = ocrFields.phone;
-            hideLoading();
+            hideScanLoading();
         } catch (error) {
-            hideLoading();
-            const result = await promptAddressCustom("사진 인식 실패", "", "", false);
+            hideScanLoading();
+            const result = await promptScanAddress("사진 인식 실패", "", "", false);
             if (!result || !result.address) { e.target.value = ''; return; }
             manualAddress = result.address;
             addressStr = manualAddress; 
@@ -357,7 +393,7 @@ export function initCameraScan() {
 
         if (!addressStr && rawOCRText) {
             let snippet = rawOCRText.replace(/\n/g, ' ').substring(0, 40);
-            const result = await promptAddressCustom(snippet + "...", "", extractedPhone, false);
+            const result = await promptScanAddress(snippet + "...", "", extractedPhone, false);
             if (!result || !result.address) { e.target.value = ''; return; }
             manualAddress = result.address;
             addressStr = manualAddress; 
@@ -368,16 +404,17 @@ export function initCameraScan() {
         let coords = null;
         while (!coords) {
             try {
-                showLoading("지도 위치 확인 중...");
-                coords = await geocodeAddress(addressStr);
+                showScanLoading("지도 위치 확인 중...");
+                coords = await geocodeAddress(addressStr, { signal });
+                assertCurrent();
                 console.log('[주소진단-2 GEOCODE]', {
                     addressStr,
                     coords
                 });
-                hideLoading();
+                hideScanLoading();
             } catch (error) {
-                hideLoading();
-                const result = await promptAddressCustom("지도에서 주소를 찾을 수 없습니다.", addressStr, extractedPhone, true);
+                hideScanLoading();
+                const result = await promptScanAddress("지도에서 주소를 찾을 수 없습니다.", addressStr, extractedPhone, true);
                 if (!result || !result.address) { e.target.value = ''; return; }
                 manualAddress = result.address;
             addressStr = manualAddress; 
@@ -396,7 +433,7 @@ export function initCameraScan() {
         const { ocrCandidates, unambiguous, trusted } = storeOCR;
 
         if (rawOCRText) {
-            showLoading("상호명 분석 중...");
+            showScanLoading("상호명 분석 중...");
             try {
                 // 최신 기준본의 OCR 상호 선택을 우선 유지한다.
                 if (!finalStoreName) {
@@ -414,7 +451,8 @@ export function initCameraScan() {
                     storeDecision.kakaoCalled = true;
                     storeDecision.kakaoCallCount = 1;
                     try {
-                        const kakaoResult = await getPOIsByAddress(addressStr, true);
+                        const kakaoResult = await getPOIsByAddress(addressStr, true, { signal });
+                        assertCurrent();
                         storeDecision.kakaoCandidates = kakaoResult.places || [];
                         finalStoreName = matchOCRStoreCandidate(
                             ocrCandidates, storeDecision.kakaoCandidates,
@@ -430,12 +468,13 @@ export function initCameraScan() {
             } catch (error) {
                 console.error("상호 추출 오류:", error);
             }
-            hideLoading();
+            hideScanLoading();
         }
 
         storeDecision.selected = finalStoreName;
         logStoreNameDiagnostic('상호 최종 결정', storeDecision);
 
+        assertCurrent();
         // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
         if (coords) {
             let finalAddress = manualAddress || ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
@@ -490,6 +529,12 @@ export function initCameraScan() {
             const newEl = document.querySelector(`li[data-id="${newDestId}"]`);
             if (newEl) newEl.scrollIntoView({ behavior: 'auto', block: 'start' });
         }
-        e.target.value = ''; 
+        } catch (error) {
+            if (error.name !== 'AbortError') alert('스캔 처리를 완료하지 못했습니다. 다시 시도해 주세요.');
+        } finally {
+            if (activeScanRequest === scan) {
+                hideScanLoading(); activeScanRequest = null; e.target.value = '';
+            }
+        }
     });
 }
