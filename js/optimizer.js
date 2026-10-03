@@ -91,7 +91,12 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
         for(let i = 0; i < unassigned.length; i++) {
             let n = unassigned[i];
             let dist = getCachedDistance(curr, n);
-            let progressDiff = (curr.progress !== undefined && n.progress !== undefined) ? (curr.progress - n.progress) : 0;
+            let progressDiff =
+                (curr !== startPoint &&
+                 curr.progress !== undefined &&
+                 n.progress !== undefined)
+                    ? (curr.progress - n.progress)
+                    : 0;
             let backwardPenalty = progressDiff > 0 ? (progressDiff * 10) : 0; 
             let score = dist + backwardPenalty;
             if(score < bestScore) { 
