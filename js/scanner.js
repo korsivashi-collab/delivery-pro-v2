@@ -323,6 +323,8 @@ export function initCameraScan() {
         let ocrPages = [];
         let extractedPhone = null;
         let ocrFields = null;
+        let manualAddress = null;
+        let kakaoPlaceSearchAttempted = false;
         
         // 1단계: OCR 원격 판독 (텍스트 및 공간 좌표 추출)
         showLoading("사진 판독 중...");
@@ -347,7 +349,8 @@ export function initCameraScan() {
             hideLoading();
             const result = await promptAddressCustom("사진 인식 실패", "", "", false);
             if (!result || !result.address) { e.target.value = ''; return; }
-            addressStr = result.address; 
+            manualAddress = result.address;
+            addressStr = manualAddress; 
             extractedPhone = result.phone;
         }
 
@@ -355,7 +358,8 @@ export function initCameraScan() {
             let snippet = rawOCRText.replace(/\n/g, ' ').substring(0, 40);
             const result = await promptAddressCustom(snippet + "...", "", extractedPhone, false);
             if (!result || !result.address) { e.target.value = ''; return; }
-            addressStr = result.address; 
+            manualAddress = result.address;
+            addressStr = manualAddress; 
             extractedPhone = result.phone;
         }
 
@@ -374,7 +378,8 @@ export function initCameraScan() {
                 hideLoading();
                 const result = await promptAddressCustom("지도에서 주소를 찾을 수 없습니다.", addressStr, extractedPhone, true);
                 if (!result || !result.address) { e.target.value = ''; return; }
-                addressStr = result.address; 
+                manualAddress = result.address;
+            addressStr = manualAddress; 
                 extractedPhone = result.phone;
             }
         }
@@ -392,13 +397,33 @@ export function initCameraScan() {
         if (rawOCRText) {
             showLoading("상호명 분석 중...");
             try {
-                // 비용 절감을 위해 카카오 POI(장소) 교차 검증 API 호출을 비활성화하고 
-                // 뛰어난 성능의 자체 OCR 2차 엔진 결과만을 100% 신뢰하여 채택합니다.
+                // 최신 기준본의 OCR 상호 선택을 우선 유지한다.
                 if (!finalStoreName) {
                     const validOcrCandidate = trusted.length > 0 ? trusted[0].name : (ocrCandidates.length > 0 ? ocrCandidates[0] : null);
                     if (validOcrCandidate) {
                         finalStoreName = validOcrCandidate;
                         storeDecision.source = 'ocr-direct-only';
+                    }
+                }
+
+                // OCR 최종 상호가 비었을 때만 원문 교차검증용 장소 조회를 최대 1회 수행.
+                if ((!finalStoreName || !finalStoreName.trim()) && addressStr && !kakaoPlaceSearchAttempted) {
+                    finalStoreName = null;
+                    kakaoPlaceSearchAttempted = true;
+                    storeDecision.kakaoCalled = true;
+                    storeDecision.kakaoCallCount = 1;
+                    try {
+                        const kakaoResult = await getPOIsByAddress(addressStr, true);
+                        storeDecision.kakaoCandidates = kakaoResult.places || [];
+                        finalStoreName = matchOCRStoreCandidate(
+                            ocrCandidates, storeDecision.kakaoCandidates,
+                            STORE_NAME_MATCH_THRESHOLD, rawOCRText, storeDecision
+                        );
+                        storeDecision.kakaoMatched = Boolean(finalStoreName);
+                        storeDecision.source = finalStoreName ? 'kakao-raw-ocr-match' : 'kakao-fallback-unmatched';
+                    } catch (error) {
+                        storeDecision.kakaoMatched = false;
+                        storeDecision.source = 'kakao-fallback-failed';
                     }
                 }
             } catch (error) {
@@ -412,7 +437,7 @@ export function initCameraScan() {
 
         // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
         if (coords) {
-            let finalAddress = ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
+            let finalAddress = manualAddress || ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
             const labeledStoreName = finalStoreName || '';
             const finalPhone = extractedPhone;
             
@@ -422,7 +447,7 @@ export function initCameraScan() {
             }
 
             console.log('[주소진단-3 최종주소]', {
-                scanId: ocrFields?.scanId, addressStr,
+                scanId: ocrFields?.scanId, addressStr, manualAddress,
                 legacyAddress: ocrFields?.legacyAddress ?? null,
                 labeledAddress: ocrFields?.labeledAddress ?? null,
                 address_name: coords?.address_name, resolvedAddress: finalAddress
@@ -431,12 +456,12 @@ export function initCameraScan() {
                 scanId: ocrFields?.scanId,
                 legacyAddress: ocrFields?.legacyAddress ?? null,
                 labeledAddress: ocrFields?.labeledAddress ?? null,
-                labeledStoreName, phone: finalPhone,
+                manualAddress, labeledStoreName, phone: finalPhone,
                 parsedAddress: ocrFields?.address ?? null,
                 geocodeInput: addressStr, geocodeAddressName: coords?.address_name,
                 finalAddress, finalStoreName: labeledStoreName, finalPhone,
                 addressChangedInCombination: Boolean(ocrFields?.address && finalAddress !== ocrFields.address),
-                source: ocrFields?.legacyAddress ? 'legacy' : ocrFields?.labeledAddress ? 'labeled' : 'manual'
+                source: manualAddress ? 'manual' : ocrFields?.legacyAddress ? 'legacy' : ocrFields?.labeledAddress ? 'labeled' : 'manual'
             });
 
             const currentDests = state.getDestinations();
