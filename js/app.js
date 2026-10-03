@@ -8,7 +8,7 @@ import { calculateOptimizedRoute } from './optimizer.js';
 import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
-import { state, destinationIdArgument } from './state.js';
+import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
 
 // 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 연동)
 import { renderDestinationList } from './ui.js';
@@ -132,11 +132,10 @@ export async function initApp() {
             return;
         }
         if (routeData.updatedAt === state.getRouteUpdatedAt()) return;
-        const formattedList = newDestinations.map((d, idx) => ({
+        state.setDestinations(newDestinations);
+        const formattedList = state.getDestinations().map((d, idx) => ({
             ...d,
             displayNumber: d.displayNumber || (idx + 1),
-            lat: typeof d.lat === 'number' ? d.lat : (parseFloat(d.lat) || 0),
-            lng: typeof d.lng === 'number' ? d.lng : (parseFloat(d.lng) || 0),
             phone: sanitizePhoneNumber(d.phone || d.customerPhone || d.tel || d.contact || d.hp || '')
         }));
         state.setDestinations(formattedList);
@@ -310,6 +309,10 @@ export function selectStartDest(id) {
     const destinations = state.getDestinations();
     const idx = destinations.findIndex(d => d.id === id);
     if (idx > -1) {
+        if (!hasValidDeliveryCoordinates(destinations[idx])) {
+            alert('주소를 수정하여 위치를 확인한 후 시작점으로 선택해 주세요.');
+            return;
+        }
         const chosen = destinations.splice(idx, 1)[0];
         destinations.unshift(chosen);
         state.setDestinations(destinations);
@@ -344,10 +347,18 @@ export function optimizeRouteAction() {
     
     setTimeout(() => {
         try {
-            destinations = calculateOptimizedRoute(destinations, startLocation, endLocation);
+            const routeDestinations = destinations.filter(hasValidDeliveryCoordinates);
+            const pendingDestinations = destinations.filter(d => !hasValidDeliveryCoordinates(d));
+            if (!hasValidDeliveryCoordinates(startLocation) || !hasValidDeliveryCoordinates(destinations[0])) {
+                throw new Error('시작점의 주소를 수정하여 위치를 확인해 주세요.');
+            }
+            if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
+            destinations = calculateOptimizedRoute(routeDestinations, startLocation,
+                hasValidDeliveryCoordinates(endLocation) ? endLocation : null).concat(pendingDestinations);
             state.setDestinations(destinations);
             updateDisplayNumbers();
             hideLoading();
+            if (pendingDestinations.length) alert(`위치 확인이 필요한 배송지 ${pendingDestinations.length}건은 최적화에서 제외하고 목록 끝에 유지했습니다. 주소를 수정해 주세요.`);
             
             const deviceId = getOrCreateDeviceId();
             const phone = localStorage.getItem('deliveryProUserPhone') || "";

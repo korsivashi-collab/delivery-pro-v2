@@ -4,7 +4,7 @@
 // [배송 동선 PRO] UI 렌더링 및 화면 조작 전담 모듈 (네이버 내비 & 고대비 시인성 테마)
 // =================================================================
 
-import { state, destinationIdArgument, destinationIdAttribute } from './state.js';
+import { state, destinationIdArgument, destinationIdAttribute, hasValidDeliveryCoordinates } from './state.js';
 
 // 전화번호 정제 보조 함수
 function sanitizePhoneNumber(rawVal) {
@@ -106,6 +106,8 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             li.setAttribute('data-id', dest.id); 
             const idArgument = destinationIdArgument(dest.id);
             const domId = destinationIdAttribute(dest.id);
+            const needsLocation = !hasValidDeliveryCoordinates(dest);
+            const navigationDisabled = needsLocation ? 'disabled' : '';
             if (dest.orderNo) li.setAttribute('data-orderno', dest.orderNo);
             li.className = "bg-white p-3 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col gap-2";
             
@@ -133,12 +135,14 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             }
 
             let distHtml = "";
-            if (lastGps && lastGps.lat && lastGps.lng && dest.lat && dest.lng) {
+            if (hasValidDeliveryCoordinates(lastGps) && !needsLocation) {
                 const dist = calculateDistance(lastGps.lat, lastGps.lng, dest.lat, dest.lng);
                 distHtml = `<span class="text-[9.5px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded shadow-2xs whitespace-nowrap border border-slate-200 flex items-center h-[20px]"><i class="fa-solid fa-location-arrow text-[9px] mr-1 text-slate-400"></i>${formatDistance(dist)}</span>`;
             }
 
-            let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address).replace(/['"]/g, '');
+            let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address || '목적지').replace(/['"]/g, '');
+            if (!formatted.cleanAddr && !formatted.storeName) displayAddressHTML = '<span>주소 정보 없음 · 주소 수정 필요</span>';
+            if (needsLocation) displayAddressHTML += '<span class="block text-xs text-amber-700">위치 확인 필요 · 주소 수정</span>';
             const isFirst = index === 0;
             const isLast = index === destinations.length - 1;
 
@@ -183,9 +187,9 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                             <span class="text-[11px] font-bold text-slate-500 px-1.5 shrink-0 whitespace-nowrap leading-none tracking-tight">길찾기</span>
                             <div class="w-px h-3.5 bg-slate-200 shrink-0"></div>
                             <div class="flex-1 grid grid-cols-2 gap-1 h-full">
-                                <button onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-slate-900 text-white text-[11px] font-bold rounded-lg active:bg-black flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-map-location-dot text-[10px] shrink-0"></i> 티맵</button>
+                                <button ${navigationDisabled} onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-slate-900 text-white text-[11px] font-bold rounded-lg active:bg-black flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-map-location-dot text-[10px] shrink-0"></i> 티맵</button>
                                 <!-- 🌟 카카오내비 완전 대체: 네이버 내비게이션 버튼 연동 -->
-                                <button onclick="openNaverMap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#03C75A] hover:bg-[#02B351] text-white text-[11px] font-bold rounded-lg border border-[#02B351] active:bg-[#029b46] flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 네이버</button>
+                                <button ${navigationDisabled} onclick="openNaverMap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#03C75A] hover:bg-[#02B351] text-white text-[11px] font-bold rounded-lg border border-[#02B351] active:bg-[#029b46] flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 네이버</button>
                             </div>
                         </div>
                         <!-- 취소/삭제: 경고성 소프트 로즈 -->

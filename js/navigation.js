@@ -4,7 +4,7 @@
 // [배송 동선 PRO] 외부 내비게이션(티맵/네이버) 및 카카오 지도 연동 모듈
 // =================================================================
 
-import { state } from './state.js';
+import { state, hasValidDeliveryCoordinates } from './state.js';
 import { showLoading, hideLoading } from './utils.js';
 
 let startMapInstance = null;
@@ -37,7 +37,7 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // 1. 외부 내비게이션 (티맵 / 네이버) 전용 연동
 // ==========================================
 export function openTmap(lat, lng, name) { 
-    if (!lat || !lng) {
+    if (!hasValidDeliveryCoordinates({ lat, lng })) {
         alert("목적지 좌표가 유효하지 않습니다.");
         return;
     }
@@ -47,7 +47,7 @@ export function openTmap(lat, lng, name) {
 }
 
 export function openNaverMap(lat, lng, name) {
-    if (!lat || !lng) {
+    if (!hasValidDeliveryCoordinates({ lat, lng })) {
         alert("목적지 좌표가 유효하지 않습니다.");
         return;
     }
@@ -139,8 +139,12 @@ export function renderStartSelectMap(selectStartDestCallback) {
     const container = document.getElementById('start-select-kakao-map');
     if (!container) return;
     
-    const destinations = state.getDestinations();
-    if (destinations.length === 0) return;
+    const destinations = state.getDestinations().filter(hasValidDeliveryCoordinates);
+    if (destinations.length === 0) {
+        startMapMarkers.forEach(marker => marker.setMap(null));
+        startMapMarkers = [];
+        return;
+    }
 
     if (!startMapInstance) {
         const options = {

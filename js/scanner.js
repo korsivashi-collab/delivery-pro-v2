@@ -22,7 +22,7 @@ import {
     normalizeStoreMatchText,
     STORE_NAME_MATCH_THRESHOLD
 } from './kakao.js';
-import { state } from './state.js';
+import { state, hasValidDeliveryCoordinates } from './state.js';
 import { 
     isLicenseExpiredLocally, 
     clearAuthStorage, 
@@ -153,7 +153,7 @@ export async function editDestinationAddress(id) {
     
     const newAddr = result.address; 
     const newPhone = result.phone;
-    let addrChanged = newAddr !== item.address; 
+    let addrChanged = newAddr !== item.address || !hasValidDeliveryCoordinates(item);
     let phoneChanged = newPhone !== (item.phone || "");
     
     if (!addrChanged && !phoneChanged) return;
@@ -179,8 +179,9 @@ export async function editDestinationAddress(id) {
             hideLoading(); 
         }
     }
-    item.phone = newPhone; 
-    state.saveActiveData(); 
+    item.phone = newPhone;
+    state.setDestinations(destinations);
+    state.saveActiveData();
     if (typeof window.renderList === 'function') window.renderList();
 
     const deviceId = getOrCreateDeviceId();

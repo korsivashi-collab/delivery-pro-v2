@@ -15,6 +15,57 @@ let lastKnownGps = null;
 let gpsWatchId = null;
 let lastGeneratedDestinationId = 0;
 
+function safeDeliveryText(value) {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+    return '';
+}
+
+function coordinateNumber(value) {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string' && value.trim() !== '') return Number(value);
+    return NaN;
+}
+
+export function hasValidDeliveryCoordinates(location) {
+    return !!location && Number.isFinite(location.lat) && Number.isFinite(location.lng) &&
+        Math.abs(location.lat) <= 90 && Math.abs(location.lng) <= 180 &&
+        !(location.lat === 0 && location.lng === 0);
+}
+
+function normalizeDeliveryObject(item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+    const changes = {};
+    for (const field of ['address', 'storeName', 'phone', 'name']) {
+        if (field !== 'address' && !(field in item)) continue;
+        const text = safeDeliveryText(item[field]);
+        if (text !== item[field]) changes[field] = text;
+    }
+    const coordinates = { lat: coordinateNumber(item.lat), lng: coordinateNumber(item.lng) };
+    // Null coordinates retain the delivery for address correction, never as a real map point.
+    const lat = hasValidDeliveryCoordinates(coordinates) ? coordinates.lat : null;
+    const lng = hasValidDeliveryCoordinates(coordinates) ? coordinates.lng : null;
+    if (item.lat !== lat) changes.lat = lat;
+    if (item.lng !== lng) changes.lng = lng;
+    if ('progress' in item && !Number.isFinite(item.progress)) changes.progress = undefined;
+    if (!Object.keys(changes).length) return item;
+    const normalized = { ...item, ...changes };
+    if (changes.progress === undefined && 'progress' in changes) delete normalized.progress;
+    return normalized;
+}
+
+function normalizeDeliveryList(list) {
+    if (!Array.isArray(list)) return [];
+    let changed = false;
+    const normalized = [];
+    for (const item of list) {
+        const validItem = normalizeDeliveryObject(item);
+        if (validItem !== item || !validItem) changed = true;
+        if (validItem) normalized.push(validItem);
+    }
+    return ensureUniqueDestinationIds(changed ? normalized : list);
+}
+
 function isDestinationId(id) {
     return (typeof id === 'number' && Number.isSafeInteger(id)) ||
         (typeof id === 'string' && id.trim().length > 0);
@@ -79,9 +130,11 @@ export const state = {
         return destinations;
     },
     setDestinations(newList) {
-        destinations = ensureUniqueDestinationIds(newList);
+        destinations = normalizeDeliveryList(newList);
     },
     addDestination(item) {
+        item = normalizeDeliveryObject(item);
+        if (!item) return null;
         const reservedIds = new Set(destinations.map(destination => String(destination.id)));
         const addedItem = isDestinationId(item.id) && !reservedIds.has(String(item.id))
             ? item : { ...item, id: createDestinationId(reservedIds) };
@@ -97,7 +150,9 @@ export const state = {
         return endLocation;
     },
     setEndLocation(loc) {
-        endLocation = loc;
+        // Existing empty endpoint sentinel is configuration, not a delivery coordinate.
+        endLocation = loc && loc.lat === 0 && loc.lng === 0 && loc.address === ''
+            ? loc : normalizeDeliveryObject(loc) || { lat: 0, lng: 0, address: '' };
     },
 
     // 3. 시작 지점(startLocation) 관리
@@ -105,7 +160,7 @@ export const state = {
         return startLocation;
     },
     setStartLocation(loc) {
-        startLocation = loc;
+        startLocation = normalizeDeliveryObject(loc);
     },
 
     // 4. GPS 센서 상태 관리
@@ -145,12 +200,13 @@ export const state = {
             // 하나의 소유자 스냅샷을 읽어 다른 탭의 별도 키 쓰기와 섞이지 않게 합니다.
             const savedList = metadata.destinations;
             if (!Array.isArray(savedList)) return;
-            destinations = ensureUniqueDestinationIds(savedList);
-            endLocation = metadata.endLocation || endLocation;
+            destinations = normalizeDeliveryList(savedList);
+            const savedEnd = metadata.endLocation;
+            this.setEndLocation(savedEnd || endLocation);
             routeUpdatedAt = metadata.updatedAt;
             if (destinations[0]) startLocation = { lat: destinations[0].lat, lng: destinations[0].lng, address: destinations[0].address };
-            // Persist only repaired IDs, without advancing the server revision.
-            if (destinations !== savedList) this.saveActiveData(routeUpdatedAt);
+            // Persist repaired input without advancing the server revision.
+            if (destinations !== savedList || endLocation !== savedEnd) this.saveActiveData(routeUpdatedAt);
         } catch (error) {
             destinations = [];
             endLocation = { lat: 0, lng: 0, address: '' };
