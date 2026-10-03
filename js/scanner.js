@@ -191,6 +191,86 @@ export async function editDestinationAddress(id) {
 // ==========================================
 // 5. 카메라 스캔 및 AI 하이브리드 판독 파이프라인
 // ==========================================
+// 한 번 받은 OCR 응답의 복사본을 고정한다. 각 파이프라인은 이 원본만 읽는다.
+function createScanOCRSnapshot(ocrResult) {
+    const pages = JSON.parse(JSON.stringify(ocrResult.pages || []));
+    const freeze = value => {
+        if (value && typeof value === 'object') {
+            Object.values(value).forEach(freeze);
+            Object.freeze(value);
+        }
+        return value;
+    };
+    return freeze({ rawOCRText: ocrResult.text || '', ocrPages: pages });
+}
+
+// 상호의 셀/라벨/신뢰도 규칙은 그대로 유지하고 주소 결과에 의존하는 실행 조건만 분리.
+function extractScanStoreOCR(snapshot) {
+    let finalStoreName = null;
+    const storeDecision = {
+        rawOCRText: snapshot.rawOCRText, layoutCandidate: null, textCandidate: null,
+        kakaoMatched: false, selected: null, source: ''
+    };
+    try {
+                // 3-1. 2D 좌표 기반 상호 추출 (회전 대응)
+                let layoutResult = { name: null, candidates: [] };
+                try { 
+                    layoutResult = extractStoreNameByLayout(snapshot.ocrPages); 
+                } catch (err) {}
+                storeDecision.layoutCandidate = layoutResult.name;
+
+                // 3-2. 명시적 상호 라벨의 텍스트 값 추출
+                let storeOCRText = snapshot.rawOCRText;
+                for (const segment of [...(layoutResult.excludedTextSegments || [])].sort((a, b) => b.start - a.start)) {
+                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
+                }
+                let textStore = null;
+                try { 
+                    textStore = extractStoreNameLogic(storeOCRText); 
+                } catch (err) {}
+                storeDecision.textCandidate = textStore;
+
+                // 후보 풀 구성 (레이아웃 상호 -> 텍스트 영역 상호)
+                const ocrCandidates = [...new Set([layoutResult.name, ...(layoutResult.candidates || []).map(c => c.name), textStore].filter(Boolean))];
+                const normalizedCandidates = [...new Set(ocrCandidates.map(normalizeStoreMatchText))];
+                const assessments = ocrCandidates.map(name => assessOCRStoreCandidate(name, storeOCRText));
+                const trusted = assessments.filter(a => a.trustworthy && !isInvalidStoreCandidate(a.name));
+                const agreement = layoutResult.name && textStore && normalizeStoreMatchText(layoutResult.name) === normalizeStoreMatchText(textStore);
+                const clearCell = (layoutResult.candidates || []).some(c => c.name === layoutResult.name && c.cell?.confidenceReliable);
+                const unambiguous = normalizedCandidates.length === 1 && trusted.length > 0;
+                storeDecision.assessments = assessments;
+                storeDecision.kakaoCalled = false;
+                if (unambiguous && (agreement || clearCell || trusted.length === 1)) {
+                    finalStoreName = layoutResult.name || trusted[0].name;
+                    storeDecision.source = agreement ? 'ocr-agreement' : clearCell ? 'ocr-cell' : 'ocr-trusted';
+                }
+
+        return { finalStoreName, storeDecision, ocrCandidates, unambiguous, trusted };
+    } catch (error) {
+        console.error('상호 추출 오류:', error);
+        return { finalStoreName: null, storeDecision, ocrCandidates: [], unambiguous: false, trusted: [] };
+    }
+}
+
+function runScanOCRPipelines(snapshot) {
+    let address = null, phone = null;
+    // 하나의 추출 실패가 다른 필드의 추출을 막지 않는다.
+    try { address = extractAddressLogic(snapshot.rawOCRText); }
+    catch (error) { console.error('주소 추출 오류:', error); }
+    const store = extractScanStoreOCR(snapshot);
+    try { phone = extractPhoneLogic(snapshot.rawOCRText); }
+    catch (error) { console.error('전화번호 추출 오류:', error); }
+    console.log('[OCR진단-독립파이프라인]', {
+        sourceFrozen: Object.isFrozen(snapshot) && Object.isFrozen(snapshot.ocrPages),
+        address, storeName: store.finalStoreName, phone,
+        layoutCandidate: store.storeDecision.layoutCandidate,
+        textCandidate: store.storeDecision.textCandidate,
+        storeCandidates: [...store.ocrCandidates],
+        stage: '주소 수동 보정/geocode/Kakao 교차검증 이전'
+    });
+    return { address, store, phone };
+}
+
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
     if (!cameraInput) return;
@@ -233,6 +313,7 @@ export function initCameraScan() {
         let rawOCRText = ""; 
         let ocrPages = [];
         let extractedPhone = null;
+        let ocrFields = null;
         
         // 1단계: OCR 원격 판독 (텍스트 및 공간 좌표 추출)
         showLoading("사진 판독 중...");
@@ -241,15 +322,17 @@ export function initCameraScan() {
             const imageContent = base64Image.split(',')[1];
             const ocrResult = await performOCR(imageContent, true);
             
-            rawOCRText = ocrResult.text || "";
-            ocrPages = ocrResult.pages || [];
+            const ocrSnapshot = createScanOCRSnapshot(ocrResult);
+            rawOCRText = ocrSnapshot.rawOCRText;
+            ocrPages = ocrSnapshot.ocrPages;
+            ocrFields = runScanOCRPipelines(ocrSnapshot);
             
-            addressStr = extractAddressLogic(rawOCRText);
+            addressStr = ocrFields.address;
             console.log('[주소진단-1 OCR파싱]', {
                 rawOCRText,
                 addressStr
             });
-            extractedPhone = extractPhoneLogic(rawOCRText);
+            extractedPhone = ocrFields.phone;
             hideLoading();
         } catch (error) {
             hideLoading();
@@ -287,57 +370,23 @@ export function initCameraScan() {
             }
         }
 
-        // 3단계: 범용 상호명 다중 슬롯 추출 및 카카오 매칭
-        let finalStoreName = null;
-        const storeDecision = { 
-            rawOCRText, 
-            layoutCandidate: null, 
-            textCandidate: null, 
-            kakaoMatched: false,
-            selected: null,
-            source: '' 
+        // 3단계: 독립 OCR 후보를 유지한 채 필요한 Kakao 교차검증만 최종 단계에서 수행.
+        const storeOCR = ocrFields?.store || {
+            finalStoreName: null, ocrCandidates: [], unambiguous: false, trusted: [],
+            storeDecision: { rawOCRText, layoutCandidate: null, textCandidate: null,
+                kakaoMatched: false, selected: null, source: '', kakaoCalled: false }
         };
+        let finalStoreName = storeOCR.finalStoreName;
+        const storeDecision = storeOCR.storeDecision;
+        const { ocrCandidates, unambiguous, trusted } = storeOCR;
 
-        if (addressStr && rawOCRText) {
+        if (rawOCRText) {
             showLoading("상호명 분석 중...");
             try {
-                // 3-1. 2D 좌표 기반 상호 추출 (회전 대응)
-                let layoutResult = { name: null, candidates: [] };
-                try { 
-                    layoutResult = extractStoreNameByLayout(ocrPages); 
-                } catch (err) {}
-                storeDecision.layoutCandidate = layoutResult.name;
-
-                // 3-2. 명시적 상호 라벨의 텍스트 값 추출
-                let storeOCRText = rawOCRText;
-                for (const segment of [...(layoutResult.excludedTextSegments || [])].sort((a, b) => b.start - a.start)) {
-                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
-                }
-                let textStore = null;
-                try { 
-                    textStore = extractStoreNameLogic(storeOCRText); 
-                } catch (err) {}
-                storeDecision.textCandidate = textStore;
-
-                // 후보 풀 구성 (레이아웃 상호 -> 텍스트 영역 상호)
-                const ocrCandidates = [...new Set([layoutResult.name, ...(layoutResult.candidates || []).map(c => c.name), textStore].filter(Boolean))];
-                const normalizedCandidates = [...new Set(ocrCandidates.map(normalizeStoreMatchText))];
-                const assessments = ocrCandidates.map(name => assessOCRStoreCandidate(name, storeOCRText));
-                const trusted = assessments.filter(a => a.trustworthy && !isInvalidStoreCandidate(a.name));
-                const agreement = layoutResult.name && textStore && normalizeStoreMatchText(layoutResult.name) === normalizeStoreMatchText(textStore);
-                const clearCell = (layoutResult.candidates || []).some(c => c.name === layoutResult.name && c.cell?.confidenceReliable);
-                const unambiguous = normalizedCandidates.length === 1 && trusted.length > 0;
-                storeDecision.assessments = assessments;
-                storeDecision.kakaoCalled = false;
-                if (unambiguous && (agreement || clearCell || trusted.length === 1)) {
-                    finalStoreName = layoutResult.name || trusted[0].name;
-                    storeDecision.source = agreement ? 'ocr-agreement' : clearCell ? 'ocr-cell' : 'ocr-trusted';
-                }
-
                 // 3-3. 카카오 POI 조회 (보정용 교차 검증)
                 let kakaoResult = { places: [], buildingNames: [] };
                 try {
-                    if (!finalStoreName) {
+                    if (!finalStoreName && addressStr) {
                         storeDecision.kakaoCalled = true;
                         kakaoResult = await getPOIsByAddress(addressStr, true);
                     }
