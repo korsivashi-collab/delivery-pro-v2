@@ -110,6 +110,26 @@ export function createCompletionWorker({
         Object.assign(job, patch);
         return true;
     };
+    const saveHistoryPhoto = job => {
+        if (job.action !== 'complete' || !job.photoUrl || owner() !== job.ownership.routeOwnerId) return;
+        const jobs = read();
+        // A restore replaces the complete job with a delete job while upload is in flight.
+        if (!jobs.some(current => matches(current, job) && current.ownership.routeOwnerId === job.ownership.routeOwnerId)) return;
+        const records = history();
+        const record = records.find(h => h.transmissionId === job.id && h.routeOwnerId === job.ownership.routeOwnerId);
+        if (!record || (record.photoUrl === job.photoUrl && record.hasPhoto)) return;
+        record.photoUrl = job.photoUrl;
+        record.hasPhoto = true;
+        // Keep the job and original Blob until completion and route acknowledgements succeed.
+        if (!write(jobs, records)) throw new Error('사진 이력 저장 실패');
+        try {
+            if (typeof document.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+                document.dispatchEvent(new CustomEvent('completion-photo-saved', {
+                    detail: { transmissionId: job.id, routeOwnerId: job.ownership.routeOwnerId }
+                }));
+            }
+        } catch (error) { console.error('사진 이력 화면 갱신 실패:', error); }
+    };
     const request = async operation => {
         let timeout;
         const pending = Promise.resolve().then(operation);
@@ -138,6 +158,8 @@ export function createCompletionWorker({
                         if (!photoUrl) throw new Error('사진 업로드 응답 미확인');
                         if (!update(job, { photoUrl, stage: 'completion' })) continue;
                     }
+                    // Also repairs history on restart/retry when the queue already has the URL.
+                    saveHistoryPhoto(job);
                     if (job.stage !== 'route') {
                         const receipt = await request(() => job.action === 'delete' ? remove(job) : complete(job));
                         if (job.action === 'complete' && !receipt) throw new Error('완료 기록 전송 미확인');

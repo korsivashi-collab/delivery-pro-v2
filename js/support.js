@@ -333,6 +333,21 @@ export function openHistoryModal() {
     } catch (error) { state.reportStorageFailure(error); }
 }
 
+// Registered once, independently of how often the history modal is opened.
+export function refreshHistoryPhotoLinks(event) {
+    const modal = document.getElementById('history-modal');
+    if (!modal || modal.classList.contains('hidden')) return;
+    const current = getHistoryOwnershipContext();
+    if (event.detail?.routeOwnerId !== current.routeOwnerId) return;
+    const container = document.getElementById('history-list-container');
+    const scrollTop = container?.scrollTop;
+    openHistoryModal();
+    if (container && scrollTop !== undefined) container.scrollTop = scrollTop;
+}
+if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+    document.addEventListener('completion-photo-saved', refreshHistoryPhotoLinks);
+}
+
 export function closeHistoryModal() { 
     document.getElementById('history-modal')?.classList.add('hidden'); 
 }
