@@ -8,6 +8,18 @@ export function readCompletionQueue() {
     return jobs;
 }
 
+export function renderCompletionQueueStatus() {
+    const node = document.getElementById('transmission-status');
+    if (!node) return;
+    // Older cached HTML may still contain the removed banner. Never expose internal recovery state.
+    node.textContent = '';
+    node.hidden = true;
+}
+
+function refreshCompletionQueueStatus() {
+    renderCompletionQueueStatus();
+}
+
 export function createCompletionTask(item, tag, context, photoId = null, photoUrl = null) {
     const gps = state.getLastKnownGps();
     const real = !!(gps && gps.lat && gps.lng);
@@ -144,6 +156,7 @@ export function createCompletionWorker({
                         record.transmissionStatus = 'sent';
                     }
                     if (!write(jobs.filter(current => !matches(current, job)), records)) throw new Error('전송 완료 상태 저장 실패');
+                    try { status(read().filter(current => current.ownership.routeOwnerId === owner())); } catch (_) {}
                     if (job.photoId) photos.remove(job.photoId).catch(error => console.error('전송 사진 정리 실패:', error));
                 } catch (error) {
                     const longFailure = job.attempts >= 8 || now() - job.completedAt >= 86400000;
@@ -169,9 +182,9 @@ export function createCompletionWorker({
 }
 
 let completionWorker;
-export function wakeCompletionQueue() { completionWorker?.wake(); }
+export function wakeCompletionQueue() { refreshCompletionQueueStatus(); completionWorker?.wake(); }
 export function initCompletionQueue(resumeSavedOwner = null) {
-    if (completionWorker) return;
+    if (completionWorker) { refreshCompletionQueueStatus(); return; }
     let nextOwnerCheck = 0;
     completionWorker = createCompletionWorker({ async resumeOwner() {
         if (!resumeSavedOwner || Date.now() < nextOwnerCheck) return;
@@ -181,13 +194,7 @@ export function initCompletionQueue(resumeSavedOwner = null) {
         nextOwnerCheck = Date.now() + 60000;
         // Reuse the existing authentication flow only for pending work belonging to saved credentials.
         await resumeSavedOwner();
-    }, status(jobs) {
-        const node = document.getElementById('transmission-status');
-        if (!node) return;
-        const count = jobs.filter(job => job.status === 'longFailure' || Date.now() - job.completedAt >= 600000).length;
-        node.textContent = count ? `전송 대기 ${count}건 · 자동 재시도 중` : '';
-        node.hidden = !count;
-    } });
+    }, status: renderCompletionQueueStatus });
     window.addEventListener('online', wakeCompletionQueue);
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wakeCompletionQueue(); });
     wakeCompletionQueue();
