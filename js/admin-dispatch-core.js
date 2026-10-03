@@ -46,6 +46,48 @@ export function getFilteredVisibleDrivers() {
     return visibleLicenses;
 }
 
+// 장소가 같아도 주문은 다를 수 있으므로 주소/좌표만으로 처리 상태를 연결하지 않습니다.
+export function getDriverDeliverySummary(lic, route, selectedDate) {
+    const normalizePhone = value => String(value || '').replace(/\D/g, '');
+    const records = state.allCompletions.filter(c => {
+        const matchesOwner = c.routeOwnerId
+            ? c.routeOwnerId === lic.routeOwnerId
+            : (lic.deviceId && c.deviceId === lic.deviceId) || (lic.key && c.deviceId === lic.key) ||
+              (normalizePhone(lic.phone) && normalizePhone(c.phone) === normalizePhone(lic.phone) &&
+               state.allLicenses.filter(l => l.type !== 'dispatch' &&
+                   normalizePhone(l.phone) === normalizePhone(lic.phone)).length === 1);
+        const date = c.completedAt
+            ? getLocalDateString(new Date(c.completedAt))
+            : String(c.timeString || '').slice(0, 10).replace(/\./g, '-');
+        return matchesOwner && date === selectedDate;
+    }).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+    const kind = c => {
+        const tag = String(c.tag || '').trim();
+        if (tag === '배송 취소') return 'cancelled';
+        if (['배송 완료', '완료', '직접 전달', '사진 완료', '문 앞', '주방'].includes(tag) ||
+            /^기타\s*:/.test(tag)) return 'done';
+        return 'other';
+    };
+    const done = records.filter(c => kind(c) === 'done');
+    const cancelled = records.filter(c => kind(c) === 'cancelled');
+    const other = records.filter(c => kind(c) === 'other');
+    const rawDests = [...(route?.destinations || [])]
+        .sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
+    const processed = new Map();
+    const orderNo = value => String(value || '').trim();
+    records.forEach(c => {
+        if (kind(c) === 'other') return;
+        // completions.id는 Firestore 문서 ID이며 destination.id와 다릅니다.
+        const candidates = c.destinationId !== undefined && c.destinationId !== null
+            ? rawDests.filter(d => String(d.id) === String(c.destinationId))
+            : orderNo(c.orderNo) ? rawDests.filter(d => orderNo(d.orderNo) === orderNo(c.orderNo)) : [];
+        if (candidates.length === 1) processed.set(candidates[0], c);
+    });
+    const routeDests = rawDests.filter(d => kind(processed.get(d) || {}) !== 'cancelled');
+    const remainingDests = routeDests.filter(d => !processed.has(d));
+    return { rawDests, routeDests, remainingDests, processed, done, cancelled, other };
+}
+
 // ==========================================
 // 🌟 [핵심] 기사 활성 동선 정밀 판별 엔진 (오래된 과거 키 9건 잔상 완전 차단)
 // ==========================================
@@ -168,7 +210,6 @@ export function renderDriverListView() {
     }
 
     const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
     let html = '';
@@ -178,27 +219,12 @@ export function renderDriverListView() {
         
         // 🌟 기사별 정밀 활성 동선 조회
         const driverRoute = getDriverRouteData(lic, selectedDate);
-        let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
-        rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
-
-        const driverDone = state.allCompletions.filter(c => {
-            const matchesDev = (lic.deviceId && c.deviceId === lic.deviceId) || 
-                               (c.deviceId === lic.key) || 
-                               (c.deviceId === devId) ||
-                               (lic.phone && c.phone === lic.phone);
-            const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                                (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
-            return matchesDev && matchesDate;
-        });
-
-        const doneMap = {}; 
-        driverDone.forEach(c => { doneMap[c.address] = c; });
-        const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-        
-        const pendingCount = isToday ? remainingDests.length : 0;
-        const doneCount = driverDone.length;
-        const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
-        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : (doneCount > 0 ? 100 : 0);
+        const summary = getDriverDeliverySummary(lic, driverRoute, selectedDate);
+        const pendingCount = isToday ? summary.remainingDests.length : 0;
+        const doneCount = summary.done.length;
+        const cancelCount = summary.cancelled.length;
+        const totalCount = pendingCount + doneCount;
+        const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
         html += `
         <div onclick="window.selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
@@ -218,6 +244,7 @@ export function renderDriverListView() {
             <div class="flex justify-between text-[11px] font-bold text-gray-600">
                 <span>잔여: <b class="text-blue-600 font-black text-xs">${pendingCount}</b>건</span>
                 <span>완료: <b class="text-emerald-600 font-black text-xs">${doneCount}</b>건</span>
+                <span>취소: <b class="text-gray-600 font-black text-xs">${cancelCount}</b>건</span>
             </div>
         </div>`;
     });
@@ -244,49 +271,36 @@ export function renderDriverDetailView(devId) {
     `;
 
     const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
     const isToday = (selectedDate === todayStr);
 
     const driverRoute = getDriverRouteData(licObj, selectedDate);
-    let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
-    rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
-
-    const driverDone = state.allCompletions.filter(c => {
-        const matchesDev = (c.deviceId === devId) || 
-                           (matchedLic && c.deviceId === matchedLic.deviceId) || 
-                           (matchedLic && c.deviceId === matchedLic.key) || 
-                           (matchedLic && c.phone === matchedLic.phone);
-        const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
-        return matchesDev && matchesDate;
-    }).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
-
-    const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
-    const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-
+    const summary = getDriverDeliverySummary(licObj, driverRoute, selectedDate);
+    const { routeDests: rawDests, remainingDests, processed: doneMap, done: driverDone, cancelled: driverCancelled } = summary;
     const pendingCount = isToday ? remainingDests.length : 0;
     const doneCount = driverDone.length;
-    const totalCount = isToday ? (pendingCount + doneCount) : doneCount;
-    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;	
+    const cancelCount = driverCancelled.length;
+    const totalCount = pendingCount + doneCount;
+    const routeCount = rawDests.length;
+    const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
 
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">
         <div class="flex justify-between items-center mb-1.5 text-blue-950 font-black">
             <span class="flex items-center gap-1.5"><i class="fa-solid fa-chart-pie text-blue-600"></i> 배송 진척도</span>
-            <span>완료 ${doneCount} / 전체 ${totalCount} 건 (${rate}%)</span>
+            <span>완료 ${doneCount} / 대기+완료 ${totalCount} 건 (${rate}%)</span>
         </div>
         <div class="w-full bg-white rounded-full h-2 overflow-hidden mb-2">
             <div class="bg-blue-600 h-2 rounded-full transition-all duration-500" style="width: ${rate}%"></div>
         </div>
         <div class="flex justify-between text-[11px] font-bold text-blue-800">
-            <span>미배송 대기: <b class="text-blue-600 font-black">${pendingCount}</b>곳</span>
-            <span>완료율: <b class="text-emerald-600 font-black">${rate}%</b></span>
+            <span>미배송 대기: <b class="text-blue-600 font-black">${pendingCount}</b>건</span>
+            <span>취소: <b>${cancelCount}</b>건 / 기타 처리: <b>${summary.other.length}</b>건</span>
         </div>
     </div>
 
     <div class="flex gap-1 mb-3 bg-gray-100 p-1 rounded-xl text-xs font-black">
         <button onclick="window.setDispatchDetailTab('ROUTE')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'ROUTE' ? 'bg-blue-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
-            <i class="fa-solid fa-route mr-1"></i> 동선 (${totalCount})
+            <i class="fa-solid fa-route mr-1"></i> 활성 동선 (${routeCount})
         </button>
         <button onclick="window.setDispatchDetailTab('PENDING')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'PENDING' ? 'bg-amber-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-clock mr-1"></i> 미처리 (${pendingCount})
@@ -294,6 +308,10 @@ export function renderDriverDetailView(devId) {
         <button onclick="window.setDispatchDetailTab('DONE')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'DONE' ? 'bg-emerald-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
             <i class="fa-solid fa-circle-check mr-1"></i> 완료 (${doneCount})
         </button>
+        <button onclick="window.setDispatchDetailTab('CANCELLED')" class="flex-1 py-2 rounded-lg transition ${state.dispatchDetailTab === 'CANCELLED' ? 'bg-gray-600 text-white shadow-xs' : 'text-gray-600 hover:text-gray-900'}">
+            취소 (${cancelCount})
+        </button>
+        ${summary.other.length ? `<button onclick="window.setDispatchDetailTab('OTHER')" class="flex-1 py-2 rounded-lg ${state.dispatchDetailTab === 'OTHER' ? 'bg-gray-600 text-white' : 'text-gray-600'}">기타 (${summary.other.length})</button>` : ''}
     </div>`;
 
     if (state.dispatchDetailTab === 'ROUTE') {
@@ -302,7 +320,7 @@ export function renderDriverDetailView(devId) {
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             rawDests.forEach((d, idx) => {
-                const comp = doneMap[d.address];
+                const comp = doneMap.get(d);
                 const isDone = !!comp;
                 const num = d.displayNumber || (idx + 1);
                 const storeBadge = d.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1 shrink-0">${d.storeName}</span>` : '';
@@ -334,7 +352,7 @@ export function renderDriverDetailView(devId) {
         }
     } else if (state.dispatchDetailTab === 'PENDING') {
         if (remainingDests.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-circle-check text-2xl text-emerald-500 mb-1"></i><p>모든 배송이 완료되었습니다!</p></div>`;
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-400 mb-1"></i><p>미처리 배송지가 없습니다.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
             remainingDests.forEach((d, idx) => {
@@ -354,17 +372,20 @@ export function renderDriverDetailView(devId) {
             html += `</div>`;
         }
     } else {
-        if (driverDone.length === 0) {
-            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-300 mb-1"></i><p>선택한 날짜(${selectedDate})에 완료된 배송 건이 없습니다.</p></div>`;
+        const isCancelledTab = state.dispatchDetailTab === 'CANCELLED';
+        const isOtherTab = state.dispatchDetailTab === 'OTHER';
+        const historyRecords = isCancelledTab ? driverCancelled : isOtherTab ? summary.other : driverDone;
+        if (historyRecords.length === 0) {
+            html += `<div class="text-center text-gray-400 py-16 text-xs font-bold space-y-1"><i class="fa-solid fa-box-open text-2xl text-gray-300 mb-1"></i><p>선택한 날짜(${selectedDate})에 ${isCancelledTab ? '취소' : isOtherTab ? '기타 처리' : '완료'} 기록이 없습니다.</p></div>`;
         } else {
             html += `<div class="space-y-1.5 pb-4">`;
-            driverDone.forEach((c, idx) => {
+            historyRecords.forEach((c, idx) => {
                 let timeOnly = c.timeString ? c.timeString.split(' ')[1] : '';
                 let photoBtn = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
-                <div onclick="window.focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-emerald-200 hover:border-emerald-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
-                    <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-emerald-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
-                    <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-emerald-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">✓ ${timeOnly} [${c.tag || '완료'}]</span></div>
+                <div onclick="window.focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-200 hover:border-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
+                    <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
+                    <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">${isCancelledTab ? '취소' : isOtherTab ? '기타' : '✓'} ${timeOnly} [${c.tag || '완료'}]</span></div>
                 </div>`;
             });
             html += `</div>`;
@@ -410,27 +431,14 @@ export function drawDriverOnMap(devId) {
     if (!map) return;
 
     const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
-    const dotDate = selectedDate.replace(/-/g, '.');
 
     const driverRoute = getDriverRouteData(licObj, selectedDate);
-    let rawDests = driverRoute ? (driverRoute.destinations || []) : [];
-    rawDests = [...rawDests].sort((a, b) => (a.displayNumber || 0) - (b.displayNumber || 0));
-
-    const completions = state.allCompletions.filter(c => {
-        const matchesDev = (c.deviceId === devId) || 
-                           (matchedLic && c.deviceId === matchedLic.deviceId) || 
-                           (matchedLic && c.deviceId === matchedLic.key) || 
-                           (matchedLic && c.phone === matchedLic.phone);
-        const matchesDate = (c.timeString && c.timeString.startsWith(dotDate)) || 
-                            (c.completedAt && getLocalDateString(new Date(c.completedAt)) === selectedDate);
-        return matchesDev && matchesDate;
-    });
-
-    completions.sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
-    const doneMap = {};
-    completions.forEach(c => { doneMap[c.address] = c; });
-    const remainingDests = rawDests.filter(d => !doneMap[d.address]);
-    const currentTargetAddr = remainingDests.length > 0 ? remainingDests[0].address : null;
+    const summary = getDriverDeliverySummary(licObj, driverRoute, selectedDate);
+    const { remainingDests: rawDests, processed: doneMap } = summary;
+    // 활성 지도에는 주문 식별값으로 연결된 완료만 표시합니다. 당일 전체 완료 이력은 완료 경로 모드에서 확인합니다.
+    const completions = summary.done.filter(c => state.currentMapPolylineMode === 'completed' ||
+        summary.rawDests.some(d => doneMap.get(d) === c));
+    const currentTarget = rawDests[0];
 
     const bounds = new kakao.maps.LatLngBounds();
     let pointsCount = 0;
@@ -473,9 +481,9 @@ export function drawDriverOnMap(devId) {
             if (d.lat && d.lng) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
                 plannedPath.push(pos);
-                if (!doneMap[d.address]) {
+                if (!doneMap.has(d)) {
                     bounds.extend(pos); pointsCount++;
-                    const isCurrent = d.address === currentTargetAddr;
+                    const isCurrent = d === currentTarget;
                     const courseNum = d.displayNumber || (idx + 1);
                     const content = document.createElement('div');
                     content.className = isCurrent ? 'custom-overlay current' : 'custom-overlay';
@@ -545,6 +553,7 @@ export function setMapPolylineMode(mode) {
             }
         });
     }
+    if (state.selectedDeviceId) drawDriverOnMap(state.selectedDeviceId);
 }
 
 // ==========================================
