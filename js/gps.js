@@ -15,6 +15,18 @@ let unsubRequestDevice = null;
 let unsubRequestKey = null;
 let lastReportTime = 0;
 let isGpsWatcherActive = false; // 기사님의 GPS 활성화 설정 상태 보존
+let gpsSession = 0;
+
+function cachePosition(position) {
+    const gps = { lat: position.coords.latitude, lng: position.coords.longitude,
+        timestamp: position.timestamp, accuracy: position.coords.accuracy };
+    return state.setLastKnownGps(gps) ? state.getLastKnownGps() : null;
+}
+
+function invalidateGps(error) {
+    state.setLastKnownGps(null);
+    if (error) console.warn('현재 GPS 위치를 사용할 수 없습니다:', error.code);
+}
 
 // 🌟 안전한 Firestore 인스턴스 획득
 function getDbInstance() {
@@ -100,30 +112,39 @@ function listenToGpsRequests() {
 function _startHardwareWatcher() {
     listenToGpsRequests();
 
-    if (!navigator.geolocation || state.getGpsWatchId() !== null) return;
+    if (!navigator.geolocation) { invalidateGps(); return; }
+    if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
+    if (state.getGpsWatchId() !== null) return;
+    const session = ++gpsSession;
 
-    const watchId = navigator.geolocation.watchPosition(
-        (pos) => {
-            const lat = pos.coords.latitude;
-            const lng = pos.coords.longitude;
+    try {
+        const watchId = navigator.geolocation.watchPosition(
+            (pos) => {
+                if (session !== gpsSession) return;
+                const lat = pos.coords.latitude;
+                const lng = pos.coords.longitude;
 
-            state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
+                if (!cachePosition(pos)) return;
 
-            if (Date.now() - lastReportTime >= 45000) {
-                reportGpsToFirestore(lat, lng, false);
-            }
-        },
-        (err) => {},
-        { enableHighAccuracy: true, timeout: 15000, maximumAge: 15000 }
-    );
+                if (Date.now() - lastReportTime >= 45000) {
+                    reportGpsToFirestore(lat, lng, false);
+                }
+            },
+            (err) => { if (session === gpsSession) invalidateGps(err); },
+            { enableHighAccuracy: true, timeout: 15000, maximumAge: 15000 }
+        );
     
-    state.setGpsWatchId(watchId);
+        state.setGpsWatchId(watchId);
+    } catch (error) { invalidateGps(error); }
 }
 
 function _stopHardwareWatcher() {
+    gpsSession++;
+    invalidateGps();
     const watchId = state.getGpsWatchId();
     if (watchId !== null && navigator.geolocation) {
-        navigator.geolocation.clearWatch(watchId);
+        try { navigator.geolocation.clearWatch(watchId); }
+        catch (error) { console.warn('GPS 감시 정지 오류:', error.code); }
         state.setGpsWatchId(null);
     }
 
@@ -169,30 +190,28 @@ export function stopGpsWatcher() {
 // ==========================================
 export function getDeviceRealGPS() {
     return new Promise((resolve) => {
-        const lastGps = state.getLastKnownGps();
-        
-        // 1분 이내의 최신 좌표가 있으면 재사용
-        if (lastGps && (Date.now() - lastGps.timestamp < 60000)) {
-            return resolve({ lat: lastGps.lat, lng: lastGps.lng, isReal: true });
-        }
-        
         if (!navigator.geolocation) {
-            return resolve(lastGps ? { ...lastGps, isReal: true } : null);
+            invalidateGps();
+            return resolve(null);
         }
-        
-        navigator.geolocation.getCurrentPosition(
-            (pos) => {
-                const lat = pos.coords.latitude;
-                const lng = pos.coords.longitude;
-                state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
-                resolve({ lat, lng, isReal: true });
-            },
-            (err) => {
-                const fallbackGps = state.getLastKnownGps();
-                resolve(fallbackGps ? { lat: fallbackGps.lat, lng: fallbackGps.lng, isReal: true } : null);
-            },
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
-        );
+        if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return resolve(null);
+        const lastGps = state.getLastKnownGps();
+        if (lastGps) return resolve({ ...lastGps, isReal: true });
+        const session = gpsSession;
+        try {
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    if (session !== gpsSession) { resolve(null); return; }
+                    const gps = cachePosition(pos);
+                    resolve(gps ? { ...gps, isReal: true } : null);
+                },
+                (err) => {
+                    if (session === gpsSession) invalidateGps(err);
+                    resolve(null);
+                },
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            );
+        } catch (error) { invalidateGps(error); resolve(null); }
     });
 }
 
@@ -201,38 +220,25 @@ export function getDeviceRealGPS() {
 // ==========================================
 export async function setEndLocationGPS() {
     showLoading("현위치 파악 중...");
-    const lastGps = state.getLastKnownGps();
-    
-    if (lastGps) {
-        const addr = await coordToAddress(lastGps.lng, lastGps.lat);
-        state.setEndLocation({ lat: lastGps.lat, lng: lastGps.lng, address: addr || "현재 위치 (GPS)" });
-        if (!state.saveActiveData()) { hideLoading(); return; }
+    const owner = state.getRouteOwnerId();
+    const session = gpsSession;
+    try {
+        const gps = await getDeviceRealGPS();
+        if (!gps || !state.isFreshGps(gps)) {
+            alert("현재 위치를 확인할 수 없습니다. GPS와 위치 권한을 확인한 후 다시 시도해 주세요.");
+            return;
+        }
+        const addr = await coordToAddress(gps.lng, gps.lat);
+        // Address lookup may outlive the fix or an external-app/account transition.
+        if (session !== gpsSession || owner !== state.getRouteOwnerId() || !state.isFreshGps(gps)) {
+            alert("위치 정보가 만료되었습니다. 현위치를 다시 확인해 주세요.");
+            return;
+        }
+        state.setEndLocation({ lat: gps.lat, lng: gps.lng, address: addr || "현재 위치 (GPS)" });
+        if (!state.saveActiveData()) return;
         if (typeof window.renderList === 'function') window.renderList();
-        hideLoading();
-        return;
-    }
-
-    if (navigator.geolocation) {
-        navigator.geolocation.getCurrentPosition(
-            async (position) => {
-                let lat = position.coords.latitude;
-                let lng = position.coords.longitude;
-                state.setLastKnownGps({ lat, lng, timestamp: Date.now() });
-                
-                const addr = await coordToAddress(lng, lat);
-                state.setEndLocation({ lat, lng, address: addr || "현재 위치 (GPS)" });
-                if (!state.saveActiveData()) { hideLoading(); return; }
-                if (typeof window.renderList === 'function') window.renderList();
-                hideLoading();
-            },
-            (error) => { 
-                hideLoading(); 
-                alert("위치 정보를 가져올 수 없습니다."); 
-            },
-            { enableHighAccuracy: true, timeout: 5000, maximumAge: 30000 }
-        );
-    } else { 
-        hideLoading(); 
-        alert("GPS를 지원하지 않는 기기입니다."); 
-    }
+    } catch (error) {
+        console.warn('현위치 종료점 설정 실패:', error);
+        alert("현재 위치를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+    } finally { hideLoading(); }
 }

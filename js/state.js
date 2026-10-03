@@ -12,6 +12,9 @@ let routeOwnerId = null;
 let routeUpdatedAt = 0;
 let onActiveDataSaved = null;
 let lastKnownGps = null;
+// One watcher cache window (15s) plus its acquisition timeout (15s).
+export const GPS_CACHE_MAX_AGE_MS = 30000;
+let gpsValidAfter = 0;
 let gpsWatchId = null;
 let lastGeneratedDestinationId = 0;
 const LOCAL_TRANSACTION_KEY = 'deliveryPro_local_transaction';
@@ -279,10 +282,23 @@ export const state = {
 
     // 4. GPS 센서 상태 관리
     getLastKnownGps() {
-        return lastKnownGps;
+        return this.isFreshGps(lastKnownGps) ? lastKnownGps : null;
     },
     setLastKnownGps(gps) {
-        lastKnownGps = gps;
+        if (!gps) {
+            lastKnownGps = null;
+            gpsValidAfter = Date.now();
+            return false;
+        }
+        if (!this.isFreshGps(gps)) return false;
+        lastKnownGps = { ...gps };
+        return true;
+    },
+    isFreshGps(gps) {
+        if (!hasValidDeliveryCoordinates(gps) || !Number.isFinite(gps.timestamp)) return false;
+        const age = Date.now() - gps.timestamp;
+        return gps.timestamp >= gpsValidAfter && age >= 0 && age <= GPS_CACHE_MAX_AGE_MS &&
+            (gps.accuracy === undefined || (Number.isFinite(gps.accuracy) && gps.accuracy >= 0));
     },
     getGpsWatchId() {
         return gpsWatchId;
