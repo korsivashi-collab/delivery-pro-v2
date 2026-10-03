@@ -192,55 +192,26 @@ export function extractPhoneLogic(text) {
 // ==========================================
 // 6. 범용 도로명/지번 주소 정밀 추출 슬롯 엔진
 // ==========================================
-// 주소 후보 생성은 독립 실행하고, 비교/반환에는 동일한 정규화를 적용한다.
+// 구버전 주소 파서를 먼저 실행하고, 개선형 역할 파서는 별도 fallback으로 유지한다.
 export function extractAddressLogic(text) {
-    const rawA = extractAddressEngineA(text);
-    const bEvidence = {};
-    const rawB = extractAddressEngineB(text, bEvidence);
-    const a = normalizeNavigationAddress(rawA);
-    const b = normalizeNavigationAddress(rawB);
-    let selected = a;
-    let reason = '판단 모호 또는 서로 다른 주소: 기존 A 선택 유지';
-    if (a === b) { selected = a; reason = '공통 정규화 결과 동일'; }
-    else if (!a) { selected = b; reason = b ? 'B만 유효' : '유효 주소 없음'; }
-    else if (!b) { reason = 'A만 유효'; }
-    else {
-        const compactA = a.replace(/\s/g, '');
-        const compactB = b.replace(/\s/g, '');
-        // 실제 건물번호가 다른 주소를 문자열 길이로 교체하지 않는다.
-        // 짧은 결과의 번호까지가 다른 결과의 분기 도로명에 포함될 때만 복구한다.
-        const extendsBranch = (short, full) => {
-            const match = short.match(/^(.*(?:대로|로))(\d+(?:-\d+)?)$/);
-            if (!match || match[2].includes('-')) return false;
-            const prefix = match[1] + match[2];
-            return full.startsWith(prefix) && /^[가-힣]*길\d+(?:-\d+)?$/.test(full.slice(prefix.length));
-        };
-        // 서로 다른 주소를 보정하지 않도록 OCR 원문의 동일한 유일 출현을 확인한다.
-        const source = typeof text === 'string'
-            ? text.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2').replace(/\s/g, '') : '';
-        const sameSource = (short, full) => {
-            const index = source.indexOf(full);
-            if (index >= 0 && source.indexOf(short) === index && source.lastIndexOf(short) === index) return true;
-            // B가 분리된 주소 줄의 번호를 문법으로 확인한 경우에만 그 근거를 인정한다.
-            const fragment = bEvidence.roadFragment?.replace(/\s/g, '');
-            const fragmentIndex = fragment ? source.indexOf(fragment) : -1;
-            return full === compactB && bEvidence.buildingNumber && fragmentIndex >= 0
-                && full === fragment + bEvidence.buildingNumber
-                && source.indexOf(short) === fragmentIndex && source.lastIndexOf(short) === fragmentIndex;
-        };
-        const extendsNumber = (short, full) => full.startsWith(short)
-            && /\d$/.test(short) && /^-\d+$/.test(full.slice(short.length));
-        const isCompletion = (short, full) => sameSource(short, full)
-            && (extendsBranch(short, full) || extendsNumber(short, full));
-        if (isCompletion(compactA, compactB)) {
-            selected = b; reason = '같은 원문 주소의 도로명 분기/번지를 B가 완전하게 포함';
-        } else if (isCompletion(compactB, compactA)) {
-            reason = '같은 원문 주소의 도로명 분기/번지를 A가 완전하게 포함';
-        }
-    }
+    let rawLegacyAddress = null, rawLabeledAddress = null;
+    const legacyEvidence = {};
+    try { rawLegacyAddress = extractAddressEngineB(text, legacyEvidence); }
+    catch (error) { console.error('기존 주소 추출 오류:', error); }
+    try { rawLabeledAddress = extractAddressEngineA(text); }
+    catch (error) { console.error('라벨링 주소 추출 오류:', error); }
+    const legacyAddress = normalizeNavigationAddress(rawLegacyAddress);
+    const labeledAddress = normalizeNavigationAddress(rawLabeledAddress);
+    const selected = legacyAddress || labeledAddress || null;
+    const reason = legacyAddress
+        ? legacyAddress === labeledAddress ? '두 주소 동일' : '기존 주소 파서 우선'
+        : labeledAddress ? '기존 주소 없음: 라벨링 주소 fallback' : '주소 없음: 수동입력 fallback';
     try {
-        console.log('[주소진단-이중엔진]', { rawA, rawB, normalizedA: a, normalizedB: b, selected, reason, bEvidence });
-    } catch (_) { /* 로그 실패는 주소 반환에 영향 없음 */ }
+        console.log('[주소진단-최종선택]', {
+            rawLegacyAddress, rawLabeledAddress, legacyAddress, labeledAddress,
+            selected, reason, legacyEvidence
+        });
+    } catch (_) { /* 진단 실패는 주소 반환에 영향 없음 */ }
     return selected;
 }
 
