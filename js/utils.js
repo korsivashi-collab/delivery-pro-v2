@@ -192,15 +192,172 @@ export function extractPhoneLogic(text) {
 // ==========================================
 // 6. 범용 도로명/지번 주소 정밀 추출 슬롯 엔진
 // ==========================================
+// 주소 후보 생성은 독립 실행하고, 비교/반환에는 동일한 정규화를 적용한다.
 export function extractAddressLogic(text) {
+    const rawA = extractAddressEngineA(text);
+    const rawB = extractAddressEngineB(text);
+    const a = normalizeNavigationAddress(rawA);
+    const b = normalizeNavigationAddress(rawB);
+    let selected = a;
+    let reason = '판단 모호 또는 서로 다른 주소: 기존 A 선택 유지';
+    if (a === b) { selected = a; reason = '공통 정규화 결과 동일'; }
+    else if (!a) { selected = b; reason = b ? 'B만 유효' : '유효 주소 없음'; }
+    else if (!b) { reason = 'A만 유효'; }
+    else {
+        const compactA = a.replace(/\s/g, '');
+        const compactB = b.replace(/\s/g, '');
+        // 실제 건물번호가 다른 주소를 문자열 길이로 교체하지 않는다.
+        // 짧은 결과의 번호까지가 다른 결과의 분기 도로명에 포함될 때만 복구한다.
+        const extendsBranch = (short, full) => {
+            const match = short.match(/^(.*(?:대로|로))(\d+(?:-\d+)?)$/);
+            if (!match || match[2].includes('-')) return false;
+            const prefix = match[1] + match[2];
+            return full.startsWith(prefix) && /^[가-힣]*길\d+(?:-\d+)?$/.test(full.slice(prefix.length));
+        };
+        // 서로 다른 주소를 보정하지 않도록 OCR 원문의 동일한 유일 출현을 확인한다.
+        const source = typeof text === 'string'
+            ? text.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2').replace(/\s/g, '') : '';
+        const sameSource = (short, full) => {
+            const index = source.indexOf(full);
+            return index >= 0 && source.indexOf(short) === index && source.lastIndexOf(short) === index;
+        };
+        const extendsNumber = (short, full) => full.startsWith(short)
+            && /\d$/.test(short) && /^-\d+$/.test(full.slice(short.length));
+        const isCompletion = (short, full) => sameSource(short, full)
+            && (extendsBranch(short, full) || extendsNumber(short, full));
+        if (isCompletion(compactA, compactB)) {
+            selected = b; reason = '같은 원문 주소의 도로명 분기/번지를 B가 완전하게 포함';
+        } else if (isCompletion(compactB, compactA)) {
+            reason = '같은 원문 주소의 도로명 분기/번지를 A가 완전하게 포함';
+        }
+    }
+    try {
+        console.log('[주소진단-이중엔진]', { rawA, rawB, normalizedA: a, normalizedB: b, selected, reason });
+    } catch (_) { /* 로그 실패는 주소 반환에 영향 없음 */ }
+    return selected;
+}
+
+// A/B 후보 생성 이후의 공통 경계 처리. 엔진 내부 helper에는 의존하지 않는다.
+function normalizeNavigationAddress(candidate) {
+    if (typeof candidate !== 'string' || !candidate.trim()) return null;
+    let text = candidate.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2')
+        .split(/[(.]/)[0].replace(/\s+/g, ' ').trim();
+    // OCR이 분기 도로명의 구성요소 사이에 삽입한 공백만 결합한다.
+    text = text.replace(/([가-힣A-Za-z0-9·]+(?:대로|로))\s*(\d+)\s*((?:[가-힣]\s*)*)길(?=\s*\d)/g,
+        (_, road, number, branch) => road + number + branch.replace(/\s/g, '') + '길');
+    const road = text.match(/([가-힣A-Za-z0-9·]+(?:대로|로|길))\s*(\d+(?:-\d+)?)/);
+    const parcel = text.match(/[가-힣A-Za-z0-9·]+(?:동|읍|면|리)\s+(?:산\s*)?\d+(?:-\d+)?/);
+    // 상세주소内 도로명을 지번 대신 채택하지 않도록 원문에서 먼저 나온 코어 사용.
+    const core = road && (!parcel || road.index <= parcel.index) ? road : parcel;
+    if (!core) return null;
+    const address = core === road
+        ? text.slice(0, core.index) + road[1] + ' ' + road[2]
+        : text.slice(0, core.index + core[0].length);
+    return address.replace(/[,\s]+$/, '').trim();
+}
+
+function extractAddressEngineB(text) {
+    if (!text || typeof text !== 'string') return null;
+    try {
+        let processedText = text;
+
+        // [원칙 2] 줄바꿈 및 공백에 걸친 번지수 결합 (19-\n2, 19 - 2, 19 - \n 2 -> 19-2)
+        processedText = processedText.replace(/(\d+)\s*[-~ㅡ—–]\s*[\r\n]+[\s\t]*(\d+)/g, '$1-$2');
+        processedText = processedText.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2');
+
+        // 줄바꿈 평탄화
+        let flatText = processedText.replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ');
+
+        // 평탄화 후 잔여 공백 하이픈 최종 결합
+        flatText = flatText.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2');
+
+        // [원칙 1] 대한민국 행정구역 인식 시 그 지점부터 끝까지 읽어옴
+        const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
+
+        const startRegex = new RegExp(`(^|[\\s\\[\\(])(${provincePattern}(?:\\s+|$))`, 'i');
+        const startMatch = flatText.match(startRegex);
+
+        let rawAddressBlock = null;
+
+        if (startMatch) {
+            // 행정구역 시작 위치부터 뒷부분 텍스트 추출
+            const startIndex = startMatch.index + (startMatch[1] ? startMatch[1].length : 0);
+            let textFromProvince = flatText.substring(startIndex).trim();
+
+            // 다음 필드 라벨(배송지명, 상호, 연락처 등) 직전까지만 수집
+            const stopLabels = /(?:\s+)(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
+            const stopMatch = textFromProvince.search(stopLabels);
+            if (stopMatch !== -1) {
+                rawAddressBlock = textFromProvince.substring(0, stopMatch).trim();
+            } else {
+                rawAddressBlock = textFromProvince.trim();
+            }
+        } else {
+            // 시/도 명칭 생략형 (예: "천안시 서북구 ...", "성북구 개운사길 ...")
+            const localRegex = /(?:[가-힣]{2,6}(?:시|군|구))\s+[가-힣0-9\s,\-\(\)]+/;
+            const localMatch = flatText.match(localRegex);
+            if (localMatch) {
+                const stopLabels = /(?:\s+)(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
+                const stopMatch = localMatch[0].search(stopLabels);
+                rawAddressBlock = (stopMatch !== -1 ? localMatch[0].substring(0, stopMatch) : localMatch[0]).trim();
+            }
+        }
+
+        if (!rawAddressBlock) return null;
+
+        // [원칙 3] '('가 인식되면 '('부터 그 뒷부분은 무조건 전부 삭제
+        if (rawAddressBlock.includes('(')) {
+            rawAddressBlock = rawAddressBlock.split('(')[0].trim();
+        }
+
+        // 끝부분에 남은 특수문자/공백만 정돈하여 순수 주소 반환
+        return rawAddressBlock.replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
+
+    } catch (e) {
+        console.error("주소 추출 오류:", e);
+    } 
+    return null;
+}
+
+function extractAddressEngineA(text) {
     const fallback = extractAddressSingleLegacy(text);
+    // 임시 진단만 수행. 아래 주소 후보/점수/반환 조건에는 관여하지 않는다.
+    const logAddressSelection = (candidates, selected, roleApplied) => {
+        try {
+            console.log('[주소진단-후보선택] ' + JSON.stringify({
+                candidates: candidates.map(c => ({ start: c.start, end: c.end, address: c.address, role: c.role ?? null, score: c.score ?? null })),
+                fallback, legacyReturn: fallback, selected, roleApplied,
+                indexBasis: 'start/end는 공백과 번지 하이픈을 정규화한 flat 문자열 기준'
+            }));
+        } catch (_) { /* 진단 실패는 반환값에 영향 없음 */ }
+    };
+    try {
+        if (typeof text === 'string') {
+            const windows = [...text.matchAll(/동작대로/g)].map(match => {
+                const start = Math.max(0, match.index - 50);
+                const end = Math.min(text.length, match.index + match[0].length + 50);
+                const snippet = text.slice(start, end);
+                const characters = [];
+                for (let i = 0; i < snippet.length; i++) {
+                    characters.push({ index: start + i, character: snippet[i], escaped: JSON.stringify(snippet[i]), charCode: snippet.charCodeAt(i), hex: '0x' + snippet.charCodeAt(i).toString(16).padStart(4, '0') });
+                }
+                return { start, end, snippet, snippetJSON: JSON.stringify(snippet), characters };
+            });
+            console.log('[주소진단-원문문자] ' + JSON.stringify({ windows }));
+        }
+        console.log('[주소진단-LEGACY] ' + JSON.stringify({ legacyReturn: fallback }));
+    } catch (_) { /* 로그 오류는 주소 인식과 분리 */ }
+
     if (!text || typeof text !== 'string') return fallback;
     const flat = text.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2').replace(/\s+/g, ' ');
     const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
     const startRegex = new RegExp(`(^|[\\s\\[\\(])((?:${provincePattern}|[가-힣]{2,6}(?:시|군|구))\\s+(?:[가-힣]{1,10}(?:시|군|구)\\s+)*)`, 'g');
     const starts = [...flat.matchAll(startRegex)].map(m => m.index + m[1].length);
     const candidates = starts.map((start, i) => ({ start, end: starts[i + 1] ?? flat.length, address: extractAddressSingleLegacy(flat.slice(start, starts[i + 1])) })).filter(c => c.address);
-    if (new Set(candidates.map(c => c.address)).size < 2) return fallback;
+    if (new Set(candidates.map(c => c.address)).size < 2) {
+        logAddressSelection(candidates, fallback, false);
+        return fallback;
+    }
     // 공급받는 자/배송지명 복합어를 먼저 매칭해 공급자/배송지로 잘못 분할하지 않는다.
     const roles = [...flat.matchAll(/배송지명\s*\(\s*간판명\s*\)|공급\s*받는\s*자|받으시는\s*분|보내는\s*분|받는\s*분|배송지|배송처|납품처|수령지|수취인|수하인|도착지|거래처|공급자|발송처|출하처|본사|화주/g)];
     for (const c of candidates) {
@@ -213,6 +370,7 @@ export function extractAddressLogic(text) {
     }
     const scores = [...new Set(candidates.map(c => c.address))].map(address => ({ address, score: Math.max(...candidates.filter(c => c.address === address).map(c => c.score)) })).sort((a, b) => b.score - a.score);
     const selected = scores[0].score > scores[1].score ? scores[0].address : fallback;
+    logAddressSelection(candidates, selected, true);
     logStoreNameDiagnostic('복수 주소 역할 선택', { candidates, fallback, selected });
     return selected;
 }
