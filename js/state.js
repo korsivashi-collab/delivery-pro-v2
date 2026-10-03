@@ -132,13 +132,14 @@ export const state = {
     setDestinations(newList) {
         destinations = normalizeDeliveryList(newList);
     },
-    addDestination(item) {
+    addDestination(item, { prepend = false } = {}) {
         item = normalizeDeliveryObject(item);
         if (!item) return null;
         const reservedIds = new Set(destinations.map(destination => String(destination.id)));
         const addedItem = isDestinationId(item.id) && !reservedIds.has(String(item.id))
             ? item : { ...item, id: createDestinationId(reservedIds) };
-        destinations.push(addedItem);
+        if (prepend) destinations.unshift(addedItem);
+        else destinations.push(addedItem);
         return addedItem;
     },
     removeDestination(id) {

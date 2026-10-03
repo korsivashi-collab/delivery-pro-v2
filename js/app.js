@@ -36,7 +36,8 @@ import {
 import { 
     initMemoEvents, 
     preloadBatchMemos, 
-    renderMemoPreview, 
+    renderMemoPreview,
+    getAllPersonalMemos,
     openMemoModal, 
     closeMemoModal, 
     selectHeightTag, 
@@ -195,7 +196,7 @@ export function updateDisplayNumbers() {
 }
 
 export function renderList() {
-    renderDestinationList(preloadBatchMemos, renderMemoPreview);
+    renderDestinationList(preloadBatchMemos, renderMemoPreview, getAllPersonalMemos);
 }
 
 // ==========================================

@@ -5,6 +5,7 @@
 // =================================================================
 
 import { state, destinationIdArgument, destinationIdAttribute, hasValidDeliveryCoordinates } from './state.js';
+let memoRenderRevision = 0;
 
 // 전화번호 정제 보조 함수
 function sanitizePhoneNumber(rawVal) {
@@ -67,7 +68,10 @@ function formatDistance(distKm) {
 }
 
 // 배송 목록 메인 렌더링 UI 업데이트
-export function renderDestinationList(preloadBatchMemosCallback, renderMemoPreviewCallback) {
+export function renderDestinationList(preloadBatchMemosCallback, renderMemoPreviewCallback, getPersonalMemosCallback) {
+    const revision = ++memoRenderRevision;
+    const ownerId = state.getRouteOwnerId();
+    const isCurrent = () => revision === memoRenderRevision && ownerId === state.getRouteOwnerId();
     const listEl = document.getElementById('destination-list');
     const headerEndAddr = document.getElementById('header-end-address'); 
     const headerEndInput = document.getElementById('header-inline-end-input');
@@ -200,13 +204,28 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
         });
     }
     
-    if (typeof preloadBatchMemosCallback === 'function') {
-        preloadBatchMemosCallback().then(() => {
-            destinations.forEach(dest => {
-                if (typeof renderMemoPreviewCallback === 'function') {
-                    renderMemoPreviewCallback(dest);
-                }
-            });
-        });
-    }
+    // Basic cards are already visible. Yield before storage reads and memo DOM work.
+    let paintRevision = 0;
+    const paintMemos = () => {
+        if (!isCurrent() || typeof renderMemoPreviewCallback !== 'function') return;
+        const paint = ++paintRevision;
+        const personalMemos = typeof getPersonalMemosCallback === 'function' ? getPersonalMemosCallback() : null;
+        let index = 0;
+        const paintChunk = () => {
+            if (!isCurrent() || paint !== paintRevision) return;
+            const end = Math.min(index + 8, destinations.length);
+            for (; index < end; index++) renderMemoPreviewCallback(destinations[index], personalMemos);
+            if (index < destinations.length) setTimeout(paintChunk, 0);
+        };
+        paintChunk();
+    };
+    setTimeout(() => {
+        if (!isCurrent()) return;
+        paintMemos();
+        if (typeof preloadBatchMemosCallback === 'function') {
+            Promise.resolve().then(() => isCurrent() ? preloadBatchMemosCallback() : null)
+                .then(() => { if (isCurrent()) setTimeout(paintMemos, 0); })
+                .catch(() => {});
+        }
+    }, 0);
 }

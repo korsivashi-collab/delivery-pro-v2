@@ -19,7 +19,17 @@ import { state } from './state.js';
 import { getOrCreateDeviceId } from './auth.js';
 import { updateContributionStats } from './support.js';
 
-let batchMemosCache = {}; 
+let batchMemosCache = {};
+const memoCacheLoadedAt = new Map();
+const memoRequests = new Map();
+const memoCacheVersions = new Map();
+const MEMO_CACHE_MS = 60000;
+
+function invalidatePreviewMemo(address) {
+    memoCacheLoadedAt.delete(address);
+    memoCacheVersions.set(address, (memoCacheVersions.get(address) || 0) + 1);
+    memoRequests.delete(address);
+}
 let currentMemoAddress = "";
 let selectedHeightText = "";
 let selectedTimeText = "";
@@ -52,13 +62,27 @@ export async function preloadBatchMemos() {
     const destinations = state.getDestinations();
     if (destinations.length === 0) return;
     
-    const addresses = destinations.map(d => getPureAddress(d.address));
+    const addresses = destinations.map(d => getPureAddress(d.address)).filter(Boolean);
     const uniqueAddrs = [...new Set(addresses)];
-    try { 
-        batchMemosCache = await getBatchMemosFromFirestore(uniqueAddrs); 
-    } catch (e) { 
-        batchMemosCache = {}; 
+    const now = Date.now();
+    const missing = uniqueAddrs.filter(address => !memoRequests.has(address) &&
+        (!memoCacheLoadedAt.has(address) || now - memoCacheLoadedAt.get(address) >= MEMO_CACHE_MS));
+    if (missing.length) {
+        const versions = new Map(missing.map(address => [address, memoCacheVersions.get(address) || 0]));
+        const request = Promise.resolve().then(() => getBatchMemosFromFirestore(missing)).then(result => {
+            for (const address of missing) {
+                if ((memoCacheVersions.get(address) || 0) !== versions.get(address)) continue;
+                batchMemosCache[address] = result[address] || [];
+                memoCacheLoadedAt.set(address, Date.now());
+            }
+        }).catch(() => {
+            // A failed refresh must not erase already displayed/cached memos.
+        }).finally(() => {
+            for (const address of missing) if (memoRequests.get(address) === request) memoRequests.delete(address);
+        });
+        for (const address of missing) memoRequests.set(address, request);
     }
+    await Promise.all([...new Set(uniqueAddrs.map(address => memoRequests.get(address)).filter(Boolean))]);
 }
 
 // ==========================================
@@ -82,7 +106,7 @@ export function getPersonalMemo(address) {
 // ==========================================
 // 4. 메인 배송 카드 내 메모 미리보기 렌더링
 // ==========================================
-export function renderMemoPreview(dest) {
+export function renderMemoPreview(dest, personalMemos = null) {
     const previewEl = document.getElementById(`memo-preview-${dest.id}`); 
     const tagsEl = document.getElementById(`memo-tags-${dest.id}`);
     const personalPreviewEl = document.getElementById(`personal-memo-preview-${dest.id}`);
@@ -129,7 +153,7 @@ export function renderMemoPreview(dest) {
     }
 
     if (personalPreviewEl) {
-        const personalMemo = getPersonalMemo(pureAddr);
+        const personalMemo = personalMemos ? (personalMemos[pureAddr] || '') : getPersonalMemo(pureAddr);
         if (personalMemo) {
             personalPreviewEl.innerHTML = `<i class="fa-solid fa-shield-halved text-emerald-600 mr-1"></i><span class="font-bold text-emerald-800">개인메모:</span> <span class="text-gray-800 font-semibold">${personalMemo}</span>`;
             personalPreviewEl.classList.remove('hidden');
@@ -368,6 +392,7 @@ export async function saveCurrentMemo() {
         const myPhone = localStorage.getItem('deliveryProUserPhone') || "";
         
         await saveMemoToFirestore(currentMemoAddress, myDeviceId, finalMemo, myPhone);
+        invalidatePreviewMemo(currentMemoAddress);
         
         try {
             let myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
@@ -399,6 +424,7 @@ export async function saveCurrentMemo() {
 export async function likeMemo(docId) {
     try {
         await likeMemoInFirestore(docId);
+        invalidatePreviewMemo(currentMemoAddress);
         const destinations = state.getDestinations();
         const dest = destinations.find(d => getPureAddress(d.address) === currentMemoAddress);
         if (dest) { 
@@ -417,6 +443,7 @@ export async function reportMemo(docId) {
     showLoading("신고 처리 중...");
     try {
         await reportMemoInFirestore(docId);
+        invalidatePreviewMemo(currentMemoAddress);
         hideLoading(); 
         alert("신고가 접수되어 블라인드 처리되었습니다."); 
         

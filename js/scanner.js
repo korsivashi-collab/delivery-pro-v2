@@ -477,7 +477,7 @@ export function initCameraScan() {
                 phone: finalPhone, 
                 displayNumber: nextNum,
                 storeName: labeledStoreName
-            });
+            }, { prepend: true });
             const newDestId = addedDestination.id;
             
             state.saveActiveData(); 
@@ -487,10 +487,8 @@ export function initCameraScan() {
             const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
             saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
             
-            setTimeout(() => { 
-                const newEl = document.querySelector(`li[data-id="${newDestId}"]`); 
-                if (newEl) newEl.scrollIntoView({ behavior: 'smooth', block: 'center' }); 
-            }, 150);
+            const newEl = document.querySelector(`li[data-id="${newDestId}"]`);
+            if (newEl) newEl.scrollIntoView({ behavior: 'auto', block: 'start' });
         }
         e.target.value = ''; 
     });
