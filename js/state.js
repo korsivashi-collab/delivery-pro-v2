@@ -128,6 +128,16 @@ function normalizeDeliveryList(list) {
     return ensureUniqueDestinationIds(changed ? normalized : list);
 }
 
+// 사용자 선택은 배송지 ID에 연결한다. 목록의 첫 항목은 선택 여부의 근거가 아니다.
+function reconcileStartLocation() {
+    if (!startLocation) return;
+    const selected = destinations.find(d => d.id === startLocation.id);
+    if (!hasValidDeliveryCoordinates(selected)) { startLocation = null; return; }
+    if (startLocation.lat !== selected.lat || startLocation.lng !== selected.lng || startLocation.address !== selected.address) {
+        startLocation = { id: selected.id, lat: selected.lat, lng: selected.lng, address: selected.address };
+    }
+}
+
 function isDestinationId(id) {
     return (typeof id === 'number' && Number.isSafeInteger(id)) ||
         (typeof id === 'string' && id.trim().length > 0);
@@ -247,6 +257,7 @@ export const state = {
     },
     setDestinations(newList) {
         destinations = normalizeDeliveryList(newList);
+        reconcileStartLocation();
     },
     addDestination(item, { prepend = false } = {}) {
         item = normalizeDeliveryObject(item);
@@ -260,6 +271,7 @@ export const state = {
     },
     removeDestination(id) {
         destinations = destinations.filter(d => d.id !== id);
+        reconcileStartLocation();
     },
 
     // 2. 종료 지점(endLocation) 관리
@@ -274,10 +286,18 @@ export const state = {
 
     // 3. 시작 지점(startLocation) 관리
     getStartLocation() {
+        reconcileStartLocation();
         return startLocation;
     },
     setStartLocation(loc) {
-        startLocation = normalizeDeliveryObject(loc);
+        const normalized = normalizeDeliveryObject(loc);
+        // 기존 좌표형 호출도 정확히 하나의 배송지와 일치할 때만 연결한다.
+        const matches = normalized ? destinations.filter(d => normalized.id !== undefined
+            ? d.id === normalized.id
+            : d.lat === normalized.lat && d.lng === normalized.lng && d.address === normalized.address) : [];
+        const selected = matches.length === 1 ? matches[0] : null;
+        startLocation = hasValidDeliveryCoordinates(selected)
+            ? { id: selected.id, lat: selected.lat, lng: selected.lng, address: selected.address } : null;
     },
 
     // 4. GPS 센서 상태 관리
@@ -312,6 +332,7 @@ export const state = {
         if (localTransaction) return true;
         if (!routeOwnerId) return false;
         try {
+            reconcileStartLocation();
             const revision = updatedAt === null ? Math.max(Date.now(), routeUpdatedAt + 1) : updatedAt;
             const snapshot = memorySnapshot(revision);
             const values = {};
@@ -319,7 +340,8 @@ export const state = {
             if (transmissions !== undefined) values.deliveryPro_transmissions = JSON.stringify(transmissions);
             values.deliveryPro_active_destinations = JSON.stringify(destinations);
             values.deliveryPro_end_location = JSON.stringify(endLocation);
-            values.deliveryPro_route_metadata = JSON.stringify({ routeOwnerId, updatedAt: revision, destinations, endLocation });
+            values.deliveryPro_route_metadata = JSON.stringify({ routeOwnerId, updatedAt: revision, destinations, endLocation,
+                startSelected: startLocation !== null, startLocation });
             writeLocalValues(values);
             routeUpdatedAt = revision;
             committedMemory = snapshot;
@@ -349,7 +371,7 @@ export const state = {
             const savedEnd = metadata.endLocation;
             this.setEndLocation(savedEnd || endLocation);
             routeUpdatedAt = metadata.updatedAt;
-            if (destinations[0]) startLocation = { lat: destinations[0].lat, lng: destinations[0].lng, address: destinations[0].address };
+            if (metadata.startSelected === true && isDestinationId(metadata.startLocation?.id)) this.setStartLocation(metadata.startLocation);
             committedMemory = memorySnapshot();
             // Persist repaired input without advancing the server revision.
             if (destinations !== savedList || endLocation !== savedEnd) this.saveActiveData(routeUpdatedAt);

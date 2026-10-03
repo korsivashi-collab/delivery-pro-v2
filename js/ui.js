@@ -116,7 +116,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             li.className = "bg-white p-3 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col gap-2";
             
             // 번호 뱃지: 출발지는 인디고 깃발, 일반 순번은 딥 슬레이트
-            let numberBadge = index === 0 && (startLocation && startLocation.lat) ? 
+            let numberBadge = startLocation && startLocation.id === dest.id ? 
                 `<div class="bg-indigo-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] shadow-xs shrink-0 ring-2 ring-indigo-100"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
                 `<div class="bg-slate-900 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-xs shrink-0">${dest.displayNumber}</div>`;
             

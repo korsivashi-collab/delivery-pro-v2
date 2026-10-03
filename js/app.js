@@ -103,7 +103,6 @@ function sanitizePhoneNumber(rawVal) {
 export async function initApp() {
     initResponsiveViewport();
 
-    localStorage.removeItem('deliveryPro_start_location'); 
     state.loadActiveData();
     cleanOldHistory();
     initSwipeButton();
@@ -143,8 +142,7 @@ export async function initApp() {
         state.setDestinations(formattedList);
         // 이전 기기/계정의 종료점을 가져오지 않습니다.
         state.setEndLocation(routeData.endLocation || { lat: 0, lng: 0, address: '' });
-        const first = formattedList[0];
-        state.setStartLocation(first ? { lat: first.lat, lng: first.lng, address: first.address } : null);
+        state.setStartLocation(routeData.startSelected === true ? routeData.startLocation : null);
         state.updateDisplayNumbers(routeData.updatedAt);
         renderList();
     };
@@ -311,7 +309,7 @@ export function selectStartDest(id) {
         const chosen = destinations.splice(idx, 1)[0];
         destinations.unshift(chosen);
         state.setDestinations(destinations);
-        state.setStartLocation({ lat: chosen.lat, lng: chosen.lng, address: chosen.address });
+        state.setStartLocation({ id: chosen.id, lat: chosen.lat, lng: chosen.lng, address: chosen.address });
         if (!state.saveActiveData()) return;
         optimizeRouteAction();
     }
@@ -352,8 +350,11 @@ export function optimizeRouteAction() {
         try {
             if (!isCurrent()) return;
             const routeDestinations = destinations.filter(hasValidDeliveryCoordinates).map(d => ({ ...d }));
+            // 계산 알고리즘의 첫 항목 고정 규칙에 명시적으로 선택된 배송지를 전달한다.
+            const selectedIndex = routeDestinations.findIndex(d => d.id === startLocation.id);
+            if (selectedIndex > 0) routeDestinations.unshift(routeDestinations.splice(selectedIndex, 1)[0]);
             const pendingDestinations = destinations.filter(d => !hasValidDeliveryCoordinates(d));
-            if (!hasValidDeliveryCoordinates(startLocation) || !hasValidDeliveryCoordinates(destinations[0])) {
+            if (!hasValidDeliveryCoordinates(startLocation) || !hasValidDeliveryCoordinates(routeDestinations[0])) {
                 throw new Error('시작점의 주소를 수정하여 위치를 확인해 주세요.');
             }
             if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
@@ -396,14 +397,6 @@ export function moveDestinationUp(id) {
     destinations[idx] = destinations[idx - 1];
     destinations[idx - 1] = temp;
 
-    if (state.getStartLocation() && destinations[0]) {
-        state.setStartLocation({
-            lat: destinations[0].lat,
-            lng: destinations[0].lng,
-            address: destinations[0].address
-        });
-    }
-
     state.setDestinations(destinations);
     if (!updateDisplayNumbers()) return;
 
@@ -422,14 +415,6 @@ export function moveDestinationDown(id) {
     const temp = destinations[idx];
     destinations[idx] = destinations[idx + 1];
     destinations[idx + 1] = temp;
-
-    if (state.getStartLocation() && destinations[0]) {
-        state.setStartLocation({
-            lat: destinations[0].lat,
-            lng: destinations[0].lng,
-            address: destinations[0].address
-        });
-    }
 
     state.setDestinations(destinations);
     if (!updateDisplayNumbers()) return;

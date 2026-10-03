@@ -534,6 +534,8 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
             routeOwnerId,
             deviceId,
             endLocation: state.getEndLocation(),
+            startSelected: state.getStartLocation() !== null,
+            startLocation: state.getStartLocation(),
             phone: phone || "연락처 미등록",
             updatedAt: state.getRouteUpdatedAt() || Date.now(),
             destinations: destinations.map(d => ({
