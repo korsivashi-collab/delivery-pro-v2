@@ -296,6 +296,38 @@ export function closeHistoryModal() {
     document.getElementById('history-modal')?.classList.add('hidden'); 
 }
 
+// 화면의 owner 필터와 무관하게 기기에 저장된 원본 전체를 읽기만 합니다.
+export async function exportHistoryJson() {
+    try {
+        const historyRecords = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+        if (!Array.isArray(historyRecords)) throw new Error('저장된 배송 이력이 배열 형식이 아닙니다.');
+        const exportedAt = new Date().toISOString();
+        const json = JSON.stringify({ exportedAt, source: 'deliveryPro_history',
+            recordCount: historyRecords.length, historyRecords }, null, 2);
+        const filename = `deliveryPro_history_${exportedAt.replace(/[:.]/g, '-')}.json`;
+        // iPhone Safari에서는 공유 시트의 파일 저장/전송 기능을 우선 사용합니다.
+        if (typeof File === 'function' && navigator.share && navigator.canShare) {
+            const file = new File([json], filename, { type: 'application/json' });
+            if (navigator.canShare({ files: [file] })) {
+                await navigator.share({ files: [file] });
+                return;
+            }
+        }
+        const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        try { link.click(); } finally {
+            link.remove();
+            // Safari가 파일을 읽기 전에 URL을 해제하지 않습니다.
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+        }
+    } catch (error) {
+        if (error.name !== 'AbortError') alert(`이력 내보내기에 실패했습니다: ${error.message}`);
+    }
+}
+
 export function clearAllHistory() { 
     if (confirm("현재 계정의 이력을 모두 삭제하시겠습니까?\n다른 계정과 미분류 이력은 보존됩니다.")) {
         const current = getHistoryOwnershipContext();
@@ -527,4 +559,5 @@ window.clearLocalNotices = clearLocalNotices;
 window.openHistoryModal = openHistoryModal;
 window.closeHistoryModal = closeHistoryModal;
 window.clearAllHistory = clearAllHistory;
+window.exportHistoryJson = exportHistoryJson;
 window.restoreHistoryItem = restoreHistoryItem;
