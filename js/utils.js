@@ -195,7 +195,8 @@ export function extractPhoneLogic(text) {
 // 주소 후보 생성은 독립 실행하고, 비교/반환에는 동일한 정규화를 적용한다.
 export function extractAddressLogic(text) {
     const rawA = extractAddressEngineA(text);
-    const rawB = extractAddressEngineB(text);
+    const bEvidence = {};
+    const rawB = extractAddressEngineB(text, bEvidence);
     const a = normalizeNavigationAddress(rawA);
     const b = normalizeNavigationAddress(rawB);
     let selected = a;
@@ -219,7 +220,13 @@ export function extractAddressLogic(text) {
             ? text.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2').replace(/\s/g, '') : '';
         const sameSource = (short, full) => {
             const index = source.indexOf(full);
-            return index >= 0 && source.indexOf(short) === index && source.lastIndexOf(short) === index;
+            if (index >= 0 && source.indexOf(short) === index && source.lastIndexOf(short) === index) return true;
+            // B가 분리된 주소 줄의 번호를 문법으로 확인한 경우에만 그 근거를 인정한다.
+            const fragment = bEvidence.roadFragment?.replace(/\s/g, '');
+            const fragmentIndex = fragment ? source.indexOf(fragment) : -1;
+            return full === compactB && bEvidence.buildingNumber && fragmentIndex >= 0
+                && full === fragment + bEvidence.buildingNumber
+                && source.indexOf(short) === fragmentIndex && source.lastIndexOf(short) === fragmentIndex;
         };
         const extendsNumber = (short, full) => full.startsWith(short)
             && /\d$/.test(short) && /^-\d+$/.test(full.slice(short.length));
@@ -232,7 +239,7 @@ export function extractAddressLogic(text) {
         }
     }
     try {
-        console.log('[주소진단-이중엔진]', { rawA, rawB, normalizedA: a, normalizedB: b, selected, reason });
+        console.log('[주소진단-이중엔진]', { rawA, rawB, normalizedA: a, normalizedB: b, selected, reason, bEvidence });
     } catch (_) { /* 로그 실패는 주소 반환에 영향 없음 */ }
     return selected;
 }
@@ -256,7 +263,7 @@ function normalizeNavigationAddress(candidate) {
     return address.replace(/[,\s]+$/, '').trim();
 }
 
-function extractAddressEngineB(text) {
+function extractAddressEngineB(text, evidence = {}) {
     if (!text || typeof text !== 'string') return null;
     try {
         let processedText = text;
@@ -278,11 +285,13 @@ function extractAddressEngineB(text) {
         const startMatch = flatText.match(startRegex);
 
         let rawAddressBlock = null;
+        let addressFlow = null;
 
         if (startMatch) {
             // 행정구역 시작 위치부터 뒷부분 텍스트 추출
             const startIndex = startMatch.index + (startMatch[1] ? startMatch[1].length : 0);
             let textFromProvince = flatText.substring(startIndex).trim();
+            addressFlow = textFromProvince;
 
             // 다음 필드 라벨(배송지명, 상호, 연락처 등) 직전까지만 수집
             const stopLabels = /(?:\s+)(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
@@ -297,6 +306,7 @@ function extractAddressEngineB(text) {
             const localRegex = /(?:[가-힣]{2,6}(?:시|군|구))\s+[가-힣0-9\s,\-\(\)]+/;
             const localMatch = flatText.match(localRegex);
             if (localMatch) {
+                addressFlow = localMatch[0];
                 const stopLabels = /(?:\s+)(?:배송지명|간판명|상호|업체명|연락처|전화|010|받는분|수령인|구매자|고객명|공급|금액|수량|단가|총액|품명|비고|메모|박스)/;
                 const stopMatch = localMatch[0].search(stopLabels);
                 rawAddressBlock = (stopMatch !== -1 ? localMatch[0].substring(0, stopMatch) : localMatch[0]).trim();
@@ -304,6 +314,60 @@ function extractAddressEngineB(text) {
         }
 
         if (!rawAddressBlock) return null;
+
+        // B 전용 문법: 분기 도로명과 바로 이어지는 건물번호를 하나의 후보로 묶는다.
+        // A의 roadCoreRegex/helper 및 공통 정규화에는 의존하지 않는다.
+        const flowBeforeDetails = addressFlow.split(/[(.]/)[0];
+        const branchAddress = flowBeforeDetails.match(/([가-힣A-Za-z0-9·]+(?:대로|로)\s*\d+\s*(?:[가-힣]\s*)*길)\s+(\d+(?:-\d+)?)(?=$|[\s(.,])/);
+        // 기존 후보에 이미 포함된 도로명만 완성한다. 뒤의 다른 필드/주소를 찾지 않는다.
+        const sameRoad = branchAddress && branchAddress.index + branchAddress[1].length <= rawAddressBlock.length;
+        if (sameRoad) {
+            rawAddressBlock = flowBeforeDetails.slice(0, branchAddress.index)
+                + branchAddress[1].replace(/\s/g, '') + ' ' + branchAddress[2];
+        }
+        // OCR 선형 순서가 셀 순서와 다를 때: 번호 없는 분기 도로명에 한해서만
+        // 뒤의 첫 숫자 줄을 확인한다. 숫자 뒤 행정동 괄호가 있어야 주소 연속 줄로 인정한다.
+        const unfinishedBranch = rawAddressBlock.split(/[(.]/)[0]
+            .match(/([가-힣A-Za-z0-9·]+(?:대로|로)\s*\d+\s*(?:[가-힣]\s*)*길)\s*$/);
+        if (!sameRoad && unfinishedBranch && !/[(.]/.test(rawAddressBlock)) {
+            const lines = processedText.split(/[\r\n]+/);
+            const roadKey = unfinishedBranch[1].replace(/\s/g, '');
+            const roadLines = lines.map((line, index) => ({ line, index }))
+                .filter(item => item.line.replace(/\s/g, '').includes(roadKey));
+            // 반복된 도로명은 어느 셀의 번호인지 확신할 수 없으므로 복구하지 않는다.
+            if (roadLines.length === 1) {
+                for (let index = roadLines[0].index + 1; index < lines.length; index++) {
+                    const line = lines[index].trim();
+                    if (!line) continue;
+                    // 숫자가 없는 라벨/표 머리글만 건너뛴다. 다른 주소/연락처 경계는 종료.
+                    if (/연락처|전화|배송지주소|배송주소|사업장주소|발송처|보내는\s*분|출하처|본사|화주|공급자|공급\s*받는\s*자/.test(line)
+                        || /(?:서울|경기|[가-힣]+(?:시|군|구))\s/.test(line)) break;
+                    if (!/\d/.test(line)) continue;
+                    const continuation = line.match(/^(\d+(?:-\d+)?)\s*\(\s*[가-힣0-9·\s]+(?:동|읍|면|리)\s*\)(?:\s|$)/);
+                    if (continuation) {
+                        const fragment = rawAddressBlock.trim();
+                        rawAddressBlock = fragment + ' ' + continuation[1];
+                        evidence.roadFragment = fragment;
+                        evidence.buildingNumber = continuation[1];
+                        evidence.roadLine = roadLines[0].index;
+                        evidence.numberLine = index;
+                        evidence.continuationText = line;
+                        evidence.reason = '유일한 미완성 분기 도로명 뒤 첫 숫자 줄의 건물번호 + 행정동 괄호 확인';
+                    }
+                    // 가격/수량/전화번호 등 다른 숫자 줄을 넘어 번호를 찾지 않는다.
+                    break;
+                }
+            }
+        }
+        try {
+            console.log('[주소진단-B 번호결합]', {
+                addressFlow, branchMatch: branchAddress?.[0] ?? null,
+                sameRoad: Boolean(sameRoad), candidate: rawAddressBlock, continuationEvidence: evidence,
+                reason: evidence.buildingNumber ? '분리된 주소 연속 줄의 건물번호 확인'
+                    : sameRoad ? '동일 주소 흐름의 분기 도로명 + 건물번호 문법 확인'
+                    : '연속된 도로명 + 건물번호 근거 없음: 기존 B 후보 유지'
+            });
+        } catch (_) { /* 진단 실패는 반환값에 영향 없음 */ }
 
         // [원칙 3] '('가 인식되면 '('부터 그 뒷부분은 무조건 전부 삭제
         if (rawAddressBlock.includes('(')) {
