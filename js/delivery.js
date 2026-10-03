@@ -4,7 +4,7 @@
 // [배송 동선 PRO] 배송 완료(태그/사진) 및 취소 전담 모듈
 // =================================================================
 
-import { saveCompletionToFirestore, firebaseUploadDeliveryPhoto, saveRouteToFirestore } from './api.js';
+import { saveCompletionToFirestore, getCompletionOwnershipContext, firebaseUploadDeliveryPhoto, saveRouteToFirestore } from './api.js';
 import { archiveCompletedDelivery } from './support.js';
 import { state } from './state.js';
 import { getOrCreateDeviceId, updatePhotoCompButtonState } from './auth.js';
@@ -125,6 +125,7 @@ export function confirmCompletion(photoUrl = null) {
 
     const deviceId = getOrCreateDeviceId();
     const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    const completionOwnership = getCompletionOwnershipContext();
 
     // 지난배송 이력 즉시 등록 및 리스트 제거
     archiveCompletedDelivery(item, finalTag, null, photoUrl);
@@ -143,7 +144,7 @@ export function confirmCompletion(photoUrl = null) {
     (async () => {
         try {
             const completionDocId = await saveCompletionToFirestore(
-                deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl
+                deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl, completionOwnership
             );
             
             // 로컬 이력에 서버 등록 문서 ID 동기화
@@ -179,6 +180,7 @@ export function cancelDestination(id) {
 
     const deviceId = getOrCreateDeviceId();
     const phone = localStorage.getItem('deliveryProUserPhone') || "";
+    const completionOwnership = getCompletionOwnershipContext();
 
     // 2. 관제 센터 서버(routes/{deviceId})의 남은 배송 목록 즉시 동기화
     saveRouteToFirestore(deviceId, phone, state.getDestinations());
@@ -204,7 +206,7 @@ export function cancelDestination(id) {
 
             // Firestore 관제 서버에 취소 내역 비동기 전송
             const completionDocId = await saveCompletionToFirestore(
-                deviceId, phone, item, cancelTag, actualLat, actualLng, isRealGpsCaptured, null
+                deviceId, phone, item, cancelTag, actualLat, actualLng, isRealGpsCaptured, null, completionOwnership
             );
 
             if (completionDocId) {
@@ -248,6 +250,7 @@ export function initPhotoCompletion() {
         const finalTag = selectedCompTag && selectedCompTag !== '기타' ? selectedCompTag : "사진 완료";
         const deviceId = getOrCreateDeviceId();
         const phone = localStorage.getItem('deliveryProUserPhone') || "";
+        const completionOwnership = getCompletionOwnershipContext();
 
         const lastGps = state.getLastKnownGps();
         let actualLat = item.lat;
@@ -284,7 +287,7 @@ export function initPhotoCompletion() {
 
                 // 관제 서버에 완료 내역 최종 보관
                 const completionDocId = await saveCompletionToFirestore(
-                    deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl
+                    deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl, completionOwnership
                 );
 
                 // 로컬 지난배송 이력에 서버 등록 번호 및 사진 링크 갱신

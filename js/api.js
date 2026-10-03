@@ -583,12 +583,26 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
     }
 }
 
-export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null) {
+// 사진 업로드 대기 중 계정이 바뀌어도 처리 시작 시점의 소유권을 유지합니다.
+export function getCompletionOwnershipContext() {
+    return Object.freeze({
+        routeOwnerId: state.getRouteOwnerId(),
+        licenseKey: localStorage.getItem('deliveryProKey') || '',
+        dispatchKey: localStorage.getItem('deliveryProDispatchKey') || ''
+    });
+}
+
+export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null, ownership = getCompletionOwnershipContext()) {
     try {
+        if (!ownership.routeOwnerId || !ownership.licenseKey) throw new Error('배송 처리 소유자 정보가 없습니다.');
         const now = new Date();
         const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         
         const docRef = await addDoc(collection(db, "completions"), {
+            routeOwnerId: ownership.routeOwnerId,
+            licenseKey: ownership.licenseKey,
+            dispatchKey: ownership.dispatchKey || '',
+            destinationId: item.id ?? null,
             deviceId: deviceId,
             phone: driverPhone || "연락처 미등록",
             customerPhone: item.phone || "",

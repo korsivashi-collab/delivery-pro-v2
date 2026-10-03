@@ -46,21 +46,29 @@ export function getFilteredVisibleDrivers() {
     return visibleLicenses;
 }
 
-// 장소가 같아도 주문은 다를 수 있으므로 주소/좌표만으로 처리 상태를 연결하지 않습니다.
+// 기기/전화번호 단독 일치는 소유권 근거가 아니며, legacy 후보도 현재 집계에서 제외합니다.
+export function classifyCompletionOwnership(c, lic) {
+    if (c.routeOwnerId) return c.routeOwnerId === lic.routeOwnerId ? 'owned' : 'excluded';
+    const phone = value => String(value || '').replace(/\D/g, '');
+    const recordPhone = phone(c.phone);
+    const licensePhone = phone(lic.phone);
+    if (recordPhone && recordPhone !== licensePhone) return 'excluded';
+    if (c.licenseKey) return c.licenseKey === lic.key ? 'owned' : 'excluded';
+    if (recordPhone && recordPhone === licensePhone && lic.deviceId && c.deviceId === lic.deviceId) {
+        return 'legacyCandidate';
+    }
+    return 'excluded';
+}
+
 export function getDriverDeliverySummary(lic, route, selectedDate) {
-    const normalizePhone = value => String(value || '').replace(/\D/g, '');
-    const records = state.allCompletions.filter(c => {
-        const matchesOwner = c.routeOwnerId
-            ? c.routeOwnerId === lic.routeOwnerId
-            : (lic.deviceId && c.deviceId === lic.deviceId) || (lic.key && c.deviceId === lic.key) ||
-              (normalizePhone(lic.phone) && normalizePhone(c.phone) === normalizePhone(lic.phone) &&
-               state.allLicenses.filter(l => l.type !== 'dispatch' &&
-                   normalizePhone(l.phone) === normalizePhone(lic.phone)).length === 1);
+    const datedRecords = state.allCompletions.filter(c => {
         const date = c.completedAt
             ? getLocalDateString(new Date(c.completedAt))
             : String(c.timeString || '').slice(0, 10).replace(/\./g, '-');
-        return matchesOwner && date === selectedDate;
+        return date === selectedDate;
     }).sort((a, b) => (a.completedAt || 0) - (b.completedAt || 0));
+    const records = datedRecords.filter(c => classifyCompletionOwnership(c, lic) === 'owned');
+    const legacyCandidates = datedRecords.filter(c => classifyCompletionOwnership(c, lic) === 'legacyCandidate');
     const kind = c => {
         const tag = String(c.tag || '').trim();
         if (tag === '배송 취소') return 'cancelled';
@@ -85,7 +93,7 @@ export function getDriverDeliverySummary(lic, route, selectedDate) {
     });
     const routeDests = rawDests.filter(d => kind(processed.get(d) || {}) !== 'cancelled');
     const remainingDests = routeDests.filter(d => !processed.has(d));
-    return { rawDests, routeDests, remainingDests, processed, done, cancelled, other };
+    return { rawDests, routeDests, remainingDests, processed, done, cancelled, other, legacyCandidates };
 }
 
 // ==========================================
