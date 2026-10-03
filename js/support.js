@@ -198,15 +198,35 @@ export function clearLocalNotices() {
 // 4. 지난 배송 이력 관리 기능
 // ==========================================
 export function cleanOldHistory() {
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-    let sevenDaysAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-    history = history.filter(h => h.timestamp > sevenDaysAgo);
-    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+    // 계정별/미분류 이력 원본을 보존합니다. 보관 기간 정책은 별도로 결정합니다.
+}
+
+export function getHistoryOwnershipContext() {
+    return {
+        routeOwnerId: state.getRouteOwnerId(),
+        licenseKey: localStorage.getItem('deliveryProKey') || '',
+        phone: localStorage.getItem('deliveryProUserPhone') || '',
+        deviceId: localStorage.getItem('deliveryProDeviceId') || ''
+    };
+}
+
+export function classifyHistoryOwnership(record, current = getHistoryOwnershipContext()) {
+    if (!current.routeOwnerId || !current.licenseKey) return 'excluded';
+    if (record.routeOwnerId) return record.routeOwnerId === current.routeOwnerId ? 'owned' : 'excluded';
+    // originalData.phone은 고객 전화번호이므로 기사 소유권 판정에 사용하지 않습니다.
+    const phone = value => String(value || '').replace(/\D/g, '');
+    const recordPhone = phone(record.phone);
+    const currentPhone = phone(current.phone);
+    if (recordPhone && recordPhone !== currentPhone) return 'excluded';
+    if (record.licenseKey) return record.licenseKey === current.licenseKey ? 'owned' : 'excluded';
+    return recordPhone && recordPhone === currentPhone ? 'legacyCandidate' : 'excluded';
 }
 
 // 🌟 [UI 개편] 겹침 현상 원천 차단 및 시원한 주소 가독성을 보장하는 2단 카드 레이아웃
 export function openHistoryModal() {
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    const current = getHistoryOwnershipContext();
+    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]')
+        .filter(record => classifyHistoryOwnership(record, current) === 'owned');
     let container = document.getElementById('history-list-container');
     if (!container) return;
     
@@ -277,17 +297,21 @@ export function closeHistoryModal() {
 }
 
 export function clearAllHistory() { 
-    if (confirm("이력을 모두 삭제하시겠습니까?")) { 
-        localStorage.removeItem('deliveryPro_history'); 
+    if (confirm("현재 계정의 이력을 모두 삭제하시겠습니까?\n다른 계정과 미분류 이력은 보존됩니다.")) {
+        const current = getHistoryOwnershipContext();
+        const history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+        localStorage.setItem('deliveryPro_history', JSON.stringify(
+            history.filter(record => classifyHistoryOwnership(record, current) !== 'owned')));
         openHistoryModal(); 
     } 
 }
 
-export function archiveCompletedDelivery(item, tag = "", completionDocId = null, photoUrl = null) {
+export function archiveCompletedDelivery(item, tag = "", completionDocId = null, photoUrl = null, ownership = getHistoryOwnershipContext()) {
+    if (!ownership.routeOwnerId || !ownership.licenseKey) throw new Error('배송 이력 소유자 정보가 없습니다.');
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
     let now = new Date(); 
     let archivedItem = { ...item }; 
-    history.unshift({ 
+    const record = {
         id: item.id, 
         address: item.address, 
         tag: tag, 
@@ -297,22 +321,28 @@ export function archiveCompletedDelivery(item, tag = "", completionDocId = null,
         date: now.toLocaleDateString(), 
         time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
         timestamp: now.getTime(), 
-        routeOwnerId: state.getRouteOwnerId(),
+        routeOwnerId: ownership.routeOwnerId,
+        licenseKey: ownership.licenseKey,
+        phone: ownership.phone,
+        deviceId: ownership.deviceId,
         originalData: archivedItem 
-    });
+    };
+    history.unshift(record);
     localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+    return record;
 }
 
 // 🌟 배송지 복원 시 관제 센터 서버에도 실시간 복원 동기화
 export async function restoreHistoryItem(timestamp) {
     if (!confirm("이 배송지를 다시 진행 목록으로 되돌리시겠습니까?")) return;
     let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-    const idx = history.findIndex(h => h.timestamp === timestamp);
+    const current = getHistoryOwnershipContext();
+    const idx = history.findIndex(h => h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
     
     if (idx > -1) {
         showLoading("배송지 복원 중...");
         const targetHistory = history[idx];
-        if (targetHistory.routeOwnerId !== state.getRouteOwnerId()) {
+        if (classifyHistoryOwnership(targetHistory) !== 'owned') {
             hideLoading();
             alert("현재 라이선스의 배송 이력만 복원할 수 있습니다.");
             return;
@@ -345,8 +375,17 @@ export async function restoreHistoryItem(timestamp) {
         }
         
         if (itemToRestore) { 
-            history.splice(idx, 1); 
-            localStorage.setItem('deliveryPro_history', JSON.stringify(history)); 
+            const latestOwner = getHistoryOwnershipContext();
+            if (latestOwner.routeOwnerId !== current.routeOwnerId || latestOwner.licenseKey !== current.licenseKey) {
+                hideLoading();
+                alert("계정이 변경되어 이력 복원을 중단했습니다.");
+                return;
+            }
+            const latestHistory = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+            const latestIdx = latestHistory.findIndex(h => h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
+            if (latestIdx < 0) { hideLoading(); return; }
+            latestHistory.splice(latestIdx, 1);
+            localStorage.setItem('deliveryPro_history', JSON.stringify(latestHistory));
             
             if (onRestoreDestinationCallback) {
                 await onRestoreDestinationCallback(itemToRestore);
