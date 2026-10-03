@@ -245,6 +245,10 @@ export function initCameraScan() {
             ocrPages = ocrResult.pages || [];
             
             addressStr = extractAddressLogic(rawOCRText);
+            console.log('[주소진단-1 OCR파싱]', {
+                rawOCRText,
+                addressStr
+            });
             extractedPhone = extractPhoneLogic(rawOCRText);
             hideLoading();
         } catch (error) {
@@ -269,6 +273,10 @@ export function initCameraScan() {
             try {
                 showLoading("지도 위치 확인 중...");
                 coords = await geocodeAddress(addressStr);
+                console.log('[주소진단-2 GEOCODE]', {
+                    addressStr,
+                    coords
+                });
                 hideLoading();
             } catch (error) {
                 hideLoading();
@@ -365,6 +373,11 @@ export function initCameraScan() {
         // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
         if (coords) {
             let resolvedAddress = coords.address_name || addressStr;
+            console.log('[주소진단-3 최종주소]', {
+                addressStr,
+                address_name: coords?.address_name,
+                resolvedAddress
+            });
             
             // 상호명이 확인된 경우 [상호명] 주소 형식으로 조합
             if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
