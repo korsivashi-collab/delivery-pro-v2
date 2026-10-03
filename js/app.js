@@ -324,7 +324,9 @@ export function handleStartSelectTab(mode) {
 // ==========================================
 // 5. 동선 최적화 알고리즘 실행
 // ==========================================
+let activeOptimization = null;
 export function optimizeRouteAction() {
+    if (activeOptimization) return;
     let destinations = state.getDestinations();
     const startLocation = state.getStartLocation();
     const endLocation = state.getEndLocation();
@@ -338,18 +340,26 @@ export function optimizeRouteAction() {
         return; 
     }
     
+    const snapshotKey = () => JSON.stringify({ owner: state.getRouteOwnerId(),
+        destinations: state.getDestinations(), start: state.getStartLocation(), end: state.getEndLocation() });
+    const task = { snapshot: snapshotKey() };
+    activeOptimization = task;
+    const isCurrent = () => activeOptimization === task && snapshotKey() === task.snapshot;
+    try {
     showLoading("최적화중...");
     
     setTimeout(() => {
         try {
-            const routeDestinations = destinations.filter(hasValidDeliveryCoordinates);
+            if (!isCurrent()) return;
+            const routeDestinations = destinations.filter(hasValidDeliveryCoordinates).map(d => ({ ...d }));
             const pendingDestinations = destinations.filter(d => !hasValidDeliveryCoordinates(d));
             if (!hasValidDeliveryCoordinates(startLocation) || !hasValidDeliveryCoordinates(destinations[0])) {
                 throw new Error('시작점의 주소를 수정하여 위치를 확인해 주세요.');
             }
             if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
-            destinations = calculateOptimizedRoute(routeDestinations, startLocation,
-                hasValidDeliveryCoordinates(endLocation) ? endLocation : null).concat(pendingDestinations);
+            destinations = calculateOptimizedRoute(routeDestinations, { ...startLocation },
+                hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null).concat(pendingDestinations);
+            if (!isCurrent()) return;
             state.setDestinations(destinations);
             if (!updateDisplayNumbers()) return;
             hideLoading();
@@ -364,10 +374,14 @@ export function optimizeRouteAction() {
                 if (mainContainer) mainContainer.scrollTo({ top: 0, behavior: 'smooth' }); 
             }, 100);
         } catch (error) {
-            hideLoading();
             alert(error.message);
+        } finally {
+            if (activeOptimization === task) { activeOptimization = null; hideLoading(); }
         }
     }, 500);
+    } catch (error) {
+        activeOptimization = null; hideLoading(); throw error;
+    }
 }
 
 // ==========================================

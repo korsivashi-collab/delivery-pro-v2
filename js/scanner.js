@@ -97,9 +97,12 @@ export async function performOCR(base64Data, includeLayout = false, { signal } =
 // ==========================================
 // 3. 주소 수동 입력/수정 모달
 // ==========================================
+let activeAddressModal = null;
+
 export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isEditMode = false, signal = null) {
     return new Promise((resolve) => {
         if (signal?.aborted) { resolve(null); return; }
+        activeAddressModal?.cancel();
         const modal = document.getElementById('address-input-modal');
         const addrInput = document.getElementById('manual-address-input');
         const phoneInput = document.getElementById('manual-phone-input');
@@ -127,16 +130,22 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
         
         const focusTimer = setTimeout(() => { if (addrInput) addrInput.focus(); }, 100);
 
-        const onConfirm = () => { 
+        let settled = false;
+        const request = { cancel: () => onCancel() };
+        activeAddressModal = request;
+        const onConfirm = () => {
+            if (settled) return; settled = true;
             cleanup(); 
             resolve({ address: addrInput.value.trim(), phone: phoneInput.value.trim() }); 
         };
-        const onCancel = () => { 
+        const onCancel = () => {
+            if (settled) return; settled = true;
             cleanup(); 
             resolve(null); 
         };
         const cleanup = () => { 
             clearTimeout(focusTimer);
+            if (activeAddressModal === request) activeAddressModal = null;
             signal?.removeEventListener('abort', onCancel);
             btnConfirm.removeEventListener('click', onConfirm); 
             btnCancel.removeEventListener('click', onCancel); 
@@ -152,50 +161,55 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
 // ==========================================
 // 4. 배송지 주소/전화번호 수정 액션 (관제 서버 동기화 포함)
 // ==========================================
+const activeAddressEdits = new Set();
+let activeAddressEditLoading = null;
 export async function editDestinationAddress(id) {
-    const destinations = state.getDestinations();
-    const item = destinations.find(d => d.id === id); 
+    if (activeAddressEdits.has(id)) return;
+    const item = state.getDestinations().find(d => d.id === id);
     if (!item) return;
-    
-    const result = await promptAddressCustom("", item.address, item.phone || "", true); 
-    if (!result) return;
-    
-    const newAddr = result.address; 
-    const newPhone = result.phone;
-    let addrChanged = newAddr !== item.address || !hasValidDeliveryCoordinates(item);
-    let phoneChanged = newPhone !== (item.phone || "");
-    
-    if (!addrChanged && !phoneChanged) return;
-
-    if (addrChanged) {
-        showLoading("수정된 주소 확인 중...");
-        try {
-            let pureAddr = newAddr.replace(/\[.*?\]/g, '').trim();
-            const coords = await geocodeAddress(pureAddr || newAddr.trim());
-            if (coords) { 
-                let prefixMatch = newAddr.match(/^(\[.*?\])\s*/);
-                let storePrefix = prefixMatch ? (prefixMatch[1] + " ") : "";
-                
-                item.address = storePrefix + (coords.address_name || pureAddr); 
-                item.lat = coords.lat; 
-                item.lng = coords.lng; 
+    const owner = state.getRouteOwnerId();
+    const original = JSON.stringify(item);
+    const edit = {};
+    activeAddressEdits.add(id);
+    const stillCurrent = () => owner === state.getRouteOwnerId()
+        && JSON.stringify(state.getDestinations().find(d => d.id === id)) === original;
+    try {
+        const result = await promptAddressCustom('', item.address, item.phone || '', true);
+        if (!result || !stillCurrent()) return;
+        const newAddr = result.address, newPhone = result.phone;
+        const addrChanged = newAddr !== item.address || !hasValidDeliveryCoordinates(item);
+        const phoneChanged = newPhone !== (item.phone || '');
+        if (!addrChanged && !phoneChanged) return;
+        let updated = { ...item, phone: newPhone };
+        if (addrChanged) {
+            activeAddressEditLoading = edit;
+            showLoading('수정된 주소 확인 중...');
+            try {
+                const pureAddr = newAddr.replace(/\[.*?\]/g, '').trim();
+                const coords = await geocodeAddress(pureAddr || newAddr.trim());
+                if (!stillCurrent()) return;
+                if (coords) {
+                    const prefixMatch = newAddr.match(/^(\[.*?\])\s*/);
+                    updated = { ...updated, address: (prefixMatch ? prefixMatch[1] + ' ' : '') + (coords.address_name || pureAddr), lat: coords.lat, lng: coords.lng };
+                }
+            } catch (error) {
+                if (stillCurrent()) alert('수정된 주소를 지도에서 찾을 수 없습니다.');
+                return;
+            } finally {
+                if (activeAddressEditLoading === edit) { activeAddressEditLoading = null; hideLoading(); }
             }
-        } catch (e) { 
-            alert("수정된 주소를 지도에서 찾을 수 없습니다."); 
-            hideLoading(); 
-            return; 
-        } finally { 
-            hideLoading(); 
         }
+        if (!stillCurrent()) return;
+        // 기다리는 동안 추가/삭제된 다른 배송지는 최신 목록에서 그대로 보존한다.
+        state.setDestinations(state.getDestinations().map(d => d.id === id ? updated : d));
+        if (!state.saveActiveData()) return;
+        if (typeof window.renderList === 'function') window.renderList();
+        const deviceId = getOrCreateDeviceId();
+        const driverPhone = localStorage.getItem('deliveryProUserPhone') || '';
+        saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
+    } finally {
+        activeAddressEdits.delete(id);
     }
-    item.phone = newPhone;
-    state.setDestinations(destinations);
-    if (!state.saveActiveData()) return;
-    if (typeof window.renderList === 'function') window.renderList();
-
-    const deviceId = getOrCreateDeviceId();
-    const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
-    saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
 }
 
 // ==========================================
@@ -291,14 +305,20 @@ function runScanOCRPipelines(snapshot) {
 }
 
 let activeScanRequest = null;
+const initializedCameraInputs = new WeakSet();
 
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
-    if (!cameraInput) return;
+    if (!cameraInput || initializedCameraInputs.has(cameraInput)) return;
+    initializedCameraInputs.add(cameraInput);
+    cameraInput.addEventListener('click', event => {
+        if (activeScanRequest && !activeScanRequest.controller.signal.aborted) event.preventDefault();
+    });
     
     cameraInput.addEventListener('change', async (e) => {
         const file = e.target.files[0];
         if (!file) return;
+        if (activeScanRequest && !activeScanRequest.controller.signal.aborted && activeScanRequest.owner === state.getRouteOwnerId()) return;
         activeScanRequest?.controller.abort();
         if (activeScanRequest?.loading) hideLoading();
         const scan = { controller: new AbortController(), owner: state.getRouteOwnerId(), loading: false };
@@ -311,7 +331,10 @@ export function initCameraScan() {
         };
         const showScanLoading = text => {
             assertCurrent(); scan.loading = true;
-            showLoading(text, () => { scan.controller.abort(); if (activeScanRequest === scan) hideScanLoading(); });
+            showLoading(text, () => {
+                scan.controller.abort();
+                if (activeScanRequest === scan) { hideScanLoading(); activeScanRequest = null; e.target.value = ''; }
+            });
         };
         const hideScanLoading = () => {
             if (activeScanRequest === scan && scan.loading) { scan.loading = false; hideLoading(); }
