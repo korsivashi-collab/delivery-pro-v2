@@ -1,0 +1,194 @@
+import { state } from './state.js';
+import { completionPhotos } from './completion-photos.js';
+import { firebaseUploadDeliveryPhoto, saveCompletionToFirestore, deleteCompletionFromFirestore, saveRouteToFirestore } from './api.js';
+
+export function readCompletionQueue() {
+    const jobs = JSON.parse(state.readLocalData('deliveryPro_transmissions') || '[]');
+    if (!Array.isArray(jobs)) throw new Error('전송대기 데이터를 읽을 수 없습니다.');
+    return jobs;
+}
+
+export function createCompletionTask(item, tag, context, photoId = null, photoUrl = null) {
+    const gps = state.getLastKnownGps();
+    const real = !!(gps && gps.lat && gps.lng);
+    return {
+        id: photoId || crypto.randomUUID(), action: 'complete', status: 'pending',
+        completedAt: Date.now(), attempts: 0, nextAttemptAt: 0,
+        ownership: context.completionOwnership, deviceId: context.deviceId, phone: context.phone,
+        item: { ...item }, tag, lat: real ? gps.lat : item.lat, lng: real ? gps.lng : item.lng,
+        isReal: real, photoId, photoUrl: photoUrl || '', stage: photoId ? 'photo' : 'completion'
+    };
+}
+
+// Called inside the same local transaction as the history and active-list mutation.
+export function stageCompletionTask(job, historyEntry) {
+    historyEntry.transmissionId = job.id;
+    historyEntry.completionDocId = job.id;
+    historyEntry.hasPhoto = !!(job.photoId || job.photoUrl);
+    job.historyTimestamp = historyEntry.timestamp;
+    state.writeTransmissions([...readCompletionQueue(), job]);
+}
+
+export function stageCompletionDeletion(record, context, restoredItem) {
+    if (!record.transmissionId && !record.completionDocId) return;
+    const jobs = readCompletionQueue();
+    const id = record.transmissionId || crypto.randomUUID();
+    const previous = jobs.find(job => job.id === id);
+    const job = {
+        id, action: 'delete', status: 'pending', stage: 'completion', attempts: 0, nextAttemptAt: 0,
+        completedAt: Date.now(), completionDocId: record.completionDocId || id,
+        ownership: { routeOwnerId: context.routeOwnerId, licenseKey: context.licenseKey },
+        deviceId: context.deviceId, phone: context.phone, photoId: previous?.photoId || null,
+        restoredItem
+    };
+    state.writeTransmissions([...jobs.filter(entry => entry.id !== id), job]);
+}
+
+// A stale remote route must not reintroduce a locally completed delivery.
+export function excludeLocallyCompleted(list) {
+    const owner = state.getRouteOwnerId();
+    const history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
+    const completed = new Set(history.filter(h => h.routeOwnerId === owner && h.transmissionId).map(h => String(h.id)));
+    const jobs = readCompletionQueue();
+    for (const job of jobs) {
+        if (job.ownership.routeOwnerId === owner && job.action === 'complete') completed.add(String(job.item.id));
+    }
+    const filtered = list.filter(item => !item || !completed.has(String(item.id)));
+    for (const job of jobs) {
+        if (job.action === 'delete' && job.ownership.routeOwnerId === owner && job.restoredItem &&
+            !completed.has(String(job.restoredItem.id)) && !filtered.some(item => item && String(item.id) === String(job.restoredItem.id))) {
+            filtered.push(job.restoredItem);
+        }
+    }
+    return filtered;
+}
+
+// Injectable clock/transport for deterministic offline/restart/fault tests; no new state library.
+export function createCompletionWorker({
+    read = readCompletionQueue, write = (jobs, history) => state.writeTransmissions(jobs, history),
+    history = () => JSON.parse(state.readLocalData('deliveryPro_history') || '[]'),
+    owner = () => state.getRouteOwnerId(), photos = completionPhotos,
+    upload = job => photos.get(job.photoId).then(blob => {
+        if (!blob) throw new Error('보존된 배송 사진을 찾을 수 없습니다.');
+        return firebaseUploadDeliveryPhoto(blob, job.deviceId, job.id);
+    }),
+    complete = job => saveCompletionToFirestore(job.deviceId, job.phone, job.item, job.tag,
+        job.lat, job.lng, job.isReal, job.photoUrl, job.ownership, job),
+    remove = job => deleteCompletionFromFirestore(job.completionDocId, job.id, job.ownership.routeOwnerId),
+    route = async job => {
+        const revision = state.getRouteUpdatedAt();
+        const saved = await saveRouteToFirestore(job.deviceId, job.phone, state.getDestinations(), true);
+        if (state.getRouteOwnerId() !== job.ownership.routeOwnerId || revision !== state.getRouteUpdatedAt()) {
+            throw new Error('변경된 배송 목록 재전송 필요');
+        }
+        return saved;
+    },
+    now = () => Date.now(), online = () => navigator.onLine !== false,
+    later = (fn, ms) => setTimeout(fn, ms), cancel = timer => clearTimeout(timer),
+    status = () => {}, resumeOwner = async () => {}
+} = {}) {
+    let busy = false, timer = null, transport = null, stopped = false;
+    const matches = (a, b) => a.id === b.id && a.action === b.action;
+    const update = (job, patch) => {
+        const jobs = read();
+        const index = jobs.findIndex(current => matches(current, job));
+        if (index < 0) return false; // Restored/replaced while awaiting a response.
+        jobs[index] = { ...jobs[index], ...patch };
+        if (!write(jobs)) throw new Error('전송대기 상태 저장 실패');
+        Object.assign(job, patch);
+        return true;
+    };
+    const request = async operation => {
+        let timeout;
+        const pending = Promise.resolve().then(operation);
+        transport = pending;
+        pending.then(() => { if (transport === pending) transport = null; },
+            () => { if (transport === pending) transport = null; });
+        try {
+            return await Promise.race([pending, new Promise((_, reject) => {
+                timeout = later(() => reject(new Error('전송 응답 시간 초과')), 30000);
+            })]);
+        } finally { cancel(timeout); }
+        // A timed-out SDK request can still be running. Never start another until it settles.
+    };
+    async function drain() {
+        if (busy || stopped) return;
+        busy = true;
+        try {
+            if (!transport && online() && !owner() && read().length) await request(resumeOwner);
+            while (online() && owner() && !transport) {
+                const job = read().find(j => j.ownership.routeOwnerId === owner() && j.nextAttemptAt <= now());
+                if (!job) break;
+                try {
+                    if (!update(job, { status: job.attempts ? 'retrying' : 'sending', attempts: job.attempts + 1 })) continue;
+                    if (job.action === 'complete' && job.photoId && !job.photoUrl) {
+                        const photoUrl = await request(() => upload(job));
+                        if (!photoUrl) throw new Error('사진 업로드 응답 미확인');
+                        if (!update(job, { photoUrl, stage: 'completion' })) continue;
+                    }
+                    if (job.stage !== 'route') {
+                        const receipt = await request(() => job.action === 'delete' ? remove(job) : complete(job));
+                        if (job.action === 'complete' && !receipt) throw new Error('완료 기록 전송 미확인');
+                        if (!update(job, { stage: 'route' })) continue;
+                    }
+                    if (owner() !== job.ownership.routeOwnerId) break;
+                    const saved = await request(() => route(job));
+                    if (saved === false) throw new Error('배송 목록 전송 미확인');
+                    const jobs = read();
+                    if (!jobs.some(current => matches(current, job))) continue;
+                    const records = history();
+                    const record = records.find(h => h.transmissionId === job.id && h.routeOwnerId === job.ownership.routeOwnerId);
+                    if (record && job.action === 'complete') {
+                        record.photoUrl = job.photoUrl;
+                        record.hasPhoto = !!job.photoUrl;
+                        record.transmissionStatus = 'sent';
+                    }
+                    if (!write(jobs.filter(current => !matches(current, job)), records)) throw new Error('전송 완료 상태 저장 실패');
+                    if (job.photoId) photos.remove(job.photoId).catch(error => console.error('전송 사진 정리 실패:', error));
+                } catch (error) {
+                    const longFailure = job.attempts >= 8 || now() - job.completedAt >= 86400000;
+                    const delay = longFailure ? 3600000 : Math.min(300000, 5000 * 2 ** Math.min(job.attempts - 1, 6));
+                    try { update(job, { status: longFailure ? 'longFailure' : 'pending',
+                        lastError: String(error.code || error.message || error).slice(0, 200),
+                        lastFailureAt: now(), nextAttemptAt: now() + delay }); }
+                    catch (storageError) { console.error('전송 작업 보존 확인 필요:', storageError); break; }
+                }
+            }
+        } catch (error) { console.error('전송대기 처리 실패:', error); }
+        finally {
+            busy = false;
+            try { status(read().filter(job => job.ownership.routeOwnerId === owner())); } catch (_) {}
+            if (!stopped) { cancel(timer); timer = later(drain, 5000); }
+        }
+    }
+    return {
+        drain,
+        wake() { if (!stopped) { cancel(timer); timer = later(drain, 0); } },
+        stop() { stopped = true; cancel(timer); }
+    };
+}
+
+let completionWorker;
+export function wakeCompletionQueue() { completionWorker?.wake(); }
+export function initCompletionQueue(resumeSavedOwner = null) {
+    if (completionWorker) return;
+    let nextOwnerCheck = 0;
+    completionWorker = createCompletionWorker({ async resumeOwner() {
+        if (!resumeSavedOwner || Date.now() < nextOwnerCheck) return;
+        const key = localStorage.getItem('deliveryProKey');
+        const deviceId = localStorage.getItem('deliveryProDeviceId');
+        if (!key || !readCompletionQueue().some(job => job.ownership.licenseKey === key && job.deviceId === deviceId)) return;
+        nextOwnerCheck = Date.now() + 60000;
+        // Reuse the existing authentication flow only for pending work belonging to saved credentials.
+        await resumeSavedOwner();
+    }, status(jobs) {
+        const node = document.getElementById('transmission-status');
+        if (!node) return;
+        const count = jobs.filter(job => job.status === 'longFailure' || Date.now() - job.completedAt >= 600000).length;
+        node.textContent = count ? `전송 대기 ${count}건 · 자동 재시도 중` : '';
+        node.hidden = !count;
+    } });
+    window.addEventListener('online', wakeCompletionQueue);
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') wakeCompletionQueue(); });
+    wakeCompletionQueue();
+}

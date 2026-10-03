@@ -4,7 +4,9 @@
 // [배송 동선 PRO] 배송 완료(태그/사진) 및 취소 전담 모듈
 // =================================================================
 
-import { saveCompletionToFirestore, getCompletionOwnershipContext, firebaseUploadDeliveryPhoto, saveRouteToFirestore } from './api.js';
+import { getCompletionOwnershipContext } from './api.js';
+import { createCompletionTask, stageCompletionTask, wakeCompletionQueue } from './completion-queue.js';
+import { completionPhotos } from './completion-photos.js';
 import { archiveCompletedDelivery } from './support.js';
 import { state } from './state.js';
 import { getOrCreateDeviceId, updatePhotoCompButtonState } from './auth.js';
@@ -85,234 +87,79 @@ export function triggerPhotoCompletion() {
 // ==========================================
 // 5. 일반 태그 배송 완료 확정 처리 (🌟 체감 0초 백그라운드 처리)
 // ==========================================
+function finishLocally(item, tag, context, photoId = null, photoUrl = null) {
+    let job;
+    if (!state.runLocalTransaction(() => {
+        job = createCompletionTask(item, tag, context, photoId, photoUrl);
+        const historyEntry = archiveCompletedDelivery(item, tag, null, photoUrl,
+            { ...context.completionOwnership, phone: context.phone, deviceId: context.deviceId });
+        stageCompletionTask(job, historyEntry);
+        state.removeDestination(item.id);
+        state.updateDisplayNumbers();
+    })) return false;
+    // Local completion is committed. A UI error must not undo it or discard its durable photo.
+    try {
+        if (pendingCompletionId === item.id) closeCompletionModal();
+        if (typeof window.renderList === 'function') window.renderList();
+        if (navigator.vibrate) navigator.vibrate(40);
+    } catch (error) { console.error('완료 화면 갱신 오류:', error); }
+    // Schedule compression/network work after the synchronous completed-UI update.
+    try { wakeCompletionQueue(); } catch (error) { console.error('전송대기 재개 오류:', error); }
+    return true;
+}
+
 export function confirmCompletion(photoUrl = null) {
     if (typeof photoUrl !== 'string') photoUrl = null;
-    
-    if (!photoUrl && !selectedCompTag) { 
-        alert("배송 완료 태그를 선택해 주세요."); 
-        return; 
-    }
-    
+    if (!photoUrl && !selectedCompTag) { alert('배송 완료 태그를 선택해 주세요.'); return; }
     let finalTag = selectedCompTag;
-    
     if (selectedCompTag === '기타') {
-        const etcText = (document.getElementById('comp-etc-input')?.value || '').trim();
-        if (!etcText && !photoUrl) { 
-            alert("기타 사유를 상세하게 입력해 주세요."); 
-            return; 
-        }
-        finalTag = etcText ? `기타: ${etcText}` : "사진 완료";
-    } else if (!finalTag && photoUrl) {
-        finalTag = "사진 완료";
-    }
-
-    // 🌟 [핵심 수정]: 모달을 닫기 전에 삭제할 대상 ID를 변수에 먼저 안전하게 백업합니다.
-    const targetId = pendingCompletionId;
-    const destinations = state.getDestinations();
-    const item = destinations.find(d => d.id === targetId);
-    if (!item) { 
-        closeCompletionModal(); 
-        return; 
-    }
-
-
-    // 🌟 [1단계: 로딩 없는 즉각 화면 처리 및 순간 GPS 캡처]
-    const lastGps = state.getLastKnownGps();
-    let actualLat = item.lat;
-    let actualLng = item.lng;
-    let isRealGpsCaptured = false;
-
-    // 버튼을 누른 찰나에 확보되어 있는 백그라운드 GPS를 즉시 사용
-    if (lastGps && lastGps.lat && lastGps.lng) {
-        actualLat = lastGps.lat;
-        actualLng = lastGps.lng;
-        isRealGpsCaptured = true;
-    }
-
+        const text = (document.getElementById('comp-etc-input')?.value || '').trim();
+        if (!text && !photoUrl) { alert('기타 사유를 상세하게 입력해 주세요.'); return; }
+        finalTag = text ? '기타: ' + text : '사진 완료';
+    } else if (!finalTag && photoUrl) finalTag = '사진 완료';
+    const item = state.getDestinations().find(d => d.id === pendingCompletionId);
+    if (!item) { closeCompletionModal(); return; }
+    if (photoStagingIds.has(item.id)) return;
     const context = localCompletionContext();
-    if (!context) return;
-    const { deviceId, phone, completionOwnership } = context;
-
-    // 지난배송 이력 즉시 등록 및 리스트 제거
-    let historyEntry;
-    if (!state.runLocalTransaction(() => {
-        historyEntry = archiveCompletedDelivery(item, finalTag, null, photoUrl, { ...completionOwnership, phone, deviceId });
-        state.removeDestination(targetId);
-        state.updateDisplayNumbers();
-    })) return;
-    closeCompletionModal();
-    if (typeof window.renderList === 'function') window.renderList();
-    
-    // 잔여 배송 목록 관제 서버 즉시 동기화
-    saveRouteToFirestore(deviceId, phone, state.getDestinations());
-
-    // 햅틱 피드백으로 완료 체감
-    if (navigator.vibrate) navigator.vibrate(40);
-
-    // 🌟 [2단계: 백그라운드 DB 전송 (화면 간섭 없음)]
-    (async () => {
-        try {
-            const completionDocId = await saveCompletionToFirestore(
-                deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl, completionOwnership
-            );
-            
-            // 로컬 이력에 서버 등록 문서 ID 동기화
-            if (completionDocId) {
-                let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
-                const hIdx = history.findIndex(h => h.id === historyEntry.id && h.timestamp === historyEntry.timestamp && h.routeOwnerId === historyEntry.routeOwnerId);
-                if (hIdx > -1) {
-                    history[hIdx].completionDocId = completionDocId;
-                    state.writeLocalHistory(history);
-                }
-            }
-        } catch (e) {
-            console.error("수동 완료 백그라운드 동기화 오류:", e);
-        }
-    })();
+    if (context) finishLocally(item, finalTag, context, null, photoUrl);
 }
 
-// ==========================================
-// 6. 배송지 취소 처리 (0초 즉시 삭제 및 관제 실시간 동기화)
-// ==========================================
 export function cancelDestination(id) {
     if (!confirm("이 배송지를 취소하시겠습니까?\n취소된 내역은 '지난배송' 목록에 기록됩니다.")) return;
-    
-    const destinations = state.getDestinations();
-    const item = destinations.find(d => d.id === id);
-    if (!item) return;
-
+    const item = state.getDestinations().find(d => d.id === id);
+    if (!item || photoStagingIds.has(id)) return;
     const context = localCompletionContext();
-    if (!context) return;
-    const { deviceId, phone, completionOwnership } = context;
-    const cancelTag = '배송 취소';
-    let historyEntry;
-    if (!state.runLocalTransaction(() => {
-        historyEntry = archiveCompletedDelivery(item, cancelTag, null, null, { ...completionOwnership, phone, deviceId });
-        state.removeDestination(id);
-        state.updateDisplayNumbers();
-    })) return;
-    if (typeof window.renderList === 'function') window.renderList();
-
-    // 2. 관제 센터 서버(routes/{deviceId})의 남은 배송 목록 즉시 동기화
-    saveRouteToFirestore(deviceId, phone, state.getDestinations());
-
-    // 3. 백그라운드 비동기 처리
-    (async () => {
-        try {
-            const lastGps = state.getLastKnownGps();
-            let actualLat = item.lat;
-            let actualLng = item.lng;
-            let isRealGpsCaptured = false;
-
-            if (lastGps && lastGps.lat && lastGps.lng) {
-                actualLat = lastGps.lat;
-                actualLng = lastGps.lng;
-                isRealGpsCaptured = true;
-            }
-
-
-            // Firestore 관제 서버에 취소 내역 비동기 전송
-            const completionDocId = await saveCompletionToFirestore(
-                deviceId, phone, item, cancelTag, actualLat, actualLng, isRealGpsCaptured, null, completionOwnership
-            );
-
-            if (completionDocId) {
-                let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
-                const hIdx = history.findIndex(h => h.id === historyEntry.id && h.timestamp === historyEntry.timestamp && h.routeOwnerId === historyEntry.routeOwnerId);
-                if (hIdx > -1) {
-                    history[hIdx].completionDocId = completionDocId;
-                    state.writeLocalHistory(history);
-                }
-            }
-        } catch (e) {
-            console.error("취소 백그라운드 동기화 오류:", e);
-        }
-    })();
+    if (context) finishLocally(item, '배송 취소', context);
 }
 
-// ==========================================
-// 7. 배송 완료 카메라 input 리스너 (🌟 체감 0초 백그라운드 완료 탑재)
-// ==========================================
+const photoStagingIds = new Set();
+let photoCompletionInitialized = false;
 export function initPhotoCompletion() {
     const photoInput = document.getElementById('completion-photo-input');
-    if (!photoInput) return;
-
-    photoInput.addEventListener('change', async (e) => {
+    if (!photoInput || photoCompletionInitialized) return;
+    photoCompletionInitialized = true;
+    photoInput.addEventListener('change', async e => {
         const file = e.target.files[0];
-        if (!file) return;
-
-        const targetId = pendingCompletionId;
-        const destinations = state.getDestinations();
-        const item = destinations.find(d => d.id === targetId);
-
-        if (!item) {
-            closeCompletionModal();
-            e.target.value = '';
-            return;
-        }
-
-
-        // 🌟 [1단계: 체감 0초 즉각 완료] 대기 없이 화면에서 즉시 배송지 삭제 및 순간 GPS 확보
-        const finalTag = selectedCompTag && selectedCompTag !== '기타' ? selectedCompTag : "사진 완료";
+        const item = state.getDestinations().find(d => d.id === pendingCompletionId);
+        if (!file || !item || photoStagingIds.has(item.id)) { e.target.value = ''; return; }
         const context = localCompletionContext();
         if (!context) { e.target.value = ''; return; }
-        const { deviceId, phone, completionOwnership } = context;
-
-        const lastGps = state.getLastKnownGps();
-        let actualLat = item.lat;
-        let actualLng = item.lng;
-        let isRealGpsCaptured = false;
-
-        // 사진을 찍기 시작하거나 완료 버튼을 누른 시점의 백그라운드 GPS 즉시 사용
-        if (lastGps && lastGps.lat && lastGps.lng) {
-            actualLat = lastGps.lat;
-            actualLng = lastGps.lng;
-            isRealGpsCaptured = true;
+        const tag = selectedCompTag && selectedCompTag !== '기타' ? selectedCompTag : '사진 완료';
+        photoStagingIds.add(item.id);
+        let photoId;
+        let committed = false;
+        try {
+            photoId = crypto.randomUUID();
+            // Only local durable Blob storage precedes completion. Never wait for compression/upload.
+            await completionPhotos.put(photoId, file);
+            const currentItem = state.getDestinations().find(destination => destination.id === item.id);
+            if (state.getRouteOwnerId() !== context.completionOwnership.routeOwnerId || !currentItem) return;
+            committed = finishLocally(currentItem, tag, context, photoId);
+        } catch (error) { state.reportStorageFailure(error); }
+        finally {
+            photoStagingIds.delete(item.id);
+            e.target.value = '';
+            if (photoId && !committed) completionPhotos.remove(photoId).catch(error => console.error('사진 정리 실패:', error));
         }
-
-        // 지난배송 목록에 즉시 등록 (사진 URL은 백그라운드 업로드 완료 후 업데이트)
-        let historyEntry;
-        if (!state.runLocalTransaction(() => {
-            historyEntry = archiveCompletedDelivery(item, finalTag, null, null, { ...completionOwnership, phone, deviceId });
-            state.removeDestination(targetId);
-            state.updateDisplayNumbers();
-        })) { e.target.value = ''; return; }
-        closeCompletionModal();
-        if (typeof window.renderList === 'function') window.renderList();
-
-        // 관제 서버 잔여 배송 목록 즉시 동기화
-        saveRouteToFirestore(deviceId, phone, state.getDestinations());
-
-        // 기사 완료 진동 피드백
-        if (navigator.vibrate) navigator.vibrate(40);
-
-        // 🌟 [2단계: 백그라운드 비동기 처리] 사진 압축 및 업로드를 화면 간섭 없이 조용히 실행
-        (async () => {
-            try {
-                // 사진 전송 대기
-                const photoUrl = await firebaseUploadDeliveryPhoto(file, deviceId);
-
-                // 관제 서버에 완료 내역 최종 보관
-                const completionDocId = await saveCompletionToFirestore(
-                    deviceId, phone, item, finalTag, actualLat, actualLng, isRealGpsCaptured, photoUrl, completionOwnership
-                );
-
-                // 로컬 지난배송 이력에 서버 등록 번호 및 사진 링크 갱신
-                let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
-                const hIdx = history.findIndex(h => h.id === historyEntry.id && h.timestamp === historyEntry.timestamp && h.routeOwnerId === historyEntry.routeOwnerId);
-                if (hIdx > -1) {
-                    if (completionDocId) history[hIdx].completionDocId = completionDocId;
-                    if (photoUrl) {
-                        history[hIdx].photoUrl = photoUrl;
-                        history[hIdx].hasPhoto = true;
-                    }
-                    state.writeLocalHistory(history);
-                }
-            } catch (err) {
-                console.error("사진 백그라운드 완료 처리 중 오류:", err);
-            }
-        })();
-
-        e.target.value = '';
     });
 }

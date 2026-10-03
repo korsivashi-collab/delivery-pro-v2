@@ -3,8 +3,8 @@
 // [배송 동선 PRO] 보조 기능 전담 모듈 (연결 설정 / 알림함 / 지난 배송 이력)
 // =================================================================
 
-import { 
-    deleteCompletionFromFirestore, 
+import { stageCompletionDeletion, wakeCompletionQueue } from './completion-queue.js';
+import {
     firebaseSetTmsPermission, 
     syncMyParkingMemosFromServer, 
     saveRouteToFirestore 
@@ -352,10 +352,6 @@ export async function restoreHistoryItem(timestamp) {
             return;
         }
 
-        if (targetHistory.completionDocId) {
-            await deleteCompletionFromFirestore(targetHistory.completionDocId);
-        }
-
         let itemToRestore = targetHistory.originalData;
         if (!itemToRestore) {
             try {
@@ -393,9 +389,11 @@ export async function restoreHistoryItem(timestamp) {
                 state.writeLocalHistory(latestHistory);
                 if (onRestoreDestinationCallback) onRestoreDestinationCallback(itemToRestore);
                 else { state.addDestination(itemToRestore); state.updateDisplayNumbers(); }
+                stageCompletionDeletion(targetHistory, current, state.getDestinations().at(-1));
             });
             if (!saved) { hideLoading(); return; }
             if (typeof window.renderList === 'function') window.renderList();
+            wakeCompletionQueue();
 
             // 🌟 복원된 최신 배송 목록을 관제 센터 서버(routes/{deviceId})에 즉시 동기화
             try {

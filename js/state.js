@@ -50,7 +50,7 @@ function pendingLocalRecovery() {
     const raw = localStorage.getItem(LOCAL_TRANSACTION_KEY);
     if (!raw) return null;
     const journal = JSON.parse(raw);
-    const allowed = ['deliveryPro_active_destinations', 'deliveryPro_end_location', 'deliveryPro_route_metadata', 'deliveryPro_history'];
+    const allowed = ['deliveryPro_active_destinations', 'deliveryPro_end_location', 'deliveryPro_route_metadata', 'deliveryPro_history', 'deliveryPro_transmissions'];
     if (journal.version !== 1 || !journal.before ||
         !Object.entries(journal.before).every(([key, value]) => allowed.includes(key) && (value === null || typeof value === 'string'))) {
         throw new Error('로컬 복구 기록을 확인할 수 없습니다.');
@@ -203,6 +203,23 @@ export const state = {
         try { writeLocalValues({ deliveryPro_history: JSON.stringify(history) }); return true; }
         catch (error) { this.reportStorageFailure(error); return false; }
     },
+    writeTransmissions(queue, history = undefined) {
+        if (localTransaction) {
+            localTransaction.transmissions = queue;
+            if (history !== undefined) localTransaction.history = history;
+            return true;
+        }
+        try {
+            const values = { deliveryPro_transmissions: JSON.stringify(queue) };
+            if (history !== undefined) values.deliveryPro_history = JSON.stringify(history);
+            writeLocalValues(values);
+            return true;
+        } catch (error) {
+            // Background bookkeeping must retain the previous queue and never show a network popup.
+            console.error('전송대기 로컬 저장 실패:', error);
+            return false;
+        }
+    },
     runLocalTransaction(change) {
         const before = committedMemory;
         if (localTransaction) throw new Error('로컬 저장 작업이 이미 진행 중입니다.');
@@ -210,8 +227,9 @@ export const state = {
         try {
             change();
             const history = localTransaction.history;
+            const transmissions = localTransaction.transmissions;
             localTransaction = null;
-            return this.saveActiveData(null, history);
+            return this.saveActiveData(null, history, transmissions);
         } catch (error) {
             localTransaction = null;
             restoreMemory(before);
@@ -274,7 +292,7 @@ export const state = {
     },
 
     // 5. 로컬스토리지에 현재 작업 데이터 저장
-    saveActiveData(updatedAt = null, history = undefined) {
+    saveActiveData(updatedAt = null, history = undefined, transmissions = undefined) {
         if (localTransaction) return true;
         if (!routeOwnerId) return false;
         try {
@@ -282,6 +300,7 @@ export const state = {
             const snapshot = memorySnapshot(revision);
             const values = {};
             if (history !== undefined) values.deliveryPro_history = JSON.stringify(history);
+            if (transmissions !== undefined) values.deliveryPro_transmissions = JSON.stringify(transmissions);
             values.deliveryPro_active_destinations = JSON.stringify(destinations);
             values.deliveryPro_end_location = JSON.stringify(endLocation);
             values.deliveryPro_route_metadata = JSON.stringify({ routeOwnerId, updatedAt: revision, destinations, endLocation });

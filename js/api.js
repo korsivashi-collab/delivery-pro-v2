@@ -19,6 +19,7 @@ import {
     doc, 
     increment, 
     setDoc, 
+    runTransaction,
     deleteDoc, 
     orderBy, 
     limit 
@@ -89,10 +90,10 @@ export async function checkIfDeviceBlocked(deviceId) {
 }
 
 // 1. 배송 완료 사진 고속 업로드 (경량화 규격 적용)
-export async function firebaseUploadDeliveryPhoto(file, deviceId) {
+export async function firebaseUploadDeliveryPhoto(file, deviceId, operationId = null) {
     const blob = await compressImageToBlob(file, 960, 0.65);
     const safeDeviceId = (deviceId || 'dev').replace(/[^a-zA-Z0-9_-]/g, '');
-    const filePath = `delivery_photos/${Date.now()}_${safeDeviceId}.jpg`;
+    const filePath = operationId ? `delivery_photos/${operationId}.jpg` : `delivery_photos/${Date.now()}_${safeDeviceId}.jpg`;
     const storageRef = ref(storage, filePath);
     const snapshot = await uploadBytes(storageRef, blob, { contentType: 'image/jpeg' });
     return await getDownloadURL(snapshot.ref);
@@ -547,15 +548,15 @@ export async function reportMemoInFirestore(docId) {
 
 // 8. 배송 경로 및 완료 내역 동기화
 const routeSaveRevisions = new Map();
-export async function saveRouteToFirestore(deviceId, phone, destinations) {
+export async function saveRouteToFirestore(deviceId, phone, destinations, requireAcknowledgement = false) {
     let revisionKey;
     let revision;
     try {
         const routeOwnerId = state.getRouteOwnerId();
-        if (!deviceId || !routeOwnerId || destinations !== state.getDestinations()) return;
+        if (!deviceId || !routeOwnerId || destinations !== state.getDestinations()) return false;
         revisionKey = `${routeOwnerId}|${deviceId}`;
         revision = state.getRouteUpdatedAt();
-        if (routeSaveRevisions.get(revisionKey) === revision) return;
+        if (!requireAcknowledgement && routeSaveRevisions.get(revisionKey) === revision) return;
         routeSaveRevisions.set(revisionKey, revision);
         const routeRef = doc(db, "routes", deviceId);
         await setDoc(routeRef, {
@@ -577,9 +578,12 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
                 items: d.items || []
             }))
         });
+        return true;
     } catch (e) {
         if (routeSaveRevisions.get(revisionKey) === revision) routeSaveRevisions.delete(revisionKey);
         console.error("동선 전송 오류:", e);
+        if (requireAcknowledgement) throw e;
+        return false;
     }
 }
 
@@ -592,13 +596,13 @@ export function getCompletionOwnershipContext() {
     });
 }
 
-export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null, ownership = getCompletionOwnershipContext()) {
+export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null, ownership = getCompletionOwnershipContext(), transmission = null) {
     try {
         if (!ownership.routeOwnerId || !ownership.licenseKey) throw new Error('배송 처리 소유자 정보가 없습니다.');
-        const now = new Date();
+        const now = new Date(transmission ? transmission.completedAt : Date.now());
         const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         
-        const docRef = await addDoc(collection(db, "completions"), {
+        const data = {
             routeOwnerId: ownership.routeOwnerId,
             licenseKey: ownership.licenseKey,
             dispatchKey: ownership.dispatchKey || '',
@@ -617,20 +621,40 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             photoUrl: photoUrl || "",
             completedAt: now.getTime(),
             timeString: timeStr
-        });
+        };
+        if (transmission) {
+            const completionRef = doc(db, 'completions', transmission.id);
+            const operationRef = doc(db, 'completion_operations', transmission.id);
+            await runTransaction(db, async transaction => {
+                const operation = await transaction.get(operationRef);
+                if (operation.exists() && operation.data().action === 'delete') return;
+                transaction.set(operationRef, { routeOwnerId: ownership.routeOwnerId, action: 'complete' });
+                transaction.set(completionRef, data);
+            });
+            return transmission.id;
+        }
+        const docRef = await addDoc(collection(db, 'completions'), data);
         return docRef.id;
     } catch (e) { 
         console.error("완료 내역 저장 오류:", e); 
+        if (transmission) throw e;
         return null;
     }
 }
 
-export async function deleteCompletionFromFirestore(docId) {
+export async function deleteCompletionFromFirestore(docId, operationId = null, routeOwnerId = null) {
     try {
         if (!docId) return;
-        await deleteDoc(doc(db, "completions", docId));
+        if (operationId) {
+            await runTransaction(db, async transaction => {
+                // Durable cancellation wins even when an older completion request arrives late.
+                transaction.set(doc(db, 'completion_operations', operationId), { routeOwnerId, action: 'delete' });
+                transaction.delete(doc(db, 'completions', docId));
+            });
+        } else await deleteDoc(doc(db, "completions", docId));
     } catch (e) {
         console.error("완료 데이터 삭제 오류:", e);
+        throw e;
     }
 }
 

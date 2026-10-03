@@ -1,3 +1,4 @@
+import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 // js/app.js
 
 // =================================================================
@@ -133,6 +134,8 @@ export async function initApp() {
             return;
         }
         if (routeData.updatedAt === state.getRouteUpdatedAt()) return;
+        try { newDestinations = excludeLocallyCompleted(newDestinations); }
+        catch (error) { console.error('완료 전송 상태 확인 실패:', error); return; }
         state.setDestinations(newDestinations);
         const formattedList = state.getDestinations().map((d, idx) => ({
             ...d,
@@ -181,6 +184,7 @@ export async function initApp() {
 
     renderList();
     await checkSavedAuth();
+    initCompletionQueue(checkSavedAuth);
 }
 
 // ==========================================
