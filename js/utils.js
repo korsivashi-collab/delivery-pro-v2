@@ -193,7 +193,7 @@ export function extractPhoneLogic(text) {
 // 6. 범용 도로명/지번 주소 정밀 추출 슬롯 엔진
 // ==========================================
 // 구버전 주소 파서를 먼저 실행하고, 개선형 역할 파서는 별도 fallback으로 유지한다.
-export function extractAddressLogic(text) {
+export function extractAddressLogic(text, details = null) {
     let rawLegacyAddress = null, rawLabeledAddress = null;
     const legacyEvidence = {};
     try { rawLegacyAddress = extractAddressEngineB(text, legacyEvidence); }
@@ -207,7 +207,9 @@ export function extractAddressLogic(text) {
         ? legacyAddress === labeledAddress ? '두 주소 동일' : '기존 주소 파서 우선'
         : labeledAddress ? '기존 주소 없음: 라벨링 주소 fallback' : '주소 없음: 수동입력 fallback';
     try {
+        if (details) Object.assign(details, { rawLegacyAddress, rawLabeledAddress, legacyAddress, labeledAddress, selected });
         console.log('[주소진단-최종선택]', {
+            scanId: details?.scanId,
             rawLegacyAddress, rawLabeledAddress, legacyAddress, labeledAddress,
             selected, reason, legacyEvidence
         });

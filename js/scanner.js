@@ -192,6 +192,7 @@ export async function editDestinationAddress(id) {
 // 5. 카메라 스캔 및 AI 하이브리드 판독 파이프라인
 // ==========================================
 // 한 번 받은 OCR 응답의 복사본을 고정한다. 각 파이프라인은 이 원본만 읽는다.
+let ocrScanSequence = 0;
 function createScanOCRSnapshot(ocrResult) {
     const pages = JSON.parse(JSON.stringify(ocrResult.pages || []));
     const freeze = value => {
@@ -201,7 +202,7 @@ function createScanOCRSnapshot(ocrResult) {
         }
         return value;
     };
-    return freeze({ rawOCRText: ocrResult.text || '', ocrPages: pages });
+    return freeze({ scanId: `${Date.now()}-${++ocrScanSequence}`, rawOCRText: ocrResult.text || '', ocrPages: pages });
 }
 
 // 상호의 셀/라벨/신뢰도 규칙은 그대로 유지하고 주소 결과에 의존하는 실행 조건만 분리.
@@ -254,13 +255,18 @@ function extractScanStoreOCR(snapshot) {
 
 function runScanOCRPipelines(snapshot) {
     let address = null, phone = null;
+    const addressDetails = { scanId: snapshot.scanId };
     // 하나의 추출 실패가 다른 필드의 추출을 막지 않는다.
-    try { address = extractAddressLogic(snapshot.rawOCRText); }
+    try { address = extractAddressLogic(snapshot.rawOCRText, addressDetails); }
     catch (error) { console.error('주소 추출 오류:', error); }
     const store = extractScanStoreOCR(snapshot);
     try { phone = extractPhoneLogic(snapshot.rawOCRText); }
     catch (error) { console.error('전화번호 추출 오류:', error); }
     console.log('[OCR진단-독립파이프라인]', {
+        scanId: snapshot.scanId,
+        rawOCRText: snapshot.rawOCRText,
+        legacyAddress: addressDetails.legacyAddress ?? null,
+        labeledAddress: addressDetails.labeledAddress ?? null,
         sourceFrozen: Object.isFrozen(snapshot) && Object.isFrozen(snapshot.ocrPages),
         address, storeName: store.finalStoreName, phone,
         layoutCandidate: store.storeDecision.layoutCandidate,
@@ -268,7 +274,10 @@ function runScanOCRPipelines(snapshot) {
         storeCandidates: [...store.ocrCandidates],
         stage: '주소 수동 보정/geocode/Kakao 교차검증 이전'
     });
-    return { address, store, phone };
+    return { address, store, phone, scanId: snapshot.scanId,
+        legacyAddress: addressDetails.legacyAddress ?? null,
+        labeledAddress: addressDetails.labeledAddress ?? null,
+        labeledStoreName: store.finalStoreName };
 }
 
 export function initCameraScan() {
@@ -421,17 +430,26 @@ export function initCameraScan() {
 
         // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
         if (coords) {
-            let resolvedAddress = coords.address_name || addressStr;
+            const finalAddress = ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
+            const labeledStoreName = finalStoreName || '';
+            const finalPhone = extractedPhone;
             console.log('[주소진단-3 최종주소]', {
-                addressStr,
-                address_name: coords?.address_name,
-                resolvedAddress
+                scanId: ocrFields?.scanId, addressStr,
+                legacyAddress: ocrFields?.legacyAddress ?? null,
+                labeledAddress: ocrFields?.labeledAddress ?? null,
+                address_name: coords?.address_name, resolvedAddress: finalAddress
             });
-            
-            // 상호명이 확인된 경우 [상호명] 주소 형식으로 조합
-            if (finalStoreName && !resolvedAddress.includes(finalStoreName)) {
-                resolvedAddress = `[${finalStoreName}] ${resolvedAddress}`;
-            }
+            console.log('[OCR진단-최종조합]', {
+                scanId: ocrFields?.scanId,
+                legacyAddress: ocrFields?.legacyAddress ?? null,
+                labeledAddress: ocrFields?.labeledAddress ?? null,
+                labeledStoreName, phone: finalPhone,
+                parsedAddress: ocrFields?.address ?? null,
+                geocodeInput: addressStr, geocodeAddressName: coords?.address_name,
+                finalAddress, finalStoreName: labeledStoreName, finalPhone,
+                addressChangedInCombination: Boolean(ocrFields?.address && finalAddress !== ocrFields.address),
+                source: ocrFields?.legacyAddress ? 'legacy' : ocrFields?.labeledAddress ? 'labeled' : 'manual'
+            });
 
             const currentDests = state.getDestinations();
             let nextNum = currentDests.length > 0 ? Math.max(...currentDests.map(d => d.displayNumber)) + 1 : 1;
@@ -439,12 +457,12 @@ export function initCameraScan() {
             
             state.addDestination({
                 id: newDestId, 
-                address: resolvedAddress,
+                address: finalAddress,
                 lat: coords.lat, 
                 lng: coords.lng, 
-                phone: extractedPhone, 
+                phone: finalPhone, 
                 displayNumber: nextNum,
-                storeName: finalStoreName || ""
+                storeName: labeledStoreName
             });
             
             state.saveActiveData(); 
