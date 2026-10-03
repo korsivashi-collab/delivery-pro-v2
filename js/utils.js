@@ -256,7 +256,8 @@ function extractAddressSingleLegacy(text) {
         if (!rawAddressBlock) return null;
 
         // 도로명/지번 정규 코어 탐색
-        const roadCoreRegex = /(?:[가-힣A-Za-z0-9·.]+(?:대로|로)(?:\s*\d+[가-힣]*길)?|[가-힣A-Za-z0-9·.]+길)\s*\d+(?:-\d+)?/;
+        // 숫자/한글 분기명/길 사이 OCR 공백을 허용하고 건물번호는 별도로 캡처.
+        const roadCoreRegex = /((?:[가-힣A-Za-z0-9·.]+(?:대로|로)(?:\s*\d+\s*(?:[가-힣]\s*)*길)?|[가-힣A-Za-z0-9·.]+길))\s*(\d+(?:-\d+)?)/;
         const parcelCoreRegex = /[가-힣A-Za-z0-9·]+(?:동|읍|면|리)\s+(?:산\s*)?\d+(?:-\d+)?/;
         
         const roadMatch = rawAddressBlock.match(roadCoreRegex);
@@ -266,7 +267,10 @@ function extractAddressSingleLegacy(text) {
             return rawAddressBlock.split(/[(.]/)[0].trim().replace(/[,\s\-~ㅡ—–]+$/, '');
         }
 
-        const finalAddress = rawAddressBlock.slice(0, coreMatch.index + coreMatch[0].length)
+        const addressCore = roadMatch
+            ? rawAddressBlock.slice(0, roadMatch.index) + roadMatch[1].replace(/\s+/g, '') + ' ' + roadMatch[2]
+            : rawAddressBlock.slice(0, coreMatch.index + coreMatch[0].length);
+        const finalAddress = addressCore
             .replace(/[,\s\-~ㅡ—–]+$/, '').trim().replace(/\s+/g, ' ');
 
         return finalAddress;
