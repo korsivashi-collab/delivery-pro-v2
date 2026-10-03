@@ -2,6 +2,7 @@
 
 import { db } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
+import { selectLatestOwnedRoute } from "./route-owner.js";
 import { map } from "./admin-map.js";
 import { doc, updateDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
@@ -51,6 +52,18 @@ export function getFilteredVisibleDrivers() {
 export function getDriverRouteData(lic, selectedDate) {
     if (!lic) return null;
 
+    // 기사 앱과 같은 소유자 경로를 우선 선택합니다. 빈 최신 경로도 그대로 반영합니다.
+    if (lic.routeOwnerId) {
+        const ownedRoute = selectLatestOwnedRoute(
+            Object.entries(state.activeRoutes || {}).map(([id, data]) => ({ ...data, routeDocumentId: id })),
+            lic.routeOwnerId
+        );
+        if (ownedRoute) {
+            const routeDate = getLocalDateString(new Date(ownedRoute.updatedAt));
+            return selectedDate === todayStr || routeDate === selectedDate ? ownedRoute : null;
+        }
+    }
+
     // 🌟 핵심 방어: 앱 로그인 기기(deviceId)가 등록된 기사는 오직 기기 ID 문서만 확인
     // (옛날 테스트 때 라이선스키 문서에 남아있던 9건 잔상이 차선책으로 부활하는 것을 원천 차단)
     let candidateKeys = [];
@@ -63,7 +76,10 @@ export function getDriverRouteData(lic, selectedDate) {
     let foundRoute = null;
     for (const k of candidateKeys) {
         if (state.activeRoutes && state.activeRoutes[k]) {
-            foundRoute = state.activeRoutes[k];
+            const candidate = state.activeRoutes[k];
+            // 다른 라이선스의 소유자가 명시된 문서는 deviceId가 같아도 가져오지 않습니다.
+            if (candidate.routeOwnerId && candidate.routeOwnerId !== lic.routeOwnerId) continue;
+            foundRoute = candidate;
             break;
         }
     }
