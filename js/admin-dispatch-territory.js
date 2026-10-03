@@ -124,6 +124,21 @@ export function jumpToDriverDelivery(devId) {
 // 2. 실시간 지도 위치 추적 (🌟 즉시 표출 + 백그라운드 갱신 하이브리드 엔진)
 // ==========================================
 let locationStatusExpiryTimer = null;
+let activeLocationRequest = null;
+let locationRequestSequence = 0;
+
+function cancelLocationRequest() {
+    if (!activeLocationRequest) return;
+    activeLocationRequest.cancelled = true;
+    activeLocationRequest.unsubscribe?.();
+    clearTimeout(activeLocationRequest.timer);
+    activeLocationRequest = null;
+}
+
+function createLocationRequestId() {
+    return globalThis.crypto?.randomUUID?.() ||
+        `gps-${Date.now().toString(36)}-${++locationRequestSequence}-${Math.random().toString(36).slice(2)}`;
+}
 
 function formatLocationReportTime(updatedAt) {
     if (typeof updatedAt !== 'number' || !Number.isFinite(updatedAt) || updatedAt <= 0) return '보고 시각 없음';
@@ -139,11 +154,15 @@ export async function focusDriverLocationOnMap(devId) {
     const targetKey = matchedLic?.key || devId;
 
     if (!map) return;
-    closeCurrentLocationOverlay();
+    cancelLocationRequest();
+    if (window.currentLocationOverlay?.locationDeviceId !== targetDevId) closeCurrentLocationOverlay(false);
+    const request = { id: createLocationRequestId(), cancelled: false, done: false, succeeded: false, unsubscribe: null, timer: null };
+    activeLocationRequest = request;
+    const isCurrent = () => activeLocationRequest === request && !request.cancelled;
 
-    let displayedOverlay = null;
+    let displayedOverlay = window.currentLocationOverlay || null;
     const updateLocationStatus = (label) => {
-        if (!displayedOverlay || window.currentLocationOverlay !== displayedOverlay) return;
+        if (!isCurrent() || !displayedOverlay || window.currentLocationOverlay !== displayedOverlay) return;
         const content = displayedOverlay.getContent();
         const statusEl = content.querySelector('#loc-overlay-status');
         const iconEl = content.querySelector('#loc-overlay-icon');
@@ -151,12 +170,13 @@ export async function focusDriverLocationOnMap(devId) {
         if (iconEl) iconEl.classList.toggle('animate-pulse', label === '실시간 위치');
     };
 
-    const renderLocationMarker = async (lat, lng, timeLabel, updatedAt) => {
+    const renderLocationMarker = (lat, lng, timeLabel, updatedAt) => {
+        if (!isCurrent()) return;
         const pos = new kakao.maps.LatLng(lat, lng);
         map.setLevel(3);
         map.panTo(pos);
 
-        closeCurrentLocationOverlay();
+        closeCurrentLocationOverlay(false);
 
         const overlayContainer = document.createElement('div');
         overlayContainer.className = 'custom-location-overlay animate-pop-in';
@@ -171,74 +191,84 @@ export async function focusDriverLocationOnMap(devId) {
                 <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
             </div>`;
         window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
+        window.currentLocationOverlay.locationDeviceId = targetDevId;
         displayedOverlay = window.currentLocationOverlay;
         const renderedOverlay = displayedOverlay;
         window.currentLocationOverlay.setMap(map); 
         if (window.myMapOverlays) window.myMapOverlays.push(window.currentLocationOverlay);
 
         if (timeLabel === '실시간 위치') {
-            // 기존 120초 기준은 표시 만료에만 사용하며 서버 요청을 추가하지 않는다.
-            const remaining = Math.max(0, Math.min(120000, updatedAt + 120000 - Date.now()));
+            // 기사 시계와 무관하게 현재 응답을 수신한 뒤 120초만 실시간으로 표시한다.
             locationStatusExpiryTimer = setTimeout(() => {
                 if (window.currentLocationOverlay === renderedOverlay) updateLocationStatus('마지막 확인 위치');
-            }, remaining);
+            }, 120000);
         }
 
-        const resolvedAddr = await getAddressFromCoords(lat, lng);
-        const finalAddr = resolvedAddr || "주소 정보를 변환할 수 없습니다.";
-        const addrEl = window.currentLocationOverlay === renderedOverlay ? overlayContainer.querySelector('#loc-overlay-addr') : null;
-        if (addrEl) addrEl.innerHTML = `<i class="fa-solid fa-map-pin text-emerald-400 mr-1 text-xs"></i>${finalAddr}`;
+        Promise.resolve().then(() => getAddressFromCoords(lat, lng)).catch(() => null).then(resolvedAddr => {
+            const finalAddr = resolvedAddr || "주소 정보를 변환할 수 없습니다.";
+            const addrEl = isCurrent() && window.currentLocationOverlay === renderedOverlay ? overlayContainer.querySelector('#loc-overlay-addr') : null;
+            if (addrEl) addrEl.innerHTML = `<i class="fa-solid fa-map-pin text-emerald-400 mr-1 text-xs"></i>${finalAddr}`;
+        });
     };
 
-    let hasShownInitial = false;
-    try {
+    const finishWaiting = () => {
+        request.unsubscribe?.();
+        clearTimeout(request.timer);
+    };
+    const noResponse = () => {
+        if (!isCurrent() || request.done) return;
+        request.done = true;
+        finishWaiting();
+        updateLocationStatus('현재 위치 응답 없음');
+        if (!displayedOverlay) {
+            alert('[안내] 현재 위치 응답 없음\n저장된 배송 기록 또는 배송 목적지를 표시합니다.');
+            showFallbackLocation(devId);
+        }
+    };
+
+    // 초기 조회가 느려도 요청 전송 및 응답 대기는 진행한다.
+    const loadInitial = async () => {
         let snap = await getDoc(doc(db, "gps_reports", targetDevId));
         if (!snap.exists() && targetKey !== targetDevId) {
             snap = await getDoc(doc(db, "gps_reports", targetKey));
         }
 
-        if (snap.exists()) {
+        if (isCurrent() && !request.succeeded && snap.exists()) {
             const data = snap.data();
             if (data.lat && data.lng) {
-                hasShownInitial = true;
-                await renderLocationMarker(data.lat, data.lng, '마지막 확인 위치', data.updatedAt);
+                renderLocationMarker(data.lat, data.lng, '마지막 확인 위치', data.updatedAt);
+                updateLocationStatus(request.done ? '현재 위치 응답 없음' : '현재 위치 확인 중');
             }
         }
-    } catch (e) {
-        console.warn("초기 위치 캐시 확인 실패:", e);
-    }
+    };
+    void loadInitial().catch(e => console.warn('초기 위치 캐시 확인 실패:', e));
 
-    const reqTime = Date.now();
     updateLocationStatus('현재 위치 확인 중');
     try {
-        await setDoc(doc(db, "gps_requests", targetDevId), { deviceId: targetDevId, requestedAt: reqTime });
-        if (targetKey !== targetDevId) {
-            await setDoc(doc(db, "gps_requests", targetKey), { deviceId: targetKey, requestedAt: reqTime });
-        }
-    } catch (e) {}
-
-    let isResolved = false;
-    const unsub = onSnapshot(doc(db, "gps_reports", targetDevId), async (snap) => {
-        if (snap.exists()) {
+        const unsubscribe = onSnapshot(doc(db, "gps_reports", targetDevId), (snap) => {
+            if (!isCurrent() || request.done || !snap.exists()) return;
             const data = snap.data();
-            if (data.updatedAt && data.updatedAt >= reqTime) {
-                isResolved = true;
-                unsub();
-                await renderLocationMarker(data.lat, data.lng, '실시간 위치', data.updatedAt);
+            if (data.requestId === request.id && data.lat && data.lng) {
+                request.done = true;
+                request.succeeded = true;
+                finishWaiting();
+                renderLocationMarker(data.lat, data.lng, '실시간 위치', data.updatedAt);
             }
-        }
-    });
+        }, noResponse);
+        request.unsubscribe = unsubscribe;
+        if (request.done || !isCurrent()) { unsubscribe(); return; }
+    } catch (error) { noResponse(); return; }
 
-    setTimeout(() => {
-        if (!isResolved) {
-            unsub();
-            updateLocationStatus('현재 위치 응답 없음');
-            if (!hasShownInitial) {
-                alert(`[안내] 실시간 위치 응답을 받지 못했습니다.\n(앱 미실행, 통신 불량 등)\n\n시스템에 저장된 최근 마지막 위치를 표시합니다.`);
-                showFallbackLocation(devId);
-            }
-        }
-    }, 6000);
+    // 전송 승인 대기도 포함한다. 오프라인 setDoc이 대기해도 UI는 10초 후 종료한다.
+    request.timer = setTimeout(noResponse, 10000);
+    const requestedAt = Date.now();
+    const ids = targetKey === targetDevId ? [targetDevId] : [targetDevId, targetKey];
+    for (const deviceId of ids) {
+        Promise.resolve().then(() => {
+            if (!isCurrent() || request.done) return;
+            return setDoc(doc(db, "gps_requests", deviceId), { requestId: request.id, deviceId, requestedAt });
+        }).catch(error => console.warn('위치 확인 요청 저장 실패:', error));
+    }
 }
 
 export async function showFallbackLocation(devId) {
@@ -281,13 +311,14 @@ export async function showFallbackLocation(devId) {
     window.currentLocationOverlay.setMap(map); 
     if (window.myMapOverlays) window.myMapOverlays.push(window.currentLocationOverlay);
 
-    const resolvedAddr = await getAddressFromCoords(lat, lng);
+    const resolvedAddr = await Promise.resolve().then(() => getAddressFromCoords(lat, lng)).catch(() => null);
     const finalAddr = resolvedAddr || knownAddress || "주소 정보를 변환할 수 없습니다.";
     const addrEl = window.currentLocationOverlay === renderedOverlay ? overlayContainer.querySelector('#loc-overlay-addr') : null;
     if (addrEl) addrEl.innerHTML = `<i class="fa-solid fa-map-pin text-sky-400 mr-1 text-xs"></i>${finalAddr}`;
 }
 
-export function closeCurrentLocationOverlay() {
+export function closeCurrentLocationOverlay(cancelRequest = true) {
+    if (cancelRequest) cancelLocationRequest();
     if (locationStatusExpiryTimer !== null) {
         clearTimeout(locationStatusExpiryTimer);
         locationStatusExpiryTimer = null;

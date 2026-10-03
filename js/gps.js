@@ -24,6 +24,9 @@ const gpsRequests = new Map();
 let isGpsWatcherActive = false; // 기사님의 GPS 활성화 설정 상태 보존
 let gpsSession = 0;
 
+// 요청 처리 시간은 수신한 기기의 경과 시간으로 제한한다.
+const gpsRequestClock = () => typeof performance !== 'undefined' ? performance.now() : Date.now();
+
 function cachePosition(position) {
     const gps = { lat: position.coords.latitude, lng: position.coords.longitude,
         timestamp: position.timestamp, accuracy: position.coords.accuracy };
@@ -50,20 +53,28 @@ function getDbInstance() {
 // ==========================================
 // 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진
 // ==========================================
-export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null) {
+export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null, request = null) {
     const session = gpsSession;
     if (reportInFlight) {
         if (!force) return false;
         await reportInFlight;
     }
     if (session !== gpsSession || document.visibilityState === 'hidden' || navigator.onLine === false) return false;
-    const gps = state.getLastKnownGps();
+    if (request && gpsRequestClock() >= request.expiresAt) return false;
+    let gps = state.getLastKnownGps();
+    // 이전 write를 기다리는 동안 캐시가 만료됐다면 강제 요청에 한해 새 위치를 확보한다.
+    if (!gps && request) {
+        gps = await getDeviceRealGPS();
+        if (session !== gpsSession) return false;
+    }
     if (!gps) return false;
     // A pending SDK operation can outlive its original fix. Always send the current valid fix.
     lat = gps.lat; lng = gps.lng;
     const now = Date.now();
-    if (now < reportRetryAfter || (!force && now - lastReportTime < 45000)) return false;
-    if (requestedAt !== null && (now - requestedAt < 0 || now - requestedAt >= 20000)) return false;
+    if ((!request && now < reportRetryAfter) || (!force && now - lastReportTime < 45000)) return false;
+    if (request && gpsRequestClock() >= request.expiresAt) return false;
+    // 구버전 관제 요청의 호환 경로. 새 요청의 응답 판정에는 기기 간 시각을 쓰지 않는다.
+    if (!request && requestedAt !== null && (now - requestedAt < 0 || now - requestedAt >= 20000)) return false;
     let deviceId, phone, db;
     try {
         deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
@@ -72,13 +83,13 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     } catch (error) { console.error('GPS 보고 준비 오류:', error); return false; }
     if (!deviceId || !db) return false;
     // A successful ordinary report made after this request already answers it.
-    if (force && requestedAt !== null && lastUploadedDevice === deviceId && lastUploadedAt >= requestedAt) return true;
+    if (!request && force && requestedAt !== null && lastUploadedDevice === deviceId && lastUploadedAt >= requestedAt) return true;
     // Multiple forced callers may have awaited the same earlier write.
-    if (reportInFlight) return reportGpsToFirestore(lat, lng, force, requestedAt);
+    if (reportInFlight) return reportGpsToFirestore(lat, lng, force, requestedAt, request);
     reportInFlight = Promise.resolve().then(async () => {
         try {
             await setDoc(doc(db, 'gps_reports', deviceId), {
-                deviceId, phone, lat, lng, updatedAt: now
+                deviceId, phone, lat, lng, updatedAt: now, requestId: request?.requestId || null
             }, { merge: true });
             lastReportTime = Date.now();
             lastUploadedAt = now;
@@ -87,8 +98,10 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
             reportRetryAfter = 0;
             return true;
         } catch (error) {
-            reportFailures++;
-            reportRetryAfter = Date.now() + Math.min(30000, 5000 * 2 ** Math.min(reportFailures - 1, 3));
+            if (!request) {
+                reportFailures++;
+                reportRetryAfter = Date.now() + Math.min(30000, 5000 * 2 ** Math.min(reportFailures - 1, 3));
+            }
             console.error('관제 위치 보고 오류:', error);
             return false;
         } finally { reportInFlight = null; }
@@ -96,30 +109,36 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     return reportInFlight;
 }
 
-// Device and license documents carry the same requestedAt for one control-panel request.
+// Device and license documents carry the same requestId (or legacy requestedAt).
 async function handleGpsRequest(snap, identity, deviceId) {
     if (identity !== requestListenerIdentity || document.visibilityState === 'hidden' || navigator.onLine === false || !snap.exists()) return false;
     const data = snap.data();
     const timestamp = data.requestedAt;
     const age = Date.now() - timestamp;
-    if (!Number.isFinite(timestamp) || age < 0 || age >= 20000) return false;
-    const key = deviceId + '|' + timestamp;
+    const requestId = typeof data.requestId === 'string' && data.requestId.length > 0 && data.requestId.length <= 200 ? data.requestId : null;
+    if (!Number.isFinite(timestamp)) return false;
+    // requestedAt은 오래된 저장 요청을 거르는 보조 기준(2분)만으로 사용한다.
+    // 새 요청은 미래 시각이라는 이유로 거절하지 않고, 수신 후 20초 안에만 처리한다.
+    if (requestId ? age > 120000 : (age < 0 || age >= 20000)) return false;
+    const key = deviceId + '|' + (requestId ? `id:${requestId}` : timestamp);
     for (const [oldKey, entry] of gpsRequests) if (Date.now() - entry.timestamp >= 120000) gpsRequests.delete(oldKey);
     const previous = gpsRequests.get(key);
     if (previous?.done) return true;
     if (previous?.promise) return previous.promise;
-    if (Date.now() < reportRetryAfter) return false;
+    if (requestId && previous?.attempted) return false;
+    if (!requestId && Date.now() < reportRetryAfter) return false;
     const session = gpsSession;
-    const entry = { timestamp, done: false, promise: null };
+    const entry = { timestamp: Date.now(), done: false, promise: null, attempted: false };
+    const request = requestId ? { requestId, expiresAt: gpsRequestClock() + 20000 } : null;
     gpsRequests.set(key, entry);
     entry.promise = Promise.resolve().then(async () => {
         try {
             const gps = await getDeviceRealGPS();
             if (!gps || !state.isFreshGps(gps) || session !== gpsSession || identity !== requestListenerIdentity) return false;
-            entry.done = await reportGpsToFirestore(gps.lat, gps.lng, true, timestamp);
+            entry.done = await reportGpsToFirestore(gps.lat, gps.lng, true, timestamp, request);
             return entry.done;
         } catch (error) { console.warn('GPS 요청 처리 실패:', error); return false; }
-        finally { entry.promise = null; }
+        finally { entry.attempted = true; entry.promise = null; }
     });
     return entry.promise;
 }
