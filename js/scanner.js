@@ -181,7 +181,7 @@ export async function editDestinationAddress(id) {
     }
     item.phone = newPhone;
     state.setDestinations(destinations);
-    state.saveActiveData();
+    if (!state.saveActiveData()) return;
     if (typeof window.renderList === 'function') window.renderList();
 
     const deviceId = getOrCreateDeviceId();
@@ -480,7 +480,7 @@ export function initCameraScan() {
             }, { prepend: true });
             const newDestId = addedDestination.id;
             
-            state.saveActiveData(); 
+            if (!state.saveActiveData()) { e.target.value = ''; return; }
             if (typeof window.renderList === 'function') window.renderList();
 
             // 관제 센터 서버(routes/{deviceId}) 실시간 동기화

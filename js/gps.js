@@ -206,7 +206,7 @@ export async function setEndLocationGPS() {
     if (lastGps) {
         const addr = await coordToAddress(lastGps.lng, lastGps.lat);
         state.setEndLocation({ lat: lastGps.lat, lng: lastGps.lng, address: addr || "현재 위치 (GPS)" });
-        state.saveActiveData();
+        if (!state.saveActiveData()) { hideLoading(); return; }
         if (typeof window.renderList === 'function') window.renderList();
         hideLoading();
         return;
@@ -221,7 +221,7 @@ export async function setEndLocationGPS() {
                 
                 const addr = await coordToAddress(lng, lat);
                 state.setEndLocation({ lat, lng, address: addr || "현재 위치 (GPS)" });
-                state.saveActiveData();
+                if (!state.saveActiveData()) { hideLoading(); return; }
                 if (typeof window.renderList === 'function') window.renderList();
                 hideLoading();
             },

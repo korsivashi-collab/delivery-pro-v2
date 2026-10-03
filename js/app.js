@@ -118,7 +118,7 @@ export async function initApp() {
 
     if (typeof setDeliveryUpdateHandler === 'function') {
         setDeliveryUpdateHandler(() => {
-            updateDisplayNumbers();
+            if (!updateDisplayNumbers()) { hideLoading(); return; }
             const deviceId = getOrCreateDeviceId();
             const phone = localStorage.getItem('deliveryProUserPhone') || "";
             saveRouteToFirestore(deviceId, phone, state.getDestinations());
@@ -168,10 +168,7 @@ export async function initApp() {
 
     setRestoreDestinationHandler((itemToRestore) => {
         state.addDestination(itemToRestore);
-        updateDisplayNumbers();
-        const deviceId = getOrCreateDeviceId();
-        const phone = localStorage.getItem('deliveryProUserPhone') || "";
-        saveRouteToFirestore(deviceId, phone, state.getDestinations());
+        state.updateDisplayNumbers();
     });
 
     setGpsToggleHandler((isChecked) => {
@@ -190,9 +187,9 @@ export async function initApp() {
 // 2. 동선 번호(순번) 재계산 및 렌더링 연결
 // ==========================================
 export function updateDisplayNumbers() {
-    state.updateDisplayNumbers();
-    state.saveActiveData();
+    if (!state.updateDisplayNumbers()) return false;
     renderList();
+    return true;
 }
 
 export function renderList() {
@@ -318,7 +315,7 @@ export function selectStartDest(id) {
         destinations.unshift(chosen);
         state.setDestinations(destinations);
         state.setStartLocation({ lat: chosen.lat, lng: chosen.lng, address: chosen.address });
-        state.saveActiveData();
+        if (!state.saveActiveData()) return;
         optimizeRouteAction();
     }
 }
@@ -357,7 +354,7 @@ export function optimizeRouteAction() {
             destinations = calculateOptimizedRoute(routeDestinations, startLocation,
                 hasValidDeliveryCoordinates(endLocation) ? endLocation : null).concat(pendingDestinations);
             state.setDestinations(destinations);
-            updateDisplayNumbers();
+            if (!updateDisplayNumbers()) return;
             hideLoading();
             if (pendingDestinations.length) alert(`위치 확인이 필요한 배송지 ${pendingDestinations.length}건은 최적화에서 제외하고 목록 끝에 유지했습니다. 주소를 수정해 주세요.`);
             
@@ -397,8 +394,7 @@ export function moveDestinationUp(id) {
     }
 
     state.setDestinations(destinations);
-    state.saveActiveData();
-    updateDisplayNumbers();
+    if (!updateDisplayNumbers()) return;
 
     const deviceId = getOrCreateDeviceId();
     const phone = localStorage.getItem('deliveryProUserPhone') || "";
@@ -425,8 +421,7 @@ export function moveDestinationDown(id) {
     }
 
     state.setDestinations(destinations);
-    state.saveActiveData();
-    updateDisplayNumbers();
+    if (!updateDisplayNumbers()) return;
 
     const deviceId = getOrCreateDeviceId();
     const phone = localStorage.getItem('deliveryProUserPhone') || "";
@@ -483,7 +478,7 @@ export async function applyHeaderCustomEnd() {
     const addr = (document.getElementById('header-inline-end-input')?.value || '').trim();
     if (!addr) {
         state.setEndLocation({ lat: 0, lng: 0, address: "" });
-        state.saveActiveData(); 
+        if (!state.saveActiveData()) return; 
         renderList(); 
         toggleHeaderEndEdit(); 
         return;
@@ -497,7 +492,7 @@ export async function applyHeaderCustomEnd() {
                 lng: coords.lng, 
                 address: coords.address_name || addr 
             });
-            state.saveActiveData(); 
+            if (!state.saveActiveData()) return; 
             renderList(); 
             toggleHeaderEndEdit();
         }

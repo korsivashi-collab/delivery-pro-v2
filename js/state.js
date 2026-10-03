@@ -14,6 +14,65 @@ let onActiveDataSaved = null;
 let lastKnownGps = null;
 let gpsWatchId = null;
 let lastGeneratedDestinationId = 0;
+const LOCAL_TRANSACTION_KEY = 'deliveryPro_local_transaction';
+let committedMemory = null;
+let localTransaction = null;
+
+function memorySnapshot(updatedAt = routeUpdatedAt) {
+    return JSON.stringify({ destinations, endLocation, startLocation, routeUpdatedAt: updatedAt });
+}
+
+function restoreMemory(snapshot) {
+    if (!snapshot) return;
+    const saved = JSON.parse(snapshot);
+    destinations = saved.destinations;
+    endLocation = saved.endLocation;
+    startLocation = saved.startLocation;
+    routeUpdatedAt = saved.routeUpdatedAt;
+}
+
+function restoreLocalValues(before) {
+    let restored = true;
+    for (const [key, value] of Object.entries(before)) {
+        try {
+            if (value === null && typeof localStorage.removeItem === 'function') localStorage.removeItem(key);
+            else localStorage.setItem(key, value === null ? '' : value);
+        } catch (_) { restored = false; }
+    }
+    if (restored) {
+        try { localStorage.setItem(LOCAL_TRANSACTION_KEY, ''); }
+        catch (_) { restored = false; }
+    }
+    return restored;
+}
+
+function pendingLocalRecovery() {
+    const raw = localStorage.getItem(LOCAL_TRANSACTION_KEY);
+    if (!raw) return null;
+    const journal = JSON.parse(raw);
+    const allowed = ['deliveryPro_active_destinations', 'deliveryPro_end_location', 'deliveryPro_route_metadata', 'deliveryPro_history'];
+    if (journal.version !== 1 || !journal.before ||
+        !Object.entries(journal.before).every(([key, value]) => allowed.includes(key) && (value === null || typeof value === 'string'))) {
+        throw new Error('로컬 복구 기록을 확인할 수 없습니다.');
+    }
+    return journal.before;
+}
+
+function writeLocalValues(values) {
+    const pending = pendingLocalRecovery();
+    if (pending && !restoreLocalValues(pending)) throw new Error('이전 로컬 저장 복구가 필요합니다.');
+    const before = Object.fromEntries(Object.keys(values).map(key => [key, localStorage.getItem(key)]));
+    // All new values and the undo record have already been serialized before any write.
+    localStorage.setItem(LOCAL_TRANSACTION_KEY, JSON.stringify({ version: 1, before }));
+    try {
+        for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value);
+        // Clearing the undo record is the commit point. Until then recovery reads the old state.
+        localStorage.setItem(LOCAL_TRANSACTION_KEY, '');
+    } catch (error) {
+        restoreLocalValues(before);
+        throw error;
+    }
+}
 
 function safeDeliveryText(value) {
     if (typeof value === 'string') return value;
@@ -114,6 +173,7 @@ export const state = {
     getRouteUpdatedAt() { return routeUpdatedAt; },
     setActiveDataSavedHandler(handler) { onActiveDataSaved = handler; },
     activateRouteOwner(ownerId) {
+        if (routeOwnerId !== (ownerId || null)) this.deactivateRouteOwner();
         routeOwnerId = ownerId || null;
         this.loadActiveData();
     },
@@ -123,6 +183,41 @@ export const state = {
         destinations = [];
         endLocation = { lat: 0, lng: 0, address: '' };
         startLocation = null;
+        committedMemory = memorySnapshot();
+    },
+    reportStorageFailure(error) {
+        console.error('배송 데이터 로컬 저장 실패:', error);
+        if (typeof alert === 'function') alert('기기에 배송 데이터를 저장하지 못했습니다. 마지막으로 저장된 상태를 유지합니다. 저장 공간과 저장소 접근 상태를 확인한 후 다시 시도해 주세요.');
+        try { if (typeof window !== 'undefined' && typeof window.renderList === 'function') window.renderList(); } catch (_) {}
+    },
+    readLocalData(key) {
+        const before = pendingLocalRecovery();
+        if (before) {
+            restoreLocalValues(before);
+            if (Object.prototype.hasOwnProperty.call(before, key)) return before[key];
+        }
+        return localStorage.getItem(key);
+    },
+    writeLocalHistory(history) {
+        if (localTransaction) { localTransaction.history = history; return true; }
+        try { writeLocalValues({ deliveryPro_history: JSON.stringify(history) }); return true; }
+        catch (error) { this.reportStorageFailure(error); return false; }
+    },
+    runLocalTransaction(change) {
+        const before = committedMemory;
+        if (localTransaction) throw new Error('로컬 저장 작업이 이미 진행 중입니다.');
+        localTransaction = {};
+        try {
+            change();
+            const history = localTransaction.history;
+            localTransaction = null;
+            return this.saveActiveData(null, history);
+        } catch (error) {
+            localTransaction = null;
+            restoreMemory(before);
+            this.reportStorageFailure(error);
+            return false;
+        }
     },
 
     // 1. 배송지 목록(destinations) 관리
@@ -179,24 +274,38 @@ export const state = {
     },
 
     // 5. 로컬스토리지에 현재 작업 데이터 저장
-    saveActiveData(updatedAt = null) {
-        if (!routeOwnerId) return;
-        routeUpdatedAt = updatedAt === null ? Math.max(Date.now(), routeUpdatedAt + 1) : updatedAt;
-        localStorage.setItem('deliveryPro_active_destinations', JSON.stringify(destinations));
-        localStorage.setItem('deliveryPro_end_location', JSON.stringify(endLocation));
-        localStorage.setItem('deliveryPro_route_metadata', JSON.stringify({ routeOwnerId, updatedAt: routeUpdatedAt, destinations, endLocation }));
+    saveActiveData(updatedAt = null, history = undefined) {
+        if (localTransaction) return true;
+        if (!routeOwnerId) return false;
+        try {
+            const revision = updatedAt === null ? Math.max(Date.now(), routeUpdatedAt + 1) : updatedAt;
+            const snapshot = memorySnapshot(revision);
+            const values = {};
+            if (history !== undefined) values.deliveryPro_history = JSON.stringify(history);
+            values.deliveryPro_active_destinations = JSON.stringify(destinations);
+            values.deliveryPro_end_location = JSON.stringify(endLocation);
+            values.deliveryPro_route_metadata = JSON.stringify({ routeOwnerId, updatedAt: revision, destinations, endLocation });
+            writeLocalValues(values);
+            routeUpdatedAt = revision;
+            committedMemory = snapshot;
+        } catch (error) {
+            restoreMemory(committedMemory);
+            this.reportStorageFailure(error);
+            return false;
+        }
         if (updatedAt === null && onActiveDataSaved) onActiveDataSaved();
+        return true;
     },
 
     // 소유자 없는 기존 캐시는 추측해서 가져오지 않습니다.
     loadActiveData() {
-        destinations = [];
-        endLocation = { lat: 0, lng: 0, address: '' };
-        startLocation = null;
-        routeUpdatedAt = 0;
-        if (!routeOwnerId) return;
         try {
-            const metadata = JSON.parse(localStorage.getItem('deliveryPro_route_metadata') || 'null');
+            const metadata = JSON.parse(this.readLocalData('deliveryPro_route_metadata') || 'null');
+            destinations = [];
+            endLocation = { lat: 0, lng: 0, address: '' };
+            startLocation = null;
+            routeUpdatedAt = 0;
+            committedMemory = memorySnapshot();
             if (!metadata || metadata.routeOwnerId !== routeOwnerId || !Number.isFinite(metadata.updatedAt)) return;
             // 하나의 소유자 스냅샷을 읽어 다른 탭의 별도 키 쓰기와 섞이지 않게 합니다.
             const savedList = metadata.destinations;
@@ -206,12 +315,11 @@ export const state = {
             this.setEndLocation(savedEnd || endLocation);
             routeUpdatedAt = metadata.updatedAt;
             if (destinations[0]) startLocation = { lat: destinations[0].lat, lng: destinations[0].lng, address: destinations[0].address };
+            committedMemory = memorySnapshot();
             // Persist repaired input without advancing the server revision.
             if (destinations !== savedList || endLocation !== savedEnd) this.saveActiveData(routeUpdatedAt);
         } catch (error) {
-            destinations = [];
-            endLocation = { lat: 0, lng: 0, address: '' };
-            routeUpdatedAt = 0;
+            this.reportStorageFailure(error);
         }
     },
 
@@ -221,6 +329,6 @@ export const state = {
         destinations.forEach((d, i) => {
             d.displayNumber = i + 1;
         });
-        this.saveActiveData(updatedAt);
+        return this.saveActiveData(updatedAt);
     }
 };

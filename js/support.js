@@ -224,8 +224,9 @@ export function classifyHistoryOwnership(record, current = getHistoryOwnershipCo
 
 // 🌟 [UI 개편] 겹침 현상 원천 차단 및 시원한 주소 가독성을 보장하는 2단 카드 레이아웃
 export function openHistoryModal() {
+    try {
     const current = getHistoryOwnershipContext();
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]')
+    let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]')
         .filter(record => classifyHistoryOwnership(record, current) === 'owned');
     let container = document.getElementById('history-list-container');
     if (!container) return;
@@ -290,25 +291,27 @@ export function openHistoryModal() {
         container.innerHTML = html;
     }
     document.getElementById('history-modal')?.classList.remove('hidden');
+    } catch (error) { state.reportStorageFailure(error); }
 }
 
 export function closeHistoryModal() { 
     document.getElementById('history-modal')?.classList.add('hidden'); 
 }
 
-export function clearAllHistory() { 
+export function clearAllHistory() {
+    try {
     if (confirm("현재 계정의 이력을 모두 삭제하시겠습니까?\n다른 계정과 미분류 이력은 보존됩니다.")) {
         const current = getHistoryOwnershipContext();
-        const history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-        localStorage.setItem('deliveryPro_history', JSON.stringify(
-            history.filter(record => classifyHistoryOwnership(record, current) !== 'owned')));
+        const history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
+        if (!state.writeLocalHistory(history.filter(record => classifyHistoryOwnership(record, current) !== 'owned'))) return;
         openHistoryModal(); 
     } 
+    } catch (error) { state.reportStorageFailure(error); }
 }
 
 export function archiveCompletedDelivery(item, tag = "", completionDocId = null, photoUrl = null, ownership = getHistoryOwnershipContext()) {
     if (!ownership.routeOwnerId || !ownership.licenseKey) throw new Error('배송 이력 소유자 정보가 없습니다.');
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
     let now = new Date(); 
     let archivedItem = { ...item }; 
     const record = {
@@ -328,14 +331,15 @@ export function archiveCompletedDelivery(item, tag = "", completionDocId = null,
         originalData: archivedItem 
     };
     history.unshift(record);
-    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+    if (!state.writeLocalHistory(history)) throw new Error('배송 이력 저장에 실패했습니다.');
     return record;
 }
 
 // 🌟 배송지 복원 시 관제 센터 서버에도 실시간 복원 동기화
 export async function restoreHistoryItem(timestamp) {
+    try {
     if (!confirm("이 배송지를 다시 진행 목록으로 되돌리시겠습니까?")) return;
-    let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+    let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
     const current = getHistoryOwnershipContext();
     const idx = history.findIndex(h => h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
     
@@ -381,15 +385,17 @@ export async function restoreHistoryItem(timestamp) {
                 alert("계정이 변경되어 이력 복원을 중단했습니다.");
                 return;
             }
-            const latestHistory = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+            const latestHistory = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
             const latestIdx = latestHistory.findIndex(h => h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
             if (latestIdx < 0) { hideLoading(); return; }
             latestHistory.splice(latestIdx, 1);
-            localStorage.setItem('deliveryPro_history', JSON.stringify(latestHistory));
-            
-            if (onRestoreDestinationCallback) {
-                await onRestoreDestinationCallback(itemToRestore);
-            }
+            const saved = state.runLocalTransaction(() => {
+                state.writeLocalHistory(latestHistory);
+                if (onRestoreDestinationCallback) onRestoreDestinationCallback(itemToRestore);
+                else { state.addDestination(itemToRestore); state.updateDisplayNumbers(); }
+            });
+            if (!saved) { hideLoading(); return; }
+            if (typeof window.renderList === 'function') window.renderList();
 
             // 🌟 복원된 최신 배송 목록을 관제 센터 서버(routes/{deviceId})에 즉시 동기화
             try {
@@ -405,6 +411,10 @@ export async function restoreHistoryItem(timestamp) {
             openHistoryModal(); 
         }
         hideLoading();
+    }
+    } catch (error) {
+        hideLoading();
+        state.reportStorageFailure(error);
     }
 }
 

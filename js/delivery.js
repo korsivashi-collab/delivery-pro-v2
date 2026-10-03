@@ -12,6 +12,13 @@ import { getOrCreateDeviceId, updatePhotoCompButtonState } from './auth.js';
 let pendingCompletionId = null;
 let selectedCompTag = "";
 
+function localCompletionContext() {
+    try {
+        return { deviceId: getOrCreateDeviceId(), phone: localStorage.getItem('deliveryProUserPhone') || '',
+            completionOwnership: getCompletionOwnershipContext() };
+    } catch (error) { state.reportStorageFailure(error); return null; }
+}
+
 // ==========================================
 // 1. 배송 완료 모달 열기
 // ==========================================
@@ -30,7 +37,8 @@ export function completeDestination(id) {
     if (etcContainer) etcContainer.classList.add('hidden');
     if (etcInput) etcInput.value = "";
     
-    updatePhotoCompButtonState(!!localStorage.getItem('deliveryProDispatchKey'));
+    try { updatePhotoCompButtonState(!!localStorage.getItem('deliveryProDispatchKey')); }
+    catch (error) { state.reportStorageFailure(error); return; }
     document.getElementById('completion-modal')?.classList.remove('hidden');
 }
 
@@ -107,8 +115,6 @@ export function confirmCompletion(photoUrl = null) {
         return; 
     }
 
-    // 모달 닫기 (내부에서 pendingCompletionId가 null이 되어도 targetId가 안전하게 유지됨)
-    closeCompletionModal();
 
     // 🌟 [1단계: 로딩 없는 즉각 화면 처리 및 순간 GPS 캡처]
     const lastGps = state.getLastKnownGps();
@@ -123,15 +129,18 @@ export function confirmCompletion(photoUrl = null) {
         isRealGpsCaptured = true;
     }
 
-    const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone') || "";
-    const completionOwnership = getCompletionOwnershipContext();
+    const context = localCompletionContext();
+    if (!context) return;
+    const { deviceId, phone, completionOwnership } = context;
 
     // 지난배송 이력 즉시 등록 및 리스트 제거
-    const historyEntry = archiveCompletedDelivery(item, finalTag, null, photoUrl, { ...completionOwnership, phone, deviceId });
-    state.removeDestination(targetId); // 🌟 확실하게 targetId로 삭제
-    state.updateDisplayNumbers();
-    state.saveActiveData(); // 🌟 로컬 스토리지에 즉시 저장 동기화
+    let historyEntry;
+    if (!state.runLocalTransaction(() => {
+        historyEntry = archiveCompletedDelivery(item, finalTag, null, photoUrl, { ...completionOwnership, phone, deviceId });
+        state.removeDestination(targetId);
+        state.updateDisplayNumbers();
+    })) return;
+    closeCompletionModal();
     if (typeof window.renderList === 'function') window.renderList();
     
     // 잔여 배송 목록 관제 서버 즉시 동기화
@@ -149,11 +158,11 @@ export function confirmCompletion(photoUrl = null) {
             
             // 로컬 이력에 서버 등록 문서 ID 동기화
             if (completionDocId) {
-                let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+                let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
                 const hIdx = history.findIndex(h => h.id === historyEntry.id && h.timestamp === historyEntry.timestamp && h.routeOwnerId === historyEntry.routeOwnerId);
                 if (hIdx > -1) {
                     history[hIdx].completionDocId = completionDocId;
-                    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+                    state.writeLocalHistory(history);
                 }
             }
         } catch (e) {
@@ -172,15 +181,17 @@ export function cancelDestination(id) {
     const item = destinations.find(d => d.id === id);
     if (!item) return;
 
-    // 1. 화면 및 리스트에서 즉시 제거
-    state.removeDestination(id);
-    state.updateDisplayNumbers();
-    state.saveActiveData(); // 🌟 로컬 스토리지 즉시 동기화
+    const context = localCompletionContext();
+    if (!context) return;
+    const { deviceId, phone, completionOwnership } = context;
+    const cancelTag = '배송 취소';
+    let historyEntry;
+    if (!state.runLocalTransaction(() => {
+        historyEntry = archiveCompletedDelivery(item, cancelTag, null, null, { ...completionOwnership, phone, deviceId });
+        state.removeDestination(id);
+        state.updateDisplayNumbers();
+    })) return;
     if (typeof window.renderList === 'function') window.renderList();
-
-    const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone') || "";
-    const completionOwnership = getCompletionOwnershipContext();
 
     // 2. 관제 센터 서버(routes/{deviceId})의 남은 배송 목록 즉시 동기화
     saveRouteToFirestore(deviceId, phone, state.getDestinations());
@@ -199,10 +210,6 @@ export function cancelDestination(id) {
                 isRealGpsCaptured = true;
             }
 
-            const cancelTag = "배송 취소";
-
-            // 로컬 '지난배송' 목록에 즉시 등록
-            const historyEntry = archiveCompletedDelivery(item, cancelTag, null, null, { ...completionOwnership, phone, deviceId });
 
             // Firestore 관제 서버에 취소 내역 비동기 전송
             const completionDocId = await saveCompletionToFirestore(
@@ -210,11 +217,11 @@ export function cancelDestination(id) {
             );
 
             if (completionDocId) {
-                let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+                let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
                 const hIdx = history.findIndex(h => h.id === historyEntry.id && h.timestamp === historyEntry.timestamp && h.routeOwnerId === historyEntry.routeOwnerId);
                 if (hIdx > -1) {
                     history[hIdx].completionDocId = completionDocId;
-                    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+                    state.writeLocalHistory(history);
                 }
             }
         } catch (e) {
@@ -244,14 +251,12 @@ export function initPhotoCompletion() {
             return;
         }
 
-        // 모달 즉시 닫기
-        closeCompletionModal();
 
         // 🌟 [1단계: 체감 0초 즉각 완료] 대기 없이 화면에서 즉시 배송지 삭제 및 순간 GPS 확보
         const finalTag = selectedCompTag && selectedCompTag !== '기타' ? selectedCompTag : "사진 완료";
-        const deviceId = getOrCreateDeviceId();
-        const phone = localStorage.getItem('deliveryProUserPhone') || "";
-        const completionOwnership = getCompletionOwnershipContext();
+        const context = localCompletionContext();
+        if (!context) { e.target.value = ''; return; }
+        const { deviceId, phone, completionOwnership } = context;
 
         const lastGps = state.getLastKnownGps();
         let actualLat = item.lat;
@@ -266,12 +271,13 @@ export function initPhotoCompletion() {
         }
 
         // 지난배송 목록에 즉시 등록 (사진 URL은 백그라운드 업로드 완료 후 업데이트)
-        const historyEntry = archiveCompletedDelivery(item, finalTag, null, null, { ...completionOwnership, phone, deviceId });
-
-        // 메인 리스트에서 즉시 제거 및 순번 재정렬
-        state.removeDestination(targetId);
-        state.updateDisplayNumbers();
-        state.saveActiveData(); // 🌟 로컬 스토리지 즉시 동기화
+        let historyEntry;
+        if (!state.runLocalTransaction(() => {
+            historyEntry = archiveCompletedDelivery(item, finalTag, null, null, { ...completionOwnership, phone, deviceId });
+            state.removeDestination(targetId);
+            state.updateDisplayNumbers();
+        })) { e.target.value = ''; return; }
+        closeCompletionModal();
         if (typeof window.renderList === 'function') window.renderList();
 
         // 관제 서버 잔여 배송 목록 즉시 동기화
@@ -292,7 +298,7 @@ export function initPhotoCompletion() {
                 );
 
                 // 로컬 지난배송 이력에 서버 등록 번호 및 사진 링크 갱신
-                let history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
+                let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
                 const hIdx = history.findIndex(h => h.id === historyEntry.id && h.timestamp === historyEntry.timestamp && h.routeOwnerId === historyEntry.routeOwnerId);
                 if (hIdx > -1) {
                     if (completionDocId) history[hIdx].completionDocId = completionDocId;
@@ -300,7 +306,7 @@ export function initPhotoCompletion() {
                         history[hIdx].photoUrl = photoUrl;
                         history[hIdx].hasPhoto = true;
                     }
-                    localStorage.setItem('deliveryPro_history', JSON.stringify(history));
+                    state.writeLocalHistory(history);
                 }
             } catch (err) {
                 console.error("사진 백그라운드 완료 처리 중 오류:", err);
