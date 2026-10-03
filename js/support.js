@@ -304,13 +304,18 @@ export async function exportHistoryJson() {
         const exportedAt = new Date().toISOString();
         const json = JSON.stringify({ exportedAt, source: 'deliveryPro_history',
             recordCount: historyRecords.length, historyRecords }, null, 2);
-        const filename = `deliveryPro_history_${exportedAt.replace(/[:.]/g, '-')}.json`;
+        const filename = `deliveryPro-history-${exportedAt.slice(0, 10)}.json`;
         // iPhone Safari에서는 공유 시트의 파일 저장/전송 기능을 우선 사용합니다.
         if (typeof File === 'function' && navigator.share && navigator.canShare) {
-            const file = new File([json], filename, { type: 'application/json' });
-            if (navigator.canShare({ files: [file] })) {
-                await navigator.share({ files: [file] });
-                return;
+            try {
+                const file = new File([json], filename, { type: 'application/json' });
+                if (navigator.canShare({ files: [file] })) {
+                    await navigator.share({ files: [file] });
+                    return;
+                }
+            } catch (error) {
+                // 공유 취소는 정상 종료하고, 다른 실패는 다운로드로 이어갑니다.
+                if (error.name === 'AbortError') return;
             }
         }
         const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
