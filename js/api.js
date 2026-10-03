@@ -249,35 +249,6 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
     }
 }
 
-// 4. GPS 요청 리스너
-export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCallback) {
-    const q = query(collection(db, "gps_requests"), where("deviceId", "==", myDeviceId));
-    return onSnapshot(q, (snapshot) => {
-        snapshot.docChanges().forEach(async (change) => {
-            if (change.type === "added" || change.type === "modified") {
-                const now = new Date();
-                const isWeekday = now.getDay() >= 1 && now.getDay() <= 5;
-                const isWorkingTime = now.getHours() >= 9 && now.getHours() < 17;
-                if (!isWeekday || !isWorkingTime) return;
-
-                const req = change.doc.data();
-                if (req && (Date.now() - req.requestedAt < 30000)) {
-                    const gps = await getRealGpsCallback();
-                    if (gps && gps.lat && gps.lng) {
-                        await setDoc(doc(db, "gps_reports", myDeviceId), {
-                            deviceId: myDeviceId,
-                            phone: myPhone || "",
-                            lat: gps.lat,
-                            lng: gps.lng,
-                            updatedAt: Date.now()
-                        }, { merge: true });
-                    }
-                }
-            }
-        });
-    });
-}
-
 // 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (통로 독립 격리 방어)
 export function listenToActiveRoutes(deviceId, phone, onRoutesReceived, onRoutesCleared, ownerId = state.getRouteOwnerId()) {
     if (!ownerId) return () => {};

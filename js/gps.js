@@ -14,6 +14,13 @@ import { state } from './state.js';
 let unsubRequestDevice = null;
 let unsubRequestKey = null;
 let lastReportTime = 0;
+let reportInFlight = null;
+let reportRetryAfter = 0;
+let reportFailures = 0;
+let lastUploadedAt = 0;
+let lastUploadedDevice = null;
+let requestListenerIdentity = '';
+const gpsRequests = new Map();
 let isGpsWatcherActive = false; // 기사님의 GPS 활성화 설정 상태 보존
 let gpsSession = 0;
 
@@ -43,66 +50,99 @@ function getDbInstance() {
 // ==========================================
 // 0. 관제 서버(Firestore)로 GPS 좌표 보고 엔진
 // ==========================================
-export async function reportGpsToFirestore(lat, lng, force = false) {
-    if (!lat || !lng) return;
-
-    const now = Date.now();
-    // 45초 이내 중복 전송 방지 (관제 강제 요청인 force=true 제외)
-    if (!force && now - lastReportTime < 45000) return;
-    lastReportTime = now;
-
-    const deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
-    if (!deviceId) return;
-
-    const phone = localStorage.getItem('deliveryProUserPhone') || '';
-    const db = getDbInstance();
-    if (!db) return;
-
-    try {
-        await setDoc(doc(db, "gps_reports", deviceId), {
-            deviceId: deviceId,
-            phone: phone,
-            lat: parseFloat(lat),
-            lng: parseFloat(lng),
-            updatedAt: now
-        }, { merge: true });
-    } catch (e) {
-        console.error("관제 위치 보고 오류:", e);
+export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null) {
+    const session = gpsSession;
+    if (reportInFlight) {
+        if (!force) return false;
+        await reportInFlight;
     }
+    if (session !== gpsSession || document.visibilityState === 'hidden' || navigator.onLine === false) return false;
+    const gps = state.getLastKnownGps();
+    if (!gps) return false;
+    // A pending SDK operation can outlive its original fix. Always send the current valid fix.
+    lat = gps.lat; lng = gps.lng;
+    const now = Date.now();
+    if (now < reportRetryAfter || (!force && now - lastReportTime < 45000)) return false;
+    if (requestedAt !== null && (now - requestedAt < 0 || now - requestedAt >= 20000)) return false;
+    let deviceId, phone, db;
+    try {
+        deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
+        phone = localStorage.getItem('deliveryProUserPhone') || '';
+        db = getDbInstance();
+    } catch (error) { console.error('GPS 보고 준비 오류:', error); return false; }
+    if (!deviceId || !db) return false;
+    // A successful ordinary report made after this request already answers it.
+    if (force && requestedAt !== null && lastUploadedDevice === deviceId && lastUploadedAt >= requestedAt) return true;
+    // Multiple forced callers may have awaited the same earlier write.
+    if (reportInFlight) return reportGpsToFirestore(lat, lng, force, requestedAt);
+    reportInFlight = Promise.resolve().then(async () => {
+        try {
+            await setDoc(doc(db, 'gps_reports', deviceId), {
+                deviceId, phone, lat, lng, updatedAt: now
+            }, { merge: true });
+            lastReportTime = Date.now();
+            lastUploadedAt = now;
+            lastUploadedDevice = deviceId;
+            reportFailures = 0;
+            reportRetryAfter = 0;
+            return true;
+        } catch (error) {
+            reportFailures++;
+            reportRetryAfter = Date.now() + Math.min(30000, 5000 * 2 ** Math.min(reportFailures - 1, 3));
+            console.error('관제 위치 보고 오류:', error);
+            return false;
+        } finally { reportInFlight = null; }
+    });
+    return reportInFlight;
 }
 
-// ==========================================
-// 0-1. 관제 센터의 위치 확인 신호(gps_requests) 실시간 감지
-// ==========================================
+// Device and license documents carry the same requestedAt for one control-panel request.
+async function handleGpsRequest(snap, identity, deviceId) {
+    if (identity !== requestListenerIdentity || document.visibilityState === 'hidden' || navigator.onLine === false || !snap.exists()) return false;
+    const data = snap.data();
+    const timestamp = data.requestedAt;
+    const age = Date.now() - timestamp;
+    if (!Number.isFinite(timestamp) || age < 0 || age >= 20000) return false;
+    const key = deviceId + '|' + timestamp;
+    for (const [oldKey, entry] of gpsRequests) if (Date.now() - entry.timestamp >= 120000) gpsRequests.delete(oldKey);
+    const previous = gpsRequests.get(key);
+    if (previous?.done) return true;
+    if (previous?.promise) return previous.promise;
+    if (Date.now() < reportRetryAfter) return false;
+    const session = gpsSession;
+    const entry = { timestamp, done: false, promise: null };
+    gpsRequests.set(key, entry);
+    entry.promise = Promise.resolve().then(async () => {
+        try {
+            const gps = await getDeviceRealGPS();
+            if (!gps || !state.isFreshGps(gps) || session !== gpsSession || identity !== requestListenerIdentity) return false;
+            entry.done = await reportGpsToFirestore(gps.lat, gps.lng, true, timestamp);
+            return entry.done;
+        } catch (error) { console.warn('GPS 요청 처리 실패:', error); return false; }
+        finally { entry.promise = null; }
+    });
+    return entry.promise;
+}
+
 function listenToGpsRequests() {
+    if (!isGpsWatcherActive || document.visibilityState === 'hidden') return;
     const deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
     const licKey = localStorage.getItem('deliveryProKey');
+    const identity = deviceId + '|' + (licKey || '');
+    if (identity !== requestListenerIdentity) {
+        if (unsubRequestDevice) unsubRequestDevice();
+        if (unsubRequestKey) unsubRequestKey();
+        unsubRequestDevice = null; unsubRequestKey = null;
+        requestListenerIdentity = identity;
+    }
     const db = getDbInstance();
-
-    if (!db) {
-        setTimeout(listenToGpsRequests, 1000);
-        return;
-    }
-
-    const handleRequest = async (snap) => {
-        if (!snap.exists()) return;
-        const reqData = snap.data();
-        
-        // 최근 20초 이내 유효 요청에 대해서만 1회 강제 위치 보고
-        if (reqData.requestedAt && Date.now() - reqData.requestedAt < 20000) {
-            const pos = await getDeviceRealGPS();
-            if (pos && pos.lat && pos.lng) {
-                await reportGpsToFirestore(pos.lat, pos.lng, true);
-            }
-        }
-    };
-
+    if (!db) { setTimeout(listenToGpsRequests, 1000); return; }
+    const handle = snap => handleGpsRequest(snap, identity, deviceId);
     if (deviceId && !unsubRequestDevice) {
-        try { unsubRequestDevice = onSnapshot(doc(db, "gps_requests", deviceId), handleRequest); } catch (e) {}
+        try { unsubRequestDevice = onSnapshot(doc(db, 'gps_requests', deviceId), handle); } catch (error) { console.warn('GPS 요청 구독 실패:', error); }
     }
-
     if (licKey && licKey !== deviceId && !unsubRequestKey) {
-        try { unsubRequestKey = onSnapshot(doc(db, "gps_requests", licKey), handleRequest); } catch (e) {}
+        try { unsubRequestKey = onSnapshot(doc(db, 'gps_requests', licKey), handle); } catch (error) { console.warn('GPS 요청 구독 실패:', error); }
     }
 }
 
@@ -140,6 +180,7 @@ function _startHardwareWatcher() {
 
 function _stopHardwareWatcher() {
     gpsSession++;
+    requestListenerIdentity = '';
     invalidateGps();
     const watchId = state.getGpsWatchId();
     if (watchId !== null && navigator.geolocation) {
@@ -241,4 +282,13 @@ export async function setEndLocationGPS() {
         console.warn('현위치 종료점 설정 실패:', error);
         alert("현재 위치를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.");
     } finally { hideLoading(); }
+}
+
+// The SDK owns retries while a write is pending; reconnect starts no competing write.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+    window.addEventListener('online', async () => {
+        if (!isGpsWatcherActive || document.visibilityState !== 'visible' || reportInFlight) return;
+        const gps = await getDeviceRealGPS();
+        if (gps && state.isFreshGps(gps)) await reportGpsToFirestore(gps.lat, gps.lng);
+    });
 }

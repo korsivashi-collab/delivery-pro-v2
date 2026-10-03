@@ -8,7 +8,6 @@ import { state } from './state.js';
 import { 
     firebaseVerifyLicense, 
     watchLicenseStatus, 
-    startGpsRequestLister, 
     startDispatchMessageListener, 
     firebaseStartTrial, 
     firebaseClearDeviceData,
@@ -20,11 +19,10 @@ import {
     saveMessageToLocalHistory, 
     showDispatchAlertPopup 
 } from './support.js';
-import { getDeviceRealGPS, startGpsWatcher } from './gps.js';
+import { startGpsWatcher } from './gps.js';
 
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
-let gpsRequestWatcherUnsub = null;  
 let activeRoutesWatcherUnsub = null;
 
 let onRemoteRoutesReceivedCallback = null;
@@ -178,9 +176,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
         }
     });
 
-    // 관제 GPS 위치 요청 감시
-    if (gpsRequestWatcherUnsub) gpsRequestWatcherUnsub();
-    gpsRequestWatcherUnsub = startGpsRequestLister(deviceId, phone, key, getDeviceRealGPS);
+    // GPS 요청 구독과 보고는 gps.js의 단일 경로에서 관리합니다.
 
     // 관제 센터 실시간 자동할당 동선 감시 (기기ID 및 휴대폰 번호 다중 감시)
     if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
@@ -439,7 +435,6 @@ export async function logout() {
     
     try { if (typeof licenseWatcherUnsub === 'function') { licenseWatcherUnsub(); } } catch(e) {}
     try { if (typeof dispatchMsgWatcherUnsub === 'function') { dispatchMsgWatcherUnsub(); } } catch(e) {}
-    try { if (typeof gpsRequestWatcherUnsub === 'function') { gpsRequestWatcherUnsub(); } } catch(e) {}
     try { if (typeof activeRoutesWatcherUnsub === 'function') { activeRoutesWatcherUnsub(); } } catch(e) {}
 
     clearAuthStorage();
