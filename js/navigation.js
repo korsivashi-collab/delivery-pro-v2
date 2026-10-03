@@ -43,30 +43,9 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 function launchNavigationApp(url, appName) {
     const failureMessage = `${appName} 앱을 실행할 수 없습니다. 설치 여부를 확인해주세요.`;
     try {
-        // Android 플러그인은 실제 OS 실행 오류를 안내한다. 웹에서는 성공 여부를 추정하지 않는다.
-        if (!window.Capacitor?.isPluginAvailable?.('NavigationLaunch')) {
-            let notice = document.getElementById('navigation-launch-notice');
-            if (!notice) {
-                notice = document.createElement('div');
-                notice.id = 'navigation-launch-notice';
-                notice.setAttribute('role', 'status');
-                notice.className = 'fixed bottom-4 left-4 right-4 z-[150] bg-slate-900 text-white rounded-xl p-4 text-sm shadow-xl';
-                const text = document.createElement('span');
-                text.id = 'navigation-launch-message';
-                const close = document.createElement('button');
-                close.type = 'button'; close.textContent = '닫기';
-                close.className = 'ml-3 underline';
-                close.onclick = () => notice.classList.add('hidden');
-                notice.append(text, close);
-                document.body.appendChild(notice);
-            }
-            document.getElementById('navigation-launch-message').textContent =
-                `${appName} 앱으로 연결합니다. 실행되지 않으면 앱 설치 여부를 확인해주세요.`;
-            notice.classList.remove('hidden');
-        }
+        // 웹은 Safari/OS 동작에 맡기고, Android의 실제 실패 안내는 네이티브 플러그인이 처리한다.
         window.location.href = url;
     } catch (error) {
-        document.getElementById('navigation-launch-notice')?.classList.add('hidden');
         alert(failureMessage);
     }
 }
