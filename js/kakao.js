@@ -149,6 +149,7 @@ export async function coordToAddress(x, y) {
 // ==========================================
 // 상호 후보 전체 문자열 간 정규화 편집거리 기준(추후 80으로 조정 가능).
 export const STORE_NAME_MATCH_THRESHOLD = 70;
+export const STORE_NAME_MATCH_MIN_MARGIN = 10;
 export function normalizeStoreMatchText(value) {
     return String(value || '').normalize('NFKC').toLowerCase()
         .replace(/\(\s*주\s*\)|\(\s*유\s*\)|주\s*식\s*회\s*사|유\s*한\s*회\s*사/g, '')
@@ -170,31 +171,34 @@ export function matchOCRStoreCandidate(candidate, places, threshold = STORE_NAME
         const target = normalizeStoreMatchText(place);
         const candidateScores = names.map(name => ({ name, score: target ? 100 * (1 - getLevenshteinDistance(name, target) / Math.max(name.length, target.length)) : 0 }));
         let score = Math.max(0, ...candidateScores.map(item => item.score));
-        if (target.length === 2 && shortEvidence.includes(target)) score = 100;
+        let rawScore = target.length === 2 && shortEvidence.includes(target) ? 100 : 0;
+        let rawEvidence = target.length === 2 && rawScore === 100 ? target : null;
         // 원문 전체 길이와 비교하지 않고 장소명 길이에 가까운 구간을 비교한다.
         if (target.length >= 3) {
             for (let start = 0; start < raw.length; start++) {
                 for (let size = Math.max(3, Math.ceil(target.length * threshold / 100)); size <= target.length + 1; size++) {
                     const part = raw.slice(start, start + size);
                     if (part.length < 3) continue;
-                    score = Math.max(score, 100 * (1 - getLevenshteinDistance(part, target) / Math.max(part.length, target.length)));
+                    const similarity = 100 * (1 - getLevenshteinDistance(part, target) / Math.max(part.length, target.length));
+                    if (similarity > rawScore) { rawScore = similarity; rawEvidence = part; }
                 }
             }
         }
-        return { place, score, candidateScores };
+        score = Math.max(score, rawScore);
+        return { place, score, candidateScores, rawScore, rawEvidence };
     }).sort((a, b) => b.score - a.score);
     if (diagnostics) diagnostics.similarities = ranked;
     logStoreNameDiagnostic('OCR 후보 카카오 비교', { candidate, threshold, ranked, fullTextEvidence: !!raw });
     if (!ranked.length || ranked[0].score < threshold) return null;
-    const qualifying = ranked.filter(item => item.score >= threshold);
-    if (new Set(qualifying.map(item => normalizeStoreMatchText(item.place))).size !== 1) return null;
+    const rival = ranked.find(item => normalizeStoreMatchText(item.place) !== normalizeStoreMatchText(ranked[0].place));
+    if (rival && ranked[0].score - rival.score < STORE_NAME_MATCH_MIN_MARGIN) return null;
     return ranked[0].place;
 }
 
 // 후보가 상호 필드 전체와 일치하는지 평가하며, 길이만으로 확정하지 않는다.
 export function assessOCRStoreCandidate(name, rawText) {
     const normalized = normalizeStoreMatchText(name);
-    const fields = [...String(rawText || '').matchAll(/(?:상\s*호(?:\s*\(\s*법인명\s*\))?|법인명|업체명|간판명|배송지명)\s*[:：|]?([\s\S]*?)(?=성\s*명|대표자|담당자|사업장|주\s*소|전화|연락처|등록번호|업태|종목|공급|$)/g)]
+    const fields = [...String(rawText || '').matchAll(/(?:상\s*호(?:\s*\(\s*법인명\s*\))?|법인명|업체명|매장명|거래처명|가맹점명|간판명|배송지명(?:\s*\(\s*간판명\s*\))?)\s*[:：|]?([\s\S]*?)(?=성\s*명|대표자|담당자|사업장|주\s*소|전화|연락처|등록번호|업태|종목|공급|$)/g)]
         .map(match => ({ raw: match[1].trim(), normalized: normalizeStoreMatchText(match[1]) }));
     const completeFields = fields.filter(field => field.normalized === normalized);
     const longerField = fields.some(field => field.normalized.includes(normalized) && field.normalized.length > normalized.length);

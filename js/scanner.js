@@ -19,6 +19,7 @@ import {
     getPOIsByAddress, 
     matchOCRStoreCandidate,
     assessOCRStoreCandidate,
+    normalizeStoreMatchText,
     STORE_NAME_MATCH_THRESHOLD
 } from './kakao.js';
 import { state } from './state.js';
@@ -311,16 +312,31 @@ export function initCameraScan() {
                 storeDecision.textCandidate = textStore;
 
                 // 후보 풀 구성 (레이아웃 상호 -> 텍스트 영역 상호)
-                const ocrCandidates = [...new Set([layoutResult.name, textStore].filter(Boolean))];
+                const ocrCandidates = [...new Set([layoutResult.name, ...(layoutResult.candidates || []).map(c => c.name), textStore].filter(Boolean))];
+                const normalizedCandidates = [...new Set(ocrCandidates.map(normalizeStoreMatchText))];
+                const assessments = ocrCandidates.map(name => assessOCRStoreCandidate(name, storeOCRText));
+                const trusted = assessments.filter(a => a.trustworthy && !isInvalidStoreCandidate(a.name));
+                const agreement = layoutResult.name && textStore && normalizeStoreMatchText(layoutResult.name) === normalizeStoreMatchText(textStore);
+                const clearCell = (layoutResult.candidates || []).some(c => c.name === layoutResult.name && c.cell?.confidenceReliable);
+                const unambiguous = normalizedCandidates.length === 1 && trusted.length > 0;
+                storeDecision.assessments = assessments;
+                storeDecision.kakaoCalled = false;
+                if (unambiguous && (agreement || clearCell || trusted.length === 1)) {
+                    finalStoreName = layoutResult.name || trusted[0].name;
+                    storeDecision.source = agreement ? 'ocr-agreement' : clearCell ? 'ocr-cell' : 'ocr-trusted';
+                }
 
                 // 3-3. 카카오 POI 조회 (보정용 교차 검증)
                 let kakaoResult = { places: [], buildingNames: [] };
                 try {
-                    kakaoResult = await getPOIsByAddress(addressStr, true);
+                    if (!finalStoreName) {
+                        storeDecision.kakaoCalled = true;
+                        kakaoResult = await getPOIsByAddress(addressStr, true);
+                    }
                 } catch (err) {}
 
                 // [경로 A] 카카오 등록 장소와 70% 이상 일치 시 공식 장소명 채택
-                if (ocrCandidates.length > 0 && kakaoResult.places && kakaoResult.places.length > 0) {
+                if (!finalStoreName && ocrCandidates.length > 0 && kakaoResult.places && kakaoResult.places.length > 0) {
                     finalStoreName = matchOCRStoreCandidate(ocrCandidates, kakaoResult.places, STORE_NAME_MATCH_THRESHOLD, ocrCandidates.join('\n'), storeDecision);
                     if (finalStoreName) {
                         storeDecision.kakaoMatched = true;
@@ -330,7 +346,7 @@ export function initCameraScan() {
 
                 // [경로 B] 카카오 장소 검색에 없는 경우: OCR 추출 상호를 100% 보존 (절대 버리지 않음)
                 if (!finalStoreName) {
-                    const validOcrCandidate = ocrCandidates.find(c => !isInvalidStoreCandidate(c));
+                    const validOcrCandidate = !kakaoResult.places.length && unambiguous ? trusted[0]?.name : null;
                     if (validOcrCandidate) {
                         finalStoreName = validOcrCandidate;
                         storeDecision.source = 'ocr-direct-fallback';

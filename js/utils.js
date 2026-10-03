@@ -193,6 +193,31 @@ export function extractPhoneLogic(text) {
 // 6. 범용 도로명/지번 주소 정밀 추출 슬롯 엔진
 // ==========================================
 export function extractAddressLogic(text) {
+    const fallback = extractAddressSingleLegacy(text);
+    if (!text || typeof text !== 'string') return fallback;
+    const flat = text.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2').replace(/\s+/g, ' ');
+    const provincePattern = '(?:서울(?:특별시)?|부산(?:광역시)?|대구(?:광역시)?|인천(?:광역시)?|광주(?:광역시)?|대전(?:광역시)?|울산(?:광역시)?|세종(?:특별자치시)?|경기(?:도)?|강원(?:특별자치도|도)?|충북|충남|충청북도|충청남도|전북(?:특별자치도)?|전남|전라북도|전라남도|경북|경남|경상북도|경상남도|제주(?:특별자치도|도)?)';
+    const startRegex = new RegExp(`(^|[\\s\\[\\(])((?:${provincePattern}|[가-힣]{2,6}(?:시|군|구))\\s+(?:[가-힣]{1,10}(?:시|군|구)\\s+)*)`, 'g');
+    const starts = [...flat.matchAll(startRegex)].map(m => m.index + m[1].length);
+    const candidates = starts.map((start, i) => ({ start, end: starts[i + 1] ?? flat.length, address: extractAddressSingleLegacy(flat.slice(start, starts[i + 1])) })).filter(c => c.address);
+    if (new Set(candidates.map(c => c.address)).size < 2) return fallback;
+    // 공급받는 자/배송지명 복합어를 먼저 매칭해 공급자/배송지로 잘못 분할하지 않는다.
+    const roles = [...flat.matchAll(/배송지명\s*\(\s*간판명\s*\)|공급\s*받는\s*자|받으시는\s*분|보내는\s*분|받는\s*분|배송지|배송처|납품처|수령지|수취인|수하인|도착지|거래처|공급자|발송처|출하처|본사|화주/g)];
+    for (const c of candidates) {
+        const preceding = roles.filter(r => r.index + r[0].length <= c.start && !r[0].startsWith('배송지명'));
+        const role = preceding.at(-1)?.[0].replace(/\s/g, '') || '';
+        c.role = role;
+        c.score = /^(?:공급자|발송처|보내는분|출하처|본사|화주)$/.test(role) ? -100 : role ? 100 : 0;
+        // 간판명 단독은 사용하지 않고, 복합 배송지명은 이미 확인된 배송 역할을 보조한다.
+        if (c.score > 0 && roles.some(r => r.index >= c.start && r.index < c.end && r[0].startsWith('배송지명'))) c.score += 10;
+    }
+    const scores = [...new Set(candidates.map(c => c.address))].map(address => ({ address, score: Math.max(...candidates.filter(c => c.address === address).map(c => c.score)) })).sort((a, b) => b.score - a.score);
+    const selected = scores[0].score > scores[1].score ? scores[0].address : fallback;
+    logStoreNameDiagnostic('복수 주소 역할 선택', { candidates, fallback, selected });
+    return selected;
+}
+
+function extractAddressSingleLegacy(text) {
     if (!text || typeof text !== 'string') return null;
     try {
         let processedText = text;
@@ -356,7 +381,9 @@ export function extractStoreNameByLayout(pages = []) {
                 previousBox = union(continuation);
             }
             const value = parts.map(t => t.text.trim()).join(' ').replace(/\s+/g, ' ').trim();
-            const cell = { page: page.pageNumber, label: label.text, type: label.type, box: parts.length ? union(parts) : null, value, tokenCount: parts.length };
+            const confidences = parts.map(t => t.confidence);
+            const confidenceReliable = confidences.length > 0 && confidences.every(c => typeof c === 'number' && c >= 0.5) && confidences.reduce((a, b) => a + b, 0) / confidences.length >= 0.7;
+            const cell = { confidenceReliable, page: page.pageNumber, label: label.text, type: label.type, box: parts.length ? union(parts) : null, value, tokenCount: parts.length };
             cells.push(cell);
             if (label.type === 'address') parts.forEach(t => excludedTextSegments.push(...(t.textSegments || [])));
             if (label.type === 'store' && value && !isInvalidStoreCandidate(value)) candidates.push({ name: value, score: 95, source: 'layout-cell', cell });
