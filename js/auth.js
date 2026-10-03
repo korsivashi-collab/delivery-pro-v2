@@ -19,7 +19,7 @@ import {
     saveMessageToLocalHistory, 
     showDispatchAlertPopup 
 } from './support.js';
-import { startGpsWatcher } from './gps.js';
+import { startGpsWatcher, stopGpsWatcher } from './gps.js';
 
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
@@ -28,6 +28,63 @@ let activeRoutesWatcherUnsub = null;
 let onRemoteRoutesReceivedCallback = null;
 let onRemoteRoutesClearedCallback = null;
 let cachedRemoteRoutes = null;
+
+// 인증 성공 시 전달된 정식 라이선스 키로만 설정 범위를 선택한다.
+let gpsPreferenceStorageKey = null;
+let gpsPreferenceEnabled = false;
+
+function syncGpsPreferenceToggle() {
+    const toggle = document.getElementById('gps-toggle');
+    if (!toggle) return;
+    toggle.checked = gpsPreferenceEnabled;
+    toggle.disabled = !gpsPreferenceStorageKey;
+}
+
+function resetGpsPreferenceSession() {
+    stopGpsWatcher();
+    gpsPreferenceStorageKey = null;
+    gpsPreferenceEnabled = false;
+    syncGpsPreferenceToggle();
+}
+
+function restoreGpsPreference(verifiedKey) {
+    resetGpsPreferenceSession();
+    if (typeof verifiedKey !== 'string' || !verifiedKey) return;
+    gpsPreferenceStorageKey = `deliveryPro_gps_enabled:${encodeURIComponent(verifiedKey)}`;
+    try {
+        const saved = localStorage.getItem(gpsPreferenceStorageKey);
+        // 저장값이 없는 계정만 기존 기본값 ON을 적용한다.
+        gpsPreferenceEnabled = saved === null || saved === 'true';
+    } catch (error) {
+        console.warn('GPS 설정 복구 실패:', error);
+        alert('GPS 설정을 읽을 수 없어 위치 확인을 중단했습니다. 저장소 상태를 확인한 후 다시 설정해 주세요.');
+    }
+    syncGpsPreferenceToggle();
+}
+
+function applyGpsPreference() {
+    syncGpsPreferenceToggle();
+    if (gpsPreferenceStorageKey && gpsPreferenceEnabled) startGpsWatcher();
+    else stopGpsWatcher();
+}
+
+export function setGpsPreference(enabled) {
+    if (!gpsPreferenceStorageKey || typeof enabled !== 'boolean') {
+        syncGpsPreferenceToggle();
+        return false;
+    }
+    try {
+        localStorage.setItem(gpsPreferenceStorageKey, String(enabled));
+    } catch (error) {
+        console.warn('GPS 설정 저장 실패:', error);
+        syncGpsPreferenceToggle();
+        alert('GPS 설정을 저장하지 못했습니다. 기존 설정을 유지합니다. 저장소 상태를 확인한 후 다시 시도해 주세요.');
+        return false;
+    }
+    gpsPreferenceEnabled = enabled;
+    applyGpsPreference();
+    return true;
+}
 
 // ==========================================
 // 0. 관제 자동할당 동선 수신 핸들러 등록 (app.js 연동용)
@@ -76,6 +133,7 @@ export function getOrCreateDeviceId() {
 // 2. 인증 정보 로컬 스토리지 초기화
 // ==========================================
 export function clearAuthStorage() {
+    resetGpsPreferenceSession();
     if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
     activeRoutesWatcherUnsub = null;
     cachedRemoteRoutes = null;
@@ -127,7 +185,7 @@ export function unlockApp() {
         mainApp.classList.add('flex');
     }
     updateExpireBadge(); 
-    startGpsWatcher();
+    applyGpsPreference();
 }
 
 // ==========================================
@@ -155,6 +213,7 @@ export function startLicenseRealtimeWatcher(key) {
 // ==========================================
 export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey, routeOwnerId) {
     state.activateRouteOwner(routeOwnerId);
+    restoreGpsPreference(key);
     cachedRemoteRoutes = null;
     if (typeof window.renderList === 'function') window.renderList();
     unlockApp();
@@ -423,6 +482,7 @@ export async function startFreeTrial() {
 // ==========================================
 export async function logout() {
     if (!confirm("로그아웃 하시겠습니까?\n로그아웃 시 기기 정보가 초기화되어 다른 기기에서 로그인할 수 있습니다.")) return;
+    resetGpsPreferenceSession();
     
     const currentKey = localStorage.getItem('deliveryProKey');
     if (currentKey && typeof firebaseClearDeviceData === 'function') {

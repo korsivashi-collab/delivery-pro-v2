@@ -24,12 +24,11 @@ import {
     startFreeTrial, 
     logout, 
     getOrCreateDeviceId,
-    setRemoteRoutesHandler
+    setRemoteRoutesHandler,
+    setGpsPreference
 } from './auth.js';
 
 import { 
-    startGpsWatcher, 
-    stopGpsWatcher, 
     getDeviceRealGPS, 
     setEndLocationGPS 
 } from './gps.js';
@@ -108,7 +107,6 @@ export async function initApp() {
     state.loadActiveData();
     cleanOldHistory();
     initSwipeButton();
-    startGpsWatcher();
     checkUnreadNotices();
     initMemoEvents();
     initCameraScan();
@@ -174,13 +172,7 @@ export async function initApp() {
         state.updateDisplayNumbers();
     });
 
-    setGpsToggleHandler((isChecked) => {
-        if (isChecked) {
-            startGpsWatcher();
-        } else {
-            stopGpsWatcher();
-        }
-    });
+    setGpsToggleHandler(setGpsPreference);
 
     renderList();
     await checkSavedAuth();
