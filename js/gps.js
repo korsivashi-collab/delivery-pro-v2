@@ -27,6 +27,12 @@ let gpsSession = 0;
 // 요청 처리 시간은 수신한 기기의 경과 시간으로 제한한다.
 const gpsRequestClock = () => typeof performance !== 'undefined' ? performance.now() : Date.now();
 
+function hasPendingForcedGpsRequest() {
+    const now = gpsRequestClock();
+    return [...gpsRequests.values()].some(entry => entry.requestId && entry.pending &&
+        entry.session === gpsSession && now < entry.expiresAt);
+}
+
 function cachePosition(position) {
     const gps = { lat: position.coords.latitude, lng: position.coords.longitude,
         timestamp: position.timestamp, accuracy: position.coords.accuracy };
@@ -55,6 +61,8 @@ function getDbInstance() {
 // ==========================================
 export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null, request = null) {
     const session = gpsSession;
+    // 수동 요청을 수신한 뒤에는 새 일반 보고가 먼저 전송되지 않도록 한다.
+    if (!force && hasPendingForcedGpsRequest()) return false;
     if (reportInFlight) {
         if (!force) return false;
         await reportInFlight;
@@ -88,6 +96,8 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     if (reportInFlight) return reportGpsToFirestore(lat, lng, force, requestedAt, request);
     reportInFlight = Promise.resolve().then(async () => {
         try {
+            // SDK에 넘기기 전 예약된 일반 보고도 수동 요청에 우선권을 양보한다.
+            if (!force && hasPendingForcedGpsRequest()) return false;
             await setDoc(doc(db, 'gps_reports', deviceId), {
                 deviceId, phone, lat, lng, updatedAt: now, requestId: request?.requestId || null
             }, { merge: true });
@@ -116,20 +126,22 @@ async function handleGpsRequest(snap, identity, deviceId) {
     const timestamp = data.requestedAt;
     const age = Date.now() - timestamp;
     const requestId = typeof data.requestId === 'string' && data.requestId.length > 0 && data.requestId.length <= 200 ? data.requestId : null;
-    if (!Number.isFinite(timestamp)) return false;
-    // requestedAt은 오래된 저장 요청을 거르는 보조 기준(2분)만으로 사용한다.
-    // 새 요청은 미래 시각이라는 이유로 거절하지 않고, 수신 후 20초 안에만 처리한다.
-    if (requestId ? age > 120000 : (age < 0 || age >= 20000)) return false;
+    // requestId 요청은 원격 시각을 거절 기준으로 사용하지 않는다.
+    // 로컬 수신 후 처리 제한과 ID 중복 제거로 제어한다. 구버전 요청만 기존 판정을 유지한다.
+    if (!requestId && (!Number.isFinite(timestamp) || age < 0 || age >= 20000)) return false;
     const key = deviceId + '|' + (requestId ? `id:${requestId}` : timestamp);
-    for (const [oldKey, entry] of gpsRequests) if (Date.now() - entry.timestamp >= 120000) gpsRequests.delete(oldKey);
+    for (const [oldKey, entry] of gpsRequests) {
+        if (!entry.pending && gpsRequestClock() - entry.receivedAt >= 120000) gpsRequests.delete(oldKey);
+    }
     const previous = gpsRequests.get(key);
     if (previous?.done) return true;
     if (previous?.promise) return previous.promise;
     if (requestId && previous?.attempted) return false;
     if (!requestId && Date.now() < reportRetryAfter) return false;
     const session = gpsSession;
-    const entry = { timestamp: Date.now(), done: false, promise: null, attempted: false };
     const request = requestId ? { requestId, expiresAt: gpsRequestClock() + 20000 } : null;
+    const entry = { receivedAt: gpsRequestClock(), requestId, session, expiresAt: request?.expiresAt,
+        pending: true, done: false, promise: null, attempted: false };
     gpsRequests.set(key, entry);
     entry.promise = Promise.resolve().then(async () => {
         try {
@@ -138,7 +150,7 @@ async function handleGpsRequest(snap, identity, deviceId) {
             entry.done = await reportGpsToFirestore(gps.lat, gps.lng, true, timestamp, request);
             return entry.done;
         } catch (error) { console.warn('GPS 요청 처리 실패:', error); return false; }
-        finally { entry.attempted = true; entry.promise = null; }
+        finally { entry.pending = false; entry.attempted = true; entry.promise = null; }
     });
     return entry.promise;
 }
