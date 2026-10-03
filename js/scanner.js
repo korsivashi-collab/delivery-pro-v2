@@ -307,18 +307,58 @@ function runScanOCRPipelines(snapshot) {
 let activeScanRequest = null;
 const initializedCameraInputs = new WeakSet();
 
+export function triggerCameraScan() {
+    if (activeScanRequest && !activeScanRequest.controller.signal.aborted) return;
+    const cameraInput = document.getElementById('camera-input');
+    if (!cameraInput) return;
+    try {
+        // Keep the native picker launch synchronous with the user's button click.
+        cameraInput.click();
+    } catch (error) {
+        cameraInput.value = '';
+        console.error('카메라/파일 선택창 실행 실패:', error);
+        alert('카메라 또는 파일 선택창을 열 수 없습니다. 다시 시도해 주세요.');
+    }
+}
+
 export function initCameraScan() {
     const cameraInput = document.getElementById('camera-input');
     if (!cameraInput || initializedCameraInputs.has(cameraInput)) return;
     initializedCameraInputs.add(cameraInput);
     cameraInput.addEventListener('click', event => {
-        if (activeScanRequest && !activeScanRequest.controller.signal.aborted) event.preventDefault();
+        if (activeScanRequest && !activeScanRequest.controller.signal.aborted) {
+            event.preventDefault();
+            return;
+        }
+        // A canceled picker may retain its old selection. Allow the same photo on retry.
+        cameraInput.value = '';
+    });
+    cameraInput.addEventListener('cancel', () => {
+        // Picker cancellation is not OCR cancellation and must not abort an active scan.
+        if (!activeScanRequest) cameraInput.value = '';
     });
     
     cameraInput.addEventListener('change', async (e) => {
-        const file = e.target.files[0];
-        if (!file) return;
+        let file;
+        try { file = e.target?.files?.[0]; }
+        catch (error) {
+            if (!activeScanRequest) {
+                cameraInput.value = '';
+                console.error('선택한 사진 접근 실패:', error);
+                alert('사진을 불러올 수 없습니다. 다시 촬영하거나 선택해주세요.');
+            }
+            return;
+        }
+        if (!file) {
+            if (!activeScanRequest) cameraInput.value = '';
+            return;
+        }
         if (activeScanRequest && !activeScanRequest.controller.signal.aborted && activeScanRequest.owner === state.getRouteOwnerId()) return;
+        if (file.size === 0) {
+            cameraInput.value = '';
+            alert('선택한 사진이 비어 있습니다. 다시 촬영하거나 선택해주세요.');
+            return;
+        }
         activeScanRequest?.controller.abort();
         if (activeScanRequest?.loading) hideLoading();
         const scan = { controller: new AbortController(), owner: state.getRouteOwnerId(), loading: false };

@@ -64,6 +64,7 @@ const {
 
 import { 
     initCameraScan, 
+    triggerCameraScan,
     editDestinationAddress 
 } from './scanner.js';
 
@@ -529,6 +530,7 @@ window.confirmCompletion = confirmCompletion;
 window.initPhotoCompletion = initPhotoCompletion;
 
 window.editDestinationAddress = editDestinationAddress;
+window.triggerCameraScan = triggerCameraScan;
 window.openTmap = openTmap;
 window.openNaverMap = openNaverMap;
 // 구버전 인라인 HTML 호환용 폴백 바인딩
