@@ -40,6 +40,37 @@ function formatDisplayAddress(rawAddress, storeName = "") {
 // ==========================================
 // 1. 외부 내비게이션 (티맵 / 네이버) 전용 연동
 // ==========================================
+function launchNavigationApp(url, appName) {
+    const failureMessage = `${appName} 앱을 실행할 수 없습니다. 설치 여부를 확인해주세요.`;
+    try {
+        // Android 플러그인은 실제 OS 실행 오류를 안내한다. 웹에서는 성공 여부를 추정하지 않는다.
+        if (!window.Capacitor?.isPluginAvailable?.('NavigationLaunch')) {
+            let notice = document.getElementById('navigation-launch-notice');
+            if (!notice) {
+                notice = document.createElement('div');
+                notice.id = 'navigation-launch-notice';
+                notice.setAttribute('role', 'status');
+                notice.className = 'fixed bottom-4 left-4 right-4 z-[150] bg-slate-900 text-white rounded-xl p-4 text-sm shadow-xl';
+                const text = document.createElement('span');
+                text.id = 'navigation-launch-message';
+                const close = document.createElement('button');
+                close.type = 'button'; close.textContent = '닫기';
+                close.className = 'ml-3 underline';
+                close.onclick = () => notice.classList.add('hidden');
+                notice.append(text, close);
+                document.body.appendChild(notice);
+            }
+            document.getElementById('navigation-launch-message').textContent =
+                `${appName} 앱으로 연결합니다. 실행되지 않으면 앱 설치 여부를 확인해주세요.`;
+            notice.classList.remove('hidden');
+        }
+        window.location.href = url;
+    } catch (error) {
+        document.getElementById('navigation-launch-notice')?.classList.add('hidden');
+        alert(failureMessage);
+    }
+}
+
 export function openTmap(lat, lng, name) { 
     if (!hasValidDeliveryCoordinates({ lat, lng })) {
         alert("목적지 좌표가 유효하지 않습니다.");
@@ -47,7 +78,7 @@ export function openTmap(lat, lng, name) {
     }
 
     const cleanName = (name || '목적지').replace(/['"]/g, '').trim();
-    window.location.href = `tmap://route?goalname=${encodeURIComponent(cleanName)}&goalx=${lng}&goaly=${lat}`; 
+    launchNavigationApp(`tmap://route?goalname=${encodeURIComponent(cleanName)}&goalx=${lng}&goaly=${lat}`, '티맵');
 }
 
 export function openNaverMap(lat, lng, name) {
@@ -65,7 +96,7 @@ export function openNaverMap(lat, lng, name) {
     const encodedName = encodeURIComponent(cleanName);
     
     // 네이버 지도/내비게이션 앱 다이렉트 호출 스킴
-    window.location.href = `nmap://navigation?dlat=${lat}&dlng=${lng}&dname=${encodedName}&appname=com.deliverypro.app`;
+    launchNavigationApp(`nmap://navigation?dlat=${lat}&dlng=${lng}&dname=${encodedName}&appname=com.deliverypro.app`, '네이버지도');
 }
 
 // ==========================================
