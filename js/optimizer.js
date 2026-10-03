@@ -26,6 +26,38 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
     let allPoints = [startPoint, ...unassigned];
     if (hasEnd) allPoints.push(endLocation);
 
+    // 이번 실행의 실제 좌표로 인덱스를 부여합니다. id와 무관하게 같은 좌표는 공유합니다.
+    const coordinateIndices = new Map();
+    const pointIndices = new WeakMap();
+    allPoints.forEach(point => {
+        if (!Number.isFinite(point.lat) || !Number.isFinite(point.lng)) return;
+        const lat = Object.is(point.lat, -0) ? '-0' : point.lat;
+        const lng = Object.is(point.lng, -0) ? '-0' : point.lng;
+        const key = `${lat},${lng}`;
+        if (!coordinateIndices.has(key)) coordinateIndices.set(key, coordinateIndices.size);
+        pointIndices.set(point, coordinateIndices.get(key));
+    });
+    const coordinateCount = coordinateIndices.size;
+    const distanceCache = [];
+    function getCachedDistance(pointA, pointB) {
+        const indexA = pointIndices.get(pointA);
+        const indexB = pointIndices.get(pointB);
+        // 비정상 입력의 기존 형 변환/계산 동작은 그대로 유지합니다.
+        if (indexA === undefined || indexB === undefined) {
+            return getDistance(pointA.lat, pointA.lng, pointB.lat, pointB.lng);
+        }
+        const key = indexA < indexB
+            ? indexA * coordinateCount + indexB
+            : indexB * coordinateCount + indexA;
+        const cachedDistance = distanceCache[key];
+        if (cachedDistance !== undefined) return cachedDistance;
+        // 최초 계산은 기존 인자 순서를 유지하고 역방향에서도 같은 값을 재사용합니다.
+        const distance = getDistance(pointA.lat, pointA.lng, pointB.lat, pointB.lng);
+        distanceCache[key] = distance;
+        return distance;
+    }
+
+
     let axisStart = startPoint;
     let axisEnd = endLocation;
 
@@ -58,7 +90,7 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
         let bestScore = Infinity;
         for(let i = 0; i < unassigned.length; i++) {
             let n = unassigned[i];
-            let dist = getDistance(curr.lat, curr.lng, n.lat, n.lng);
+            let dist = getCachedDistance(curr, n);
             let progressDiff = (curr.progress !== undefined && n.progress !== undefined) ? (curr.progress - n.progress) : 0;
             let backwardPenalty = progressDiff > 0 ? (progressDiff * 10) : 0; 
             let score = dist + backwardPenalty;
@@ -89,10 +121,10 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
                 let nodeI = fullRoute[i]; 
                 let nodeJ = fullRoute[j]; 
                 let nodeJ_next = fullRoute[j+1];
-                let d_curr = getDistance(nodeI_prev.lat, nodeI_prev.lng, nodeI.lat, nodeI.lng);
-                if (nodeJ_next) d_curr += getDistance(nodeJ.lat, nodeJ.lng, nodeJ_next.lat, nodeJ_next.lng);
-                let d_new = getDistance(nodeI_prev.lat, nodeI_prev.lng, nodeJ.lat, nodeJ.lng);
-                if (nodeJ_next) d_new += getDistance(nodeI.lat, nodeI.lng, nodeJ_next.lat, nodeJ_next.lng);
+                let d_curr = getCachedDistance(nodeI_prev, nodeI);
+                if (nodeJ_next) d_curr += getCachedDistance(nodeJ, nodeJ_next);
+                let d_new = getCachedDistance(nodeI_prev, nodeJ);
+                if (nodeJ_next) d_new += getCachedDistance(nodeI, nodeJ_next);
                 if (d_new < d_curr - 0.0001) {
                     let subArray = fullRoute.slice(i, j + 1).reverse();
                     fullRoute.splice(i, subArray.length, ...subArray);
