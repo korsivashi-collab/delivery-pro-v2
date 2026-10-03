@@ -392,33 +392,15 @@ export function initCameraScan() {
         if (rawOCRText) {
             showLoading("상호명 분석 중...");
             try {
-                // 3-3. 카카오 POI 조회 (보정용 교차 검증)
-                let kakaoResult = { places: [], buildingNames: [] };
-                try {
-                    if (!finalStoreName && addressStr) {
-                        storeDecision.kakaoCalled = true;
-                        kakaoResult = await getPOIsByAddress(addressStr, true);
-                    }
-                } catch (err) {}
-
-                // [경로 A] 카카오 등록 장소와 70% 이상 일치 시 공식 장소명 채택
-                if (!finalStoreName && ocrCandidates.length > 0 && kakaoResult.places && kakaoResult.places.length > 0) {
-                    finalStoreName = matchOCRStoreCandidate(ocrCandidates, kakaoResult.places, STORE_NAME_MATCH_THRESHOLD, ocrCandidates.join('\n'), storeDecision);
-                    if (finalStoreName) {
-                        storeDecision.kakaoMatched = true;
-                        storeDecision.source = 'kakao-poi-match';
-                    }
-                }
-
-                // [경로 B] 카카오 장소 검색에 없는 경우: OCR 추출 상호를 100% 보존 (절대 버리지 않음)
+                // 비용 절감을 위해 카카오 POI(장소) 교차 검증 API 호출을 비활성화하고 
+                // 뛰어난 성능의 자체 OCR 2차 엔진 결과만을 100% 신뢰하여 채택합니다.
                 if (!finalStoreName) {
-                    const validOcrCandidate = !kakaoResult.places.length && unambiguous ? trusted[0]?.name : null;
+                    const validOcrCandidate = trusted.length > 0 ? trusted[0].name : (ocrCandidates.length > 0 ? ocrCandidates[0] : null);
                     if (validOcrCandidate) {
                         finalStoreName = validOcrCandidate;
-                        storeDecision.source = 'ocr-direct-fallback';
+                        storeDecision.source = 'ocr-direct-only';
                     }
                 }
-
             } catch (error) {
                 console.error("상호 추출 오류:", error);
             }
@@ -430,9 +412,15 @@ export function initCameraScan() {
 
         // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
         if (coords) {
-            const finalAddress = ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
+            let finalAddress = ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
             const labeledStoreName = finalStoreName || '';
             const finalPhone = extractedPhone;
+            
+            // 리스트 UI 표출을 위해 순수 주소 앞에 [상호명]을 강제 결합
+            if (labeledStoreName && !finalAddress.startsWith('[')) {
+                finalAddress = `[${labeledStoreName}] ${finalAddress}`;
+            }
+
             console.log('[주소진단-3 최종주소]', {
                 scanId: ocrFields?.scanId, addressStr,
                 legacyAddress: ocrFields?.legacyAddress ?? null,

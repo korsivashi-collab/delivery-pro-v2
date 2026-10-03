@@ -192,20 +192,45 @@ export function extractPhoneLogic(text) {
 // ==========================================
 // 6. 범용 도로명/지번 주소 정밀 추출 슬롯 엔진
 // ==========================================
-// 구버전 주소 파서를 먼저 실행하고, 개선형 역할 파서는 별도 fallback으로 유지한다.
 export function extractAddressLogic(text, details = null) {
     let rawLegacyAddress = null, rawLabeledAddress = null;
     const legacyEvidence = {};
+    
+    // 1차: 기존 주소 파서 우선 실행 (Engine B)
     try { rawLegacyAddress = extractAddressEngineB(text, legacyEvidence); }
     catch (error) { console.error('기존 주소 추출 오류:', error); }
+    
+    // 2차: 라벨링 주소 파서 실행 (Engine A)
     try { rawLabeledAddress = extractAddressEngineA(text); }
     catch (error) { console.error('라벨링 주소 추출 오류:', error); }
+    
     const legacyAddress = normalizeNavigationAddress(rawLegacyAddress);
     const labeledAddress = normalizeNavigationAddress(rawLabeledAddress);
-    const selected = legacyAddress || labeledAddress || null;
-    const reason = legacyAddress
-        ? legacyAddress === labeledAddress ? '두 주소 동일' : '기존 주소 파서 우선'
-        : labeledAddress ? '기존 주소 없음: 라벨링 주소 fallback' : '주소 없음: 수동입력 fallback';
+    
+    let selected = null;
+    let reason = '';
+
+    // 사용자 요청 알고리즘 적용:
+    // 1. 1차와 2차 주소 비교시 동일하면 2차 방식 출력
+    // 2. 틀리면 1차 방식 출력
+    if (legacyAddress && labeledAddress) {
+        if (legacyAddress === labeledAddress) {
+            selected = labeledAddress;
+            reason = '1차와 2차 주소 동일: 2차(라벨링) 방식 결과 출력';
+        } else {
+            selected = legacyAddress;
+            reason = '1차와 2차 주소 불일치: 1차(기존 파서) 방식 결과 출력';
+        }
+    } else if (legacyAddress) {
+        selected = legacyAddress;
+        reason = '2차 실패: 1차(기존) 방식 결과 출력';
+    } else if (labeledAddress) {
+        selected = labeledAddress;
+        reason = '1차 실패: 2차(라벨링) 방식 결과 출력';
+    } else {
+        reason = '주소 인식 실패: 수동입력 fallback';
+    }
+
     try {
         if (details) Object.assign(details, { rawLegacyAddress, rawLabeledAddress, legacyAddress, labeledAddress, selected });
         console.log('[주소진단-최종선택]', {
@@ -214,6 +239,7 @@ export function extractAddressLogic(text, details = null) {
             selected, reason, legacyEvidence
         });
     } catch (_) { /* 진단 실패는 주소 반환에 영향 없음 */ }
+    
     return selected;
 }
 
@@ -368,22 +394,6 @@ function extractAddressEngineA(text) {
             }));
         } catch (_) { /* 진단 실패는 반환값에 영향 없음 */ }
     };
-    try {
-        if (typeof text === 'string') {
-            const windows = [...text.matchAll(/동작대로/g)].map(match => {
-                const start = Math.max(0, match.index - 50);
-                const end = Math.min(text.length, match.index + match[0].length + 50);
-                const snippet = text.slice(start, end);
-                const characters = [];
-                for (let i = 0; i < snippet.length; i++) {
-                    characters.push({ index: start + i, character: snippet[i], escaped: JSON.stringify(snippet[i]), charCode: snippet.charCodeAt(i), hex: '0x' + snippet.charCodeAt(i).toString(16).padStart(4, '0') });
-                }
-                return { start, end, snippet, snippetJSON: JSON.stringify(snippet), characters };
-            });
-            console.log('[주소진단-원문문자] ' + JSON.stringify({ windows }));
-        }
-        console.log('[주소진단-LEGACY] ' + JSON.stringify({ legacyReturn: fallback }));
-    } catch (_) { /* 로그 오류는 주소 인식과 분리 */ }
 
     if (!text || typeof text !== 'string') return fallback;
     const flat = text.replace(/(\d+)\s*[-~ㅡ—–]\s*(\d+)/g, '$1-$2').replace(/\s+/g, ' ');
