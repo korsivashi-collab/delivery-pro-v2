@@ -231,7 +231,7 @@ export function extractAddressLogic(text) {
         if (!rawAddressBlock) return null;
 
         // 도로명/지번 정규 코어 탐색
-        const roadCoreRegex = /(?:[가-힣A-Za-z0-9·.]+(?:대로|로)(?:\s*\d+(?:번|가)?길)?|[가-힣A-Za-z0-9·.]+길)\s*\d+(?:-\d+)?/;
+        const roadCoreRegex = /(?:[가-힣A-Za-z0-9·.]+(?:대로|로)(?:\s*\d+[가-힣]*길)?|[가-힣A-Za-z0-9·.]+길)\s*\d+(?:-\d+)?/;
         const parcelCoreRegex = /[가-힣A-Za-z0-9·]+(?:동|읍|면|리)\s+(?:산\s*)?\d+(?:-\d+)?/;
         
         const roadMatch = rawAddressBlock.match(roadCoreRegex);
