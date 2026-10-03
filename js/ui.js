@@ -4,7 +4,7 @@
 // [배송 동선 PRO] UI 렌더링 및 화면 조작 전담 모듈 (네이버 내비 & 고대비 시인성 테마)
 // =================================================================
 
-import { state } from './state.js';
+import { state, destinationIdArgument, destinationIdAttribute } from './state.js';
 
 // 전화번호 정제 보조 함수
 function sanitizePhoneNumber(rawVal) {
@@ -104,6 +104,8 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
         destinations.forEach((dest, index) => {
             const li = document.createElement('li'); 
             li.setAttribute('data-id', dest.id); 
+            const idArgument = destinationIdArgument(dest.id);
+            const domId = destinationIdAttribute(dest.id);
             if (dest.orderNo) li.setAttribute('data-orderno', dest.orderNo);
             li.className = "bg-white p-3 rounded-2xl shadow-xs border border-slate-200/90 flex flex-col gap-2";
             
@@ -143,10 +145,10 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             li.innerHTML = `
                 <div class="flex items-start gap-1.5 pb-0.5 mt-0.5">
                     <div class="flex flex-col items-center justify-center gap-1 shrink-0 -ml-0.5 mr-0.5 mt-0.5">
-                        <button onclick="moveDestinationUp(${dest.id})" ${isFirst ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
+                        <button onclick="moveDestinationUp(${idArgument})" ${isFirst ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
                         </button>
-                        <button onclick="moveDestinationDown(${dest.id})" ${isLast ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="아래로 이동">
+                        <button onclick="moveDestinationDown(${idArgument})" ${isLast ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="아래로 이동">
                             <i class="fa-solid fa-chevron-down text-[10px]"></i>
                         </button>
                     </div>
@@ -156,13 +158,13 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                     </div>
                     <div class="flex items-center gap-1 shrink-0 -mr-1">
                         ${distHtml}
-                        <button onclick="editDestinationAddress(${dest.id})" class="text-slate-400 hover:text-slate-700 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-slate-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[13px]"></i></button>
+                        <button onclick="editDestinationAddress(${idArgument})" class="text-slate-400 hover:text-slate-700 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-slate-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[13px]"></i></button>
                     </div>
                 </div>
                 
-                <div id="memo-tags-${dest.id}" class="hidden flex flex-wrap gap-1 mb-0.5 mt-0.5"></div>
-                <div id="memo-preview-${dest.id}" class="hidden bg-slate-50 rounded-lg p-2 text-[11px] text-slate-700 border border-slate-200 truncate shadow-2xs mb-0.5 mt-0.5"></div>
-                <div id="personal-memo-preview-${dest.id}" class="hidden bg-emerald-50/70 rounded-lg p-2 text-[11px] text-emerald-900 border border-emerald-200 truncate shadow-2xs mb-1 mt-0.5"></div>
+                <div id="memo-tags-${domId}" class="hidden flex flex-wrap gap-1 mb-0.5 mt-0.5"></div>
+                <div id="memo-preview-${domId}" class="hidden bg-slate-50 rounded-lg p-2 text-[11px] text-slate-700 border border-slate-200 truncate shadow-2xs mb-0.5 mt-0.5"></div>
+                <div id="personal-memo-preview-${domId}" class="hidden bg-emerald-50/70 rounded-lg p-2 text-[11px] text-emerald-900 border border-emerald-200 truncate shadow-2xs mb-1 mt-0.5"></div>
                 
                 <div class="flex flex-col gap-1.5 mt-0.5 pt-2 border-t border-slate-100">
                     <div class="flex gap-1.5 h-[40px]">
@@ -171,10 +173,10 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                         
                         <!-- 문자 / 메모: 일체감 있는 라이트 슬레이트 베이스 -->
                         <a href="sms:${customerPhoneStr}" class="flex-1 min-w-0 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-slate-200 transition flex-nowrap ${!customerPhoneStr ? 'opacity-30 pointer-events-none' : ''}"><i class="fa-solid fa-comment-sms text-[12px] text-sky-600 shrink-0"></i><span class="text-[12px] font-bold whitespace-nowrap tracking-tight">문자</span></a>
-                        <button onclick="openMemoModal(${dest.id})" class="flex-1 min-w-0 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-slate-200 transition flex-nowrap"><i class="fa-solid fa-pen-to-square text-[12px] text-amber-500 shrink-0"></i><span class="text-[12px] font-bold whitespace-nowrap tracking-tight">메모</span></button>
+                        <button onclick="openMemoModal(${idArgument})" class="flex-1 min-w-0 bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl shadow-2xs flex items-center justify-center gap-1 active:bg-slate-200 transition flex-nowrap"><i class="fa-solid fa-pen-to-square text-[12px] text-amber-500 shrink-0"></i><span class="text-[12px] font-bold whitespace-nowrap tracking-tight">메모</span></button>
                         
                         <!-- 완료: 즉각적인 반응을 돕는 솔리드 블루 -->
-                        <button onclick="completeDestination(${dest.id})" class="flex-1 min-w-0 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs flex items-center justify-center gap-1 active:bg-blue-800 transition flex-nowrap"><i class="fa-solid fa-check text-[13px] shrink-0"></i><span class="text-[12px] font-black whitespace-nowrap tracking-tight">완료</span></button>
+                        <button onclick="completeDestination(${idArgument})" class="flex-1 min-w-0 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs flex items-center justify-center gap-1 active:bg-blue-800 transition flex-nowrap"><i class="fa-solid fa-check text-[13px] shrink-0"></i><span class="text-[12px] font-black whitespace-nowrap tracking-tight">완료</span></button>
                     </div>
                     <div class="flex gap-1.5 h-[36px]">
                         <div class="flex-1 min-w-0 bg-slate-50 border border-slate-200 p-1 rounded-xl flex items-center gap-1.5 shadow-2xs">
@@ -187,7 +189,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                             </div>
                         </div>
                         <!-- 취소/삭제: 경고성 소프트 로즈 -->
-                        <button onclick="cancelDestination(${dest.id})" class="w-[42px] shrink-0 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-rose-100 transition" title="배송 취소"><i class="fa-solid fa-trash-can text-[13px] shrink-0"></i></button>
+                        <button onclick="cancelDestination(${idArgument})" class="w-[42px] shrink-0 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-rose-100 transition" title="배송 취소"><i class="fa-solid fa-trash-can text-[13px] shrink-0"></i></button>
                     </div>
                 </div>`;
             listEl.appendChild(li);

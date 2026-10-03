@@ -466,10 +466,10 @@ export function initCameraScan() {
 
             const currentDests = state.getDestinations();
             let nextNum = currentDests.length > 0 ? Math.max(...currentDests.map(d => d.displayNumber)) + 1 : 1;
-            const newDestId = idCounter++; 
+            const requestedId = idCounter++;
             
-            state.addDestination({
-                id: newDestId, 
+            const addedDestination = state.addDestination({
+                id: requestedId,
                 address: finalAddress,
                 lat: coords.lat, 
                 lng: coords.lng, 
@@ -477,6 +477,7 @@ export function initCameraScan() {
                 displayNumber: nextNum,
                 storeName: labeledStoreName
             });
+            const newDestId = addedDestination.id;
             
             state.saveActiveData(); 
             if (typeof window.renderList === 'function') window.renderList();

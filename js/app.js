@@ -8,7 +8,7 @@ import { calculateOptimizedRoute } from './optimizer.js';
 import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
-import { state } from './state.js';
+import { state, destinationIdArgument } from './state.js';
 
 // 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 연동)
 import { renderDestinationList } from './ui.js';
@@ -134,7 +134,6 @@ export async function initApp() {
         if (routeData.updatedAt === state.getRouteUpdatedAt()) return;
         const formattedList = newDestinations.map((d, idx) => ({
             ...d,
-            id: d.id || (Date.now() + idx),
             displayNumber: d.displayNumber || (idx + 1),
             lat: typeof d.lat === 'number' ? d.lat : (parseFloat(d.lat) || 0),
             lng: typeof d.lng === 'number' ? d.lng : (parseFloat(d.lng) || 0),
@@ -289,7 +288,7 @@ export function openStartSelectionModal() {
         }
 
         html += `
-            <button onclick="window.selectStartDest(${d.id})" class="w-full text-left bg-white hover:bg-slate-50 border border-slate-200 p-3.5 rounded-2xl shadow-xs transition flex items-center justify-between mb-2 active:bg-slate-100">
+            <button onclick="window.selectStartDest(${destinationIdArgument(d.id)})" class="w-full text-left bg-white hover:bg-slate-50 border border-slate-200 p-3.5 rounded-2xl shadow-xs transition flex items-center justify-between mb-2 active:bg-slate-100">
                 <div class="flex-1 pr-2 min-w-0">
                     ${storeName ? `<span class="text-blue-600 font-extrabold text-[12px] block mb-0.5 leading-none">🏢 ${storeName}</span>` : ''}
                     <span class="font-bold text-slate-900 text-[13.5px] break-keep block leading-snug">${cleanAddr}</span>
