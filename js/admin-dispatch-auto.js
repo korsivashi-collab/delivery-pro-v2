@@ -1,3 +1,4 @@
+import { ensureRouteOwner } from './route-owner.js';
 // js/admin-dispatch-auto.js
 
 import { db } from "./admin-api.js";
@@ -605,7 +606,9 @@ export async function sendRoutesToDrivers() {
                 items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
             }));
 
+            const routeOwnerId = await ensureRouteOwner(db, matchedLic.key);
             const routePayload = {
+                routeOwnerId,
                 deviceId: devId,
                 phone: matchedLic.phone || devId,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',

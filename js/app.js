@@ -124,94 +124,47 @@ export async function initApp() {
         });
     }
     
-    setRemoteRoutesHandler((newDestinations, routeData) => {
-        if (!newDestinations || !Array.isArray(newDestinations)) return;
-
-        const history = JSON.parse(localStorage.getItem('deliveryPro_history') || '[]');
-        const todayStart = new Date().setHours(0, 0, 0, 0);
-        const completedIdsOrAddrs = new Set();
-        history.forEach(h => {
-            if (h.timestamp >= todayStart) {
-                if (h.id) completedIdsOrAddrs.add(String(h.id));
-                if (h.orderNo) completedIdsOrAddrs.add(String(h.orderNo));
-                if (h.address) completedIdsOrAddrs.add(h.address.trim());
-            }
+    const applyOwnedRoute = (newDestinations, routeData) => {
+        if (!routeData || routeData.routeOwnerId !== state.getRouteOwnerId() ||
+            !Array.isArray(newDestinations) || !Number.isFinite(routeData.updatedAt)) return;
+        if (routeData.updatedAt < state.getRouteUpdatedAt()) {
+            saveRouteToFirestore(getOrCreateDeviceId(), localStorage.getItem('deliveryProUserPhone') || '', state.getDestinations());
+            return;
+        }
+        if (routeData.updatedAt === state.getRouteUpdatedAt()) return;
+        const formattedList = newDestinations.map((d, idx) => ({
+            ...d,
+            id: d.id || (Date.now() + idx),
+            displayNumber: d.displayNumber || (idx + 1),
+            lat: typeof d.lat === 'number' ? d.lat : (parseFloat(d.lat) || 0),
+            lng: typeof d.lng === 'number' ? d.lng : (parseFloat(d.lng) || 0),
+            phone: sanitizePhoneNumber(d.phone || d.customerPhone || d.tel || d.contact || d.hp || '')
+        }));
+        state.setDestinations(formattedList);
+        // 이전 기기/계정의 종료점을 가져오지 않습니다.
+        state.setEndLocation(routeData.endLocation || { lat: 0, lng: 0, address: '' });
+        const first = formattedList[0];
+        state.setStartLocation(first ? { lat: first.lat, lng: first.lng, address: first.address } : null);
+        state.updateDisplayNumbers(routeData.updatedAt);
+        renderList();
+    };
+    setRemoteRoutesHandler(applyOwnedRoute);
+    let pendingRouteSave = false;
+    state.setActiveDataSavedHandler(() => {
+        if (pendingRouteSave) return;
+        pendingRouteSave = true;
+        const ownerId = state.getRouteOwnerId();
+        queueMicrotask(() => {
+            pendingRouteSave = false;
+            if (state.getRouteOwnerId() !== ownerId) return;
+            saveRouteToFirestore(getOrCreateDeviceId(), localStorage.getItem('deliveryProUserPhone') || '', state.getDestinations());
         });
-
-        const formattedList = newDestinations
-            .filter(d => {
-                if (d.id && completedIdsOrAddrs.has(String(d.id))) return false;
-                if (d.orderNo && completedIdsOrAddrs.has(String(d.orderNo))) return false;
-                return true;
-            })
-            .map((d, idx) => {
-                const rawPhone = d.phone || d.customerPhone || d.tel || d.contact || d.hp || "";
-                const validPhone = sanitizePhoneNumber(rawPhone);
-
-                return {
-                    id: d.id || (Date.now() + idx),
-                    displayNumber: d.displayNumber || (idx + 1),
-                    address: d.address || "",
-                    lat: typeof d.lat === 'number' ? d.lat : (parseFloat(d.lat) || 0),
-                    lng: typeof d.lng === 'number' ? d.lng : (parseFloat(d.lng) || 0),
-                    phone: validPhone,
-                    storeName: d.storeName || "",
-                    orderNo: d.orderNo || "",
-                    memo: d.memo || "",
-                    items: d.items || []
-                };
-            });
-
-        if (formattedList.length > 0 && (!state.getStartLocation() || !state.getStartLocation().lat)) {
-            state.setStartLocation({
-                lat: formattedList[0].lat,
-                lng: formattedList[0].lng,
-                address: formattedList[0].address
-            });
-        }
-
-        if (formattedList.length > 0) {
-            sessionStorage.setItem('deliveryPro_has_dispatch_route', 'true');
-            state.setDestinations(formattedList);
-            state.updateDisplayNumbers();
-            state.saveActiveData();
-            renderList();
-
-            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
-        }
-    }, () => {
-        const hadDispatchRoute = sessionStorage.getItem('deliveryPro_has_dispatch_route') === 'true';
-        if (hadDispatchRoute) {
-            sessionStorage.removeItem('deliveryPro_has_dispatch_route');
-            state.setDestinations([]);
-            state.setStartLocation(null);
-            state.saveActiveData();
-            renderList();
-        }
     });
-
     document.addEventListener('visibilitychange', async () => {
-        if (document.visibilityState === 'visible') {
-            const deviceId = getOrCreateDeviceId();
-            const phone = localStorage.getItem('deliveryProUserPhone') || "";
-            if ((deviceId || phone) && typeof fetchActiveRouteOnce === 'function') {
-                try {
-                    const latestRoute = await fetchActiveRouteOnce(deviceId, phone);
-                    if (latestRoute && Array.isArray(latestRoute.destinations) && latestRoute.destinations.length > 0) {
-                        const firstItem = latestRoute.destinations[0];
-                        if (typeof firstItem === 'object' && firstItem !== null && firstItem.address) {
-                            sessionStorage.setItem('deliveryPro_has_dispatch_route', 'true');
-                            state.setDestinations(latestRoute.destinations);
-                            state.updateDisplayNumbers();
-                            state.saveActiveData();
-                            renderList();
-                        }
-                    }
-                } catch (err) {
-                    console.warn("포그라운드 복귀 동선 동기화 확인 대기:", err);
-                }
-            }
-        }
+        const ownerId = state.getRouteOwnerId();
+        if (document.visibilityState !== 'visible' || !ownerId) return;
+        const route = await fetchActiveRouteOnce(getOrCreateDeviceId(), localStorage.getItem('deliveryProUserPhone') || '', ownerId);
+        if (state.getRouteOwnerId() === ownerId) applyOwnedRoute(route.destinations, route);
     });
 
     setRestoreDestinationHandler((itemToRestore) => {

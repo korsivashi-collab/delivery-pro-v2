@@ -1,3 +1,4 @@
+import { state } from './state.js';
 // js/auth.js
 
 // =================================================================
@@ -77,6 +78,10 @@ export function getOrCreateDeviceId() {
 // 2. 인증 정보 로컬 스토리지 초기화
 // ==========================================
 export function clearAuthStorage() {
+    if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
+    activeRoutesWatcherUnsub = null;
+    cachedRemoteRoutes = null;
+    state.deactivateRouteOwner();
     localStorage.removeItem('deliveryProKey');
     localStorage.removeItem('deliveryProUserPhone');
     localStorage.removeItem('deliveryProExpireDate');
@@ -150,7 +155,10 @@ export function startLicenseRealtimeWatcher(key) {
 // ==========================================
 // 6. 인증 성공 시 백그라운드 서비스 일괄 가동
 // ==========================================
-export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey) {
+export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey, routeOwnerId) {
+    state.activateRouteOwner(routeOwnerId);
+    cachedRemoteRoutes = null;
+    if (typeof window.renderList === 'function') window.renderList();
     unlockApp();
     updateExpireBadge(expireDate);
     startLicenseRealtimeWatcher(key);
@@ -244,7 +252,7 @@ export async function checkSavedAuth() {
             const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
             if (res.valid) {
                 localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-                startActiveServices(deviceId, savedPhone, res.actualKey || savedKey, res.expireDate, res.dispatchKey);
+                startActiveServices(deviceId, savedPhone, res.actualKey || savedKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
             } else {
                 clearAuthStorage();
                 const authMsg = document.getElementById('auth-message');
@@ -323,7 +331,7 @@ export async function verifyLicense() {
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
             if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
             
-            startActiveServices(deviceId, formattedPhone, actualKey, res.expireDate, res.dispatchKey);
+            startActiveServices(deviceId, formattedPhone, actualKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
         } else {
             if (msgEl) msgEl.innerText = (res && res.msg) ? res.msg : "인증에 실패했습니다. 키와 번호를 확인해 주세요.";
         }
@@ -394,7 +402,7 @@ export async function startFreeTrial() {
             alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
             closeTrialModal();
             
-            startActiveServices(deviceId, phoneInput, res.trialKey, res.expireDate, res.dispatchKey);
+            startActiveServices(deviceId, phoneInput, res.trialKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
         } else {
             if (msgEl) {
                 msgEl.innerText = res.msg;

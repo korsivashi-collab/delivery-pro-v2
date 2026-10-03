@@ -297,6 +297,7 @@ export function archiveCompletedDelivery(item, tag = "", completionDocId = null,
         date: now.toLocaleDateString(), 
         time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
         timestamp: now.getTime(), 
+        routeOwnerId: state.getRouteOwnerId(),
         originalData: archivedItem 
     });
     localStorage.setItem('deliveryPro_history', JSON.stringify(history));
@@ -311,6 +312,11 @@ export async function restoreHistoryItem(timestamp) {
     if (idx > -1) {
         showLoading("배송지 복원 중...");
         const targetHistory = history[idx];
+        if (targetHistory.routeOwnerId !== state.getRouteOwnerId()) {
+            hideLoading();
+            alert("현재 라이선스의 배송 이력만 복원할 수 있습니다.");
+            return;
+        }
 
         if (targetHistory.completionDocId) {
             await deleteCompletionFromFirestore(targetHistory.completionDocId);

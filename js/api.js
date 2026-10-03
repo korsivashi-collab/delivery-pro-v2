@@ -1,3 +1,5 @@
+import { state } from './state.js';
+import { ensureRouteOwner, selectLatestOwnedRoute } from './route-owner.js';
 // js/api.js
 // =================================================================
 // [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈 (통로 충돌 완벽 방어)
@@ -133,19 +135,17 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
         }
     }
 
-    if (!data.deviceId) {
-        await updateDoc(docRef, { deviceId: deviceId, phone: phone });
-    } else if (data.deviceId !== deviceId) {
-        return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다.\n관리자에게 기기 초기화를 요청하세요." };
-    } else {
-        await updateDoc(docRef, { phone: phone });
+    if (data.deviceId && data.deviceId !== deviceId) {
+        return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다. 관리자에게 기기 초기화를 요청하세요." };
     }
+    const routeOwnerId = await ensureRouteOwner(db, docSnap.id, deviceId, phone);
 
     return { 
         valid: true, 
         expireDate: data.expireDate, 
         phone: phone, 
         actualKey: docSnap.id,
+        routeOwnerId,
         dispatchKey: data.dispatchKey || "",
         allowTms: data.allowTms !== false
     };
@@ -278,137 +278,36 @@ export function startGpsRequestLister(myDeviceId, myPhone, myKey, getRealGpsCall
 }
 
 // 🌟 4-1. 관제 센터 실시간 자동할당 동선 다중 수신 리스너 (통로 독립 격리 방어)
-export function listenToActiveRoutes(deviceId, arg2, arg3, arg4) {
-    let phone = "";
-    let onRoutesReceived = null;
-    let onRoutesCleared = null;
-
-    if (typeof arg2 === 'function') {
-        onRoutesReceived = arg2;
-        onRoutesCleared = arg3;
-        phone = typeof arg4 === 'string' ? arg4 : "";
-    } else if (typeof arg2 === 'string') {
-        phone = arg2;
-        onRoutesReceived = arg3;
-        onRoutesCleared = arg4;
-    }
-
-    if (!deviceId && !phone) return () => {};
-
-    const unsubs = [];
-    let lastHandledTime = 0;
-    
-    // 🌟 핵심 방어: 통로별로 "내 통로에 정상 할당 데이터가 있었는지"를 각각 따로 기억합니다.
-    const channelState = {
-        device: false,
-        cleanPhone: false,
-        rawPhone: false
-    };
-
-    const handleRouteData = (data, exists, channelKey) => {
-        const now = Date.now();
-
-        // 1) 관제에서 전송한 유효한 배송지 목록이 있는 경우
-        if (exists && data && Array.isArray(data.destinations) && data.destinations.length > 0) {
-            const updateTime = data.updatedAt || now;
-            if (updateTime < lastHandledTime && (lastHandledTime - updateTime > 2000)) {
-                return; 
-            }
-            
-            lastHandledTime = updateTime;
-            channelState[channelKey] = true; // 이 통로가 데이터를 받았음을 마킹
-            
-            if (typeof onRoutesReceived === 'function') {
-                onRoutesReceived(data.destinations, data);
-            }
-            return;
+export function listenToActiveRoutes(deviceId, phone, onRoutesReceived, onRoutesCleared, ownerId = state.getRouteOwnerId()) {
+    if (!ownerId) return () => {};
+    const ownedRoutes = query(collection(db, 'routes'), where('routeOwnerId', '==', ownerId));
+    let hasSeenOwnedRoute = false;
+    return onSnapshot(ownedRoutes, snapshot => {
+        if (state.getRouteOwnerId() !== ownerId) return;
+        const routes = [];
+        snapshot.forEach(item => routes.push({ ...item.data(), routeDocumentId: item.id }));
+        const latest = selectLatestOwnedRoute(routes, ownerId);
+        if (typeof onRoutesReceived === 'function') {
+            const missing = hasSeenOwnedRoute
+                ? { routeOwnerId: ownerId, updatedAt: Math.max(Date.now(), state.getRouteUpdatedAt() + 1), destinations: [], cleared: true }
+                : { routeOwnerId: ownerId, updatedAt: 0, destinations: [], isNoDoc: true };
+            onRoutesReceived(latest ? latest.destinations : [], latest || missing);
         }
-
-        // 2) 관제에서 문서가 삭제되었거나 비어있는 경우 (할당 취소 또는 초기화)
-        if (!exists || !data || !data.destinations || data.destinations.length === 0 || data.cleared === true) {
-            // 🌟 오직 '이 통로'에서 정상 데이터를 준 적이 있을 때만 삭제(초기화) 명령을 받아들입니다.
-            if (channelState[channelKey]) {
-                lastHandledTime = now;
-                channelState[channelKey] = false;
-                
-                if (typeof onRoutesCleared === 'function') {
-                    onRoutesCleared();
-                }
-            }
-        }
-    };
-
-    if (deviceId) {
-        const devRef = doc(db, "routes", deviceId);
-        const unsubDev = onSnapshot(devRef, (docSnap) => {
-            handleRouteData(docSnap.data(), docSnap.exists(), 'device');
-        }, (err) => console.warn("deviceId 동선 감시 오류:", err));
-        unsubs.push(unsubDev);
-    }
-
-    if (phone) {
-        const cleanPhone = phone.replace(/[^0-9]/g, '');
-        if (cleanPhone && cleanPhone !== deviceId) {
-            const phoneRef = doc(db, "routes", cleanPhone);
-            const unsubPhone = onSnapshot(phoneRef, (docSnap) => {
-                handleRouteData(docSnap.data(), docSnap.exists(), 'cleanPhone');
-            }, (err) => console.warn("cleanPhone 감시 오류:", err));
-            unsubs.push(unsubPhone);
-        }
-
-        if (phone !== cleanPhone && phone !== deviceId) {
-            const rawPhoneRef = doc(db, "routes", phone);
-            const unsubRawPhone = onSnapshot(rawPhoneRef, (docSnap) => {
-                handleRouteData(docSnap.data(), docSnap.exists(), 'rawPhone');
-            }, (err) => console.warn("rawPhone 감시 오류:", err));
-            unsubs.push(unsubRawPhone);
-        }
-    }
-
-    return () => {
-        unsubs.forEach(unsub => {
-            try { if (typeof unsub === 'function') unsub(); } catch (e) {}
-        });
-    };
+        hasSeenOwnedRoute = !!latest;
+    }, error => console.warn('소유자 경로 동기화 오류:', error));
 }
 
 export const startAssignedRouteListener = listenToActiveRoutes;
 
-// 4-2. 포그라운드 복귀 시 1회 즉시 동기화 보조 함수
-export async function fetchActiveRouteOnce(deviceId, phone) {
+export async function fetchActiveRouteOnce(deviceId, phone, ownerId = state.getRouteOwnerId()) {
+    if (!ownerId) return { destinations: [], isNoDoc: true };
     try {
-        const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
-        let latestData = null;
-        let latestTime = -1;
-        let foundAnyDoc = false;
-
-        const checkDoc = async (id) => {
-            if (!id) return;
-            const snap = await getDoc(doc(db, "routes", id));
-            if (snap.exists()) {
-                foundAnyDoc = true;
-                const d = snap.data();
-                if (d) {
-                    const t = d.updatedAt || 0;
-                    if (t > latestTime) {
-                        latestTime = t;
-                        latestData = d;
-                    }
-                }
-            }
-        };
-
-        await checkDoc(deviceId);
-        await checkDoc(cleanPhone);
-        if (phone !== cleanPhone) await checkDoc(phone);
-
-        if (!foundAnyDoc) {
-            return { destinations: [], isNoDoc: true };
-        }
-
-        return latestData || { destinations: [], isEmpty: true };
-    } catch (e) {
-        console.warn("최신 동선 단발 조회 오류:", e);
+        const snapshot = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', ownerId)));
+        const routes = [];
+        snapshot.forEach(item => routes.push({ ...item.data(), routeDocumentId: item.id }));
+        return selectLatestOwnedRoute(routes, ownerId) || { routeOwnerId: ownerId, updatedAt: 0, destinations: [], isNoDoc: true };
+    } catch (error) {
+        console.warn('소유자 경로 조회 오류:', error);
         return { destinations: [], isOffline: true };
     }
 }
@@ -482,7 +381,9 @@ export async function firebaseStartTrial(phone, deviceId) {
     }
     const trialKey = `TRIAL-${p1}-${p2}`;
 
+    const routeOwnerId = crypto.randomUUID();
     await setDoc(doc(db, "licenses", trialKey), {
+        routeOwnerId,
         key: trialKey,
         type: 'trial',
         phone: phone,
@@ -494,7 +395,7 @@ export async function firebaseStartTrial(phone, deviceId) {
         createdAt: now.getTime()
     });
 
-    return { valid: true, trialKey: trialKey, expireDate: expDateStr, dispatchKey: '' };
+    return { valid: true, trialKey: trialKey, expireDate: expDateStr, dispatchKey: '', routeOwnerId };
 }
 
 // 7. 주차 및 건물 메모 (공용 메모) 관련 함수들
@@ -645,13 +546,24 @@ export async function reportMemoInFirestore(docId) {
 }
 
 // 8. 배송 경로 및 완료 내역 동기화
+const routeSaveRevisions = new Map();
 export async function saveRouteToFirestore(deviceId, phone, destinations) {
+    let revisionKey;
+    let revision;
     try {
-        if (!deviceId) return;
+        const routeOwnerId = state.getRouteOwnerId();
+        if (!deviceId || !routeOwnerId || destinations !== state.getDestinations()) return;
+        revisionKey = `${routeOwnerId}|${deviceId}`;
+        revision = state.getRouteUpdatedAt();
+        if (routeSaveRevisions.get(revisionKey) === revision) return;
+        routeSaveRevisions.set(revisionKey, revision);
         const routeRef = doc(db, "routes", deviceId);
         await setDoc(routeRef, {
+            routeOwnerId,
+            deviceId,
+            endLocation: state.getEndLocation(),
             phone: phone || "연락처 미등록",
-            updatedAt: new Date().getTime(),
+            updatedAt: state.getRouteUpdatedAt() || Date.now(),
             destinations: destinations.map(d => ({
                 id: d.id,
                 displayNumber: d.displayNumber || 0,
@@ -665,7 +577,10 @@ export async function saveRouteToFirestore(deviceId, phone, destinations) {
                 items: d.items || []
             }))
         });
-    } catch (e) { console.error("동선 전송 오류:", e); }
+    } catch (e) {
+        if (routeSaveRevisions.get(revisionKey) === revision) routeSaveRevisions.delete(revisionKey);
+        console.error("동선 전송 오류:", e);
+    }
 }
 
 export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null) {

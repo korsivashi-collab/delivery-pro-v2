@@ -1,3 +1,4 @@
+import { ensureRouteOwner } from './route-owner.js';
 // js/admin-master-licenses.js
 
 import { db, generateSecureKey } from "./admin-api.js";
@@ -676,6 +677,7 @@ export async function saveLicenseEdit() {
     };
 
     try {
+        updatePayload.routeOwnerId = await ensureRouteOwner(db, origKey);
         if (newKey !== origKey) {
             await setDoc(doc(db, "licenses", newKey), updatePayload);
             await deleteDoc(doc(db, "licenses", origKey));
