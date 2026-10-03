@@ -519,6 +519,7 @@ export async function reportMemoInFirestore(docId) {
 
 // 8. 배송 경로 및 완료 내역 동기화
 const routeSaveRevisions = new Map();
+const MAX_ROUTE_SAVE_REVISIONS = 64;
 export async function saveRouteToFirestore(deviceId, phone, destinations, requireAcknowledgement = false) {
     let revisionKey;
     let revision;
@@ -528,6 +529,9 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
         revisionKey = `${routeOwnerId}|${deviceId}`;
         revision = state.getRouteUpdatedAt();
         if (!requireAcknowledgement && routeSaveRevisions.get(revisionKey) === revision) return;
+        if (!routeSaveRevisions.has(revisionKey) && routeSaveRevisions.size >= MAX_ROUTE_SAVE_REVISIONS) {
+            routeSaveRevisions.delete(routeSaveRevisions.keys().next().value);
+        }
         routeSaveRevisions.set(revisionKey, revision);
         const routeRef = doc(db, "routes", deviceId);
         await setDoc(routeRef, {

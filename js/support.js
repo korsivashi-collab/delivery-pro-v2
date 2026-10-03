@@ -69,18 +69,57 @@ async function geocodeAddress(address) {
 // ==========================================
 // 3. 알림함 및 관제 팝업 관리 기능
 // ==========================================
+let beepAudioContext = null;
+let activeBeep = null;
+
+function stopActiveBeep() {
+    const beep = activeBeep;
+    if (!beep) return;
+    try { beep.osc.stop(); } catch (_) {}
+    beep.cleanup();
+}
+
+function releaseBeepAudio() {
+    stopActiveBeep();
+    const ctx = beepAudioContext;
+    beepAudioContext = null;
+    try { ctx?.close()?.catch(() => {}); } catch (_) {}
+}
+
+if (typeof window.addEventListener === 'function') window.addEventListener('pagehide', releaseBeepAudio);
+
 export function playBeepSound() {
+    let beep, osc, gain;
     try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
+        if (!beepAudioContext || beepAudioContext.state === 'closed') {
+            beepAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+        }
+        const ctx = beepAudioContext;
+        stopActiveBeep();
+        osc = ctx.createOscillator();
+        gain = ctx.createGain();
+        beep = { osc, cleanup() {
+            osc.onended = null;
+            try { osc.disconnect(); } catch (_) {}
+            try { gain.disconnect(); } catch (_) {}
+            if (activeBeep === beep) activeBeep = null;
+        } };
+        activeBeep = beep;
+        osc.onended = beep.cleanup;
         osc.connect(gain); 
         gain.connect(ctx.destination);
         osc.frequency.value = 880; 
         gain.gain.value = 0.3;
+        // 사용자 제스처를 놓치지 않도록 await 없이 즉시 재개를 요청한다.
+        if (ctx.state === 'suspended' || ctx.state === 'interrupted') {
+            ctx.resume().catch(() => { if (activeBeep === beep) stopActiveBeep(); });
+        }
         osc.start();
-        setTimeout(() => { osc.stop(); }, 250);
-    } catch(e) {}
+        osc.stop(ctx.currentTime + 0.25);
+    } catch(e) {
+        if (beep) { try { beep.osc.stop(); } catch (_) {} beep.cleanup(); }
+        else { try { osc?.disconnect(); gain?.disconnect(); } catch (_) {} }
+    }
 }
 
 export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, senderTitle, senderType) {

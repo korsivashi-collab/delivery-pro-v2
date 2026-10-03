@@ -134,7 +134,11 @@ export function getOrCreateDeviceId() {
 // ==========================================
 export function clearAuthStorage() {
     resetGpsPreferenceSession();
-    if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
+    for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
+        try { if (typeof unsubscribe === 'function') unsubscribe(); } catch (_) {}
+    }
+    licenseWatcherUnsub = null;
+    dispatchMsgWatcherUnsub = null;
     activeRoutesWatcherUnsub = null;
     cachedRemoteRoutes = null;
     state.deactivateRouteOwner();
@@ -493,10 +497,6 @@ export async function logout() {
         }
     }
     
-    try { if (typeof licenseWatcherUnsub === 'function') { licenseWatcherUnsub(); } } catch(e) {}
-    try { if (typeof dispatchMsgWatcherUnsub === 'function') { dispatchMsgWatcherUnsub(); } } catch(e) {}
-    try { if (typeof activeRoutesWatcherUnsub === 'function') { activeRoutesWatcherUnsub(); } } catch(e) {}
-
     clearAuthStorage();
     window.location.reload();
 }

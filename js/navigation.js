@@ -13,6 +13,7 @@ let isMapSdkLoaded = false;
 let mapSdkPromise = null;
 let mapViewGeneration = 0;
 let mapViewController = null;
+let mapRenderTimer = null;
 export const MAP_SDK_TIMEOUT_MS = 15000;
 
 // 상호명 분리 및 주소 원본 보존 헬퍼
@@ -118,6 +119,10 @@ async function loadKakaoMapSdk() {
 
 export function cancelStartMapLoad() {
     mapViewGeneration++;
+    clearTimeout(mapRenderTimer);
+    mapRenderTimer = null;
+    startMapMarkers.forEach(marker => marker.setMap(null));
+    startMapMarkers = [];
     if (mapViewController) { mapViewController.abort(); mapViewController = null; hideLoading(); }
 }
 
@@ -158,7 +163,8 @@ export async function switchStartSelectViewMode(mode, selectStartDestCallback) {
             if (generation === mapViewGeneration) { mapViewController = null; hideLoading(); }
         }
         
-        setTimeout(() => {
+        mapRenderTimer = setTimeout(() => {
+            mapRenderTimer = null;
             if (generation !== mapViewGeneration || document.getElementById('start-select-modal')?.classList.contains('hidden')) return;
             if (startMapInstance) startMapInstance.relayout();
             renderStartSelectMap(selectStartDestCallback);
