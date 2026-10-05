@@ -36,7 +36,7 @@ import {
 // [관제/PRO 코어 모듈 가져오기]
 // ==========================================
 import {
-    formatNumber, forceClearMap, getFilteredVisibleDrivers, setDispatchMode, renderSidebar,
+    formatNumber, forceClearMap, getFilteredVisibleDrivers, setDispatchMode, renderSidebar, withDriverSummaryCycle,
     renderDriverListView, setDispatchDetailTab, renderDriverDetailView, selectDriver,
     clearSelectedDriver, removeOrUnlinkDriver, drawDriverOnMap, setMapPolylineMode,
     changeDispatchDate, onDispatchDateChange, resetDispatchDateToToday,
@@ -149,7 +149,7 @@ function stopAdminDataSync() {
 function subscribeAdmin(source, callback, onError = null) {
     const identity = adminIdentity;
     adminSubscriptions.push(onSnapshot(source, snapshot => {
-        if (identity && adminIdentity === identity && getVerifiedAuthSession() === identity) callback(snapshot);
+        if (identity && adminIdentity === identity && getVerifiedAuthSession() === identity) withDriverSummaryCycle(() => callback(snapshot));
     }, () => {
         if (onError && identity && adminIdentity === identity && getVerifiedAuthSession() === identity) onError();
     }));
@@ -254,7 +254,7 @@ window.handleSingleKeyLogin = async function() {
     if (adminLoginBusy) return;
     adminLoginBusy = true;
     const input = document.getElementById('single-key-input');
-    const secret = (input?.value || '').trim();
+    const secret = input?.value || '';
     if (input) input.value = '';
     const message = document.getElementById('login-msg');
     const button = document.getElementById('login-btn');
@@ -462,7 +462,7 @@ window.initMasterDataSync = function() {
     });
 
     // 🌟 4. 경로(Routes) 실시간 동기화 (기사 앱에서 동선 삭제/초기화 시 지도 및 모달 잔상 즉시 소거)
-    const renderRoutesState = () => {
+    const renderRoutesState = () => withDriverSummaryCycle(() => {
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
@@ -481,7 +481,7 @@ window.initMasterDataSync = function() {
         }
         const searchInput = document.getElementById('global-search-input');
         if (!isMaster && searchInput?.value && typeof handleGlobalSearch === 'function') handleGlobalSearch(searchInput.value, false);
-    };
+    });
     if (isMaster) subscribeAdmin(collection(db, 'routes'), snapshot => {
         state.activeRoutes = {};
         snapshot.forEach(item => { state.activeRoutes[item.id] = item.data(); });
@@ -632,9 +632,21 @@ window.initMasterDataSync = function() {
     }
 
     // 🌟 5. 배송 완료 실시간 동기화
+    let completionRows = [];
     subscribeAdmin(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
-        state.allCompletions = [];
-        snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+        // Query-order indices preserve additions, moves and removals.
+        // Keep the full query and rendering behavior; decode only changed documents.
+        if (typeof snapshot.docChanges === 'function') {
+            for (const change of snapshot.docChanges()) {
+                if (change.type !== 'added') completionRows.splice(change.oldIndex, 1);
+                if (change.type !== 'removed') completionRows.splice(change.newIndex, 0,
+                    { id: change.doc.id, ...change.doc.data() });
+            }
+        } else {
+            completionRows = [];
+            snapshot.forEach(docSnap => { completionRows.push({ id: docSnap.id, ...docSnap.data() }); });
+        }
+        state.allCompletions = completionRows.slice();
 
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {

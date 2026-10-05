@@ -96,9 +96,10 @@ export async function firebaseVerifyLicense(key, phone, deviceId, expectedType =
 
     const data = docSnap.data();
     if (expectedType && (data.type !== expectedType || data.status !== 'active')) return { valid: false };
-    phone = phone ?? data.phone ?? '';
+    phone = data.phone ?? phone ?? '';
     const cleanDigits = String(phone).replace(/[^0-9]/g, '');
     if (cleanDigits.length < 9 || cleanDigits.length > 13) return { valid: false };
+    // The server records the current driver's number. It is not an ownership check.
 
     if (data.status === 'suspended') {
         return { valid: false, msg: "사용이 일시 정지된 계정입니다.\n관리자에게 문의하세요." };
@@ -116,7 +117,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId, expectedType =
         return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다. 관리자에게 기기 초기화를 요청하세요." };
     }
     if (getVerifiedAuthSession('driver') !== identity) return { valid: false };
-    const routeOwnerId = await ensureRouteOwner(db, docSnap.id, deviceId, phone);
+    const routeOwnerId = await ensureRouteOwner(db, docSnap.id, deviceId);
     if (getVerifiedAuthSession('driver') !== identity) return { valid: false };
 
     return { 
@@ -408,7 +409,6 @@ export async function saveMemoToFirestore(address, deviceId, memoText, phone = "
 export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) {
     const identity = getVerifiedAuthSession('driver');
     if (!identity) return 0;
-    const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
     const myAddresses = new Set();
 
     try {
@@ -417,42 +417,14 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
     } catch (e) {}
 
     try {
-        if (deviceId) {
-            const qDev = query(collection(db, "memos"), where("deviceId", "==", deviceId));
-            const snapDev = await getDocs(qDev);
-            snapDev.forEach(docSnap => {
-                const d = docSnap.data();
-                if (d.address) myAddresses.add(d.address);
-            });
+        // The protected endpoint derives phone/company/owner from the live account.
+        // Never widen access using caller-supplied telephone or local login keys.
+        const result = await requestLicenseMembership({ action: 'readOwnParkingMemos' });
+        if (getVerifiedAuthSession('driver') !== identity) return 0;
+        if (!Array.isArray(result?.addresses) || result.addresses.some(a => typeof a !== 'string' || !a || a.length > 4096)) {
+            throw new Error('메모 조회 결과를 확인할 수 없습니다.');
         }
-
-        if (phone) {
-            const qPhone = query(collection(db, "memos"), where("phone", "==", phone));
-            const snapPhone = await getDocs(qPhone);
-            snapPhone.forEach(docSnap => {
-                const d = docSnap.data();
-                if (d.address) myAddresses.add(d.address);
-            });
-        }
-
-        if (cleanPhone) {
-            if (!identity || !/^licenses\/[^/]+$/.test(identity.accountRef)) throw new Error('인증 계정을 확인할 수 없습니다.');
-            const licSnap = await getDoc(doc(db, 'licenses', identity.accountRef.slice('licenses/'.length)));
-            if (getVerifiedAuthSession('driver') !== identity) throw new Error('인증 계정이 변경되었습니다.');
-            const userDevIds = new Set();
-            if (licSnap.exists() && licSnap.data().deviceId) userDevIds.add(licSnap.data().deviceId);
-
-            for (const dId of userDevIds) {
-                if (dId !== deviceId) {
-                    const qOther = query(collection(db, "memos"), where("deviceId", "==", dId));
-                    const snapOther = await getDocs(qOther);
-                    snapOther.forEach(docSnap => {
-                        const d = docSnap.data();
-                        if (d.address) myAddresses.add(d.address);
-                    });
-                }
-            }
-        }
+        result.addresses.forEach(address => myAddresses.add(address));
     } catch (err) {
         console.error("서버 메모 동기화 오류:", err);
     }
@@ -473,6 +445,7 @@ export async function reportMemoInFirestore(docId) {
 
 // 8. 배송 경로 및 완료 내역 동기화
 const routeSaveRevisions = new Map();
+const routeSavePending = new Map();
 const MAX_ROUTE_SAVE_REVISIONS = 64;
 export async function saveRouteToFirestore(deviceId, phone, destinations, requireAcknowledgement = false) {
     let revisionKey;
@@ -494,13 +467,21 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
         const dispatchKey = license.dispatchKey || '';
         // A company change needs a write even when the route revision is unchanged.
         revision = JSON.stringify([updatedAt, licenseKey, dispatchKey]);
-        if (!requireAcknowledgement && routeSaveRevisions.get(revisionKey) === revision) return;
-        if (!routeSaveRevisions.has(revisionKey) && routeSaveRevisions.size >= MAX_ROUTE_SAVE_REVISIONS) {
-            routeSaveRevisions.delete(routeSaveRevisions.keys().next().value);
+        if (routeSaveRevisions.get(revisionKey) === revision) return true;
+        let pending = routeSavePending.get(revisionKey);
+        if (pending?.revision === revision) return await pending.promise;
+        // Serialize writes to this owner/device. A late old write must not overwrite
+        // a newer route; recheck the state after waiting for the previous write.
+        while (pending) {
+            try { await pending.promise; } catch { /* A failed write does not block retry. */ }
+            if (getVerifiedAuthSession('driver') !== identity || state.getRouteOwnerId() !== routeOwnerId ||
+                destinations !== state.getDestinations() || state.getRouteUpdatedAt() !== updatedAt) return false;
+            if (routeSaveRevisions.get(revisionKey) === revision) return true;
+            pending = routeSavePending.get(revisionKey);
+            if (pending?.revision === revision) return await pending.promise;
         }
-        routeSaveRevisions.set(revisionKey, revision);
         const routeRef = doc(db, "routes", deviceId);
-        await setDoc(routeRef, {
+        const payload = {
             routeOwnerId,
             licenseKey,
             dispatchKey,
@@ -522,7 +503,22 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 memo: d.memo || "",
                 items: d.items || []
             }))
+        };
+        const operation = { revision, promise: null };
+        operation.promise = Promise.resolve().then(async () => {
+            try {
+                await setDoc(routeRef, payload);
+                if (!routeSaveRevisions.has(revisionKey) && routeSaveRevisions.size >= MAX_ROUTE_SAVE_REVISIONS) {
+                    routeSaveRevisions.delete(routeSaveRevisions.keys().next().value);
+                }
+                routeSaveRevisions.set(revisionKey, revision);
+                return true;
+            } finally {
+                if (routeSavePending.get(revisionKey) === operation) routeSavePending.delete(revisionKey);
+            }
         });
+        routeSavePending.set(revisionKey, operation);
+        await operation.promise;
         return true;
     } catch (e) {
         if (routeSaveRevisions.get(revisionKey) === revision) routeSaveRevisions.delete(revisionKey);
@@ -573,7 +569,8 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             await runTransaction(db, async transaction => {
                 const operation = await transaction.get(operationRef);
                 if (operation.exists() && operation.data().action === 'delete') return;
-                transaction.set(operationRef, { routeOwnerId: ownership.routeOwnerId, action: 'complete' });
+                transaction.set(operationRef, { licenseKey: ownership.licenseKey, routeOwnerId: ownership.routeOwnerId,
+                    deviceId, action: 'complete' });
                 transaction.set(completionRef, data);
             });
             return transmission.id;
@@ -591,9 +588,15 @@ export async function deleteCompletionFromFirestore(docId, operationId = null, r
     try {
         if (!docId) return;
         if (operationId) {
+            const ownership = getCompletionOwnershipContext();
+            const deviceId = localStorage.getItem('deliveryProDeviceId');
+            if (!ownership.licenseKey || !deviceId || ownership.routeOwnerId !== routeOwnerId) {
+                throw new Error('배송 처리 소유자 정보가 일치하지 않습니다.');
+            }
             await runTransaction(db, async transaction => {
                 // Durable cancellation wins even when an older completion request arrives late.
-                transaction.set(doc(db, 'completion_operations', operationId), { routeOwnerId, action: 'delete' });
+                transaction.set(doc(db, 'completion_operations', operationId), {
+                    licenseKey: ownership.licenseKey, routeOwnerId, deviceId, action: 'delete' });
                 transaction.delete(doc(db, 'completions', docId));
             });
         } else await deleteDoc(doc(db, "completions", docId));
@@ -604,27 +607,13 @@ export async function deleteCompletionFromFirestore(docId, operationId = null, r
 }
 
 export async function firebaseClearDeviceData(key) {
-    try {
-        if (!key) return;
-        const identity = getVerifiedAuthSession('driver');
-        if (!identity || identity.accountRef !== `licenses/${key}`) return;
-        let docRef = doc(db, "licenses", key);
-        let docSnap = await getDoc(docRef);
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        
-        if ((await getDoc(docRef)).exists()) {
-            await updateDoc(docRef, { deviceId: "", phone: "" });
-        }
-    } catch(e) {
-        console.error("서버 기기 정보 초기화 오류:", e);
-    }
+    const identity = getVerifiedAuthSession('driver');
+    if (!identity || identity.accountRef !== `licenses/${key}`) return;
+    const deviceId = localStorage.getItem('deliveryProDeviceId');
+    if (!deviceId) return;
+    // Server checks the live version/device atomically; an old device cannot
+    // clear a replacement device's binding during delayed logout.
+    await requestLicenseMembership({ action: 'releaseDevice', deviceId });
 }
 
 // 9. TMS(관제) 연결 허용/차단 상태 제어 함수

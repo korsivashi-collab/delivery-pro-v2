@@ -1,6 +1,6 @@
 // js/admin-master-licenses.js
 
-import { db, getVerifiedAuthSession, requestAuthCredential, changeOwnMasterSecret, requestLicenseMembership, onVerifiedSessionInvalidated } from "./admin-api.js";
+import { db, getVerifiedAuthSession, requestAuthCredential, getOwnMasterStatus, changeOwnMasterSecret, requestLicenseMembership, onVerifiedSessionInvalidated } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -15,6 +15,10 @@ let masterPasswordChangeUncertain = false;
 let licenseCredentialControls = null;
 const credentialFailure = '발급 완료를 확인하지 못했습니다. 기존 로그인 정보가 변경되었을 수 있으므로 자동으로 재시도하지 마세요. 계정 상태를 확인한 뒤 재발급해 주세요.';
 
+function loginKeyText(target) { return target.loginKey ?? target.key ?? target.id; }
+function escapeLoginKey(value) {
+    return String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+}
 function credentialButton(label, action) {
     const button = document.createElement('button');
     button.type = 'button';
@@ -72,6 +76,37 @@ async function issueCredential(action, role, accountRef) {
     finally { if (result) result.secret = ''; credentialBusy = false; }
 }
 
+async function openMasterStatus() {
+    const identity = getVerifiedAuthSession('master');
+    if (!identity || credentialBusy || closeSecretDisplay) return;
+    credentialBusy = true;
+    const generation = credentialUiGeneration;
+    try {
+        const status = await getOwnMasterStatus();
+        if (generation !== credentialUiGeneration || getVerifiedAuthSession('master') !== identity) return;
+        const dialog = document.createElement('dialog');
+        dialog.className = 'rounded-2xl p-6 shadow-2xl w-full max-w-lg';
+        dialog.setAttribute('aria-label', '마스터 로그인 정보');
+        const title = document.createElement('p'); title.textContent = '현재 마스터 로그인 상태 (비밀번호는 표시하지 않습니다.)';
+        dialog.append(title);
+        for (const [label, value] of [
+            ['계정 연결 경로', status.accountRef], ['권한', status.role],
+            ['계정 사용', status.enabled ? '사용 가능' : '사용 중지'],
+            ['로그인 준비', status.credentialReady ? '준비됨' : '준비되지 않음'],
+            ['인증 버전', status.credentialVersion],
+            ['인증 연결', status.authenticationLinked ? '정상' : '비정상']]) {
+            const row = document.createElement('p'); row.textContent = `${label}: ${value}`; dialog.append(row);
+        }
+        const cleanup = () => { dialog.remove(); closeSecretDisplay = null; };
+        closeSecretDisplay = cleanup;
+        dialog.addEventListener('cancel', event => { event.preventDefault(); cleanup(); });
+        dialog.addEventListener('close', cleanup);
+        dialog.append(credentialButton('닫기', cleanup)); document.body.append(dialog); dialog.showModal();
+    } catch {
+        if (generation === credentialUiGeneration && getVerifiedAuthSession('master') === identity) alert('마스터 로그인 상태를 조회하지 못했습니다. 잠시 후 다시 확인해 주세요.');
+    } finally { credentialBusy = false; }
+}
+
 function openMasterPasswordChange() {
     const identity = getVerifiedAuthSession('master');
     if (!identity || credentialBusy || closeSecretDisplay || masterPasswordChangeUncertain) return;
@@ -83,12 +118,13 @@ function openMasterPasswordChange() {
         const input = document.createElement('input');
         input.type = 'password'; input.placeholder = label; input.setAttribute('aria-label', label);
         input.autocomplete = index === 0 ? 'current-password' : 'new-password';
+        input.minLength = 8; input.maxLength = 64;
         input.className = 'w-full border rounded-lg p-3 my-2';
-        input.maxLength = 128; input.spellcheck = false;
+        input.spellcheck = false;
         return input;
     });
     const message = document.createElement('p');
-    message.textContent = '새 비밀번호는 16~128자입니다. 앞뒤 공백과 제어문자는 사용할 수 없습니다.';
+    message.textContent = '비밀번호는 8~64자입니다. 앞뒤 공백과 제어문자는 사용할 수 없습니다.';
     let closed = false;
     const clear = () => { for (const input of inputs) input.value = ''; };
     const cleanup = () => {
@@ -97,7 +133,7 @@ function openMasterPasswordChange() {
     };
     const submit = credentialButton('변경', async () => {
         if (closed || credentialBusy || masterPasswordChangeUncertain || generation !== credentialUiGeneration || getVerifiedAuthSession('master') !== identity) return;
-        const validNew = inputs[1].value.length >= 16 && inputs[1].value.length <= 128 &&
+        const validNew = inputs[1].value.length >= 8 && inputs[1].value.length <= 64 &&
             inputs[1].value.trim() === inputs[1].value && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(inputs[1].value);
         if (!validNew || inputs[1].value !== inputs[2].value || !inputs[0].value) {
             clear(); message.textContent = '현재 비밀번호, 새 비밀번호 형식 및 확인값을 확인해 주세요.'; return;
@@ -110,10 +146,19 @@ function openMasterPasswordChange() {
             cleanup();
             await window.systemLogout();
             alert('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인하세요.');
-        } catch {
+        } catch (error) {
             clear();
-            if (!closed && generation === credentialUiGeneration) message.textContent =
-                '변경 완료를 확인하지 못했습니다. 기존 비밀번호가 이미 변경되었을 수 있습니다. 다시 변경하지 말고 계정 상태를 확인하세요.';
+            if (generation !== credentialUiGeneration) return;
+            if (error.changeOutcome === 'notChanged') {
+                masterPasswordChangeUncertain = false; submit.disabled = false;
+                const failures = { AUTH_FAILED: '현재 비밀번호 또는 로그인 권한을 확인해 주세요.',
+                    INVALID_SECRET: '비밀번호는 8~64자이며 앞뒤 공백과 제어문자는 사용할 수 없습니다.',
+                    SECRET_UNCHANGED: '현재 비밀번호와 다른 새 비밀번호를 입력해 주세요.',
+                    CREDENTIAL_CONFLICT: '사용할 수 없는 비밀번호입니다. 다른 비밀번호를 입력해 주세요.',
+                    CREDENTIAL_BUSY: '계정의 이전 변경 상태를 먼저 확인해 주세요.' };
+                if (!closed) message.textContent = failures[error.code] || '비밀번호는 변경되지 않았습니다. 로그인 상태와 입력값을 확인한 뒤 다시 시도해 주세요.';
+            } else if (!closed) message.textContent =
+                '변경 결과를 확인하지 못했습니다. 비밀번호가 변경되었을 수 있으므로 다시 변경하지 말고 로그인 상태를 확인해 주세요.';
         } finally { clear(); credentialBusy = false; }
     });
     closeSecretDisplay = cleanup;
@@ -127,16 +172,7 @@ export function initMasterCredentialControls() {
     if (!getVerifiedAuthSession('master') || masterCredentialButton) return;
     const anchor = document.getElementById('master-name-badge');
     if (!anchor?.parentNode) return;
-    masterCredentialButton = credentialButton('마스터 로그인 정보', () => {
-        const identity = getVerifiedAuthSession('master');
-        if (!identity || credentialBusy || closeSecretDisplay) return;
-        const accountRef = window.prompt('기존 마스터 계정 경로를 입력하세요 (admin/문서ID 또는 admins/문서ID). 계정을 새로 만들지는 않습니다.', identity.accountRef)?.trim();
-        if (!accountRef) return;
-        if (!/^(admin|admins)\/[^/]+$/.test(accountRef)) { alert('마스터 계정 경로를 확인해 주세요.'); return; }
-        const choice = window.prompt('최초 발급은 1, 재발급은 2를 입력하세요. 재발급하면 기존 로그인 정보와 세션이 철회됩니다.', '2');
-        if (choice !== '1' && choice !== '2') return;
-        return issueCredential(choice === '1' ? 'issue' : 'rotate', 'master', accountRef);
-    });
+    masterCredentialButton = credentialButton('마스터 로그인 정보', openMasterStatus);
     anchor.parentNode.append(masterCredentialButton);
     masterPasswordButton = credentialButton('Master 로그인 비밀번호 변경', openMasterPasswordChange);
     anchor.parentNode.append(masterPasswordButton);
@@ -146,7 +182,7 @@ function mountLicenseCredentialControls(target) {
     licenseCredentialControls?.remove();
     licenseCredentialControls = null;
     // Free-trial Auth provisioning remains a separate, explicitly deferred stage.
-    if (!getVerifiedAuthSession('master') || target.type === 'trial' || target.isTrial || String(target.key).startsWith('TRIAL-')) return;
+    if (!getVerifiedAuthSession('master') || target.type !== 'dispatch' || target.isTrial || String(target.key).startsWith('TRIAL-')) return;
     const id = target.id;
     const card = document.getElementById('edit-modal-card');
     if (!card || typeof id !== 'string' || !id || id.includes('/')) return;
@@ -167,6 +203,7 @@ onVerifiedSessionInvalidated(() => {
     masterPasswordButton?.remove(); masterPasswordButton = null;
     masterPasswordChangeUncertain = false;
     licenseCredentialControls?.remove(); licenseCredentialControls = null;
+    document.getElementById('license-key-change-control')?.remove();
 });
 window.addEventListener('pagehide', () => { credentialUiGeneration++; closeSecretDisplay?.(false); });
 
@@ -217,7 +254,7 @@ export function renderMasterTables() {
     renderPagedTableTab('regular', regulars, 'table-body-regular', 'pagination-regular', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
             <td class="py-3 px-3 font-bold text-gray-400 text-center">${idx}</td>
-            <td class="py-3 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
+            <td class="py-3 px-3 font-mono font-black text-blue-600 select-all">${escapeLoginKey(loginKeyText(item))}</td>
             <td class="py-3 px-3 font-black text-gray-900">${item.phone || '<span class="text-gray-400 text-[11px] font-normal">로그인 대기</span>'}</td>
             <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-700">${item.deviceId || '미등록'}</span></td>
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
@@ -232,7 +269,7 @@ export function renderMasterTables() {
     renderPagedTableTab('trial', trials, 'table-body-trial', 'pagination-trial', (item, idx) => `
         <tr class="hover:bg-gray-50/80 transition">
             <td class="py-3 px-3 font-bold text-gray-400 text-center">${idx}</td>
-            <td class="py-3 px-3 font-mono font-black text-emerald-600 select-all">${item.key}</td>
+            <td class="py-3 px-3 font-mono font-black text-emerald-600 select-all">${escapeLoginKey(loginKeyText(item))}</td>
             <td class="py-3 px-3 font-black text-gray-900">${item.phone || '-'}</td>
             <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-700">${item.deviceId || '-'}</span></td>
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
@@ -515,6 +552,10 @@ export async function generateNewLicense() {
 
     const typeName = (type === 'dispatch') ? '관제 계정' : '일반 계정';
     const expStr = expireDate.replace(/-/g, '.');
+    const phones = type === 'regular' ? (document.getElementById('new-key-phones')?.value || '').trim().split(/\r?\n/).map(p => p.trim()) : null;
+    if (phones && (phones.length !== count || phones.some(p => p.length > 32 || !/^[0-9+() -]+$/.test(p) || !/^\d{9,13}$/.test(p.replace(/\D/g, ''))))) {
+        alert('생성 수량에 맞춰 등록 전화번호를 한 줄에 하나씩 입력해 주세요.'); return;
+    }
 
     if (btn) {
         btn.disabled = true;
@@ -522,7 +563,7 @@ export async function generateNewLicense() {
     }
 
     try {
-        const result = await requestLicenseMembership({ action: 'createLicense', type, keyword, count, expireDate: expStr });
+        const result = await requestLicenseMembership({ action: 'createLicense', type, keyword, count, expireDate: expStr, ...(phones ? { phones } : {}) });
         const createdKeys = result.licenseKeys;
         if (!Array.isArray(createdKeys) || createdKeys.length !== count || createdKeys.some(key => typeof key !== 'string')) {
             throw new Error('생성을 확인할 수 없습니다. 자동 재시도하지 마세요.');
@@ -530,11 +571,13 @@ export async function generateNewLicense() {
         document.getElementById('create-account-modal')?.classList.add('hidden');
         if (document.getElementById('new-key-keyword')) document.getElementById('new-key-keyword').value = '';
         if (document.getElementById('new-key-count')) document.getElementById('new-key-count').value = '1';
+        if (phones && document.getElementById('new-key-phones')) document.getElementById('new-key-phones').value = '';
+        const loginGuide = type === 'regular' ? '라이선스 키와 등록 전화번호로 바로 로그인할 수 있습니다.' : '로그인 secret은 별도로 최초 발급해야 합니다.';
 
         if (count === 1) {
-            alert(`[${typeName} 생성 완료]\n\n라이선스 키: ${createdKeys[0]}\n로그인 secret은 별도로 최초 발급해야 합니다.`);
+            alert(`[${typeName} 생성 완료]\n\n라이선스 키: ${createdKeys[0]}\n${loginGuide}`);
         } else {
-            alert(`[${typeName} 총 ${count}개 생성 완료]\n\n생성된 키 목록:\n${createdKeys.join('\n')}\n로그인 secret은 각 계정에 별도로 최초 발급해야 합니다.`);
+            alert(`[${typeName} 총 ${count}개 생성 완료]\n\n생성된 키 목록:\n${createdKeys.join('\n')}\n${loginGuide}`);
         }
     } catch {
         alert('계정 생성을 확인하지 못했습니다. 생성되었을 수 있으므로 재시도 전에 현재 목록을 확인해 주세요.');
@@ -606,7 +649,7 @@ function mountLicenseManagementControls(target) {
         } catch { alert('편입을 확인할 수 없습니다. 소유권과 인증 연결을 점검해 주세요. 자동 보정하지 않습니다.'); }
         finally { button.disabled = false; }
     });
-    group.append(button);
+    if (target.type === 'dispatch') group.append(button);
     if (target.routeOwnerId === undefined || target.routeOwnerId === '') {
         const repair = document.createElement('button'); repair.type = 'button';
         repair.className = button.className; repair.textContent = '이 계정의 동선 소유자만 보완';
@@ -628,12 +671,43 @@ function mountLicenseManagementControls(target) {
     host.append(group);
 }
 
+function mountLicenseKeyControl(target) {
+    document.getElementById('license-key-change-control')?.remove();
+    if (target.type === 'dispatch' || !getVerifiedAuthSession('master')) return;
+    const host = document.getElementById('edit-key-input')?.parentNode;
+    if (!host) return;
+    const group = document.createElement('div'); group.id = 'license-key-change-control';
+    const button = credentialButton('로그인 키 변경', async () => {
+        const identity = getVerifiedAuthSession('master'), generation = credentialUiGeneration;
+        if (!identity || credentialBusy) return;
+        const expectedKey = loginKeyText(target), licenseKey = target.id || target.key;
+        const newKey = window.prompt('새 로그인 라이선스 키를 입력하세요. (1~128자)', expectedKey)?.trim();
+        if (!newKey) return;
+        if (newKey.length > 128 || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(newKey)) { alert('키는 1~128자이며 제어문자를 사용할 수 없습니다.'); return; }
+        if (newKey === expectedKey) { alert('현재 키와 다른 키를 입력해 주세요.'); return; }
+        if (!confirm(`로그인 키를 변경하시겠습니까?\n${expectedKey}\n→ ${newKey}\n기존 로그인 세션은 종료됩니다.`)) return;
+        credentialBusy = true; button.disabled = true;
+        try {
+            const result = await requestLicenseMembership({ action: 'changeLicenseKey', licenseKey, expectedKey, newKey });
+            if (getVerifiedAuthSession('master') !== identity || generation !== credentialUiGeneration) return;
+            if (result.changed !== true || result.accountRef !== `licenses/${licenseKey}` || result.loginKey !== newKey ||
+                !Number.isSafeInteger(result.credentialVersion) || result.credentialVersion < 2) throw new Error('CHANGE_UNCONFIRMED');
+            target.loginKey = newKey;
+            document.getElementById('edit-key-input').value = newKey;
+            alert('로그인 키가 변경되었습니다. 새 키와 등록 전화번호로 로그인하세요.');
+        } catch {
+            if (getVerifiedAuthSession('master') === identity && generation === credentialUiGeneration) alert('키 변경을 확인하지 못했습니다. 중복 키 또는 계정 상태를 확인하고, 결과가 불명확하면 현재 목록을 먼저 확인해 주세요.');
+        } finally { credentialBusy = false; button.disabled = false; }
+    });
+    group.append(button); host.append(group);
+}
+
 export function openEditLicenseModal(key) {
     const target = state.allLicenses.find(l => l.key === key);
     if (!target) return;
-    document.getElementById('edit-orig-key').value = target.key;
+    document.getElementById('edit-orig-key').value = target.id || target.key;
     document.getElementById('edit-type').value = target.type || 'regular';
-    document.getElementById('edit-key-input').value = target.key;
+    document.getElementById('edit-key-input').value = loginKeyText(target);
     document.getElementById('edit-key-input').readOnly = true;
     document.getElementById('edit-type').disabled = true;
     document.getElementById('edit-phone-input').value = target.phone || '';
@@ -720,6 +794,7 @@ export function openEditLicenseModal(key) {
     }
     mountLicenseCredentialControls(target);
     mountLicenseManagementControls(target);
+    mountLicenseKeyControl(target);
     document.getElementById('edit-license-modal').classList.remove('hidden');
 }
 
@@ -775,7 +850,7 @@ export async function linkDriverFromModal() {
     try {
         const target = await requestLicenseMembership({ action: 'lookup', licenseKey });
         if (target.linked && !confirm('기존 연결이 있는 기사입니다. 선택한 회사로 연결하시겠습니까?')) return;
-        await requestLicenseMembership({ action: 'link', licenseKey, dispatchKey });
+        await requestLicenseMembership({ action: 'link', licenseKey: target.licenseKey, dispatchKey });
         alert('기사 연결이 처리되었습니다.');
         if (inputEl) inputEl.value = '';
         renderModalConnectedDrivers(dispatchKey);
@@ -802,7 +877,8 @@ export async function saveLicenseEdit() {
     const expireDate = document.getElementById('edit-expire-input').value;
     const status = document.getElementById('edit-status-select').value;
     const type = document.getElementById('edit-type').value;
-    if (!newKey || newKey !== origKey) { alert('기존 라이선스 키와 문서 ID는 변경할 수 없습니다.'); return; }
+    const original = (state.allLicenses || []).find(l => (l.id || l.key) === origKey);
+    if (!newKey || newKey !== (original?.loginKey ?? original?.key ?? origKey)) { alert('로그인 키는 로그인 키 변경 버튼으로 변경해 주세요.'); return; }
     if (!expireDate) { alert('만료일을 선택해 주세요.'); return; }
     const changes = { phone, deviceId, expireDate: expireDate.replace(/-/g, '.'), status, type };
     if (type === 'dispatch') {

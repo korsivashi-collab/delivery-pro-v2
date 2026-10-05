@@ -1,9 +1,9 @@
 // js/admin-dispatch-excel.js
 
-import { db } from "./admin-api.js";
+import { db, getVerifiedAuthSession } from "./admin-api.js";
 import { state, todayStr } from "./admin-state.js";
 import { processSinglePdfFile } from "./admin-dispatch-pdf.js";
-import { doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
 // 0. 로컬 스토리지 기반 주소 캐시(Cache) 관리 엔진
@@ -834,15 +834,14 @@ export async function clearAllExcelRows() {
     if(state.parsedExcelList.length === 0) return;
     if(!confirm("업로드된 모든 주문 리스트와 기사 앱으로 전송된 배송 동선을 모두 완전히 초기화하시겠습니까?")) return;
     
-    state.parsedExcelList = []; 
-    state.printReadyList = [];
-    renderExcelTable(); 
-    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
-    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
-    await autoSaveExcelToFirebase();
-
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-    const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
+    const identity = getVerifiedAuthSession();
+    if (!identity || !['master', 'dispatch'].includes(identity.role)) {
+        alert('현재 관제 계정을 확인할 수 없습니다.');
+        return;
+    }
+    const isMaster = identity.role === 'master';
+    const dispatchKey = isMaster ? (sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER') :
+        identity.accountRef.slice('licenses/'.length);
     
     let visibleLicenses = state.allLicenses.filter(l => l.type !== 'dispatch');
     if (!isMaster && dispatchKey) {
@@ -850,24 +849,48 @@ export async function clearAllExcelRows() {
     }
 
     let clearCount = 0;
-    for (const lic of visibleLicenses) {
-        const devId = lic.deviceId || lic.key;
-        if (state.activeRoutes && state.activeRoutes[devId]) {
-            try {
-                await deleteDoc(doc(db, "routes", devId));
-                delete state.activeRoutes[devId]; // 🌟 로컬 메모리에서도 즉시 동선 삭제
+    try {
+        for (const lic of visibleLicenses) {
+            const devId = lic.deviceId || lic.key;
+            if (state.activeRoutes && state.activeRoutes[devId]) {
+                const snapshot = await getDoc(doc(db, 'licenses', lic.key));
+                if (getVerifiedAuthSession() !== identity || !snapshot.exists()) throw new Error();
+                const current = snapshot.data();
+                if (!current.routeOwnerId || (current.deviceId || lic.key) !== devId ||
+                    (!isMaster && current.dispatchKey !== dispatchKey)) throw new Error();
+                const payload = { routeOwnerId: current.routeOwnerId, licenseKey: lic.key,
+                    dispatchKey: current.dispatchKey || '', deviceId: devId, phone: current.phone || devId,
+                    destinations: [], cleared: true, updatedAt: Date.now() };
+                await setDoc(doc(db, 'routes', devId), payload, { merge: true });
+                state.activeRoutes[devId] = payload;
                 clearCount++;
-            } catch (e) {
-                console.error(`동선 삭제 실패 (${devId}):`, e);
             }
         }
+        if (getVerifiedAuthSession() !== identity) throw new Error();
+        const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr;
+        // Unlike background autosave, this write must report failure to the caller.
+        await setDoc(doc(db, 'dispatch_orders', `${dateVal}_${dispatchKey}`), {
+            date: dateVal, dispatchKey, orders: [], updatedAt: Date.now()
+        }, { merge: true });
+        if (getVerifiedAuthSession() !== identity) throw new Error();
+    } catch (e) {
+        console.error('전체 초기화 실패:', e);
+        if (window.renderSidebar) window.renderSidebar();
+        if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+        alert(`전체 초기화를 완료하지 못했습니다. 화면의 주문 목록은 유지합니다.\n동선 초기화 완료: ${clearCount}명. 소속과 권한을 확인한 후 다시 시도해주세요.`);
+        return;
     }
+    state.parsedExcelList = [];
+    state.printReadyList = [];
+    renderExcelTable();
+    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
+    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     
     // 🌟 지도 및 사이드바 뷰 잔상 즉시 소거
     if (window.forceClearMap) window.forceClearMap();
     if (window.renderSidebar) window.renderSidebar();
 
-    alert(`전체 초기화가 완료되었습니다.\n(기사 스마트폰 동선 삭제 완료: ${clearCount}명)`);
+    alert(`전체 초기화가 완료되었습니다.\n(기사 스마트폰 동선 초기화 완료: ${clearCount}명)`);
 }
 
 // ==========================================

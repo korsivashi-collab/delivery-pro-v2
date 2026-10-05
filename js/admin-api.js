@@ -78,7 +78,7 @@ export function getVerifiedAuthSession(role) {
         (role && verifiedSession.role !== role)) return null;
     return verifiedSession;
 }
-async function authPost(body, idToken, endpoint = '/api/auth') {
+async function authPost(body, idToken, endpoint = '/api/auth', masterRequest = false) {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
     try {
@@ -86,9 +86,22 @@ async function authPost(body, idToken, endpoint = '/api/auth') {
             method: 'POST', headers: { 'Content-Type': 'application/json', ...(idToken ? { Authorization: `Bearer ${idToken}` } : {}) },
             body: JSON.stringify(body), signal: controller.signal, cache: 'no-store', credentials: 'omit', redirect: 'error'
         });
-        if (!response.ok) throw authFailure();
+        if (!response.ok) {
+            if (!masterRequest) { const error = authFailure(); error.authRejected = response.status === 401; throw error; }
+            const result = await response.json();
+            const error = authFailure();
+            error.masterRequest = true;
+            error.changeOutcome = result.changeOutcome === 'notChanged' ? 'notChanged' : 'unknown';
+            error.code = ['AUTH_FAILED', 'INVALID_SECRET', 'SECRET_UNCHANGED', 'CREDENTIAL_CONFLICT',
+                'CREDENTIAL_BUSY', 'INVALID_REQUEST', 'AUTH_UNAVAILABLE'].includes(result.error) ? result.error : 'AUTH_UNAVAILABLE';
+            throw error;
+        }
         return await response.json();
-    } catch { throw authFailure(); }
+    } catch (error) {
+        if (error.authRejected) throw error;
+        if (masterRequest && error.masterRequest) throw error;
+        throw authFailure();
+    }
     finally { clearTimeout(timer); }
 }
 export async function restoreFirebaseSession() {
@@ -125,7 +138,7 @@ export async function loginWithSecret(secret, expectedRole) {
         const allowedRoles = Array.isArray(expectedRole) ? expectedRole : [expectedRole];
         const masterInput = allowedRoles.includes('master');
         const normalized = typeof secret === 'string' ? (masterInput ? secret : secret.trim()) : '';
-        if (masterInput ? normalized.length < 16 || normalized.length > 128 || normalized.trim() !== normalized ||
+        if (masterInput ? normalized.length < 8 || normalized.length > 64 || normalized.trim() !== normalized ||
             /[\p{Cc}\p{Cf}\p{Cs}]/u.test(normalized) : !/^[A-Za-z0-9_-]{24}$/.test(normalized)) throw authFailure();
         const response = await authPost({ secret: normalized });
         if (attempt !== loginAttempt) throw authFailure();
@@ -140,6 +153,51 @@ export async function loginWithSecret(secret, expectedRole) {
         try { await signOut(firebaseAuth); } catch { /* UI stays locked even if persistence fails. */ }
         throw authFailure();
     } finally { signingIn = false; }
+}
+export async function loginWithLicense(licenseKey, phone, deviceId) {
+    if (signingIn) throw authFailure();
+    signingIn = true;
+    const attempt = ++loginAttempt;
+    try {
+        await readyForAuth(); invalidateVerifiedSession();
+        if (typeof licenseKey !== 'string' || !licenseKey.trim() || licenseKey.trim().length > 128 || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(licenseKey) ||
+            typeof phone !== 'string' || phone.length > 32 || !/^[0-9+() -]+$/.test(phone) ||
+            !/^\d{9,13}$/.test(phone.replace(/\D/g, '')) || typeof deviceId !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(deviceId)) throw authFailure();
+        const key = licenseKey.trim();
+        const response = await authPost({ action: 'driverLogin', licenseKey: key, phone, deviceId });
+        if (attempt !== loginAttempt || typeof response.customToken !== 'string' || !response.customToken ||
+            typeof response.accountRef !== 'string' || !/^licenses\/[^/]+$/.test(response.accountRef)) throw authFailure();
+        await signInWithCustomToken(firebaseAuth, response.customToken);
+        if (attempt !== loginAttempt) throw authFailure();
+        const identity = await restoreFirebaseSession();
+        if (!identity || identity.role !== 'driver' || identity.accountRef !== response.accountRef) throw authFailure();
+        return identity;
+    } catch {
+        invalidateVerifiedSession();
+        try { await signOut(firebaseAuth); } catch {}
+        throw authFailure();
+    } finally { signingIn = false; }
+}
+async function rejectDriverSession(identity) {
+    if (getVerifiedAuthSession('driver') !== identity) return;
+    invalidateVerifiedSession();
+    try { await signOut(firebaseAuth); } catch {}
+}
+export async function revalidateDriverSession(deviceId) {
+    const identity = getVerifiedAuthSession('driver'), user = firebaseAuth.currentUser;
+    if (!identity || !user) return null;
+    try {
+        const result = await authPost({ action: 'session', deviceId }, await user.getIdToken());
+        if (getVerifiedAuthSession('driver') !== identity || firebaseAuth.currentUser !== user) return null;
+        if (result.uid !== identity.uid || result.role !== 'driver' || result.accountRef !== identity.accountRef || result.credentialVersion !== identity.credentialVersion) {
+            const error = authFailure(); error.authRejected = true; throw error;
+        }
+        return identity;
+    } catch (error) {
+        if (error.authRejected) await rejectDriverSession(identity);
+        throw authFailure();
+    }
 }
 export async function signOutFirebaseSession() {
     loginAttempt++;
@@ -163,13 +221,35 @@ export async function requestAuthCredential(input) {
     return { uid: result.uid, secret: result.secret, credentialVersion: result.credentialVersion };
 }
 
-export async function changeOwnMasterSecret(currentSecret, newSecret) {
+export async function getOwnMasterStatus() {
     const identity = getVerifiedAuthSession('master');
     const user = firebaseAuth.currentUser;
     if (!identity || !user) throw authFailure();
     const token = await user.getIdToken();
     if (getVerifiedAuthSession('master') !== identity || firebaseAuth.currentUser !== user) throw authFailure();
-    const result = await authPost({ action: 'changeOwnSecret', currentSecret, newSecret }, token, '/api/auth-credentials');
+    const result = await authPost({ action: 'inspectOwnMaster' }, token, '/api/auth-credentials');
+    if (getVerifiedAuthSession('master') !== identity || firebaseAuth.currentUser !== user ||
+        result.accountRef !== identity.accountRef || result.role !== 'master' ||
+        result.credentialVersion !== identity.credentialVersion ||
+        ['enabled', 'credentialReady', 'authenticationLinked'].some(key => typeof result[key] !== 'boolean')) throw authFailure();
+    // Do not forward any unexpected server field to the status dialog.
+    return { accountRef: result.accountRef, role: result.role, enabled: result.enabled,
+        credentialReady: result.credentialReady, credentialVersion: result.credentialVersion,
+        authenticationLinked: result.authenticationLinked };
+}
+
+export async function changeOwnMasterSecret(currentSecret, newSecret) {
+    const identity = getVerifiedAuthSession('master');
+    const user = firebaseAuth.currentUser;
+    let token;
+    try {
+        if (!identity || !user) throw authFailure();
+        token = await user.getIdToken();
+        if (getVerifiedAuthSession('master') !== identity || firebaseAuth.currentUser !== user) throw authFailure();
+    } catch {
+        const error = authFailure(); error.changeOutcome = 'notChanged'; throw error;
+    }
+    const result = await authPost({ action: 'changeOwnSecret', currentSecret, newSecret }, token, '/api/auth-credentials', true);
     if (getVerifiedAuthSession('master') !== identity || firebaseAuth.currentUser !== user || result.changed !== true ||
         result.credentialVersion !== identity.credentialVersion + 1 ||
         Object.keys(result).some(key => !['changed', 'credentialVersion'].includes(key))) throw authFailure();
@@ -209,7 +289,9 @@ export async function requestLicenseMembership(input) {
     if (!identity || !user) throw authFailure();
     const idToken = await user.getIdToken();
     if (getVerifiedAuthSession() !== identity || firebaseAuth.currentUser !== user) throw authFailure();
-    const result = await authPost(input, idToken, '/api/license-membership');
+    let result;
+    try { result = await authPost(input, idToken, '/api/license-membership'); }
+    catch (error) { if (identity.role === 'driver' && error.authRejected) await rejectDriverSession(identity); throw authFailure(); }
     if (getVerifiedAuthSession() !== identity || firebaseAuth.currentUser !== user) throw authFailure();
     return result;
 }

@@ -1,9 +1,10 @@
 import { doc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { getVerifiedAuthSession, requestLicenseMembership } from './admin-api.js';
 
 // 라이선스 키/전화번호와 독립적이며, 라이선스 이름 변경 시에도 유지합니다.
 export async function ensureRouteOwner(db, licenseKey, expectedDeviceId = null, phone = null) {
     const licenseRef = doc(db, 'licenses', licenseKey);
-    return runTransaction(db, async transaction => {
+    const existingOwner = await runTransaction(db, async transaction => {
         const snapshot = await transaction.get(licenseRef);
         if (!snapshot.exists()) throw new Error('라이선스가 존재하지 않습니다.');
         const license = snapshot.data();
@@ -12,14 +13,22 @@ export async function ensureRouteOwner(db, licenseKey, expectedDeviceId = null, 
         }
         const routeOwnerId = license.routeOwnerId;
         if (typeof routeOwnerId !== 'string' || !routeOwnerId.trim()) {
-            throw new Error('동선 소유자가 없는 기존 계정입니다. 마스터의 개별 확인이 필요합니다.');
+            return null;
         }
         const changes = {};
-        if (expectedDeviceId) changes.deviceId = expectedDeviceId;
-        if (phone !== null) changes.phone = phone;
+        if (expectedDeviceId && license.deviceId !== expectedDeviceId) changes.deviceId = expectedDeviceId;
+        if (phone !== null && license.phone !== phone) changes.phone = phone;
         if (Object.keys(changes).length) transaction.update(licenseRef, changes);
         return routeOwnerId;
     });
+    if (existingOwner) return existingOwner;
+    const identity = getVerifiedAuthSession('driver');
+    if (!identity || identity.accountRef !== `licenses/${licenseKey}`) throw new Error('동선 소유자를 확인할 수 없습니다.');
+    const result = await requestLicenseMembership({ action: 'ensureOwnRouteOwner' });
+    if (getVerifiedAuthSession('driver') !== identity || typeof result?.routeOwnerId !== 'string' || !result.routeOwnerId.trim()) {
+        throw new Error('동선 소유자를 확인할 수 없습니다.');
+    }
+    return result.routeOwnerId;
 }
 
 // 빈 최신 경로도 비교하여 완료/취소 전의 오래된 경로가 부활하지 않게 합니다.

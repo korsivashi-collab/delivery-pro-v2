@@ -59,7 +59,22 @@ export function classifyCompletionOwnership(c, lic) {
     return 'excluded';
 }
 
+let driverSummaryCycle = null;
+export function withDriverSummaryCycle(render) {
+    if (driverSummaryCycle) return render();
+    driverSummaryCycle = new Map();
+    try { return render(); }
+    finally { driverSummaryCycle = null; }
+}
+
 export function getDriverDeliverySummary(lic, route, selectedDate) {
+    const scope = driverSummaryCycle;
+    const signature = JSON.stringify([selectedDate, state.selectedDeviceId, lic.key, lic.id,
+        lic.routeOwnerId, lic.deviceId, lic.phone, lic.dispatchKey]);
+    const cached = scope?.get(lic);
+    const destinations = route?.destinations;
+    if (cached && cached.signature === signature && cached.completions === state.allCompletions &&
+        cached.routes === state.activeRoutes && cached.destinations === destinations) return cached.summary;
     const datedRecords = state.allCompletions.filter(c => {
         const date = c.completedAt
             ? getLocalDateString(new Date(c.completedAt))
@@ -92,7 +107,10 @@ export function getDriverDeliverySummary(lic, route, selectedDate) {
     });
     const routeDests = rawDests.filter(d => kind(processed.get(d) || {}) !== 'cancelled');
     const remainingDests = routeDests.filter(d => !processed.has(d));
-    return { rawDests, routeDests, remainingDests, processed, done, cancelled, other, legacyCandidates };
+    const summary = { rawDests, routeDests, remainingDests, processed, done, cancelled, other, legacyCandidates };
+    if (scope) scope.set(lic, { signature, completions: state.allCompletions,
+        routes: state.activeRoutes, destinations, summary });
+    return summary;
 }
 
 // ==========================================
@@ -674,8 +692,8 @@ export async function confirmLinkDriver() {
     const licenseKey = document.getElementById('link-driver-key-input').value.trim();
     if (!licenseKey) { alert('정확한 기사 라이선스 키를 입력하세요.'); return; }
     try {
-        await requestLicenseMembership({ action: 'lookup', licenseKey });
-        await requestLicenseMembership({ action: 'link', licenseKey });
+        const target = await requestLicenseMembership({ action: 'lookup', licenseKey });
+        await requestLicenseMembership({ action: 'link', licenseKey: target.licenseKey });
         alert('[등록 완료] 기사가 연결되었습니다.');
         closeLinkDriverModal();
     } catch { alert('기사 연결을 확인할 수 없습니다. 계정, TMS 설정과 회사 슬롯을 확인해 주세요.'); }

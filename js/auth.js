@@ -20,7 +20,7 @@ import {
     showDispatchAlertPopup 
 } from './support.js';
 import { startGpsWatcher, stopGpsWatcher } from './gps.js';
-import { AUTH_FAILURE_MESSAGE, loginWithSecret, restoreFirebaseSession, signOutFirebaseSession,
+import { AUTH_FAILURE_MESSAGE, loginWithSecret, loginWithLicense, revalidateDriverSession, restoreFirebaseSession, signOutFirebaseSession,
     getVerifiedAuthSession, onVerifiedSessionInvalidated } from './admin-api.js';
 
 let licenseWatcherUnsub = null;
@@ -35,6 +35,19 @@ let driverLoginInProgress = false;
 let driverAuthObserver = null;
 let activeDriverUid = null;
 let trialAttempt = 0;
+let driverSessionTimer = null;
+let driverSessionGeneration = 0;
+function startDriverSessionChecks(deviceId) {
+    clearTimeout(driverSessionTimer);
+    const generation = ++driverSessionGeneration;
+    const tick = async () => {
+        if (!activeDriverUid || generation !== driverSessionGeneration) return;
+        try { await revalidateDriverSession(deviceId); } catch {}
+        if (activeDriverUid && generation === driverSessionGeneration) schedule();
+    };
+    const schedule = () => { driverSessionTimer = setTimeout(tick, 30000); driverSessionTimer?.unref?.(); };
+    schedule();
+}
 
 function lockDriverScreen() {
     const main = document.getElementById('main-app');
@@ -43,7 +56,7 @@ function lockDriverScreen() {
 }
 function prepareDriverAuth() {
     const input = document.getElementById('license-input');
-    // The existing input is reused; base64url secrets must not appear uppercased.
+    // Preserve the exact stored license ID, including case in existing trial keys.
     if (input) { input.classList.remove('uppercase'); input.autocapitalize = 'none'; input.spellcheck = false; }
     if (!driverAuthObserver) driverAuthObserver = onVerifiedSessionInvalidated(() => {
         if (activeDriverUid) { clearAuthStorage(); lockDriverScreen(); }
@@ -168,6 +181,8 @@ export function getOrCreateDeviceId() {
 // 2. 인증 정보 로컬 스토리지 초기화
 // ==========================================
 export function clearAuthStorage() {
+    driverSessionGeneration++;
+    clearTimeout(driverSessionTimer); driverSessionTimer = null;
     trialAttempt++;
     activeDriverUid = null;
     resetGpsPreferenceSession();
@@ -254,6 +269,7 @@ export function startLicenseRealtimeWatcher(key) {
 // 6. 인증 성공 시 백그라운드 서비스 일괄 가동
 // ==========================================
 export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey, routeOwnerId) {
+    startDriverSessionChecks(deviceId);
     state.activateRouteOwner(routeOwnerId);
     restoreGpsPreference(key);
     cachedRemoteRoutes = null;
@@ -369,7 +385,7 @@ export async function verifyLicense() {
     driverLoginInProgress = true;
     if (input) input.value = '';
     try {
-        const identity = await loginWithSecret(keyInput, 'driver');
+        const identity = await loginWithLicense(keyInput, formattedPhone, getOrCreateDeviceId());
         await activateVerifiedDriver(identity, formattedPhone);
     } catch {
         clearAuthStorage();
