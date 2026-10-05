@@ -120,14 +120,14 @@
             <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
             <i class="fa-solid fa-truck-fast text-5xl text-blue-600 mb-4 mt-2"></i>
             <h2 class="text-2xl font-black text-slate-900 mb-1 tracking-tight">배송 경로 PRO</h2>
-            <p class="text-xs text-slate-500 mb-6 font-semibold">발급받은 키와 본인 휴대폰 번호를 입력해 주세요.</p>
+            <p class="text-xs text-slate-500 mb-6 font-semibold">라이선스 키와 계정에 등록된 전화번호를 입력해 주세요.</p>
             <div class="space-y-3 mb-5 text-left">
                 <div>
                     <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">라이선스 키</label>
                     <input type="text" id="license-input" placeholder="예: 7K9A-4M2X" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3.5 text-center font-mono uppercase font-bold transition" onkeyup="if(window.event.keyCode==13){document.getElementById('auth-phone-input').focus()}">
                 </div>
                 <div>
-                    <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">본인 휴대폰 번호 <span class="text-rose-500 font-black">*필수</span></label>
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">등록 전화번호 <span class="text-rose-500 font-black">*필수</span></label>
                     <input type="tel" id="auth-phone-input" placeholder="예: 010-1234-5678" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3.5 text-center outline-none font-bold font-mono transition" onkeyup="if(window.event.keyCode==13){window.verifyLicense()}">
                 </div>
             </div>
