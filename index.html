@@ -1,0 +1,620 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+    
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="배송경로PRO">
+    <meta name="theme-color" content="#ffffff">
+    <meta name="format-detection" content="telephone=no">
+    
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+    <link rel="icon" type="image/png" sizes="512x512" href="icons/icon-512.png">
+    
+    <title>배송 경로 PRO</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <style>
+        :root { --vh: 1vh; --app-scale: 1; }
+        * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+        html, body {
+            width: 100%; max-width: 100vw; overflow-x: hidden;
+            height: 100%; height: -webkit-fill-available; height: calc(var(--vh, 1vh) * 100);
+            -webkit-text-size-adjust: 100% !important; -moz-text-size-adjust: 100% !important; text-size-adjust: 100% !important;
+            overscroll-behavior-y: none; -webkit-user-select: none; user-select: none; touch-action: manipulation;
+        }
+        input, textarea { -webkit-user-select: text !important; user-select: text !important; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        .pt-safe { padding-top: max(0.5rem, env(safe-area-inset-top, 0px)); }
+        .pb-safe { padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 8px)); }
+        .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+        @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    </style>
+
+    <script>
+        (function() {
+            function updateImmediateVH() {
+                var vh = window.innerHeight * 0.01;
+                document.documentElement.style.setProperty('--vh', vh + 'px');
+            }
+            updateImmediateVH();
+            window.addEventListener('resize', updateImmediateVH);
+            window.addEventListener('orientationchange', updateImmediateVH);
+        })();
+    </script>
+
+    <script>
+        let wakeLock = null;
+        async function requestWakeLock() {
+            if ('wakeLock' in navigator) {
+                try { wakeLock = await navigator.wakeLock.request('screen'); } catch (err) {}
+            }
+        }
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible') await requestWakeLock();
+        });
+        window.addEventListener('load', requestWakeLock);
+    </script>
+
+    <script type="module">
+        import { initApp } from './js/app.js';
+        window.onload = () => initApp();
+    </script>
+</head>
+<body class="bg-slate-100 flex flex-col overflow-hidden relative" style="height: calc(var(--vh, 1vh) * 100);">
+
+    <!-- 사전 부팅 보안 화면 -->
+    <div id="boot-screen" class="fixed inset-0 bg-slate-900 z-[200] flex flex-col items-center justify-center p-6 text-center">
+        <div class="w-16 h-16 bg-blue-600/20 text-blue-400 rounded-3xl flex items-center justify-center text-3xl mb-4 animate-pulse">
+            <i class="fa-solid fa-truck-fast"></i>
+        </div>
+        <div class="flex items-center gap-2 text-white text-base font-black mb-1">
+            <i class="fa-solid fa-circle-notch fa-spin text-blue-500"></i>
+            <span>라이선스 보안 검증 중...</span>
+        </div>
+        <p class="text-xs text-slate-400 font-semibold">서버와 통신하여 계정 상태를 확인하고 있습니다.</p>
+    </div>
+
+    <!-- 알림 긴급 팝업 모달 -->
+    <div id="dispatch-alert-modal" class="hidden fixed inset-0 bg-black/75 z-[250] flex items-center justify-center p-5 backdrop-blur-sm animate-slide-up">
+        <div id="dispatch-alert-box" class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative border border-slate-200 text-center">
+            <div id="dispatch-alert-icon-box" class="w-14 h-14 bg-slate-100 text-slate-800 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-3 shadow-inner animate-bounce">
+                <i class="fa-solid fa-bell"></i>
+            </div>
+            <span id="dispatch-alert-badge" class="bg-slate-900 text-white text-[10px] font-black px-2.5 py-1 rounded-full uppercase tracking-wider">회사 알림</span>
+            <h3 class="text-base font-black text-slate-900 mt-2 mb-1" id="dispatch-alert-time">수신 시간</h3>
+            <div class="bg-slate-50 border border-slate-200 rounded-2xl p-4 my-3 text-left shadow-inner">
+                <p id="dispatch-alert-content" class="text-sm font-bold text-slate-800 whitespace-pre-line leading-relaxed"></p>
+            </div>
+            <button onclick="window.closeDispatchAlertModal()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-xl shadow-md transition active:scale-95 text-sm">확인했습니다</button>
+        </div>
+    </div>
+
+    <!-- 지난 알림장 모달 -->
+    <div id="notice-history-modal" class="hidden fixed inset-0 bg-black/60 z-[250] flex items-end sm:items-center justify-center p-0 sm:p-4 animate-slide-up">
+        <div class="bg-white w-full sm:max-w-md h-[75vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h3 class="font-bold text-slate-900 text-base flex items-center gap-2"><i class="fa-solid fa-bell text-blue-600"></i> 알림 보관함</h3>
+                <button onclick="window.closeNoticeHistoryModal()" class="text-slate-400 hover:text-slate-700 text-xl p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="notice-history-container" class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar bg-slate-50 overscroll-contain"></div>
+            <div class="p-3 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
+                <button onclick="window.clearLocalNotices()" class="text-xs text-rose-600 font-bold px-2 py-1">알림함 비우기</button>
+                <button onclick="window.closeNoticeHistoryModal()" class="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl active:bg-black">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 1. 메인 인증 화면 -->
+    <div id="auth-screen" class="hidden fixed inset-0 bg-slate-50 z-50 flex flex-col items-center justify-center p-6">
+        <div class="w-full max-w-sm bg-white border border-slate-200 rounded-3xl p-8 shadow-2xl text-center relative overflow-hidden">
+            <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
+            <i class="fa-solid fa-truck-fast text-5xl text-blue-600 mb-4 mt-2"></i>
+            <h2 class="text-2xl font-black text-slate-900 mb-1 tracking-tight">배송 경로 PRO</h2>
+            <p class="text-xs text-slate-500 mb-6 font-semibold">발급받은 키와 본인 휴대폰 번호를 입력해 주세요.</p>
+            <div class="space-y-3 mb-5 text-left">
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">라이선스 키</label>
+                    <input type="text" id="license-input" placeholder="예: 7K9A-4M2X" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3.5 text-center font-mono uppercase font-bold transition" onkeyup="if(window.event.keyCode==13){document.getElementById('auth-phone-input').focus()}">
+                </div>
+                <div>
+                    <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">본인 휴대폰 번호 <span class="text-rose-500 font-black">*필수</span></label>
+                    <input type="tel" id="auth-phone-input" placeholder="예: 010-1234-5678" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3.5 text-center outline-none font-bold font-mono transition" onkeyup="if(window.event.keyCode==13){window.verifyLicense()}">
+                </div>
+            </div>
+            <button onclick="window.verifyLicense()" id="verify-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-black rounded-xl text-base px-5 py-3.5 text-center shadow-md transition active:scale-95">인증하고 시작하기</button>
+            <p id="auth-message" class="text-rose-500 text-xs mt-3 font-bold min-h-[16px] whitespace-pre-line"></p>
+            <div class="relative flex py-4 items-center">
+                <div class="flex-grow border-t border-slate-200"></div>
+                <span class="flex-shrink-0 mx-4 text-slate-400 text-[10px] font-bold">또는</span>
+                <div class="flex-grow border-t border-slate-200"></div>
+            </div>
+            <button onclick="window.openTrialModal()" class="w-full text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 font-bold rounded-xl text-sm px-5 py-3.5 transition flex items-center justify-center gap-2 active:scale-95">
+                <i class="fa-solid fa-gift text-emerald-600"></i> 처음이신가요? 7일 무료 체험
+            </button>
+            <div class="mt-4 pt-2 border-t border-slate-100 text-center">
+                <a href="/privacy.html" target="_blank" class="text-[11px] text-slate-400 hover:text-slate-600 underline font-medium transition">개인정보처리방침</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7일 무료 체험 모달 -->
+    <div id="trial-modal" class="hidden fixed inset-0 bg-black/60 z-[140] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden animate-slide-up border border-slate-200">
+            <div class="absolute top-0 left-0 w-full h-1 bg-emerald-500"></div>
+            <h3 class="font-black text-slate-900 text-lg mb-1 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-emerald-600"></i> 7일 무료 체험 시작</h3>
+            <p class="text-[11px] text-slate-500 font-bold mb-4 leading-relaxed">
+                관제 센터 식별을 위해<br>본인 휴대폰 번호를 정확하게 입력해 주세요.<br>
+                <span class="text-emerald-700 font-extrabold">(기기당 1회만 체험 가능합니다.)</span>
+            </p>
+            <div class="mb-5">
+                <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">본인 휴대폰 번호</label>
+                <input type="tel" id="trial-phone-input" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold font-mono rounded-xl p-3.5 outline-none shadow-inner focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-center" placeholder="예: 010-1234-5678" onkeyup="if(window.event.keyCode==13){window.startFreeTrial()}">
+                <p id="trial-error-msg" class="text-rose-500 text-[10px] font-bold mt-1.5 hidden text-center"></p>
+            </div>
+            <div class="flex gap-2.5">
+                <button onclick="window.closeTrialModal()" class="flex-1 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-xl text-sm active:bg-slate-200">취소</button>
+                <button onclick="window.startFreeTrial()" id="trial-submit-btn" class="flex-[1.5] bg-emerald-600 text-white font-bold py-3.5 rounded-xl shadow-md text-sm active:bg-emerald-700">무료로 시작하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 2. 메인 앱 영역 -->
+    <div id="main-app" class="hidden flex-col h-full w-full">
+        <header class="bg-white px-2.5 pt-safe pb-2.5 shadow-xs z-20 flex-none border-b border-slate-200 relative w-full">
+            <div class="flex flex-col gap-1.5 w-full">
+                <div class="flex items-center justify-between gap-1 w-full min-w-0">
+                    <h1 class="text-[14px] font-black text-slate-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
+                        <i class="fa-solid fa-route text-blue-600 text-[15px] shrink-0"></i>
+                        <span>배송경로PRO</span>
+                    </h1>
+                    
+                    <div class="flex items-center gap-1 shrink-0">
+                        <button onclick="window.openHistoryModal()" class="text-[10px] bg-white text-slate-700 px-2 py-1.5 rounded-lg font-bold border border-slate-300 active:bg-slate-100 flex items-center gap-0.5 shadow-2xs transition active:scale-95 whitespace-nowrap">
+                            <i class="fa-solid fa-clock-rotate-left text-slate-500"></i> 지난배송
+                        </button>
+                        <button onclick="window.openSettingsModal()" class="text-[10px] bg-white text-slate-700 px-2 py-1.5 rounded-lg font-bold border border-slate-300 active:bg-slate-100 shadow-2xs transition active:scale-95 flex items-center gap-0.5 whitespace-nowrap">
+                            <i class="fa-solid fa-gear text-slate-500"></i> 설정
+                        </button>
+                        <button onclick="window.logout()" class="text-[10px] text-slate-500 bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 px-2 py-1.5 rounded-lg font-bold active:scale-95 transition shadow-2xs whitespace-nowrap">
+                            로그아웃
+                        </button>
+                    </div>
+                </div>
+                
+                <div class="flex justify-between items-center w-full min-w-0">
+                    <span class="text-[10.5px] text-slate-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap ml-0.5">물류 라스트마일</span>
+                    
+                    <div class="flex items-center gap-1.5 shrink-0">
+                        <span id="license-expire-badge" class="text-[10.5px] bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-md font-extrabold whitespace-nowrap shadow-2xs">
+                            사용기한: 확인중...
+                        </span>
+                        
+                        <button onclick="window.openNoticeHistoryModal()" class="relative bg-slate-50 hover:bg-slate-100 active:bg-slate-200 text-slate-700 border border-slate-300 px-2 py-1 rounded-md text-[10.5px] font-extrabold shadow-2xs transition active:scale-95 flex items-center gap-1 whitespace-nowrap">
+                            <i class="fa-solid fa-bell text-blue-600 text-[11px]"></i> 알림
+                            <span id="notice-unread-dot" class="hidden absolute -top-1 -right-1 w-2.5 h-2.5 bg-rose-500 rounded-full border-2 border-white animate-pulse"></span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 종료 지점 바: 깔끔한 소프트 로즈 & 포인트 레드 -->
+                <div class="bg-rose-50/70 border border-rose-200 rounded-xl p-2 flex items-center justify-between gap-1.5 shadow-2xs w-full min-w-0 mt-0.5">
+                    <div class="flex items-center gap-1.5 min-w-0 flex-1">
+                        <span class="bg-rose-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">종료지점</span>
+                        <span id="header-end-address" class="text-[12px] font-bold text-slate-900 truncate flex-1 leading-tight">설정 안 함</span>
+                    </div>
+                    <div class="flex gap-1 shrink-0">
+                        <button onclick="window.setEndLocationGPS()" class="text-[10.5px] bg-white text-slate-800 border border-slate-300 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-slate-100 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-crosshairs text-[10px] text-slate-500"></i> 현위치</button>
+                        <button onclick="window.toggleHeaderEndEdit()" class="text-[10.5px] bg-white text-slate-800 border border-slate-300 px-2 py-1 rounded-lg shadow-2xs font-bold active:bg-slate-100 flex items-center gap-1 whitespace-nowrap"><i class="fa-solid fa-pen text-[10px] text-slate-500"></i> 직접입력</button>
+                    </div>
+                </div>
+                <div id="header-end-edit-area" class="hidden flex gap-1.5 mt-0.5 w-full">
+                    <input type="text" id="header-inline-end-input" class="flex-1 min-w-0 border border-rose-200 rounded-lg px-2.5 py-1.5 text-xs outline-none focus:border-rose-500 shadow-inner" placeholder="종료지 입력 (비우면 취소)">
+                    <button onclick="window.applyHeaderCustomEnd()" class="bg-rose-600 text-white px-3 py-1.5 text-xs rounded-lg font-bold shadow-2xs shrink-0">적용</button>
+                </div>
+            </div>
+        </header>
+
+        <main class="flex-1 overflow-y-auto px-3 sm:px-4 py-3 hide-scrollbar bg-slate-100 relative w-full flex flex-col">
+            <ul id="destination-list" class="space-y-2.5 pb-4 min-h-[50px] w-full flex-1">
+                <li id="empty-state" class="text-center text-slate-400 py-16 border-2 border-dashed border-slate-300 rounded-2xl my-2 bg-white">
+                    <i class="fa-solid fa-receipt text-5xl mb-3 text-slate-300"></i>
+                    <p class="font-bold text-xs text-slate-500 leading-relaxed">주소지를 스캔하거나 관제에서 전송되면<br>동선이 생성됩니다.</p>
+                </li>
+            </ul>
+        </main>
+
+        <footer class="bg-white border-t border-slate-200 px-2.5 sm:px-4 pt-2.5 pb-safe z-20 flex-none shadow-xs w-full">
+            <div class="flex items-center gap-2 relative w-full">
+                <input type="file" id="camera-input" accept="image/*" capture="environment" class="hidden">
+                <button onclick="triggerCameraScan()" class="h-[52px] w-[76px] bg-slate-900 hover:bg-slate-800 active:bg-black text-white font-bold rounded-xl shadow-xs active:scale-95 transition text-[14px] flex items-center justify-center gap-1.5 shrink-0">
+                    <i class="fa-solid fa-camera text-base"></i>
+                    <span>스캔</span>
+                </button>
+                
+                <div id="swipe-container" class="flex-1 min-w-0 bg-slate-100 rounded-xl relative overflow-hidden flex items-center justify-center border border-slate-200 h-[52px]">
+                    <div class="absolute inset-0 flex items-center justify-center pl-[84px] pr-2 text-slate-600 font-extrabold text-[12.5px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
+                        밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-600 animate-pulse"></i>
+                    </div>
+                    <div id="swipe-btn" class="absolute left-1 w-[78px] h-[44px] bg-blue-600 hover:bg-blue-700 rounded-lg flex items-center justify-center text-white shadow-sm z-10 cursor-pointer touch-none">
+                        <i class="fa-solid fa-angles-right text-lg"></i>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <!-- 시작 지점 선택 모달 -->
+    <div id="start-select-modal" class="hidden fixed inset-0 bg-black/60 z-[130] flex flex-col items-center justify-end sm:justify-center p-0 sm:p-4 pb-0 transition-opacity">
+        <div class="bg-slate-100 w-full sm:max-w-md h-[85vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden animate-slide-up shadow-2xl relative border border-slate-200">
+            <div class="p-4 border-b border-slate-200 flex flex-col bg-white relative z-10 shadow-xs shrink-0">
+                <div class="w-12 h-1.5 bg-slate-200 rounded-full mx-auto mb-4 sm:hidden"></div>
+                <h3 class="font-black text-slate-900 text-lg mb-1 flex items-center gap-2">
+                    <i class="fa-solid fa-flag text-blue-600"></i> 시작 지점을 선택하세요
+                </h3>
+                <p class="text-xs text-slate-500 font-bold mb-3 ml-1">지도에서 선택하면 출발 지점을 잡기 쉽습니다.</p>
+                
+                <div class="flex justify-center mb-1 shrink-0 w-full">
+                    <div class="bg-slate-100 p-1 rounded-xl flex w-full max-w-[240px] text-[11px] font-bold shadow-inner border border-slate-200">
+                        <button id="modal-tab-list-view" onclick="window.handleStartSelectTab('list')" class="flex-1 py-1.5 rounded-lg bg-white shadow-xs text-blue-600 transition font-bold">📝 리스트 모드</button>
+                        <button id="modal-tab-map-view" onclick="window.handleStartSelectTab('map')" class="flex-1 py-1.5 rounded-lg text-slate-500 hover:text-slate-700 transition font-bold"><i class="fa-solid fa-map-location-dot"></i> 지도 모드</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div id="start-select-list" class="flex-1 overflow-y-auto hide-scrollbar p-3 space-y-2 overscroll-contain bg-slate-100"></div>
+            
+            <div id="start-select-map-container" class="hidden flex-1 w-full relative">
+                <div id="start-select-kakao-map" class="w-full h-full"></div>
+            </div>
+
+            <div class="p-3 bg-white border-t border-slate-200 z-10 shadow-xs shrink-0 pb-safe">
+                <button onclick="window.closeStartModal()" class="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl transition text-sm">닫기 (취소)</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 배송 완료 태그 선택 모달 -->
+    <div id="completion-modal" class="hidden fixed inset-0 bg-black/60 z-[140] flex items-end sm:items-center justify-center p-0 sm:p-4 transition-opacity">
+        <div class="bg-white w-full sm:max-w-sm rounded-t-3xl sm:rounded-3xl p-6 shadow-2xl relative animate-slide-up border border-slate-200">
+            <h3 class="font-black text-slate-900 text-[17px] mb-1 flex items-center gap-2">
+                <i class="fa-solid fa-box-open text-blue-600"></i> 배송 완료 처리
+            </h3>
+            <p class="text-xs text-slate-500 font-bold mb-4">태그를 선택하거나 사진을 찍어 즉시 완료하세요.</p>
+            
+            <div class="grid grid-cols-2 gap-2 mb-3">
+                <button onclick="window.selectCompletionTag(this, '문 앞')" class="comp-tag-btn bg-slate-50 text-slate-800 font-bold py-3.5 rounded-xl border border-slate-200 active:bg-slate-100 transition text-sm">문 앞</button>
+                <button onclick="window.selectCompletionTag(this, '직접 전달')" class="comp-tag-btn bg-slate-50 text-slate-800 font-bold py-3.5 rounded-xl border border-slate-200 active:bg-slate-100 transition text-sm">직접 전달</button>
+                <button onclick="window.selectCompletionTag(this, '주방')" class="comp-tag-btn bg-slate-50 text-slate-800 font-bold py-3.5 rounded-xl border border-slate-200 active:bg-slate-100 transition text-sm">주방</button>
+                <button onclick="window.selectCompletionTag(this, '기타')" class="comp-tag-btn bg-slate-50 text-slate-800 font-bold py-3.5 rounded-xl border border-slate-200 active:bg-slate-100 transition text-sm">기타 (직접 입력)</button>
+            </div>
+            
+            <div id="comp-etc-input-container" class="hidden mb-4">
+                <input type="text" id="comp-etc-input" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold rounded-xl p-3.5 outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600" placeholder="상세 내용을 입력해 주세요">
+            </div>
+            
+            <input type="file" id="completion-photo-input" accept="image/*" capture="environment" class="hidden">
+
+            <div class="space-y-2 mt-4">
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="window.triggerPhotoCompletion()" id="btn-photo-comp" class="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-2 rounded-xl shadow-xs text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer">
+                        <span class="flex items-center gap-1 font-black text-sm"><i class="fa-solid fa-camera"></i> 사진 전송</span>
+                        <span id="photo-comp-subtext" class="text-[9px] font-bold text-slate-300 mt-0.5 tracking-tighter">관제/일반 모두 사용 가능</span>
+                    </button>
+                    <!-- 완료 확정 버튼은 핵심 포인트 컬러(블루) -->
+                    <button onclick="window.confirmCompletion(null)" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-xs text-sm active:scale-95 transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-check"></i> 완료 확정
+                    </button>
+                </div>
+                <button onclick="window.closeCompletionModal()" class="w-full bg-slate-100 text-slate-600 font-bold py-3 rounded-xl text-xs active:bg-slate-200 transition">
+                    취소
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 주차정보 보드 모달 -->
+    <div id="memo-modal" class="hidden fixed inset-0 bg-black/60 z-[110] flex items-end justify-center p-0 sm:items-center sm:p-4">
+        <div class="bg-slate-100 w-full sm:max-w-md h-[92vh] sm:h-[85vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden animate-slide-up shadow-2xl relative border border-slate-200">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-start bg-white relative z-10 shadow-xs shrink-0">
+                <div class="absolute top-0 left-0 w-full h-1 bg-slate-900"></div>
+                <div class="flex-1 min-w-0 pr-3 pt-1">
+                    <h3 class="font-black text-slate-900 text-[15px] flex items-center gap-1.5 truncate">
+                        <i class="fa-solid fa-map-location-dot text-blue-600"></i>
+                        <span id="memo-modal-title" class="truncate"></span>
+                    </h3>
+                </div>
+                <button onclick="window.closeMemoModal()" class="text-slate-400 hover:text-slate-700 text-2xl p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-4 hide-scrollbar flex flex-col gap-4 overscroll-contain">
+                <div>
+                    <div class="flex justify-between items-center mb-2 px-1">
+                        <span class="text-sm font-black text-slate-900"><i class="fa-solid fa-crown mr-1 text-amber-500"></i>BEST 동료 현장·주차 정보</span>
+                    </div>
+                    <div id="memo-list-container" class="space-y-2 mb-2">
+                        <div class="flex justify-center items-center py-6 text-slate-400"><i class="fa-solid fa-circle-notch fa-spin mr-2"></i>목록을 불러오는 중...</div>
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl shadow-xs border border-slate-200">
+                    <div class="mb-3">
+                        <span class="text-xs font-black text-slate-900"><i class="fa-solid fa-building mr-1 text-slate-600"></i>주차 및 건물정보 등록/수정</span>
+                        <p class="text-[10px] text-slate-500 mt-0.5">계정당 1개만 등록되며, 다시 쓰면 이전 내용이 수정됩니다.</p>
+                    </div>
+                    
+                    <div class="space-y-3 mb-3">
+                        <div class="grid grid-cols-2 gap-3">
+                            <div>
+                                <span class="text-[10px] font-bold text-slate-400 block mb-1">주차장 높이</span>
+                                <div class="flex gap-1">
+                                    <button onclick="window.selectHeightTag(this, '2.1m 이하')" class="height-tag-btn text-[10.5px] bg-slate-50 text-slate-700 font-bold px-1 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100 flex-1 text-center whitespace-nowrap">2.1m 이하</button>
+                                    <button onclick="window.selectHeightTag(this, '2.2m')" class="height-tag-btn text-[10.5px] bg-slate-50 text-slate-700 font-bold px-1 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100 flex-1 text-center whitespace-nowrap">2.2m</button>
+                                    <button onclick="window.selectHeightTag(this, '2.3m 이상')" class="height-tag-btn text-[10.5px] bg-slate-50 text-slate-700 font-bold px-1 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100 flex-1 text-center whitespace-nowrap">2.3m 이상</button>
+                                </div>
+                            </div>
+                            <div>
+                                <span class="text-[10px] font-bold text-slate-400 block mb-1">회차 시간</span>
+                                <div class="flex flex-wrap gap-1.5">
+                                    <button onclick="window.selectTimeTag(this, '10분')" class="time-tag-btn text-[10px] bg-slate-50 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100 flex-1 text-center whitespace-nowrap">10분</button>
+                                    <button onclick="window.selectTimeTag(this, '15분')" class="time-tag-btn text-[10px] bg-slate-50 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100 flex-1 text-center whitespace-nowrap">15분</button>
+                                    <button onclick="window.selectTimeTag(this, '30분')" class="time-tag-btn text-[10px] bg-slate-50 text-slate-700 font-bold px-2.5 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100 flex-1 text-center whitespace-nowrap">30분</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div>
+                            <span class="text-[10px] font-bold text-slate-400 block mb-1">간편 입력 (다중선택 가능)</span>
+                            <div class="flex flex-wrap gap-1.5">
+                                <button onclick="window.toggleEtcTag(this)" data-val="도로변 주차" class="etc-tag-btn text-[11px] bg-slate-50 text-slate-700 font-bold px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">도로변 주차</button>
+                                <button onclick="window.toggleEtcTag(this)" data-val="지하주차장" class="etc-tag-btn text-[11px] bg-slate-50 text-slate-700 font-bold px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">지하주차장</button>
+                                <button onclick="window.toggleEtcTag(this)" data-val="지상주차장" class="etc-tag-btn text-[11px] bg-slate-50 text-slate-700 font-bold px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">지상주차장</button>
+                                <button onclick="window.toggleEtcTag(this)" data-val="엘리베이터" class="etc-tag-btn text-[11px] bg-slate-50 text-slate-700 font-bold px-3 py-1.5 rounded-lg border border-slate-200 active:bg-slate-100">엘리베이터</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <textarea id="memo-input" rows="2" maxlength="30" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-medium rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3 outline-none resize-none" placeholder="주차 위치 상세정보 (최대 30자) 비밀번호 금지!"></textarea>
+                    <div class="flex justify-between items-center mt-2">
+                        <span id="memo-char-count" class="text-[10px] font-bold text-slate-400">0 / 30</span>
+                        <button onclick="window.saveCurrentMemo()" class="bg-slate-900 hover:bg-black text-white font-black px-4 py-2 rounded-lg shadow-2xs transition text-xs"><i class="fa-solid fa-check mr-1 text-emerald-400"></i>등록/수정하기</button>
+                    </div>
+                </div>
+
+                <div class="bg-white p-4 rounded-2xl shadow-xs border border-emerald-200">
+                    <div class="mb-2.5">
+                        <div class="flex items-center justify-between">
+                            <span class="text-xs font-black text-emerald-900 flex items-center gap-1.5">
+                                <i class="fa-solid fa-shield-halved text-emerald-600"></i>내 폰에만 저장되는 개인 메모
+                            </span>
+                            <span class="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">기기 로컬 단독</span>
+                        </div>
+                        <p class="text-[10px] text-slate-500 mt-1 leading-tight">
+                            출입문 비밀번호, 호수별 특이사항 등 개인 업무 메모를 입력하세요.<br>
+                            <span class="text-emerald-700 font-bold">서버에 전송되지 않고 본인 핸드폰에만 안전하게 보관됩니다.</span>
+                        </p>
+                    </div>
+
+                    <textarea id="personal-memo-input" rows="2" maxlength="30" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-medium rounded-xl focus:ring-emerald-500 focus:border-emerald-500 block p-3 outline-none resize-none" placeholder="예: #1234*, 1층 비번, 경비실 통과 등 (최대 30자)"></textarea>
+                    
+                    <div class="flex justify-between items-center mt-2">
+                        <span id="personal-memo-char-count" class="text-[10px] font-bold text-slate-400">0 / 30</span>
+                        <div class="flex items-center gap-1.5">
+                            <button onclick="window.deletePersonalMemo()" id="btn-delete-personal-memo" class="hidden bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200 font-bold px-3 py-2 rounded-lg text-xs transition">
+                                <i class="fa-solid fa-trash-can mr-1"></i>삭제
+                            </button>
+                            <button onclick="window.savePersonalMemo()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-4 py-2 rounded-lg shadow-2xs transition text-xs flex items-center gap-1">
+                                <i class="fa-solid fa-lock mr-1"></i>개인메모 저장
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="p-3 bg-white border-t border-slate-200 flex gap-2 z-10 shadow-xs shrink-0 pb-safe">
+                <button onclick="window.closeMemoModal()" class="w-full bg-slate-900 text-white font-bold py-3.5 rounded-xl transition text-sm active:bg-black">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 연결 설정 바텀시트 모달 -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/60 z-[250] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-slide-up" onclick="if(event.target===this) window.closeSettingsModal()">
+        <div class="bg-white w-full sm:max-w-md h-[85vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden shadow-2xl">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h3 class="font-bold text-slate-900 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-gear text-blue-600"></i> 연결 설정
+                </h3>
+                <button onclick="window.closeSettingsModal()" class="text-slate-400 hover:text-slate-700 active:text-slate-900 text-xl p-1 -mr-1">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            
+            <div class="flex-1 overflow-y-auto p-4 space-y-4 bg-white overscroll-contain">
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h4 class="text-sm font-bold text-slate-800">TMS 연결</h4>
+                        <p class="text-[11px] text-slate-500 mt-0.5 leading-tight">관제 계정(사무실)과의 정보 송수신을<br>허용하거나 차단합니다.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+                        <input type="checkbox" id="tms-toggle" class="sr-only peer" onchange="window.toggleTMS(this.checked)" checked>
+                        <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+                
+                <div class="w-full h-px bg-slate-200"></div>
+
+                <div class="flex items-center justify-between">
+                    <div>
+                        <h4 class="text-sm font-bold text-slate-800">GPS 위치 확인</h4>
+                        <p class="text-[11px] text-slate-500 mt-0.5 leading-tight">앱 전환 시 위치 권한 설정 및<br>백그라운드 GPS 사용 여부를 결정합니다.</p>
+                    </div>
+                    <label class="relative inline-flex items-center cursor-pointer shrink-0 ml-3">
+                        <input type="checkbox" id="gps-toggle" class="sr-only peer" onchange="window.toggleGPS(this.checked)" disabled>
+                        <div class="w-11 h-6 bg-slate-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                </div>
+
+                <div class="w-full h-px bg-slate-200"></div>
+
+                <div class="bg-slate-50 border border-slate-200 rounded-2xl p-3.5 shadow-2xs">
+                    <div class="flex items-center justify-between mb-2">
+                        <h4 class="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                            <i class="fa-solid fa-chart-pie text-blue-600"></i> 내 기여 활동 현황
+                        </h4>
+                        <span class="text-[9px] bg-slate-200 text-slate-700 font-bold px-2 py-0.5 rounded-md">기기 로컬 기준</span>
+                    </div>
+                    
+                    <div class="grid grid-cols-2 gap-2">
+                        <div class="bg-white border border-slate-200 rounded-xl p-2.5 text-center shadow-2xs">
+                            <span class="block text-[10px] text-slate-400 font-bold mb-0.5">공용 주차정보 작성</span>
+                            <span id="stat-parking-memo-count" class="text-base font-black text-blue-600">0건</span>
+                        </div>
+                        <div class="bg-white border border-slate-200 rounded-xl p-2.5 text-center shadow-2xs">
+                            <span class="block text-[10px] text-slate-400 font-bold mb-0.5">내 폰 개인메모 저장</span>
+                            <span id="stat-personal-memo-count" class="text-base font-black text-emerald-600">0건</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="w-full h-px bg-slate-200"></div>
+
+                <div>
+                    <div class="flex items-center justify-between mb-1">
+                        <h4 class="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                            <i class="fa-solid fa-shield-halved text-emerald-600"></i> 기기변경 개인메모 이전
+                        </h4>
+                        <span class="text-[9px] bg-emerald-50 text-emerald-700 border border-emerald-200 font-bold px-2 py-0.5 rounded-md">12시간 암호화</span>
+                    </div>
+                    <p class="text-[10px] text-slate-500 mb-3 leading-tight">
+                        폰 교체 시 메모를 암호화하여 서버에 12시간 동안 임시 보관합니다. 새 폰 로그인 후 [복구]를 누르세요.
+                    </p>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button onclick="window.backupPersonalMemosToCloud()" class="bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200 font-bold py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition shadow-2xs">
+                            <i class="fa-solid fa-cloud-arrow-up text-[13px]"></i> 임시 백업 (12h)
+                        </button>
+                        <button onclick="window.restorePersonalMemosFromCloud()" class="bg-slate-50 hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold py-2.5 px-2 rounded-xl text-xs flex items-center justify-center gap-1.5 active:scale-95 transition shadow-2xs">
+                            <i class="fa-solid fa-cloud-arrow-down text-[13px] text-blue-600"></i> 메모 복구
+                        </button>
+                    </div>
+                </div>
+
+                <div class="flex items-center justify-between pt-3 border-t border-slate-200 px-1 pb-2">
+                    <div class="flex items-center gap-2 text-[11px] text-slate-400 font-medium">
+                        <a href="/terms.html" target="_blank" class="hover:text-slate-600 underline transition">이용약관</a>
+                        <span>·</span>
+                        <a href="/privacy.html" target="_blank" class="hover:text-slate-600 underline font-bold text-slate-500 transition">개인정보</a>
+                        <span>·</span>
+                        <a href="/policy.html" target="_blank" class="hover:text-slate-600 underline transition">운영정책</a>
+                    </div>
+                    <span class="text-[10px] text-slate-300 font-mono font-bold">v1.0.0</span>
+                </div>
+            </div>
+            
+            <div class="p-3 bg-white border-t border-slate-200 shrink-0 pb-safe">
+                <button onclick="window.closeSettingsModal()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3.5 rounded-xl transition text-sm active:scale-95 shadow-md">
+                    닫기
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TMS 연결 차단 확인 커스텀 모달 -->
+    <div id="tms-confirm-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center border border-slate-200">
+            <div class="w-14 h-14 bg-rose-50 text-rose-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner">
+                <i class="fa-solid fa-link-slash"></i>
+            </div>
+            <h3 class="font-black text-slate-900 text-lg mb-2">TMS 연결을 차단할까요?</h3>
+            <p class="text-xs text-slate-500 font-bold mb-6 leading-relaxed">
+                차단 시 기존 관제 소속이 해제되며,<br>새로운 연결 요청도 거부됩니다.
+            </p>
+            <div class="flex gap-2">
+                <button onclick="window.cancelTMSToggle()" class="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-3.5 rounded-xl text-sm transition">취소 (유지)</button>
+                <button onclick="window.confirmTMSToggle()" class="flex-1 bg-rose-600 hover:bg-rose-700 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95">차단하기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TMS 상태 변경 완료 커스텀 모달 -->
+    <div id="tms-success-modal" class="hidden fixed inset-0 bg-black/60 z-[300] flex items-center justify-center p-4 backdrop-blur-sm animate-slide-up">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden text-center border border-slate-200">
+            <div id="tms-success-icon" class="w-14 h-14 bg-slate-100 text-blue-600 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-inner">
+                <i class="fa-solid fa-check"></i>
+            </div>
+            <h3 id="tms-success-title" class="font-black text-slate-900 text-lg mb-2">상태 변경 완료</h3>
+            <p id="tms-success-desc" class="text-xs text-slate-500 font-bold mb-6 leading-relaxed"></p>
+            <button onclick="document.getElementById('tms-success-modal').classList.add('hidden')" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black py-3.5 rounded-xl text-sm shadow-md transition active:scale-95">확인했습니다</button>
+        </div>
+    </div>
+
+    <!-- 주소 확인 모달 -->
+    <div id="address-input-modal" class="hidden fixed inset-0 bg-black/60 z-[100] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden border border-slate-200">
+            <div class="absolute top-0 left-0 w-full h-1 bg-blue-600"></div>
+            <h3 class="font-black text-slate-900 text-lg mb-1 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-blue-600"></i> <span id="address-modal-title">정보 확인 및 수정</span></h3>
+            <p id="address-modal-desc" class="text-sm text-slate-600 font-bold mb-4">정확한 배송지 정보를 입력해 주세요.</p>
+            
+            <div id="ocr-snippet-container" class="mb-4 bg-slate-50 rounded-xl p-3 border border-slate-200 hidden">
+                <label class="block text-[11px] font-bold text-slate-400 mb-1">카메라 판독 결과 (참고용)</label>
+                <div id="ocr-snippet" class="text-xs text-slate-700 break-all font-mono leading-relaxed"></div>
+            </div>
+            
+            <div class="space-y-3 mb-5">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 mb-1 pl-1">배송지 주소</label>
+                    <div class="flex gap-1.5">
+                        <input type="text" id="manual-address-input" class="flex-1 min-w-0 bg-white border border-slate-200 text-slate-900 text-sm font-medium rounded-xl p-3.5 outline-none shadow-inner focus:border-blue-600 focus:ring-1 focus:ring-blue-600" placeholder="정확한 주소를 입력하세요">
+                        <button onclick="window.copyAddressModal()" class="bg-slate-50 text-slate-700 border border-slate-200 hover:bg-slate-100 rounded-xl px-3 font-black text-[10px] shadow-2xs active:scale-95 shrink-0 flex flex-col items-center justify-center transition">
+                            <i class="fa-regular fa-copy text-[16px] mb-1 text-slate-500"></i>
+                            복사
+                        </button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-500 mb-1 pl-1">고객 연락처 (선택)</label>
+                    <input type="tel" id="manual-phone-input" class="w-full bg-white border border-slate-200 text-slate-900 text-sm font-medium font-mono rounded-xl p-3.5 outline-none shadow-inner focus:border-blue-600 focus:ring-1 focus:ring-blue-600" placeholder="전화번호 (예: 010-1234-5678)">
+                </div>
+            </div>
+            <div class="flex gap-2.5">
+                <button id="address-modal-cancel" class="flex-1 bg-slate-100 text-slate-700 font-bold py-3.5 rounded-xl active:bg-slate-200">취소</button>
+                <button id="address-modal-confirm" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-md active:bg-blue-800">확인</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 지난배송 이력 모달 -->
+    <div id="history-modal" class="hidden fixed inset-0 bg-black/60 z-[90] flex items-end sm:items-center justify-center p-0 sm:p-4">
+        <div class="bg-white w-full sm:max-w-lg h-[80vh] rounded-t-3xl sm:rounded-3xl flex flex-col overflow-hidden border border-slate-200 shadow-2xl">
+            <div class="p-4 border-b border-slate-200 flex justify-between items-center bg-slate-50 shrink-0">
+                <h3 class="font-bold text-slate-900 text-base flex items-center gap-2">
+                    <i class="fa-solid fa-box-archive text-blue-600"></i> 완료된 배송 이력
+                </h3>
+                <button onclick="window.closeHistoryModal()" class="text-slate-400 hover:text-slate-700 text-xl p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div id="history-list-container" class="flex-1 overflow-y-auto p-4 hide-scrollbar relative overscroll-contain bg-slate-50"></div>
+            <div class="p-3 bg-white border-t border-slate-200 flex justify-between shrink-0">
+                <button onclick="window.clearAllHistory()" class="text-xs text-rose-600 font-bold px-2 py-1">전체 이력 삭제</button>
+                <button onclick="window.closeHistoryModal()" class="bg-slate-900 text-white text-xs font-bold px-4 py-2 rounded-xl active:bg-black">닫기</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 로딩 오버레이 -->
+    <div id="loading-overlay" class="hidden fixed inset-0 bg-black/50 z-[120] flex items-center justify-center backdrop-blur-xs">
+        <div class="bg-white p-6 rounded-2xl flex flex-col items-center shadow-xl min-w-[150px] border border-slate-100">
+            <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-4"></i>
+            <p id="loading-text" class="text-slate-800 font-bold text-sm mt-1">요청 처리 중...</p>
+            <button id="loading-cancel" type="button" class="hidden mt-4 px-4 py-2 rounded-lg bg-slate-100 text-slate-600 text-sm font-bold">취소</button>
+        </div>
+    </div>
+</body>
+</html>

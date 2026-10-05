@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>배송 경로 PRO - 통합 관리자 센터</title>
+    <!-- Tailwind CSS & Font Awesome -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- 공통 분리 스타일시트 -->
+    <link rel="stylesheet" href="./css/admin.css">
+
+    <!-- 카카오 맵 API (services 라이브러리 포함) -->
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=893c5c6ec8613974d84fa75fd6d0be11&libraries=services"></script>
+</head>
+<body class="bg-slate-900 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
+
+    <!-- 통합 관리자 로그인 화면 (단일 접속 게이트) -->
+    <div id="login-screen" class="fixed inset-0 bg-slate-900 z-50 flex flex-col items-center justify-center p-6">
+        <div class="w-full max-w-sm bg-white rounded-3xl p-8 shadow-2xl text-center relative overflow-hidden border border-gray-100 animate-slide-up">
+            <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
+            <div class="mb-4">
+                <i class="fa-solid fa-route text-blue-600 text-[56px] drop-shadow-sm"></i>
+            </div>
+            <h2 class="text-xl font-black text-gray-900 mb-1 tracking-tight">통합 관리자 센터</h2>
+            <p class="text-xs text-gray-400 mb-6 font-bold">마스터 비밀키 또는 관제 키를 입력해 주세요.</p>
+            
+            <div class="space-y-3 mb-5 text-left">
+                <div class="relative">
+                    <i class="fa-solid fa-key absolute left-4 top-4 text-gray-400 text-sm"></i>
+                    <input type="text" id="single-key-input" placeholder="관리자 키 입력" class="w-full pl-10 pr-4 py-3.5 bg-gray-50 border border-gray-300 text-gray-900 text-sm font-mono rounded-xl focus:ring-blue-500 focus:border-blue-500 block font-black outline-none transition" onkeyup="if(window.event.keyCode==13){window.handleSingleKeyLogin()}">
+                </div>
+            </div>
+            
+            <button onclick="window.handleSingleKeyLogin()" id="login-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-black rounded-xl text-sm px-5 py-3.5 text-center shadow-lg transition active:scale-95 flex items-center justify-center gap-2">
+                <span>대시보드 접속</span>
+            </button>
+            <p id="login-msg" class="text-red-500 text-xs mt-3 font-bold min-h-[16px] whitespace-pre-line"></p>
+
+            <!-- 법적 고지 및 약관 링크 -->
+            <div class="mt-5 pt-3 border-t border-gray-100 flex justify-center items-center gap-2 text-[11px] text-gray-400 font-medium">
+                <a href="/terms.html" target="_blank" class="hover:text-gray-600 underline transition">이용약관</a>
+                <span>·</span>
+                <a href="/privacy.html" target="_blank" class="hover:text-gray-600 underline font-bold text-gray-500 transition">개인정보처리방침</a>
+                <span>·</span>
+                <a href="/policy.html" target="_blank" class="hover:text-gray-600 underline transition">운영정책</a>
+            </div>
+        </div>
+    </div>
+
+    <!-- ES Modules 방식의 관리자 메인 컨트롤러 및 라우터 연결 -->
+    <script type="module" src="./js/admin-app.js"></script>
+</body>
+</html>
