@@ -32,8 +32,26 @@ function lookupId(secret, key) {
     return 'v1_' + createHmac('sha256', hmacKey(key)).update(normalizeSecret(secret), 'utf8').digest('hex');
 }
 function generateSecret() { return randomBytes(SECRET_BYTES).toString('base64url'); }
+function normalizePhone(value) {
+    if (typeof value !== 'string' || value.length > 32 || !/^[0-9+() -]+$/.test(value)) deny();
+    const digits = value.replace(/\D/g, '');
+    if (!/^\d{9,13}$/.test(digits)) deny();
+    return digits;
+}
+function validateLicenseLoginKey(value) {
+    if (typeof value !== 'string' || !value || value.length > 128 || value.trim() !== value || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(value)) {
+        throw new AuthError(400, 'INVALID_LICENSE_KEY');
+    }
+    return value;
+}
+function driverLicenseLookupId(value, key) {
+    return 'v1_' + createHmac('sha256', hmacKey(key)).update('driver-license-v1\0' + validateLicenseLoginKey(value), 'utf8').digest('hex');
+}
+function currentLicenseLoginKey(license, accountRef) {
+    return Object.hasOwn(license, 'loginKey') ? license.loginKey : license.key ?? accountRef.slice('licenses/'.length);
+}
 function validateMasterSecret(value) {
-    if (typeof value !== 'string' || value.length < 16 || value.length > 128 ||
+    if (typeof value !== 'string' || value.length < 8 || value.length > 64 ||
         value.trim() !== value || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(value)) {
         throw new AuthError(400, 'INVALID_SECRET');
     }
@@ -198,16 +216,42 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
         await db.runTransaction(tx => master(tx, actor));
         return actor;
     }
-    async function session(idToken) {
+    async function session(idToken, deviceId) {
         if (typeof idToken !== 'string' || !idToken || idToken.length > 16384) deny();
         let actor;
         try { actor = await auth.verifyIdToken(idToken, true); } catch { deny(); }
         return db.runTransaction(async tx => {
             const p = principalData(await tx.get(pRef(actor.uid)));
             if (actor.credentialVersion !== p.credentialVersion) deny();
-            await checkAccount(tx, p);
+            const license = await checkAccount(tx, p);
+            if (deviceId !== undefined && (p.role !== 'driver' || typeof deviceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(deviceId) || license.deviceId !== deviceId)) deny();
+            if (p.role === 'driver' && actor.deviceId !== undefined && actor.deviceId !== license.deviceId) deny();
             return { uid: actor.uid, role: p.role, accountRef: p.accountRef,
                 credentialVersion: p.credentialVersion };
+        });
+    }
+    async function inspectOwnMaster(idToken) {
+        if (typeof idToken !== 'string' || !idToken || idToken.length > 16384) deny();
+        let actor;
+        try { actor = await auth.verifyIdToken(idToken, true); } catch { deny(); }
+        return db.runTransaction(async tx => {
+            const snapshot = await tx.get(pRef(actor.uid));
+            if (!snapshot.exists) deny();
+            const p = snapshot.data();
+            if (p.role !== 'master' || !version(p.credentialVersion) || actor.credentialVersion !== p.credentialVersion) deny();
+            accountPath('master', p.accountRef);
+            const account = await tx.get(db.doc(p.accountRef));
+            const binding = await tx.get(db.doc(bindingPath(p.accountRef)));
+            const lookup = LOOKUP.test(p.lookupId) ? await tx.get(lRef(p.lookupId)) : null;
+            let accountUsable = true;
+            try { validateAccount('master', account.exists ? account.data() : null, now()); }
+            catch (error) { if (!(error instanceof AuthError)) throw error; accountUsable = false; }
+            return { accountRef: p.accountRef, role: 'master', enabled: p.enabled === true,
+                credentialReady: p.credentialReady === true, credentialVersion: p.credentialVersion,
+                authenticationLinked: accountUsable && p.enabled === true && p.credentialReady === true &&
+                    p.credentialOperation == null && binding.exists && binding.data().kind === 'account_binding' &&
+                    binding.data().uid === actor.uid && !!lookup?.exists && lookup.data().uid === actor.uid &&
+                    lookup.data().credentialVersion === p.credentialVersion };
         });
     }
     async function login(secret) {
@@ -236,6 +280,166 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
         const current = principalData(await db.getAll(pRef(identity.uid)).then(items => items[0]));
         if (current.lookupId !== id || current.credentialVersion !== identity.credentialVersion) deny();
         return { customToken };
+    }
+    // Reuse the existing private principal/lookup/binding format. Never replace
+    // an existing identity or attempt to repair an inconsistent link at login.
+    async function prepareDriverPrincipal(tx, accountRef) {
+        const bindingRef = db.doc(bindingPath(accountRef));
+        const binding = await tx.get(bindingRef);
+        const matches = await tx.get(db.collection('auth_principals').where('accountRef', '==', accountRef));
+        const principals = matches.docs.filter(s => s.data().kind !== 'trial_registration');
+        if (binding.exists || principals.length) {
+            const b = binding.exists ? binding.data() : null;
+            if (!b || b.kind !== 'account_binding' || !UUID.test(b.uid) || principals.length !== 1 || principals[0].id !== b.uid) deny();
+            const p = principalData(principals[0]);
+            if (p.role !== 'driver' || p.accountRef !== accountRef || p.credentialOperation != null) deny();
+            const lookup = await tx.get(lRef(p.lookupId));
+            if (!lookup.exists || lookup.data().uid !== b.uid || lookup.data().credentialVersion !== p.credentialVersion) deny();
+            return { uid: b.uid, p, created: false, write() {} };
+        }
+        const uid = randomUUID(), id = lookupId(generateSecret(), key), timestamp = now();
+        const principal = pRef(uid), lookup = lRef(id);
+        if ((await tx.get(principal)).exists || (await tx.get(lookup)).exists) deny();
+        const p = { role: 'driver', accountRef, enabled: true, credentialVersion: 1,
+            credentialReady: true, lookupId: id, createdAt: timestamp, updatedAt: timestamp };
+        return { uid, p, created: true, write() {
+            tx.create(principal, p); tx.create(lookup, { uid, credentialVersion: 1 });
+            tx.create(bindingRef, { kind: 'account_binding', uid });
+        } };
+    }
+    async function prepareOwnRouteOwner(tx, accountRef, license) {
+        if (typeof license.routeOwnerId === 'string' && license.routeOwnerId.trim()) {
+            return { routeOwnerId: license.routeOwnerId, write() {} };
+        }
+        const conflict = () => { throw new AuthError(409, 'OWNER_REPAIR_CONFLICT'); };
+        if (licenseMode(license) !== 'legacy' || ![undefined, ''].includes(license.routeOwnerId)) conflict();
+        const id = accountRef.slice('licenses/'.length), company = license.dispatchKey || '';
+        const identified = await tx.get(db.collection('routes').where('licenseKey', '==', id).limit(301));
+        if (identified.docs.length > 300) conflict();
+        const routes = new Map(identified.docs.map(s => [s.id, s.data()]));
+        for (const device of new Set([id, license.deviceId].filter(v => typeof v === 'string' && v && !v.includes('/')))) {
+            const snapshot = await tx.get(db.doc('routes/' + device));
+            if (!snapshot.exists) continue;
+            const links = await tx.get(db.collection('licenses').where('deviceId', '==', device).limit(301));
+            if (links.docs.some(s => s.id !== id)) conflict();
+            routes.set(device, snapshot.data());
+        }
+        const owners = new Set();
+        for (const r of routes.values()) {
+            if ((r.licenseKey !== undefined && r.licenseKey !== id) ||
+                (r.dispatchKey !== undefined && r.dispatchKey !== company)) conflict();
+            if (r.routeOwnerId !== undefined && r.routeOwnerId !== '' &&
+                (typeof r.routeOwnerId !== 'string' || !r.routeOwnerId.trim())) conflict();
+            if (r.routeOwnerId) owners.add(r.routeOwnerId);
+        }
+        // Completed/history records can retain the owner after active routes vanish.
+        // Read their explicit account link only; never rewrite historical payloads.
+        for (const collection of ['completions', 'history']) {
+            const rows = await tx.get(db.collection(collection).where('licenseKey', '==', id).limit(301));
+            if (rows.docs.length > 300) conflict();
+            for (const s of rows.docs) {
+                const r = s.data();
+                if (r.routeOwnerId !== undefined && r.routeOwnerId !== '' &&
+                    (typeof r.routeOwnerId !== 'string' || !r.routeOwnerId.trim())) conflict();
+                if (r.routeOwnerId) owners.add(r.routeOwnerId);
+            }
+        }
+        if (owners.size > 1) conflict();
+        const routeOwnerId = owners.size ? [...owners][0] : randomUUID();
+        const linked = await tx.get(db.collection('licenses').where('routeOwnerId', '==', routeOwnerId).limit(301));
+        if (linked.docs.some(s => s.id !== id)) conflict();
+        const historical = await tx.get(db.collection('routes').where('routeOwnerId', '==', routeOwnerId).limit(301));
+        if (historical.docs.length > 300) conflict();
+        for (const s of historical.docs) {
+            const r = s.data();
+            // Owner alone cannot authorize an otherwise unidentified historical route.
+            if (!routes.has(s.id) && r.licenseKey !== id) conflict();
+            if ((r.licenseKey !== undefined && r.licenseKey !== id) ||
+                (r.dispatchKey !== undefined && r.dispatchKey !== company)) conflict();
+        }
+        return { routeOwnerId, write() {
+            tx.update(db.doc(accountRef), { routeOwnerId });
+            for (const [routeId, r] of routes) if (!r.routeOwnerId) {
+                tx.update(db.doc('routes/' + routeId), { routeOwnerId });
+            }
+        } };
+    }
+    async function driverLogin(input) {
+        if (!input || Object.keys(input).some(f => !['action', 'licenseKey', 'phone', 'deviceId'].includes(f)) ||
+            input.action !== 'driverLogin' || typeof input.licenseKey !== 'string' || !input.licenseKey ||
+            input.licenseKey !== input.licenseKey.trim() || typeof input.deviceId !== 'string' ||
+            !/^[A-Za-z0-9_-]{1,128}$/.test(input.deviceId)) deny();
+        const loginKey = validateLicenseLoginKey(input.licenseKey), loginId = driverLicenseLookupId(loginKey, key), phone = normalizePhone(input.phone);
+        const identity = await db.runTransaction(async tx => {
+            const loginLookup = await tx.get(lRef(loginId));
+            let accountRef;
+            if (loginLookup.exists) {
+                const mapping = loginLookup.data(), p = principalData(await tx.get(pRef(mapping.uid)));
+                if (mapping.kind !== 'driver_license' || p.role !== 'driver' || p.lookupId !== loginId || mapping.credentialVersion !== p.credentialVersion) deny();
+                accountRef = p.accountRef;
+            } else accountRef = accountPath('driver', 'licenses/' + loginKey);
+            const ref = db.doc(accountRef), snapshot = await tx.get(ref);
+            const license = snapshot.exists ? snapshot.data() : null;
+            validateAccount('driver', license, now());
+            if (currentLicenseLoginKey(license, accountRef) !== loginKey || (!loginLookup.exists && Object.hasOwn(license, 'loginKey')) ||
+                (await tx.get(db.doc('blocked_devices/' + input.deviceId))).exists) deny();
+            // Remembered history is server-written; mutable active deviceId must
+            // not override it and bypass the cooldown after a client-side clear.
+            const previousDevice = license.lastDeviceId || license.deviceId || '';
+            const changedDevice = Boolean(previousDevice && previousDevice !== input.deviceId);
+            const changedAt = license.lastDeviceChangeAt === 0 ? undefined : license.lastDeviceChangeAt;
+            if ((license.lastDeviceId !== undefined && (typeof license.lastDeviceId !== 'string' ||
+                (license.lastDeviceId && !/^[A-Za-z0-9_-]{1,128}$/.test(license.lastDeviceId)))) ||
+                (changedAt !== undefined && (!Number.isSafeInteger(changedAt) || changedAt < 0))) {
+                throw new AuthError(409, 'DEVICE_CHANGE_STATE_INVALID');
+            }
+            const timestamp = now();
+            if (changedDevice && changedAt !== undefined && timestamp - changedAt < 24 * 60 * 60 * 1000) {
+                throw new AuthError(409, 'DEVICE_CHANGE_LIMIT');
+            }
+            // A cooldown timestamp without any remembered device cannot safely
+            // distinguish a same-device return from logout-based evasion.
+            if (!previousDevice && changedAt !== undefined) throw new AuthError(409, 'DEVICE_CHANGE_STATE_INVALID');
+            const prepared = await prepareDriverPrincipal(tx, accountRef);
+            const owner = await prepareOwnRouteOwner(tx, accountRef, license);
+            owner.write();
+            prepared.write();
+            // The license is the account. Telephone is current-driver information,
+            // not an ownership credential. A different driver on the same device
+            // must still invalidate the preceding session using the existing version.
+            const phoneChanged = String(license.phone || '').replace(/\D/g, '') !== phone;
+            const currentPhone = phoneChanged ? input.phone.trim() : license.phone;
+            const switching = !prepared.created && (license.deviceId !== input.deviceId || phoneChanged);
+            if (switching) {
+                if (prepared.p.credentialVersion >= Number.MAX_SAFE_INTEGER) deny();
+                prepared.p.credentialVersion++;
+                tx.update(pRef(prepared.uid), { credentialVersion: prepared.p.credentialVersion, updatedAt: now() });
+                tx.update(lRef(prepared.p.lookupId), { credentialVersion: prepared.p.credentialVersion });
+            }
+            const deviceChanges = {};
+            if (license.deviceId !== input.deviceId || phoneChanged) Object.assign(deviceChanges, { deviceId: input.deviceId, phone: currentPhone });
+            if (license.lastDeviceId !== input.deviceId || changedDevice) Object.assign(deviceChanges, { lastDeviceId: input.deviceId,
+                ...(changedDevice ? { lastDeviceChangeAt: timestamp } : {}) });
+            if (Object.keys(deviceChanges).length) tx.update(ref, deviceChanges);
+            return { uid: prepared.uid, accountRef, credentialVersion: prepared.p.credentialVersion, lookupId: prepared.p.lookupId };
+        });
+        const accountRef = identity.accountRef;
+        const customToken = await auth.createCustomToken(identity.uid, { credentialVersion: identity.credentialVersion, deviceId: input.deviceId });
+        // Recheck device, account and identity after signing, just as secret
+        // login rechecks its version. No business identifiers are changed.
+        await db.runTransaction(async tx => {
+            const p = principalData(await tx.get(pRef(identity.uid)));
+            const license = await checkAccount(tx, p);
+            const binding = await tx.get(db.doc(bindingPath(accountRef))), lookup = await tx.get(lRef(p.lookupId));
+            if (p.role !== 'driver' || p.accountRef !== accountRef || p.lookupId !== identity.lookupId ||
+                p.credentialVersion !== identity.credentialVersion || p.credentialOperation != null ||
+                currentLicenseLoginKey(license, accountRef) !== loginKey ||
+                license.deviceId !== input.deviceId ||
+                !binding.exists || binding.data().kind !== 'account_binding' || binding.data().uid !== identity.uid ||
+                !lookup.exists || lookup.data().uid !== identity.uid || lookup.data().credentialVersion !== identity.credentialVersion ||
+                (await tx.get(db.doc('blocked_devices/' + input.deviceId))).exists) deny();
+        });
+        return { customToken, accountRef };
     }
     async function credentials(actor, input) {
         if (!input || !['issue', 'rotate', 'changeOwnSecret'].includes(input.action)) throw new AuthError(400, 'INVALID_REQUEST');
@@ -293,7 +497,8 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
                     if (nextId === p.lookupId) throw new AuthError(400, 'SECRET_UNCHANGED');
                 }
             }
-            await checkAccount(tx, p);
+            const linkedAccount = await checkAccount(tx, p);
+            if (p.role === 'driver' && Object.hasOwn(linkedAccount, 'loginKey')) throw new AuthError(409, 'LICENSE_KEY_MANAGED');
             if ((await tx.get(lRef(nextId))).exists) throw new AuthError(409, 'CREDENTIAL_CONFLICT');
             const next = { ...p, lookupId: nextId, credentialVersion: p.credentialVersion + 1,
                 credentialReady: issuing, updatedAt: now() };
@@ -303,6 +508,11 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
             tx.create(lRef(nextId), { uid, credentialVersion: next.credentialVersion });
             tx.set(ref, next);
             return next;
+        }).catch(error => {
+            // Logical transaction rejection proves no write committed; transport
+            // failures do not prove that a commit failed.
+            if (ownChange && error instanceof AuthError) error.changeOutcome = 'notChanged';
+            throw error;
         });
         if (!issuing) {
             const ref = pRef(uid);
@@ -375,8 +585,10 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
     }
     async function membership(idToken, input) {
         const fields = { checkDevice: ['action', 'deviceId'], lookup: ['action', 'licenseKey'], link: ['action', 'licenseKey', 'dispatchKey'],
+            releaseDevice: ['action', 'deviceId'], readOwnParkingMemos: ['action'], ensureOwnRouteOwner: ['action'],
             unlink: ['action', 'licenseKey'], setTmsPermission: ['action', 'allowed'],
-            createLicense: ['action', 'type', 'keyword', 'count', 'expireDate'],
+            createLicense: ['action', 'type', 'keyword', 'count', 'expireDate', 'phones'],
+            changeLicenseKey: ['action', 'licenseKey', 'newKey', 'expectedKey'],
             adoptLicense: ['action', 'licenseKey'], suspendLicense: ['action', 'licenseKey'],
             updateLicense: ['action', 'licenseKey', 'changes'],
             readLegacyRoutes: ['action', 'licenseKeys'],
@@ -389,6 +601,109 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
             const p = principalData(await tx.get(pRef(actor.uid)));
             if (actor.credentialVersion !== p.credentialVersion || !['master', 'dispatch', 'driver'].includes(p.role)) deny();
             const actorAccount = await checkAccount(tx, p);
+            if (p.role === 'driver' && actor.deviceId !== undefined && actor.deviceId !== actorAccount.deviceId) deny();
+            if (input.action === 'ensureOwnRouteOwner') {
+                if (p.role !== 'driver') deny();
+                const owner = await prepareOwnRouteOwner(tx, p.accountRef, actorAccount);
+                owner.write();
+                return { routeOwnerId: owner.routeOwnerId };
+            }
+            if (input.action === 'readOwnParkingMemos') {
+                if (p.role !== 'driver' || typeof actorAccount.routeOwnerId !== 'string' || !actorAccount.routeOwnerId.trim()) deny();
+                const company = actorAccount.dispatchKey || '';
+                const ownId = p.accountRef.slice('licenses/'.length), owner = actorAccount.routeOwnerId;
+                const related = await tx.get(db.collection('licenses').where('routeOwnerId', '==', owner).limit(301));
+                if (related.docs.length > 300) throw new AuthError(409, 'MEMO_READ_LIMIT');
+                const members = new Set([ownId]), devices = new Set();
+                for (const s of related.docs) {
+                    const l = s.data();
+                    if (!['regular', 'trial'].includes(l.type || 'regular') || (l.dispatchKey || '') !== company) {
+                        throw new AuthError(409, 'MEMO_OWNERSHIP_CONFLICT');
+                    }
+                    members.add(s.id);
+                    if (typeof l.deviceId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(l.deviceId)) devices.add(l.deviceId);
+                }
+                const historical = await tx.get(db.collection('routes').where('routeOwnerId', '==', owner).limit(301));
+                if (historical.docs.length > 300 || members.size > 30) throw new AuthError(409, 'MEMO_READ_LIMIT');
+                for (const s of historical.docs) {
+                    const r = s.data();
+                    if ((r.licenseKey !== undefined && !members.has(r.licenseKey)) ||
+                        (r.dispatchKey !== undefined && r.dispatchKey !== company)) continue;
+                    if (typeof r.deviceId === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(r.deviceId)) devices.add(r.deviceId);
+                }
+                if (devices.size > 60) throw new AuthError(409, 'MEMO_READ_LIMIT');
+                const addresses = new Set();
+                const accept = (r, deviceOwned = false) => {
+                    if (typeof r.address !== 'string' || !r.address || r.address.length > 4096 ||
+                        (r.dispatchKey !== undefined && r.dispatchKey !== company) ||
+                        (r.licenseKey !== undefined && !members.has(r.licenseKey)) ||
+                        (r.routeOwnerId !== undefined && r.routeOwnerId !== owner)) return;
+                    if (deviceOwned || r.routeOwnerId === owner || members.has(r.licenseKey)) addresses.add(r.address);
+                };
+                const readMemos = async (field, value, deviceOwned = false) => {
+                    const rows = await tx.get(db.collection('memos').where(field, '==', value).limit(1001));
+                    if (rows.docs.length > 1000) throw new AuthError(409, 'MEMO_READ_LIMIT');
+                    for (const s of rows.docs) accept(s.data(), deviceOwned);
+                    if (addresses.size > 3000) throw new AuthError(409, 'MEMO_READ_LIMIT');
+                };
+                for (const device of devices) {
+                    const links = await tx.get(db.collection('licenses').where('deviceId', '==', device).limit(301));
+                    if (links.docs.length > 300 || links.docs.some(s => !members.has(s.id))) continue;
+                    const deviceRoutes = await tx.get(db.collection('routes').where('deviceId', '==', device).limit(301));
+                    if (deviceRoutes.docs.length > 300 || deviceRoutes.docs.some(s => {
+                        const r = s.data();
+                        return (r.licenseKey !== undefined && !members.has(r.licenseKey)) ||
+                            (r.routeOwnerId !== undefined && r.routeOwnerId !== owner) ||
+                            (r.dispatchKey !== undefined && r.dispatchKey !== company);
+                    })) continue;
+                    await readMemos('deviceId', device, true);
+                }
+                await readMemos('routeOwnerId', owner);
+                for (const id of members) await readMemos('licenseKey', id);
+                // Telephone-only records provide no proof of ownership. Return addresses only.
+                return { addresses: [...addresses] };
+            }
+            if (input.action === 'releaseDevice') {
+                if (p.role !== 'driver' || typeof input.deviceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.deviceId) ||
+                    actorAccount.deviceId !== input.deviceId || p.credentialVersion >= Number.MAX_SAFE_INTEGER) deny();
+                const lookup = await tx.get(lRef(p.lookupId));
+                if (!lookup.exists || lookup.data().uid !== actor.uid || lookup.data().credentialVersion !== p.credentialVersion) deny();
+                const nextVersion = p.credentialVersion + 1;
+                tx.update(pRef(actor.uid), { credentialVersion: nextVersion, updatedAt: now() });
+                tx.update(lRef(p.lookupId), { credentialVersion: nextVersion });
+                tx.update(db.doc(p.accountRef), { deviceId: '', phone: '', lastDeviceId: actorAccount.deviceId });
+                return { released: true };
+            }
+            if (input.action === 'changeLicenseKey') {
+                if (p.role !== 'master') deny();
+                if (typeof input.licenseKey !== 'string' || !input.licenseKey || input.licenseKey !== input.licenseKey.trim()) throw new AuthError(400, 'INVALID_REQUEST');
+                const newKey = validateLicenseLoginKey(input.newKey), expectedKey = validateLicenseLoginKey(input.expectedKey);
+                const accountRef = accountPath('driver', 'licenses/' + input.licenseKey), ref = db.doc(accountRef), snapshot = await tx.get(ref);
+                if (!snapshot.exists) deny();
+                const license = snapshot.data(); validateAccount('driver', license, now());
+                if (currentLicenseLoginKey(license, accountRef) !== expectedKey) throw new AuthError(409, 'LICENSE_KEY_CONFLICT');
+                if (newKey === expectedKey) throw new AuthError(400, 'LICENSE_KEY_UNCHANGED');
+                // Reserve the name globally, including legacy fallback names and
+                // fixed document IDs, so two accounts cannot acquire the same key.
+                const nextId = driverLicenseLookupId(newKey, key), nextRef = lRef(nextId), next = await tx.get(nextRef);
+                const named = await tx.get(db.collection('licenses').where('loginKey', '==', newKey));
+                const legacy = await tx.get(db.collection('licenses').where('key', '==', newKey));
+                let documentName = null;
+                try { documentName = db.doc(accountPath('driver', 'licenses/' + newKey)); } catch (error) { if (!(error instanceof AuthError)) throw error; }
+                const documentSnapshot = documentName ? await tx.get(documentName) : null;
+                if (next.exists || named.docs.length || legacy.docs.some(s => s.id !== ref.path.split('/')[1]) ||
+                    (documentSnapshot?.exists && documentName.path !== ref.path)) throw new AuthError(409, 'LICENSE_KEY_EXISTS');
+                const prepared = await prepareDriverPrincipal(tx, accountRef);
+                // Key changes must preserve an already established Firebase UID.
+                if (prepared.created || prepared.p.credentialVersion >= Number.MAX_SAFE_INTEGER) throw new AuthError(409, 'LICENSE_KEY_CONFLICT');
+                const oldLookups = await tx.get(db.collection('auth_secret_lookups').where('uid', '==', prepared.uid));
+                const nextVersion = prepared.p.credentialVersion + 1;
+                for (const old of oldLookups.docs) tx.delete(db.doc('auth_secret_lookups/' + old.id));
+                tx.create(nextRef, { uid: prepared.uid, credentialVersion: nextVersion, kind: 'driver_license' });
+                tx.update(pRef(prepared.uid), { lookupId: nextId, credentialVersion: nextVersion, updatedAt: now() });
+                tx.update(ref, { loginKey: newKey });
+                return { changed: true, accountRef, loginKey: newKey, credentialVersion: nextVersion };
+            }
             if (input.action === 'checkDevice') {
                 if (p.role !== 'driver') deny();
                 if (typeof input.deviceId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(input.deviceId)) throw new AuthError(400, 'INVALID_REQUEST');
@@ -483,6 +798,11 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
                 if (input.action === 'createLicense') {
                     if (!['regular', 'dispatch'].includes(input.type) || !Number.isSafeInteger(input.count) || input.count < 1 || input.count > 50 ||
                         typeof input.keyword !== 'string' || input.keyword.length > 255 || now() >= expiryEnd(input.expireDate)) throw new AuthError(400, 'INVALID_REQUEST');
+                    let phones = [];
+                    if (input.type === 'regular') {
+                        if (!Array.isArray(input.phones) || input.phones.length !== input.count) throw new AuthError(400, 'INVALID_REQUEST');
+                        try { phones = input.phones.map(normalizePhone); } catch { throw new AuthError(400, 'INVALID_REQUEST'); }
+                    } else if (input.phones !== undefined) throw new AuthError(400, 'INVALID_REQUEST');
                     const alphabet = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
                     const prefix = input.keyword.trim().replace(/[^A-Z0-9가-힣]/gi, '').toUpperCase().slice(0, 7);
                     const licenses = [];
@@ -493,15 +813,25 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
                         const licenseKey = text.slice(0, 4) + '-' + text.slice(4);
                         const ref = db.doc('licenses/' + licenseKey);
                         if (licenses.some(item => item.licenseKey === licenseKey) || (await tx.get(ref)).exists) throw new AuthError(409, 'LICENSE_EXISTS');
+                        if ((await tx.get(lRef(driverLicenseLookupId(licenseKey, key)))).exists ||
+                            (await tx.get(db.collection('licenses').where('loginKey', '==', licenseKey))).docs.length ||
+                            (await tx.get(db.collection('licenses').where('key', '==', licenseKey))).docs.length) throw new AuthError(409, 'LICENSE_EXISTS');
                         licenses.push({ ref, licenseKey });
                     }
-                    for (const { ref, licenseKey } of licenses) tx.create(ref, {
+                    // All reads precede writes; license and authentication readiness
+                    // commit atomically. Dispatch creation retains its existing flow.
+                    const prepared = input.type === 'regular' ? await Promise.all(licenses.map(({ licenseKey }) =>
+                        prepareDriverPrincipal(tx, 'licenses/' + licenseKey))) : [];
+                    if (prepared.some(item => !item.created)) throw new AuthError(409, 'LICENSE_EXISTS');
+                    for (const [i, { ref, licenseKey }] of licenses.entries()) {
+                        tx.create(ref, {
                         key: licenseKey, type: input.type, securityVersion: 1, status: 'active', expireDate: input.expireDate,
-                        phone: '', deviceId: '', dispatchKey: '', allowTms: true, maxSessions: 1, isPro: false,
+                        phone: phones[i] || '', deviceId: '', dispatchKey: '', allowTms: true, maxSessions: 1, isPro: false,
                         maxSlots: input.type === 'dispatch' ? 10 : 0, createdAt: now(),
                         ...(input.type === 'regular' ? { routeOwnerId: randomUUID() } : { membershipVersion: 0 })
                     });
-                    // Authentication is issued separately through existing credential issuance.
+                        prepared[i]?.write();
+                    }
                     return { licenseKeys: licenses.map(item => item.licenseKey) };
                 }
                 if (typeof input.licenseKey !== 'string' || !input.licenseKey || input.licenseKey !== input.licenseKey.trim()) throw new AuthError(400, 'INVALID_REQUEST');
@@ -554,13 +884,44 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
                 if (changes.maxSlots !== undefined && (license.type !== 'dispatch' || !Number.isSafeInteger(changes.maxSlots) || changes.maxSlots < 0)) throw new AuthError(400, 'INVALID_REQUEST');
                 if (changes.maxSessions !== undefined && (license.type !== 'dispatch' || !Number.isSafeInteger(changes.maxSessions) || changes.maxSessions < 1 || changes.maxSessions > 50)) throw new AuthError(400, 'INVALID_REQUEST');
                 if (changes.isPro !== undefined && (license.type !== 'dispatch' || typeof changes.isPro !== 'boolean')) throw new AuthError(400, 'INVALID_REQUEST');
-                tx.update(ref, changes); // Never touch identity, membership, or driving collections.
+                // Existing master edit/reset may clear the current driver binding.
+                // Invalidate issued sessions without creating/replacing an identity.
+                const resetDriver = license.type !== 'dispatch' &&
+                    ((changes.deviceId !== undefined && changes.deviceId !== (license.deviceId || '')) ||
+                     (changes.phone === '' && Boolean(license.phone)));
+                if (license.type !== 'dispatch' && changes.phone === '' && changes.deviceId === '') {
+                    // Explicit existing master account/device reset is the exception.
+                    // A normal driver logout never enters this master-only branch.
+                    changes.lastDeviceId = '';
+                    changes.lastDeviceChangeAt = 0;
+                }
+                if (resetDriver) {
+                    const binding = await tx.get(db.doc(bindingPath(accountRef)));
+                    const matches = await tx.get(db.collection('auth_principals').where('accountRef', '==', accountRef));
+                    if (binding.exists || matches.docs.some(s => s.data().kind !== 'trial_registration')) {
+                        const target = await prepareDriverPrincipal(tx, accountRef);
+                        if (target.created || target.p.credentialVersion >= Number.MAX_SAFE_INTEGER) throw new AuthError(409, 'CREDENTIAL_CONFLICT');
+                        const nextVersion = target.p.credentialVersion + 1;
+                        tx.update(pRef(target.uid), { credentialVersion: nextVersion, updatedAt: now() });
+                        tx.update(lRef(target.p.lookupId), { credentialVersion: nextVersion });
+                    }
+                }
+                tx.update(ref, changes); // Preserve fixed identity, membership and driving collections.
                 return { changed: true };
             }
             const selfTms = input.action === 'setTmsPermission';
             if (selfTms ? p.role !== 'driver' || typeof input.allowed !== 'boolean' : !['master', 'dispatch'].includes(p.role)) deny();
             if (!selfTms && (typeof input.licenseKey !== 'string' || !input.licenseKey.trim() || input.licenseKey !== input.licenseKey.trim())) throw new AuthError(400, 'INVALID_REQUEST');
-            const ref = db.doc(selfTms ? p.accountRef : accountPath('driver', 'licenses/' + input.licenseKey));
+            let targetAccountRef = selfTms ? p.accountRef : null;
+            if (input.action === 'lookup') {
+                const aliasId = driverLicenseLookupId(input.licenseKey, key), alias = await tx.get(lRef(aliasId));
+                if (alias.exists) {
+                    const target = principalData(await tx.get(pRef(alias.data().uid)));
+                    if (alias.data().kind !== 'driver_license' || target.role !== 'driver' || target.lookupId !== aliasId || target.credentialVersion !== alias.data().credentialVersion) deny();
+                    targetAccountRef = target.accountRef;
+                }
+            }
+            const ref = db.doc(targetAccountRef || accountPath('driver', 'licenses/' + input.licenseKey));
             const snapshot = await tx.get(ref);
             if (!snapshot.exists) deny();
             const driver = snapshot.data();
@@ -570,8 +931,9 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
             const oldKey = driver.dispatchKey || '';
             const ownKey = p.role === 'dispatch' ? p.accountRef.slice('licenses/'.length) : null;
             if (input.action === 'lookup') {
+                if (currentLicenseLoginKey(driver, ref.path) !== input.licenseKey) deny();
                 if (ownKey && oldKey && oldKey !== ownKey) deny();
-                return { licenseKey: input.licenseKey, linked: !!oldKey,
+                return { licenseKey: ref.path.slice('licenses/'.length), linked: !!oldKey,
                     allowTms: driver.allowTms === undefined || driver.allowTms === true };
             }
             if (input.action === 'link') {
@@ -621,7 +983,7 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
             return { changed: Object.keys(changes).length > 0 };
         });
     }
-    return membershipOnly ? { membership } : { login, session, verifyMaster, credentials, startTrial };
+    return membershipOnly ? { membership } : { login, driverLogin, session, verifyMaster, inspectOwnMaster, credentials, startTrial };
 }
 
 function createMembershipCore(services) { return createAuthCore(services, true); }
