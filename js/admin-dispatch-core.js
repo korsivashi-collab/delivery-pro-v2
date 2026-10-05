@@ -1,10 +1,9 @@
 // js/admin-dispatch-core.js
 
-import { db } from "./admin-api.js";
+import { requestLicenseMembership } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { selectLatestOwnedRoute } from "./route-owner.js";
 import { map } from "./admin-map.js";
-import { doc, updateDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // 🌟 분리된 검색 전용 모듈에서 함수들을 재연결 (안전한 호환성 유지)
 export {
@@ -417,11 +416,7 @@ export function clearSelectedDriver() {
 export async function removeOrUnlinkDriver(devId, key) {
     if (!confirm(`[${key}] 기사와의 관제 연결을 해제하시겠습니까?`)) return;
     try { 
-        await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); 
-        try {
-            await deleteDoc(doc(db, "routes", devId));
-            if (key && key !== devId) await deleteDoc(doc(db, "routes", key));
-        } catch(err){}
+        await requestLicenseMembership({ action: 'unlink', licenseKey: key }); 
         alert("연결이 해제되었습니다."); 
     } catch (e) { 
         alert("오류: " + e.message); 
@@ -676,66 +671,14 @@ export function closeLinkDriverModal() {
 }
 
 export async function confirmLinkDriver() {
-    const rawInput = document.getElementById('link-driver-key-input').value.trim().toUpperCase();
-    if (!rawInput) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
-    const currentKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-
+    const licenseKey = document.getElementById('link-driver-key-input').value.trim();
+    if (!licenseKey) { alert('정확한 기사 라이선스 키를 입력하세요.'); return; }
     try {
-        const cleanDigits = rawInput.replace(/[^0-9]/g, '');
-        const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        
-        let targetLicKey = null;
-        let targetLic = state.allLicenses.find(l => {
-            if (l.type === 'dispatch') return false;
-            const lKey = (l.key || '').toUpperCase();
-            const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
-            const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-            return lKey === rawInput || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
-        });
-
-        if (targetLic) {
-            targetLicKey = targetLic.key || targetLic.id;
-        } else {
-            targetLicKey = rawInput; 
-        }
-
-        let docRef = doc(db, "licenses", targetLicKey);
-        let directSnap = await getDoc(docRef);
-        
-        if (!directSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${targetLicKey}`);
-            directSnap = await getDoc(docRef);
-        }
-        if (!directSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${targetLicKey}`);
-            directSnap = await getDoc(docRef);
-        }
-
-        if (!directSnap.exists()) { 
-            alert("기사 계정을 찾을 수 없습니다. 키 또는 번호를 다시 확인해 주세요."); 
-            return; 
-        }
-
-        const freshLicData = directSnap.data();
-        const finalKey = directSnap.id;
-
-        if (freshLicData.allowTms === false || freshLicData.allowTms === "false") {
-            alert(`해당 기사님([${freshLicData.phone || finalKey}])이 앱에서 'TMS 연결'을 차단(OFF) 상태로 설정했습니다.\n기사님에게 앱의 [연결설정]에서 스위치를 켜달라고 요청해 주셔야 연결이 가능합니다.`);
-            return;
-        }
-
-        if (freshLicData.dispatchKey && freshLicData.dispatchKey !== currentKey && currentKey !== 'MASTER') {
-            alert(`이미 다른 관제소([${freshLicData.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); 
-            return;
-        }
-
-        await updateDoc(doc(db, "licenses", finalKey), { dispatchKey: currentKey });
-        
-        alert(`[등록 완료] 기사 [${freshLicData.phone || finalKey}] 님이 연결되었습니다.`);
+        await requestLicenseMembership({ action: 'lookup', licenseKey });
+        await requestLicenseMembership({ action: 'link', licenseKey });
+        alert('[등록 완료] 기사가 연결되었습니다.');
         closeLinkDriverModal();
-    } catch (e) { 
-        alert("연결 처리 중 오류가 발생했습니다: " + e.message); 
-    }
+    } catch { alert('기사 연결을 확인할 수 없습니다. 계정, TMS 설정과 회사 슬롯을 확인해 주세요.'); }
 }
 
 // ==========================================

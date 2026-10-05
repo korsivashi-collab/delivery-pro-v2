@@ -20,6 +20,8 @@ import {
     showDispatchAlertPopup 
 } from './support.js';
 import { startGpsWatcher, stopGpsWatcher } from './gps.js';
+import { AUTH_FAILURE_MESSAGE, loginWithSecret, restoreFirebaseSession, signOutFirebaseSession,
+    getVerifiedAuthSession, onVerifiedSessionInvalidated } from './admin-api.js';
 
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
@@ -28,6 +30,39 @@ let activeRoutesWatcherUnsub = null;
 let onRemoteRoutesReceivedCallback = null;
 let onRemoteRoutesClearedCallback = null;
 let cachedRemoteRoutes = null;
+let savedAuthCheck = null;
+let driverLoginInProgress = false;
+let driverAuthObserver = null;
+let activeDriverUid = null;
+let trialAttempt = 0;
+
+function lockDriverScreen() {
+    const main = document.getElementById('main-app');
+    if (main) { main.classList.add('hidden'); main.classList.remove('flex'); }
+    document.getElementById('auth-screen')?.classList.remove('hidden');
+}
+function prepareDriverAuth() {
+    const input = document.getElementById('license-input');
+    // The existing input is reused; base64url secrets must not appear uppercased.
+    if (input) { input.classList.remove('uppercase'); input.autocapitalize = 'none'; input.spellcheck = false; }
+    if (!driverAuthObserver) driverAuthObserver = onVerifiedSessionInvalidated(() => {
+        if (activeDriverUid) { clearAuthStorage(); lockDriverScreen(); }
+    });
+}
+async function activateVerifiedDriver(identity, phone = null, expectedType = null) {
+    if (!identity || identity.role !== 'driver' || getVerifiedAuthSession('driver') !== identity) throw new Error(AUTH_FAILURE_MESSAGE);
+    const deviceId = getOrCreateDeviceId();
+    if (await checkIfDeviceBlocked(deviceId)) throw new Error(AUTH_FAILURE_MESSAGE);
+    const key = identity.accountRef.slice('licenses/'.length);
+    const result = await firebaseVerifyLicense(key, phone, deviceId, expectedType);
+    if (!result?.valid || getVerifiedAuthSession('driver') !== identity) throw new Error(AUTH_FAILURE_MESSAGE);
+    localStorage.setItem('deliveryProKey', result.actualKey);
+    localStorage.setItem('deliveryProUserPhone', result.phone);
+    localStorage.setItem('deliveryProDispatchKey', result.dispatchKey || '');
+    if (result.expireDate) localStorage.setItem('deliveryProExpireDate', result.expireDate);
+    activeDriverUid = identity.uid;
+    startActiveServices(deviceId, result.phone, result.actualKey, result.expireDate, result.dispatchKey, result.routeOwnerId);
+}
 
 // 인증 성공 시 전달된 정식 라이선스 키로만 설정 범위를 선택한다.
 let gpsPreferenceStorageKey = null;
@@ -133,6 +168,8 @@ export function getOrCreateDeviceId() {
 // 2. 인증 정보 로컬 스토리지 초기화
 // ==========================================
 export function clearAuthStorage() {
+    trialAttempt++;
+    activeDriverUid = null;
     resetGpsPreferenceSession();
     for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
         try { if (typeof unsubscribe === 'function') unsubscribe(); } catch (_) {}
@@ -197,14 +234,15 @@ export function unlockApp() {
 // ==========================================
 export function startLicenseRealtimeWatcher(key) {
     if (licenseWatcherUnsub) licenseWatcherUnsub();
-    licenseWatcherUnsub = watchLicenseStatus(key, (status, msg) => {
+    licenseWatcherUnsub = watchLicenseStatus(key, async (status, msg) => {
         alert(`⚠️ [라이선스 알림]\n${msg}`);
         clearAuthStorage();
         const mainApp = document.getElementById('main-app');
         const authScreen = document.getElementById('auth-screen');
         if (mainApp) { mainApp.classList.add('hidden'); mainApp.classList.remove('flex'); }
         if (authScreen) authScreen.classList.remove('hidden');
-        window.location.reload();
+        try { await signOutFirebaseSession(); window.location.reload(); }
+        catch { lockDriverScreen(); }
     }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
@@ -267,91 +305,39 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
 // 7. 자동 로그인 (부팅 시 기존 저장된 키 검증)
 // ==========================================
 export async function checkSavedAuth() {
-    const deviceId = getOrCreateDeviceId();
-
-    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
-    try {
-        const isBlocked = await checkIfDeviceBlocked(deviceId);
-        if (isBlocked) {
-            window.location.replace('error.html');
-            return;
-        }
-    } catch (err) {}
-
-    const savedKey = localStorage.getItem('deliveryProKey');
-    const savedPhone = localStorage.getItem('deliveryProUserPhone');
-    const savedExpire = localStorage.getItem('deliveryProExpireDate');
-    const bootScreen = document.getElementById('boot-screen');
-
-    if (savedKey) {
-        const inputKey = document.getElementById('license-input');
-        if (inputKey) inputKey.value = savedKey;
-    }
-    if (savedPhone) {
-        const inputPhone = document.getElementById('auth-phone-input');
-        if (inputPhone) inputPhone.value = savedPhone;
-    }
-
-    // 1단계 로컬 만료일 대조: 이미 유효기간이 지났다면 서버 호출 없이 즉시 만료 처리
-    if (savedExpire && isLicenseExpiredLocally()) {
-        clearAuthStorage();
-        const authMsg = document.getElementById('auth-message');
-        if (authMsg) authMsg.innerText = `라이선스 유효기간(${savedExpire})이 만료되었습니다.`;
-        const authScreen = document.getElementById('auth-screen');
-        if (authScreen) authScreen.classList.remove('hidden');
-        if (bootScreen) bootScreen.classList.add('hidden');
-        return;
-    }
-
-    const cleanDigits = (savedPhone || '').replace(/[^0-9]/g, '');
-
-    // 2단계 서버 검증: 앱 구동 시 1회 단발성 검증 (getDoc)
-    if (savedKey && cleanDigits.length >= 9) {
+    prepareDriverAuth();
+    if (driverLoginInProgress) return;
+    if (savedAuthCheck) return savedAuthCheck;
+    savedAuthCheck = (async () => {
         try {
-            const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
-            if (res.valid) {
-                localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-                startActiveServices(deviceId, savedPhone, res.actualKey || savedKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
-            } else {
-                clearAuthStorage();
-                const authMsg = document.getElementById('auth-message');
-                if (authMsg) authMsg.innerText = res.msg;
-                const authScreen = document.getElementById('auth-screen');
-                if (authScreen) authScreen.classList.remove('hidden');
-            }
-        } catch (e) {
-            const authMsg = document.getElementById('auth-message');
-            if (authMsg) authMsg.innerText = "보안 통신 오류가 발생했습니다. 네트워크를 확인해 주세요.";
-            const authScreen = document.getElementById('auth-screen');
-            if (authScreen) authScreen.classList.remove('hidden');
+            const identity = await restoreFirebaseSession();
+            if (!identity) { clearAuthStorage(); lockDriverScreen(); return; }
+            if (identity.role !== 'driver') throw new Error(AUTH_FAILURE_MESSAGE);
+            if (activeDriverUid === identity.uid && state.getRouteOwnerId()) return;
+            await activateVerifiedDriver(identity);
+        } catch {
+            clearAuthStorage();
+            lockDriverScreen();
+            const message = document.getElementById('auth-message');
+            if (message) message.innerText = AUTH_FAILURE_MESSAGE;
+        } finally {
+            document.getElementById('boot-screen')?.classList.add('hidden');
         }
-    } else {
-        const authScreen = document.getElementById('auth-screen');
-        if (authScreen) authScreen.classList.remove('hidden');
-    }
-
-    if (bootScreen) bootScreen.classList.add('hidden');
+    })();
+    try { await savedAuthCheck; } finally { savedAuthCheck = null; }
 }
 
 // ==========================================
 // 8. 수동 라이선스 키 인증 (로그인 버튼 클릭)
 // ==========================================
 export async function verifyLicense() {
-    const keyInput = (document.getElementById('license-input')?.value || '').trim().toUpperCase();
+    if (driverLoginInProgress || savedAuthCheck) return;
+    prepareDriverAuth();
+    const input = document.getElementById('license-input');
+    const keyInput = (input?.value || '').trim();
     const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
     const msgEl = document.getElementById('auth-message');
     const btn = document.getElementById('verify-btn');
-    const deviceId = getOrCreateDeviceId(); 
-
-    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
-    try {
-        const isBlocked = await checkIfDeviceBlocked(deviceId);
-        if (isBlocked) {
-            window.location.replace('error.html');
-            return;
-        }
-    } catch (err) {}
-    
     if (!keyInput) { 
         if (msgEl) msgEl.innerText = "라이선스 키를 입력해 주세요."; 
         document.getElementById('license-input')?.focus();
@@ -380,23 +366,19 @@ export async function verifyLicense() {
         btn.disabled = true;
     }
 
+    driverLoginInProgress = true;
+    if (input) input.value = '';
     try {
-        const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId);
-        
-        if (res && res.valid) {
-            const actualKey = res.actualKey || keyInput;
-            localStorage.setItem('deliveryProKey', actualKey);
-            localStorage.setItem('deliveryProUserPhone', formattedPhone); 
-            localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
-            
-            startActiveServices(deviceId, formattedPhone, actualKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
-        } else {
-            if (msgEl) msgEl.innerText = (res && res.msg) ? res.msg : "인증에 실패했습니다. 키와 번호를 확인해 주세요.";
-        }
-    } catch (e) {
-        if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
+        const identity = await loginWithSecret(keyInput, 'driver');
+        await activateVerifiedDriver(identity, formattedPhone);
+    } catch {
+        clearAuthStorage();
+        lockDriverScreen();
+        try { await signOutFirebaseSession(); } catch {}
+        if (msgEl) msgEl.innerText = AUTH_FAILURE_MESSAGE;
     } finally {
+        driverLoginInProgress = false;
+        if (input) input.value = '';
         if (btn) {
             btn.innerHTML = '인증하고 시작하기';
             btn.disabled = false;
@@ -422,20 +404,13 @@ export function closeTrialModal() {
 }
 
 export async function startFreeTrial() {
+    if (driverLoginInProgress || savedAuthCheck || activeDriverUid) return;
+    prepareDriverAuth();
     const phoneInput = (document.getElementById('trial-phone-input')?.value || '').trim();
     const msgEl = document.getElementById('trial-error-msg');
     const btn = document.getElementById('trial-submit-btn');
     const deviceId = getOrCreateDeviceId();
 
-    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
-    try {
-        const isBlocked = await checkIfDeviceBlocked(deviceId);
-        if (isBlocked) {
-            window.location.replace('error.html');
-            return;
-        }
-    } catch (err) {}
-    
     const cleanDigits = phoneInput.replace(/[^0-9]/g, '');
     if (!phoneInput || cleanDigits.length < 9 || cleanDigits.length > 13) {
         if (msgEl) {
@@ -451,29 +426,32 @@ export async function startFreeTrial() {
         btn.disabled = true;
     }
 
+    driverLoginInProgress = true;
+    let registration;
+    const attempt = ++trialAttempt;
     try {
-        const res = await firebaseStartTrial(phoneInput, deviceId);
-        if (res.valid) {
-            localStorage.setItem('deliveryProKey', res.trialKey);
-            localStorage.setItem('deliveryProUserPhone', phoneInput);
-            localStorage.setItem('deliveryProExpireDate', res.expireDate);
-            localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
-            closeTrialModal();
-            
-            startActiveServices(deviceId, phoneInput, res.trialKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
-        } else {
-            if (msgEl) {
-                msgEl.innerText = res.msg;
-                msgEl.classList.remove('hidden');
-            }
-        }
-    } catch (e) {
+        registration = await firebaseStartTrial(phoneInput, deviceId);
+        if (attempt !== trialAttempt) throw new Error(AUTH_FAILURE_MESSAGE);
+        let identity;
+        try { identity = await loginWithSecret(registration.secret, 'driver'); }
+        finally { registration.secret = null; }
+        if (!identity || identity.role !== 'driver' || identity.accountRef !== registration.accountRef ||
+            identity.credentialVersion !== 1) throw new Error(AUTH_FAILURE_MESSAGE);
+        await activateVerifiedDriver(identity, phoneInput, 'trial');
+        alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
+        closeTrialModal();
+    } catch {
+        clearAuthStorage();
+        lockDriverScreen();
+        try { await signOutFirebaseSession(); } catch {}
         if (msgEl) {
-            msgEl.innerText = "오류 발생: " + e.message;
+            msgEl.innerText = "체험 시작을 확인하지 못했습니다. 자동 재신청하지 않습니다. 관리자에게 문의해 주세요.";
             msgEl.classList.remove('hidden');
         }
     } finally {
+        if (registration) registration.secret = null;
+        registration = null;
+        driverLoginInProgress = false;
         if (btn) {
             btn.innerHTML = '무료로 시작하기';
             btn.disabled = false;
@@ -488,17 +466,19 @@ export async function logout() {
     if (!confirm("로그아웃 하시겠습니까?\n로그아웃 시 기기 정보가 초기화되어 다른 기기에서 로그인할 수 있습니다.")) return;
     resetGpsPreferenceSession();
     
-    const currentKey = localStorage.getItem('deliveryProKey');
+    const currentKey = getVerifiedAuthSession('driver')?.accountRef.slice('licenses/'.length);
     if (currentKey && typeof firebaseClearDeviceData === 'function') {
         try {
             await firebaseClearDeviceData(currentKey);
         } catch (e) {
-            console.error("서버 초기화 중 오류 발생:", e);
+            console.warn("기기 연결 해제를 완료하지 못했습니다.");
         }
     }
     
     clearAuthStorage();
-    window.location.reload();
+    lockDriverScreen();
+    try { await signOutFirebaseSession(); window.location.reload(); }
+    catch { alert(AUTH_FAILURE_MESSAGE); }
 }
 
 window.isLicenseExpiredLocally = isLicenseExpiredLocally;

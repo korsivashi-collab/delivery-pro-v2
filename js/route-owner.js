@@ -3,7 +3,6 @@ import { doc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/
 // 라이선스 키/전화번호와 독립적이며, 라이선스 이름 변경 시에도 유지합니다.
 export async function ensureRouteOwner(db, licenseKey, expectedDeviceId = null, phone = null) {
     const licenseRef = doc(db, 'licenses', licenseKey);
-    const newOwnerId = crypto.randomUUID();
     return runTransaction(db, async transaction => {
         const snapshot = await transaction.get(licenseRef);
         if (!snapshot.exists()) throw new Error('라이선스가 존재하지 않습니다.');
@@ -11,11 +10,14 @@ export async function ensureRouteOwner(db, licenseKey, expectedDeviceId = null, 
         if (expectedDeviceId && license.deviceId && license.deviceId !== expectedDeviceId) {
             throw new Error('다른 기기에 등록된 라이선스입니다.');
         }
-        const routeOwnerId = license.routeOwnerId || newOwnerId;
-        const changes = { routeOwnerId };
+        const routeOwnerId = license.routeOwnerId;
+        if (typeof routeOwnerId !== 'string' || !routeOwnerId.trim()) {
+            throw new Error('동선 소유자가 없는 기존 계정입니다. 마스터의 개별 확인이 필요합니다.');
+        }
+        const changes = {};
         if (expectedDeviceId) changes.deviceId = expectedDeviceId;
         if (phone !== null) changes.phone = phone;
-        transaction.update(licenseRef, changes);
+        if (Object.keys(changes).length) transaction.update(licenseRef, changes);
         return routeOwnerId;
     });
 }

@@ -1,10 +1,10 @@
 import { ensureRouteOwner } from './route-owner.js';
 // js/admin-dispatch-auto.js
 
-import { db } from "./admin-api.js";
+import { db, getVerifiedAuthSession } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
-import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, getDoc, setDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
 import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
 
@@ -422,7 +422,7 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 }
 
 // ==========================================
-// 5. 할당 초기화 (🌟 deviceId, key, phone 전수 삭제로 9건 잔상 완전 소거)
+// 5. 할당 초기화 (구형 문서를 보존하고 현재 동선을 빈 상태로 저장)
 // ==========================================
 export async function revertAutoDispatch() {
     const hasExcelOrders = state.parsedExcelList && state.parsedExcelList.length > 0;
@@ -453,21 +453,29 @@ export async function revertAutoDispatch() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) await window.autoSaveExcelToFirebase();
 
-    // 🌟 3. 핵심: 기사별 식별자(deviceId, key, phone)에 생성된 모든 Firestore 동선 문서를 전수 삭제
+    // 현재 소속과 소유자를 재확인합니다. 과거 식별자 문서는 삭제하지 않습니다.
     const visibleDrivers = getFilteredVisibleDrivers();
     let clearedDriverCount = 0;
-
+    const identity = getVerifiedAuthSession();
+    if (!identity || !['master', 'dispatch'].includes(identity.role)) return;
+    const companyKey = identity.role === 'dispatch' ? identity.accountRef.slice('licenses/'.length) : null;
     for (const d of visibleDrivers) {
-        const keysToDelete = new Set([d.deviceId, d.key, d.phone].filter(Boolean));
-        for (const k of keysToDelete) {
-            try {
-                await deleteDoc(doc(db, "routes", k));
-                if (state.activeRoutes) delete state.activeRoutes[k];
-            } catch (e) {
-                console.error(`기사 동선 삭제 오류 (${k}):`, e);
-            }
+        try {
+            const snapshot = await getDoc(doc(db, 'licenses', d.key));
+            if (getVerifiedAuthSession() !== identity || !snapshot.exists()) throw new Error();
+            const license = snapshot.data(), deviceId = license.deviceId || d.key;
+            if (!license.routeOwnerId || deviceId !== (d.deviceId || d.key) ||
+                (companyKey !== null && license.dispatchKey !== companyKey)) throw new Error();
+            const payload = { routeOwnerId: license.routeOwnerId, licenseKey: d.key, dispatchKey: license.dispatchKey || '',
+                deviceId, phone: license.phone || deviceId, destinations: [], cleared: true, updatedAt: Date.now() };
+            await setDoc(doc(db, 'routes', deviceId), payload, { merge: true });
+            if (getVerifiedAuthSession() !== identity) return;
+            state.activeRoutes[deviceId] = payload;
+            clearedDriverCount++;
+        } catch {
+            alert('일부 기사 동선을 초기화하지 못했습니다. 소속과 동선 소유자를 확인해주세요.');
+            return;
         }
-        clearedDriverCount++;
     }
 
     // 🌟 4. 메인 지도 오버레이 및 사이드바 동선 잔상 즉시 소거
@@ -536,6 +544,10 @@ export function runAutoDispatchAlgorithm() {
 // 7. 토글 선택 기반 동선 전송 엔진 (🌟 잔여 옛날 키 자동 소거 연동)
 // ==========================================
 export async function sendRoutesToDrivers() {
+    const identity = getVerifiedAuthSession();
+    if (!identity || !['dispatch', 'master'].includes(identity.role) ||
+        (identity.role === 'dispatch' && !/^licenses\/[^/]+$/.test(identity.accountRef))) return;
+    const companyKey = identity.role === 'dispatch' ? identity.accountRef.slice('licenses/'.length) : null;
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("전송할 배송 데이터가 없습니다.");
         return;
@@ -606,26 +618,36 @@ export async function sendRoutesToDrivers() {
                 items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
             }));
 
-            const routeOwnerId = await ensureRouteOwner(db, matchedLic.key);
+            const licenseKey = matchedLic.key;
+            if (getVerifiedAuthSession() !== identity) throw new Error('인증 계정이 변경되었습니다.');
+            const licenseRef = doc(db, 'licenses', licenseKey);
+            const before = await getDoc(licenseRef);
+            if (getVerifiedAuthSession() !== identity || !before.exists()) throw new Error('기사 소속을 확인할 수 없습니다.');
+            const beforeLicense = before.data();
+            if ((beforeLicense.deviceId || licenseKey) !== devId ||
+                (companyKey !== null && beforeLicense.dispatchKey !== companyKey)) throw new Error('기사 소속을 확인할 수 없습니다.');
+            const routeOwnerId = await ensureRouteOwner(db, licenseKey);
+            const current = await getDoc(licenseRef);
+            if (getVerifiedAuthSession() !== identity || !current.exists()) throw new Error('인증 계정이 변경되었습니다.');
+            const license = current.data();
+            if ((beforeLicense.routeOwnerId && beforeLicense.routeOwnerId !== routeOwnerId) ||
+                license.routeOwnerId !== routeOwnerId || (license.deviceId || licenseKey) !== devId ||
+                (license.dispatchKey !== undefined && typeof license.dispatchKey !== 'string') ||
+                (companyKey !== null && license.dispatchKey !== companyKey)) throw new Error('기사 소속 또는 동선 소유자가 변경되었습니다.');
             const routePayload = {
                 routeOwnerId,
+                licenseKey,
                 deviceId: devId,
-                phone: matchedLic.phone || devId,
-                dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
+                phone: license.phone || devId,
+                dispatchKey: license.dispatchKey || '',
                 destinations: destinations,
+                cleared: false,
                 updatedAt: nowTs
             };
 
             await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
 
-            // 🌟 중복 방지: devId 외에 남아있던 구형 식별자 문서(key, phone)는 자동 정리하여 옛날 9건 부활 차단
-            const otherKeys = [matchedLic.key, matchedLic.phone].filter(k => k && k !== devId);
-            for (const ok of otherKeys) {
-                try {
-                    await deleteDoc(doc(db, "routes", ok));
-                    if (state.activeRoutes) delete state.activeRoutes[ok];
-                } catch(e) {}
-            }
+            // 구형 문서는 보존하고 최신 updatedAt 기준으로 표시할 동선을 선택합니다.
 
             // 🌟 실시간 로컬 상태 즉시 갱신
             state.activeRoutes[devId] = routePayload;

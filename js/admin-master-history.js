@@ -177,7 +177,6 @@ export function setHistoryMasterSubTab(tab) {
 export async function deleteAccountFromHistory() {
     if (!state.currentSelectedAccountKey) return;
     const key = state.currentSelectedAccountKey;
-    if (!confirm(`정말 [${key}] 계정을 완전히 영구 삭제하시겠습니까?`)) return;
     await deleteLicense(key);
     backToAllAccountsView();
 }
@@ -311,7 +310,7 @@ export function renderAccountHistoryView() {
                 <td class="py-3.5 px-3 font-bold text-gray-500">${item.expireDate || '-'}</td>
                 <td class="py-3.5 px-4 text-center whitespace-nowrap space-x-1.5">
                     <button onclick="event.stopPropagation(); window.selectAccountDirectly('${item.key}')" class="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-black rounded-lg text-[11px] transition shadow-2xs active:scale-95">내역 조회</button>
-                    <button onclick="event.stopPropagation(); window.deleteLicense('${item.key}')" class="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">삭제</button>
+                    <button onclick="event.stopPropagation(); window.deleteLicense('${item.key}')" class="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">사용 중지</button>
                 </td>
             </tr>`;
         });

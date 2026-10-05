@@ -5,7 +5,7 @@ import { ensureRouteOwner, selectLatestOwnedRoute } from './route-owner.js';
 // [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈 (통로 충돌 완벽 방어)
 // =================================================================
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-app.js";
+import { db, storage, getVerifiedAuthSession, requestLicenseMembership } from './admin-api.js';
 import { 
     getFirestore, 
     collection, 
@@ -25,19 +25,6 @@ import {
     limit 
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
-
-const firebaseConfig = {
-    apiKey: "AIzaSyBZKERmiPis4PCVDSYg0SSRTWV7L3z_5tw",
-    authDomain: "delivery-pro-dd272.firebaseapp.com",
-    projectId: "delivery-pro-dd272",
-    storageBucket: "delivery-pro-dd272.firebasestorage.app",
-    messagingSenderId: "329406776647",
-    appId: "1:329406776647:web:62b32568328dd1eecab862"
-};
-
-const app = initializeApp(firebaseConfig);
-const db = getFirestore(app);
-const storage = getStorage(app);
 
 // 이미지 클라이언트 초고속 압축 함수 (배송 증빙 최적화: 960px / 0.65 품질)
 async function compressImageToBlob(file, maxDimension = 960, quality = 0.65) {
@@ -79,14 +66,10 @@ async function compressImageToBlob(file, maxDimension = 960, quality = 0.65) {
 
 // 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증
 export async function checkIfDeviceBlocked(deviceId) {
-    if (!deviceId) return false;
-    try {
-        const docRef = doc(db, "blocked_devices", deviceId);
-        const snap = await getDoc(docRef);
-        return snap.exists();
-    } catch (e) {
-        return false;
-    }
+    if (!getVerifiedAuthSession('driver') || typeof deviceId !== 'string' || !deviceId) throw new Error('인증 상태를 확인할 수 없습니다.');
+    const result = await requestLicenseMembership({ action: 'checkDevice', deviceId });
+    if (typeof result?.blocked !== 'boolean') throw new Error('기기 상태를 확인할 수 없습니다.');
+    return result.blocked;
 }
 
 // 1. 배송 완료 사진 고속 업로드 (경량화 규격 적용)
@@ -100,29 +83,22 @@ export async function firebaseUploadDeliveryPhoto(file, deviceId, operationId = 
 }
 
 // 2. 라이선스 검증
-export async function firebaseVerifyLicense(key, phone, deviceId) {
-    const cleanDigits = (phone || "").replace(/[^0-9]/g, '');
-    if (!cleanDigits || cleanDigits.length < 9) {
-        return { valid: false, msg: "휴대폰 번호를 정확하게 입력해야 로그인이 완료됩니다." };
-    }
-
+export async function firebaseVerifyLicense(key, phone, deviceId, expectedType = null) {
+    // This is business/device binding AFTER server-verified Firebase authentication.
+    const identity = getVerifiedAuthSession('driver');
+    if (!identity || identity.accountRef !== `licenses/${key}`) return { valid: false };
     let docRef = doc(db, "licenses", key);
     let docSnap = await getDoc(docRef);
-
-    if (!docSnap.exists()) {
-        docRef = doc(db, "licenses", `PRO-${key}`);
-        docSnap = await getDoc(docRef);
-    }
-    if (!docSnap.exists()) {
-        docRef = doc(db, "licenses", `TRIAL-${key}`);
-        docSnap = await getDoc(docRef);
-    }
 
     if (!docSnap.exists()) {
         return { valid: false, msg: "등록되지 않은 라이선스 키입니다." };
     }
 
     const data = docSnap.data();
+    if (expectedType && (data.type !== expectedType || data.status !== 'active')) return { valid: false };
+    phone = phone ?? data.phone ?? '';
+    const cleanDigits = String(phone).replace(/[^0-9]/g, '');
+    if (cleanDigits.length < 9 || cleanDigits.length > 13) return { valid: false };
 
     if (data.status === 'suspended') {
         return { valid: false, msg: "사용이 일시 정지된 계정입니다.\n관리자에게 문의하세요." };
@@ -139,7 +115,9 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     if (data.deviceId && data.deviceId !== deviceId) {
         return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다. 관리자에게 기기 초기화를 요청하세요." };
     }
+    if (getVerifiedAuthSession('driver') !== identity) return { valid: false };
     const routeOwnerId = await ensureRouteOwner(db, docSnap.id, deviceId, phone);
+    if (getVerifiedAuthSession('driver') !== identity) return { valid: false };
 
     return { 
         valid: true, 
@@ -154,6 +132,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
 
 // 3. 라이선스 상태 감시
 export function watchLicenseStatus(key, callback, onUpdateCallback) {
+    let cancelled = false;
     (async () => {
         try {
             let docRef = doc(db, "licenses", key);
@@ -168,6 +147,7 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
                 docSnap = await getDoc(docRef);
             }
 
+            if (cancelled) return;
             if (!docSnap.exists()) {
                 if (callback) callback('DELETED', '관리자에 의해 라이선스가 삭제되었습니다.');
                 return;
@@ -196,7 +176,7 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
         }
     })();
 
-    return () => {};
+    return () => { cancelled = true; };
 }
 
 // 3-1. 주요 액션 1회 라이선스 검증
@@ -324,50 +304,23 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
 
 // 6. 7일 무료 체험 시작
 export async function firebaseStartTrial(phone, deviceId) {
-    const cleanDigits = (phone || "").replace(/[^0-9]/g, '');
-    if (!cleanDigits || cleanDigits.length < 9) {
-        return { valid: false, msg: "휴대폰 번호를 정확하게 입력해 주세요." };
-    }
-
-    const q = query(
-        collection(db, "licenses"),
-        where("deviceId", "==", deviceId),
-        where("type", "==", "trial")
-    );
-    const querySnapshot = await getDocs(q);
-
-    if (!querySnapshot.empty) {
-        return { valid: false, msg: "이미 7일 무료 체험을 사용하신 기기입니다.\n정식 라이선스를 이용해 주세요." };
-    }
-
-    const now = new Date();
-    const expDate = new Date();
-    expDate.setDate(expDate.getDate() + 7);
-    const expDateStr = `${expDate.getFullYear()}.${String(expDate.getMonth() + 1).padStart(2, '0')}.${String(expDate.getDate()).padStart(2, '0')}`;
-
-    const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    let p1 = "", p2 = "";
-    for (let i = 0; i < 4; i++) {
-        p1 += chars.charAt(Math.floor(Math.random() * chars.length));
-        p2 += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const trialKey = `TRIAL-${p1}-${p2}`;
-
-    const routeOwnerId = crypto.randomUUID();
-    await setDoc(doc(db, "licenses", trialKey), {
-        routeOwnerId,
-        key: trialKey,
-        type: 'trial',
-        phone: phone,
-        deviceId: deviceId,
-        expireDate: expDateStr,
-        status: 'active',
-        dispatchKey: '',
-        allowTms: true,
-        createdAt: now.getTime()
-    });
-
-    return { valid: true, trialKey: trialKey, expireDate: expDateStr, dispatchKey: '', routeOwnerId };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 15000);
+    try {
+        const response = await fetch('/api/auth', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'startTrial', phone, deviceId }),
+            signal: controller.signal, cache: 'no-store', credentials: 'omit', redirect: 'error'
+        });
+        if (!response.ok) throw new Error();
+        const result = await response.json();
+        if (typeof result.secret !== 'string' || !/^[A-Za-z0-9_-]{24}$/.test(result.secret) ||
+            typeof result.accountRef !== 'string' || !/^licenses\/TRIAL-[a-f0-9]{32}$/.test(result.accountRef)) throw new Error();
+        return result;
+    } catch {
+        // An uncertain response must never trigger another registration or a legacy write.
+        throw new Error('체험 시작을 확인하지 못했습니다. 자동 재신청하지 않습니다. 관리자에게 문의해 주세요.');
+    } finally { clearTimeout(timer); }
 }
 
 // 7. 주차 및 건물 메모 (공용 메모) 관련 함수들
@@ -453,6 +406,8 @@ export async function saveMemoToFirestore(address, deviceId, memoText, phone = "
 }
 
 export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) {
+    const identity = getVerifiedAuthSession('driver');
+    if (!identity) return 0;
     const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
     const myAddresses = new Set();
 
@@ -481,13 +436,11 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
         }
 
         if (cleanPhone) {
-            const licQ = query(collection(db, "licenses"), where("phone", "==", phone));
-            const licSnap = await getDocs(licQ);
+            if (!identity || !/^licenses\/[^/]+$/.test(identity.accountRef)) throw new Error('인증 계정을 확인할 수 없습니다.');
+            const licSnap = await getDoc(doc(db, 'licenses', identity.accountRef.slice('licenses/'.length)));
+            if (getVerifiedAuthSession('driver') !== identity) throw new Error('인증 계정이 변경되었습니다.');
             const userDevIds = new Set();
-            licSnap.forEach(ld => {
-                const dId = ld.data().deviceId;
-                if (dId) userDevIds.add(dId);
-            });
+            if (licSnap.exists() && licSnap.data().deviceId) userDevIds.add(licSnap.data().deviceId);
 
             for (const dId of userDevIds) {
                 if (dId !== deviceId) {
@@ -505,6 +458,7 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
     }
 
     const finalArray = Array.from(myAddresses);
+    if (getVerifiedAuthSession('driver') !== identity) return 0;
     localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(finalArray));
     return finalArray.length;
 }
@@ -526,8 +480,20 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
     try {
         const routeOwnerId = state.getRouteOwnerId();
         if (!deviceId || !routeOwnerId || destinations !== state.getDestinations()) return false;
+        const identity = getVerifiedAuthSession('driver');
+        if (!identity || !/^licenses\/[^/]+$/.test(identity.accountRef)) return false;
+        const licenseKey = identity.accountRef.slice('licenses/'.length);
         revisionKey = `${routeOwnerId}|${deviceId}`;
-        revision = state.getRouteUpdatedAt();
+        const updatedAt = state.getRouteUpdatedAt();
+        const licenseSnap = await getDoc(doc(db, 'licenses', licenseKey));
+        if (getVerifiedAuthSession('driver') !== identity || state.getRouteOwnerId() !== routeOwnerId ||
+            destinations !== state.getDestinations() || state.getRouteUpdatedAt() !== updatedAt || !licenseSnap.exists()) return false;
+        const license = licenseSnap.data();
+        if (license.routeOwnerId !== routeOwnerId || (license.deviceId && license.deviceId !== deviceId) ||
+            (license.dispatchKey !== undefined && typeof license.dispatchKey !== 'string')) return false;
+        const dispatchKey = license.dispatchKey || '';
+        // A company change needs a write even when the route revision is unchanged.
+        revision = JSON.stringify([updatedAt, licenseKey, dispatchKey]);
         if (!requireAcknowledgement && routeSaveRevisions.get(revisionKey) === revision) return;
         if (!routeSaveRevisions.has(revisionKey) && routeSaveRevisions.size >= MAX_ROUTE_SAVE_REVISIONS) {
             routeSaveRevisions.delete(routeSaveRevisions.keys().next().value);
@@ -536,6 +502,8 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
         const routeRef = doc(db, "routes", deviceId);
         await setDoc(routeRef, {
             routeOwnerId,
+            licenseKey,
+            dispatchKey,
             deviceId,
             endLocation: state.getEndLocation(),
             startSelected: state.getStartLocation() !== null,
@@ -638,6 +606,8 @@ export async function deleteCompletionFromFirestore(docId, operationId = null, r
 export async function firebaseClearDeviceData(key) {
     try {
         if (!key) return;
+        const identity = getVerifiedAuthSession('driver');
+        if (!identity || identity.accountRef !== `licenses/${key}`) return;
         let docRef = doc(db, "licenses", key);
         let docSnap = await getDoc(docRef);
         if (!docSnap.exists()) {
@@ -659,34 +629,11 @@ export async function firebaseClearDeviceData(key) {
 
 // 9. TMS(관제) 연결 허용/차단 상태 제어 함수
 export async function firebaseSetTmsPermission(key, isAllowed) {
-    try {
-        if (!key) throw new Error("유효한 라이선스 키 값이 없습니다.");
-        
-        let docRef = doc(db, "licenses", key);
-        let docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        
-        if (docSnap.exists()) {
-            if (isAllowed) {
-                await updateDoc(docRef, { allowTms: true });
-            } else {
-                await updateDoc(docRef, { allowTms: false, dispatchKey: "" });
-            }
-        } else {
-            throw new Error("서버에서 계정 정보를 찾을 수 없습니다.");
-        }
-    } catch(e) {
-        console.error("TMS 상태 변경 오류:", e);
-        throw e;
+    const identity = getVerifiedAuthSession('driver');
+    if (!identity || identity.accountRef !== `licenses/${key}` || typeof isAllowed !== 'boolean') {
+        throw new Error('현재 기사 계정을 확인할 수 없습니다.');
     }
+    return requestLicenseMembership({ action: 'setTmsPermission', allowed: isAllowed });
 }
 
 // 10. 개인 메모 기기변경 임시 금고 (12시간 자동 파기 및 암호화 보관)

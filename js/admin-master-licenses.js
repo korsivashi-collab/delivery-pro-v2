@@ -1,10 +1,117 @@
-import { ensureRouteOwner } from './route-owner.js';
 // js/admin-master-licenses.js
 
-import { db, generateSecureKey } from "./admin-api.js";
+import { db, getVerifiedAuthSession, requestAuthCredential, requestLicenseMembership, onVerifiedSessionInvalidated } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state, getLocalDateString } from "./admin-state.js";
-import { doc, setDoc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+
+// Credential controls are separate from license edits: no key/history/product writes.
+let credentialBusy = false;
+let credentialUiGeneration = 0;
+let closeSecretDisplay = null;
+let masterCredentialButton = null;
+let licenseCredentialControls = null;
+const credentialFailure = '발급 완료를 확인하지 못했습니다. 기존 로그인 정보가 변경되었을 수 있으므로 자동으로 재시도하지 마세요. 계정 상태를 확인한 뒤 재발급해 주세요.';
+
+function credentialButton(label, action) {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'px-3 py-2 rounded-lg bg-indigo-600 text-white text-xs font-bold';
+    button.textContent = label;
+    button.addEventListener('click', action);
+    return button;
+}
+
+function displaySecretOnce(result, selfRotation) {
+    const dialog = document.createElement('dialog');
+    dialog.className = 'rounded-2xl p-6 shadow-2xl w-full max-w-lg';
+    dialog.setAttribute('aria-label', '새 로그인 정보 1회 표시');
+    const explanation = document.createElement('p');
+    explanation.textContent = '새 로그인 정보는 이 창에서 한 번만 표시됩니다. 안전한 곳에 보관하세요. 닫은 뒤에는 다시 조회할 수 없습니다.' +
+        (selfRotation ? ' 닫으면 로그아웃됩니다. 새 정보로 다시 로그인하세요.' : '');
+    const value = document.createElement('input');
+    value.type = 'text'; value.readOnly = true; value.autocomplete = 'off'; value.spellcheck = false;
+    value.setAttribute('aria-label', '새 로그인 secret');
+    value.className = 'w-full border rounded-lg p-3 my-4 font-mono';
+    value.value = result.secret;
+    result.secret = '';
+    let closed = false;
+    const cleanup = (signOutSelf = true) => {
+        if (closed) return;
+        closed = true;
+        value.value = '';
+        dialog.remove();
+        closeSecretDisplay = null;
+        if (selfRotation && signOutSelf) void window.systemLogout();
+    };
+    closeSecretDisplay = cleanup;
+    dialog.addEventListener('cancel', event => { event.preventDefault(); cleanup(); });
+    dialog.addEventListener('close', cleanup);
+    dialog.append(explanation, value, credentialButton('보관 완료 · 닫기', cleanup));
+    document.body.append(dialog);
+    dialog.showModal();
+    value.focus(); value.select();
+}
+
+async function issueCredential(action, role, accountRef) {
+    const identity = getVerifiedAuthSession('master');
+    if (!identity || credentialBusy || closeSecretDisplay) return;
+    const selfRotation = action === 'rotate' && accountRef === identity.accountRef;
+    const message = action === 'rotate' ? '기존 로그인 정보와 세션을 철회하고 재발급합니다.' : '새 로그인 정보를 최초 발급합니다.';
+    if (!confirm(`${accountRef}\n${message}${selfRotation ? '\n본인 계정입니다. 새 정보를 반드시 보관하세요. 처리 중 오류가 발생하면 다른 마스터 또는 별도 승인된 관리자 복구가 필요할 수 있습니다.' : ''}`)) return;
+    credentialBusy = true;
+    const generation = credentialUiGeneration;
+    let result;
+    try {
+        result = await requestAuthCredential(action === 'issue' ? { action, role, accountRef } : { action, accountRef });
+        if (generation !== credentialUiGeneration) throw new Error('CREDENTIAL_VIEW_CLOSED');
+        displaySecretOnce(result, selfRotation);
+    } catch { closeSecretDisplay?.(false); alert(credentialFailure); }
+    finally { if (result) result.secret = ''; credentialBusy = false; }
+}
+
+export function initMasterCredentialControls() {
+    if (!getVerifiedAuthSession('master') || masterCredentialButton) return;
+    const anchor = document.getElementById('master-name-badge');
+    if (!anchor?.parentNode) return;
+    masterCredentialButton = credentialButton('마스터 로그인 정보', () => {
+        const identity = getVerifiedAuthSession('master');
+        if (!identity || credentialBusy || closeSecretDisplay) return;
+        const accountRef = window.prompt('기존 마스터 계정 경로를 입력하세요 (admin/문서ID 또는 admins/문서ID). 계정을 새로 만들지는 않습니다.', identity.accountRef)?.trim();
+        if (!accountRef) return;
+        if (!/^(admin|admins)\/[^/]+$/.test(accountRef)) { alert('마스터 계정 경로를 확인해 주세요.'); return; }
+        const choice = window.prompt('최초 발급은 1, 재발급은 2를 입력하세요. 재발급하면 기존 로그인 정보와 세션이 철회됩니다.', '2');
+        if (choice !== '1' && choice !== '2') return;
+        return issueCredential(choice === '1' ? 'issue' : 'rotate', 'master', accountRef);
+    });
+    anchor.parentNode.append(masterCredentialButton);
+}
+
+function mountLicenseCredentialControls(target) {
+    licenseCredentialControls?.remove();
+    licenseCredentialControls = null;
+    // Free-trial Auth provisioning remains a separate, explicitly deferred stage.
+    if (!getVerifiedAuthSession('master') || target.type === 'trial' || target.isTrial || String(target.key).startsWith('TRIAL-')) return;
+    const id = target.id;
+    const card = document.getElementById('edit-modal-card');
+    if (!card || typeof id !== 'string' || !id || id.includes('/')) return;
+    const role = target.type === 'dispatch' ? 'dispatch' : 'driver';
+    const group = document.createElement('div');
+    group.className = 'mt-3 pt-3 border-t flex flex-wrap items-center gap-2 shrink-0';
+    const label = document.createElement('span'); label.textContent = '로그인 정보'; label.className = 'text-xs font-bold';
+    group.append(label, credentialButton('최초 발급', () => issueCredential('issue', role, 'licenses/' + id)),
+        credentialButton('재발급', () => issueCredential('rotate', role, 'licenses/' + id)));
+    card.append(group);
+    licenseCredentialControls = group;
+}
+
+onVerifiedSessionInvalidated(() => {
+    credentialUiGeneration++;
+    closeSecretDisplay?.(false);
+    masterCredentialButton?.remove(); masterCredentialButton = null;
+    licenseCredentialControls?.remove(); licenseCredentialControls = null;
+});
+window.addEventListener('pagehide', () => { credentialUiGeneration++; closeSecretDisplay?.(false); });
 
 // ==========================================
 // 1. 마스터 탭 및 계정 테이블 렌더링
@@ -60,7 +167,7 @@ export function renderMasterTables() {
             <td class="py-3 px-3"><span class="px-2 py-0.5 rounded-full text-[10px] font-black ${item.status === 'active' ? 'bg-emerald-100 text-emerald-800' : 'bg-red-100 text-red-800'}">${item.status === 'active' ? '정상' : '정지'}</span></td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
-                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
+                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">사용 중지</button>
             </td>
         </tr>
     `);
@@ -75,14 +182,15 @@ export function renderMasterTables() {
             <td class="py-3 px-3"><span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-black">7일체험</span></td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
-                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>
+                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">사용 중지</button>
             </td>
         </tr>
     `);
 
     renderPagedTableTab('dispatch', dispatches, 'table-body-dispatch', 'pagination-dispatch', (item, idx) => {
         const connectedDrivers = state.allLicenses.filter(l => l.dispatchKey === item.key);
-        const slotLimitStr = item.maxSlots ? `${item.maxSlots}대 한도` : '무제한';
+        const slotLimitStr = !Number.isSafeInteger(item.maxSlots) || item.maxSlots < 0 ? '슬롯 설정 확인 필요' :
+            item.maxSlots === 0 ? '무제한' : `${item.maxSlots}대 한도`;
         const allowedSessions = item.maxSessions || (item.isPro ? 2 : 1);
         const proBadge = item.isPro ? `<span class="bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full text-[10px] font-black ml-1 border border-amber-300"><i class="fa-solid fa-crown text-amber-500"></i> PRO</span>` : ``;
         const sessionBadge = `<span class="bg-indigo-50 text-indigo-700 border border-indigo-200 text-[10px] font-black px-1.5 py-0.5 rounded ml-1">${allowedSessions}회선</span>`;
@@ -109,7 +217,7 @@ export function renderMasterTables() {
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="window.open(window.location.pathname + '?monitor=' + '${item.key}', '_blank')" class="px-2.5 py-1 bg-emerald-600 text-white font-black rounded-lg text-[11px] hover:bg-emerald-700 transition">모니터링</button>
                 <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px] hover:bg-blue-700 transition">수정</button>
-                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px] hover:bg-red-100 transition">삭제</button>
+                <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px] hover:bg-red-100 transition">사용 중지</button>
             </td>
         </tr>`;
     });
@@ -329,28 +437,6 @@ export async function unblockDevice(deviceId) {
 // 3. 라이선스(계정) 관리 및 키워드/대량 생성 CRUD 로직
 // ==========================================
 
-function generateCustomLicenseKey(keyword = '') {
-    const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    const cleanKw = keyword.trim().replace(/[^A-Z0-9가-힣]/gi, '').toUpperCase().slice(0, 7);
-    let fullChars = cleanKw;
-    const needed = Math.max(0, 8 - cleanKw.length);
-    for (let i = 0; i < needed; i++) {
-        fullChars += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    fullChars = fullChars.slice(0, 8);
-    return `${fullChars.slice(0, 4)}-${fullChars.slice(4, 8)}`;
-}
-
-function getUniqueLicenseKey(keyword) {
-    let key;
-    let attempts = 0;
-    do {
-        key = generateCustomLicenseKey(keyword);
-        attempts++;
-    } while (state.allLicenses.some(l => l.key === key) && attempts < 100);
-    return key;
-}
-
 export async function generateNewLicense() {
     const type = document.getElementById('new-key-type')?.value || 'regular';
     const keyword = document.getElementById('new-key-keyword')?.value?.trim() || '';
@@ -379,35 +465,22 @@ export async function generateNewLicense() {
     }
 
     try {
-        const createdKeys = [];
-        for (let i = 0; i < count; i++) {
-            const newKey = getUniqueLicenseKey(keyword);
-            await setDoc(doc(db, "licenses", newKey), {
-                key: newKey,
-                type: type,
-                phone: "",
-                expireDate: expStr,
-                deviceId: "",
-                status: "active",
-                maxSlots: (type === 'dispatch' ? 20 : 0),
-                maxSessions: (type === 'dispatch' ? 1 : 1),
-                isPro: false,
-                createdAt: Date.now() + i
-            });
-            createdKeys.push(newKey);
+        const result = await requestLicenseMembership({ action: 'createLicense', type, keyword, count, expireDate: expStr });
+        const createdKeys = result.licenseKeys;
+        if (!Array.isArray(createdKeys) || createdKeys.length !== count || createdKeys.some(key => typeof key !== 'string')) {
+            throw new Error('생성을 확인할 수 없습니다. 자동 재시도하지 마세요.');
         }
-
         document.getElementById('create-account-modal')?.classList.add('hidden');
         if (document.getElementById('new-key-keyword')) document.getElementById('new-key-keyword').value = '';
         if (document.getElementById('new-key-count')) document.getElementById('new-key-count').value = '1';
 
         if (count === 1) {
-            alert(`[${typeName} 발급 완료]\n\n라이선스 키: ${createdKeys[0]}`);
+            alert(`[${typeName} 생성 완료]\n\n라이선스 키: ${createdKeys[0]}\n로그인 secret은 별도로 최초 발급해야 합니다.`);
         } else {
-            alert(`[${typeName} 총 ${count}개 일괄 발급 완료]\n\n발급된 키 목록:\n${createdKeys.join('\n')}`);
+            alert(`[${typeName} 총 ${count}개 생성 완료]\n\n생성된 키 목록:\n${createdKeys.join('\n')}\n로그인 secret은 각 계정에 별도로 최초 발급해야 합니다.`);
         }
-    } catch (e) {
-        alert("계정 발급 오류: " + e.message);
+    } catch {
+        alert('계정 생성을 확인하지 못했습니다. 생성되었을 수 있으므로 재시도 전에 현재 목록을 확인해 주세요.');
     } finally {
         if (btn) {
             btn.disabled = false;
@@ -455,12 +528,57 @@ function updateSessionDescUI(val) {
     }
 }
 
+function mountLicenseManagementControls(target) {
+    document.getElementById('license-management-controls')?.remove();
+    if (Object.hasOwn(target, 'securityVersion')) return;
+    const modal = document.getElementById('edit-license-modal');
+    const host = document.getElementById('edit-key-input')?.parentNode;
+    if (!modal || !host) return;
+    const group = document.createElement('div'); group.id = 'license-management-controls';
+    const button = document.createElement('button'); button.type = 'button';
+    button.className = 'mt-2 px-3 py-2 text-xs rounded-lg bg-indigo-600 text-white';
+    button.textContent = '이 라이선스만 관리형으로 편입';
+    button.addEventListener('click', async () => {
+        const identity = getVerifiedAuthSession('master');
+        const licenseKey = target.id || target.key;
+        if (!identity || !confirm('선택한 라이선스 1개만 편입합니다. 기존 키와 운행 데이터는 보존됩니다. 진행하시겠습니까?')) return;
+        button.disabled = true;
+        try {
+            await requestLicenseMembership({ action: 'adoptLicense', licenseKey });
+            if (getVerifiedAuthSession('master') === identity) { alert('관리형 편입을 확인했습니다. 인증이 없다면 별도로 최초 발급해 주세요.'); group.remove(); }
+        } catch { alert('편입을 확인할 수 없습니다. 소유권과 인증 연결을 점검해 주세요. 자동 보정하지 않습니다.'); }
+        finally { button.disabled = false; }
+    });
+    group.append(button);
+    if (target.routeOwnerId === undefined || target.routeOwnerId === '') {
+        const repair = document.createElement('button'); repair.type = 'button';
+        repair.className = button.className; repair.textContent = '이 계정의 동선 소유자만 보완';
+        repair.addEventListener('click', async () => {
+            const identity = getVerifiedAuthSession('master');
+            if (!identity) return;
+            const owner = window.prompt('확인된 기존 동선 소유자 ID를 입력하세요. 기존 동선 소유자가 없음을 직접 확인한 경우에만 NEW를 입력하세요. 전화번호만으로 복원하지 않습니다.')?.trim();
+            if (!owner || !confirm('선택한 기존 계정 1개의 소유자만 보완합니다. 동선·이력·메모·키는 변경하지 않습니다. 기존 소유자 확인을 완료했습니까?')) return;
+            repair.disabled = true;
+            try {
+                await requestLicenseMembership({ action: 'repairRouteOwner', licenseKey: target.id || target.key,
+                    ...(owner === 'NEW' ? { confirmNewOwner: true } : { routeOwnerId: owner }) });
+                if (getVerifiedAuthSession('master') === identity) { alert('소유자 보완을 확인했습니다. 계정 화면을 다시 열어 주세요.'); group.remove(); }
+            } catch { alert('보완을 확인할 수 없습니다. 기존 소유자 또는 연결 충돌을 점검해 주세요. 자동 재실행하지 않습니다.'); }
+            finally { repair.disabled = false; }
+        });
+        group.append(repair);
+    }
+    host.append(group);
+}
+
 export function openEditLicenseModal(key) {
     const target = state.allLicenses.find(l => l.key === key);
     if (!target) return;
     document.getElementById('edit-orig-key').value = target.key;
     document.getElementById('edit-type').value = target.type || 'regular';
     document.getElementById('edit-key-input').value = target.key;
+    document.getElementById('edit-key-input').readOnly = true;
+    document.getElementById('edit-type').disabled = true;
     document.getElementById('edit-phone-input').value = target.phone || '';
     document.getElementById('edit-device-input').value = target.deviceId || '';
     
@@ -509,7 +627,7 @@ export function openEditLicenseModal(key) {
         if (proBox) proBox.classList.remove('hidden');
         if (sessionsBox) sessionsBox.classList.remove('hidden');
         
-        document.getElementById('edit-slots-input').value = target.maxSlots || 0;
+        document.getElementById('edit-slots-input').value = target.maxSlots ?? '';
         
         // 현재 계정의 저장된 회선 수 로드 (기본값: PRO는 2, 기본형은 1)
         const currentSavedSessions = target.maxSessions || (target.isPro ? 2 : 1);
@@ -543,6 +661,8 @@ export function openEditLicenseModal(key) {
         if (sessionsBox) sessionsBox.classList.add('hidden');
         if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
     }
+    mountLicenseCredentialControls(target);
+    mountLicenseManagementControls(target);
     document.getElementById('edit-license-modal').classList.remove('hidden');
 }
 
@@ -563,7 +683,8 @@ export function renderModalConnectedDrivers(dispatchKey) {
     const connectedDrivers = state.allLicenses.filter(l => l.dispatchKey === dispatchKey);
 
     if (badgeEl) {
-        const max = targetDispatch && targetDispatch.maxSlots ? targetDispatch.maxSlots : '무제한';
+        const slots = targetDispatch?.maxSlots;
+        const max = !Number.isSafeInteger(slots) || slots < 0 ? '설정 확인 필요' : slots === 0 ? '무제한' : slots;
         badgeEl.innerText = `${connectedDrivers.length}명 연결됨 (최대 ${max}대)`;
     }
 
@@ -592,47 +713,16 @@ export function renderModalConnectedDrivers(dispatchKey) {
 export async function linkDriverFromModal() {
     const dispatchKey = document.getElementById('edit-orig-key').value;
     const inputEl = document.getElementById('modal-add-driver-input');
-    const rawVal = inputEl ? inputEl.value.trim().toUpperCase() : '';
-
-    if (!rawVal) { alert("연결할 기사의 8자리 키 또는 전화번호를 입력해 주세요."); if (inputEl) inputEl.focus(); return; }
-
-    const dispatchLic = state.allLicenses.find(l => l.key === dispatchKey);
-    const connectedDrivers = state.allLicenses.filter(l => l.dispatchKey === dispatchKey);
-    if (dispatchLic && dispatchLic.maxSlots > 0 && connectedDrivers.length >= dispatchLic.maxSlots) {
-        alert(`관제 허용 슬롯(${dispatchLic.maxSlots}대)을 모두 채웠습니다.\n기사를 더 연결하려면 상단 슬롯 수를 늘려주세요.`); return;
-    }
-
-    const cleanDigits = rawVal.replace(/[^0-9]/g, '');
-    const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-    let targetLic = state.allLicenses.find(l => {
-        if (l.type === 'dispatch') return false;
-        const lKey = (l.key || '').toUpperCase();
-        const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
-        const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        return lKey === rawVal || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
-    });
-
-    if (!targetLic) {
-        try {
-            let snap = await getDoc(doc(db, "licenses", rawVal));
-            if (!snap.exists()) snap = await getDoc(doc(db, "licenses", `TRIAL-${rawVal}`));
-            if (!snap.exists()) snap = await getDoc(doc(db, "licenses", `PRO-${rawVal}`));
-            if (snap.exists()) targetLic = { id: snap.id, ...snap.data() };
-        } catch(e) {}
-    }
-
-    if (!targetLic) { alert("해당 기사 계정을 찾을 수 없습니다."); return; }
-    if (targetLic.dispatchKey === dispatchKey) { alert("이미 본 관제 계정에 연결되어 있는 기사입니다."); return; }
-    if (targetLic.dispatchKey && targetLic.dispatchKey !== dispatchKey) {
-        if (!confirm(`해당 기사는 현재 다른 관제소([${targetLic.dispatchKey}])에 소속되어 있습니다.\n본 관제 계정([${dispatchKey}])으로 소속을 이전하시겠습니까?`)) return;
-    }
-
+    const licenseKey = inputEl ? inputEl.value.trim() : '';
+    if (!licenseKey) { alert('정확한 기사 라이선스 키를 입력해 주세요.'); return; }
     try {
-        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: dispatchKey });
-        alert(`기사 [${targetLic.phone || targetLic.key}] 님이 성공적으로 연결되었습니다.`);
+        const target = await requestLicenseMembership({ action: 'lookup', licenseKey });
+        if (target.linked && !confirm('기존 연결이 있는 기사입니다. 선택한 회사로 연결하시겠습니까?')) return;
+        await requestLicenseMembership({ action: 'link', licenseKey, dispatchKey });
+        alert('기사 연결이 처리되었습니다.');
         if (inputEl) inputEl.value = '';
         renderModalConnectedDrivers(dispatchKey);
-    } catch(e) { alert("기사 연결 처리 오류: " + e.message); }
+    } catch { alert('기사 연결을 확인할 수 없습니다. 계정, TMS 설정과 회사 슬롯을 확인해 주세요.'); }
 }
 
 export async function unlinkDriverFromModal(driverKey) {
@@ -641,7 +731,7 @@ export async function unlinkDriverFromModal(driverKey) {
     const name = driver?.phone || driverKey;
     if (!confirm(`[${name}] 기사를 관제 연결에서 해제하시겠습니까?`)) return;
     try {
-        await updateDoc(doc(db, "licenses", driverKey), { dispatchKey: "" });
+        await requestLicenseMembership({ action: 'unlink', licenseKey: driverKey });
         alert(`[${name}] 기사의 관제 연결이 해제되었습니다.`);
         renderModalConnectedDrivers(dispatchKey);
     } catch(e) { alert("연결 해제 오류: " + e.message); }
@@ -649,65 +739,36 @@ export async function unlinkDriverFromModal(driverKey) {
 
 export async function saveLicenseEdit() {
     const origKey = document.getElementById('edit-orig-key').value;
-    const newKey = document.getElementById('edit-key-input').value.trim().toUpperCase();
+    const newKey = document.getElementById('edit-key-input').value.trim();
     const phone = document.getElementById('edit-phone-input').value.trim();
     const deviceId = document.getElementById('edit-device-input').value.trim();
     const expireDate = document.getElementById('edit-expire-input').value;
     const status = document.getElementById('edit-status-select').value;
     const type = document.getElementById('edit-type').value;
-
-    if (!newKey) { alert("라이선스 키를 입력해 주세요."); return; }
-    if (!expireDate) { alert("만료일을 선택해 주세요."); return; }
-
-    const expStr = expireDate.replace(/-/g, '.');
-    const target = state.allLicenses.find(l => l.key === origKey);
-    
-    const isPro = document.getElementById('edit-pro-checkbox')?.checked || false;
-
-    // 🌟 마스터 관리자가 직접 입력하거나 증설한 회선 수 그대로 반영
-    const inputSessions = parseInt(document.getElementById('edit-sessions-input')?.value);
-    const maxSessions = type === 'dispatch' ? (inputSessions > 0 ? inputSessions : (isPro ? 2 : 1)) : 1;
-
-    const updatePayload = {
-        key: newKey, phone: phone, expireDate: expStr, status: status, type: type, deviceId: deviceId,
-        dispatchKey: target ? target.dispatchKey || '' : '',
-        maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input')?.value) || 0 : 0,
-        maxSessions: maxSessions,
-        isPro: type === 'dispatch' ? isPro : false
-    };
-
+    if (!newKey || newKey !== origKey) { alert('기존 라이선스 키와 문서 ID는 변경할 수 없습니다.'); return; }
+    if (!expireDate) { alert('만료일을 선택해 주세요.'); return; }
+    const changes = { phone, deviceId, expireDate: expireDate.replace(/-/g, '.'), status, type };
+    if (type === 'dispatch') {
+        const text = document.getElementById('edit-slots-input')?.value?.trim();
+        const slots = Number(text);
+        if (!text || !Number.isSafeInteger(slots) || slots < 0) { alert('슬롯은 0 이상의 정수로 입력해 주세요.'); return; }
+        const sessions = Number(document.getElementById('edit-sessions-input')?.value);
+        if (!Number.isSafeInteger(sessions) || sessions < 1 || sessions > 50) { alert('동시 접속 수를 확인해 주세요.'); return; }
+        Object.assign(changes, { maxSlots: slots, maxSessions: sessions, isPro: !!document.getElementById('edit-pro-checkbox')?.checked });
+    }
     try {
-        updatePayload.routeOwnerId = await ensureRouteOwner(db, origKey);
-        if (newKey !== origKey) {
-            await setDoc(doc(db, "licenses", newKey), updatePayload);
-            await deleteDoc(doc(db, "licenses", origKey));
-            if (type === 'dispatch') {
-                const linked = state.allLicenses.filter(l => l.dispatchKey === origKey);
-                for (const l of linked) await updateDoc(doc(db, "licenses", l.key), { dispatchKey: newKey });
-            }
-        } else {
-            await updateDoc(doc(db, "licenses", origKey), updatePayload);
-        }
-        alert(`계정 정보가 성공적으로 수정되었습니다.\n(동시 접속 허용: ${maxSessions}대)`);
-        closeEditModal();
-    } catch (e) { alert("오류: " + e.message); }
+        await requestLicenseMembership({ action: 'updateLicense', licenseKey: origKey, changes });
+        alert('계정 정보가 수정되었습니다.'); closeEditModal();
+    } catch { alert('계정 수정을 확인할 수 없습니다. 현재 상태를 확인해 주세요.'); }
 }
 
 export async function deleteLicense(key) {
-    const target = state.allLicenses.find(l => l.key === key);
-    if (!confirm(`정말 [${key}] 계정을 영구 삭제하시겠습니까?`)) return;
+    if (!confirm(`[${key}] 계정을 사용 중지하시겠습니까? 라이선스와 운행 데이터, 소속 관계는 보존됩니다.`)) return;
     try {
-        await deleteDoc(doc(db, "licenses", key));
-        if (target && target.deviceId) {
-            try { await deleteDoc(doc(db, "routes", target.deviceId)); } catch(e){}
-        }
-        if (target && target.type === 'dispatch') {
-            const linked = state.allLicenses.filter(l => l.dispatchKey === key);
-            for (const l of linked) await updateDoc(doc(db, "licenses", l.key), { dispatchKey: "" });
-        }
-        alert(`[${key}] 계정이 삭제되었습니다.`);
+        await requestLicenseMembership({ action: 'suspendLicense', licenseKey: key });
+        alert('계정이 사용 중지되었습니다. 기존 데이터는 보존됩니다.');
         if (state.currentSelectedAccountKey === key && window.backToAllAccountsView) window.backToAllAccountsView();
-    } catch (e) { alert("삭제 오류: " + e.message); }
+    } catch { alert('사용 중지를 확인할 수 없습니다. 현재 계정 상태를 확인해 주세요.'); }
 }
 
 export async function deleteLicenseFromModal() {

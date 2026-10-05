@@ -1,7 +1,8 @@
 // js/admin-app.js
 
-import { db } from "./admin-api.js";
-import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { db, AUTH_FAILURE_MESSAGE, loginWithSecret, restoreFirebaseSession, signOutFirebaseSession,
+    getVerifiedAuthSession, onVerifiedSessionInvalidated, subscribeLegacyRoutes } from "./admin-api.js";
+import { doc, getDoc, onSnapshot, collection, query, where, orderBy, limit, updateDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 import { renderPaginationControls } from "./admin-ui.js";
@@ -10,7 +11,7 @@ import { renderPaginationControls } from "./admin-ui.js";
 // [마스터 기능 모듈 가져오기]
 // ==========================================
 import {
-    switchMasterTab, changeMasterTabPagination, renderMasterTables,
+    switchMasterTab, changeMasterTabPagination, renderMasterTables, initMasterCredentialControls,
     generateNewLicense, openEditLicenseModal, closeEditModal,
     renderModalConnectedDrivers, linkDriverFromModal, unlinkDriverFromModal,
     saveLicenseEdit, deleteLicense, deleteLicenseFromModal,
@@ -122,191 +123,206 @@ import {
 // ==========================================
 // 1. 초기화 및 페이지 라우팅 제어 (Lifecycle)
 // ==========================================
+let adminIdentity = null;
+let adminBootTask = null;
+let adminLoginBusy = false;
+let adminLogoutTask = null;
+let dataSyncStarted = false;
+let dispatchPanelStarted = false;
+const adminSubscriptions = [];
+let routeSyncCleanup = null;
+
+function clearAdminSessionStorage() {
+    for (const key of ['deliveryProRole', 'deliveryProAdminName', 'deliveryProDispatchKey', 'deliveryProSessionToken']) sessionStorage.removeItem(key);
+}
+function stopAdminDataSync() {
+    adminIdentity = null;
+    if (routeSyncCleanup) routeSyncCleanup();
+    routeSyncCleanup = null;
+    state.activeRoutes = {};
+    dataSyncStarted = false;
+    dispatchPanelStarted = false;
+    for (const unsubscribe of adminSubscriptions.splice(0)) unsubscribe();
+    state.currentUserRole = null;
+    if (typeof forceClearMap === 'function') forceClearMap();
+}
+function subscribeAdmin(source, callback, onError = null) {
+    const identity = adminIdentity;
+    adminSubscriptions.push(onSnapshot(source, snapshot => {
+        if (identity && adminIdentity === identity && getVerifiedAuthSession() === identity) callback(snapshot);
+    }, () => {
+        if (onError && identity && adminIdentity === identity && getVerifiedAuthSession() === identity) onError();
+    }));
+}
+onVerifiedSessionInvalidated(() => {
+    if (!adminIdentity) return;
+    stopAdminDataSync();
+    clearAdminSessionStorage();
+    window.location.href = 'admin.html';
+});
+
+async function connectDispatchSession(identity, newLogin = false) {
+    if (identity?.role !== 'dispatch' || getVerifiedAuthSession('dispatch') !== identity) throw new Error(AUTH_FAILURE_MESSAGE);
+    const key = identity.accountRef.slice('licenses/'.length);
+    const savedToken = sessionStorage.getItem('deliveryProDispatchKey') === key ? sessionStorage.getItem('deliveryProSessionToken') : null;
+    const nextToken = 'SES-' + crypto.randomUUID();
+    const selectedToken = await runTransaction(db, async transaction => {
+        const ref = doc(db, 'licenses', key);
+        const snapshot = await transaction.get(ref);
+        if (!snapshot.exists() || getVerifiedAuthSession('dispatch') !== identity) throw new Error(AUTH_FAILURE_MESSAGE);
+        const data = snapshot.data();
+        if (data.type !== 'dispatch' || data.status !== 'active') throw new Error(AUTH_FAILURE_MESSAGE);
+        const sessions = Array.isArray(data.activeSessions) ? [...data.activeSessions] : (data.currentSessionToken ? [data.currentSessionToken] : []);
+        if (!newLogin && savedToken && !savedToken.startsWith('MONITOR-')) {
+            if (!sessions.includes(savedToken)) throw new Error(AUTH_FAILURE_MESSAGE);
+            return savedToken;
+        }
+        const configured = Number(data.maxSessions);
+        const maxSessions = Number.isSafeInteger(configured) && configured > 0 ? configured : (data.isPro ? 2 : 1);
+        while (sessions.length >= maxSessions) sessions.shift();
+        sessions.push(nextToken);
+        // Preserve the existing FIFO policy without rewriting the product setting.
+        transaction.update(ref, { currentSessionToken: nextToken, activeSessions: sessions, lastLoginAt: Date.now() });
+        return nextToken;
+    });
+    if (getVerifiedAuthSession('dispatch') !== identity) throw new Error(AUTH_FAILURE_MESSAGE);
+    sessionStorage.setItem('deliveryProRole', 'DISPATCH');
+    sessionStorage.setItem('deliveryProDispatchKey', key);
+    sessionStorage.setItem('deliveryProSessionToken', selectedToken);
+    adminIdentity = identity;
+}
+
+function connectMasterSession(identity) {
+    if (identity?.role !== 'master' || getVerifiedAuthSession('master') !== identity) throw new Error(AUTH_FAILURE_MESSAGE);
+    clearAdminSessionStorage();
+    adminIdentity = identity;
+    sessionStorage.setItem('deliveryProRole', 'MASTER'); // Display state only.
+}
+
 window.onload = () => {
-    const path = window.location.pathname;
-    const isMasterPage = path.includes('admin-master.html');
-    const isDispatchPage = path.includes('admin-dispatch.html');
-    const isLoginPage = !isMasterPage && !isDispatchPage;
-
-    // 날짜 기본값 설정
-    const todayInput = document.getElementById('dispatch-date-picker');
-    if (todayInput) todayInput.value = todayStr;
-    
-    const assignDateInput = document.getElementById('dispatch-assign-date');
-    if (assignDateInput) {
-        assignDateInput.value = todayStr;
-        assignDateInput.onchange = () => { window.loadExcelFromFirebase(); };
-    }
-
-    const defaultExpire = new Date();
-    defaultExpire.setDate(defaultExpire.getDate() + 30);
-    const expEl = document.getElementById('new-key-expire');
-    if (expEl) expEl.value = getLocalDateString(defaultExpire);
-
-    // 모듈 초기화 (해당 요소가 있는 페이지에서만 실행)
-    if (document.getElementById('pro-invoice-modal') && typeof loadSavedForms === 'function') loadSavedForms();
-    if (document.getElementById('excel-drop-zone') && typeof initExcelDropZone === 'function') initExcelDropZone(); 
-    if (document.getElementById('template-pdf-dropzone') && typeof initTemplatePdfDropZone === 'function') initTemplatePdfDropZone();
-
-    // 모니터링 전용 URL 파라미터 (?monitor=KEY) 감지
-    const urlParams = new URLSearchParams(window.location.search);
-    const monitorKey = urlParams.get('monitor');
-    if (monitorKey) {
-        sessionStorage.setItem('deliveryProRole', 'DISPATCH');
-        sessionStorage.setItem('deliveryProDispatchKey', monitorKey);
-        sessionStorage.setItem('deliveryProSessionToken', 'MONITOR-' + Date.now()); 
-        
-        if (!isDispatchPage) {
-            window.location.href = 'admin-dispatch.html';
-            return;
-        }
-    }
-
-    const savedRole = sessionStorage.getItem('deliveryProRole');
-    const savedName = sessionStorage.getItem('deliveryProAdminName') || '마스터';
-
-    // 권한 및 페이지 검증 (접근 제어)
-    if (isMasterPage) {
-        if (savedRole !== 'MASTER') {
-            window.location.href = 'admin.html';
-            return;
-        }
-        showMasterPanel(savedName);
-    } else if (isDispatchPage) {
-        if (savedRole !== 'DISPATCH') {
-            window.location.href = 'admin.html';
-            return;
-        }
-        showDispatchPanel();
-    } else if (isLoginPage) {
-        if (savedRole === 'MASTER') {
-            window.location.href = 'admin-master.html';
-        } else if (savedRole === 'DISPATCH') {
-            window.location.href = 'admin-dispatch.html';
-        }
-    }
-};
-
-// ==========================================
-// 2. 통합 로그인 및 로그아웃 (다중 회선 FIFO 제어 엔진)
-// ==========================================
-window.handleSingleKeyLogin = async function() {
-    const keyInput = document.getElementById('single-key-input').value.trim();
-    const msgEl = document.getElementById('login-msg');
-    const btn = document.getElementById('login-btn');
-
-    if (!keyInput) { msgEl.innerText = "관리자 키를 입력해 주세요."; return; }
-    msgEl.innerText = "";
-    btn.disabled = true;
-    btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인증 확인 중...';
-
-    try {
-        let adminSnap = await getDoc(doc(db, "admin", keyInput));
-        if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admin", keyInput.toUpperCase()));
-        if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admins", keyInput));
-        if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admins", keyInput.toUpperCase()));
-
-        if (adminSnap.exists()) {
-            const adminData = adminSnap.data();
-            sessionStorage.setItem('deliveryProRole', 'MASTER');
-            sessionStorage.setItem('deliveryProAdminName', adminData.name || '마스터');
-            window.location.href = 'admin-master.html';
-            return;
-        }
-
-        let licRef = doc(db, "licenses", keyInput);
-        let licSnap = await getDoc(licRef);
-        if (!licSnap.exists()) {
-            licRef = doc(db, "licenses", keyInput.toUpperCase());
-            licSnap = await getDoc(licRef);
-        }
-        if (!licSnap.exists()) {
-            licRef = doc(db, "licenses", `CTRL-${keyInput.toUpperCase()}`);
-            licSnap = await getDoc(licRef);
-        }
-
-        if (licSnap.exists() && licSnap.data().type === 'dispatch') {
-            const licData = licSnap.data();
-
-            if (licData.status === 'suspended') {
-                msgEl.innerText = "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요.";
+    if (adminBootTask) return adminBootTask;
+    adminBootTask = (async () => {
+        const path = window.location.pathname;
+        const isMasterPage = path.includes('admin-master.html');
+        const isDispatchPage = path.includes('admin-dispatch.html');
+        const input = document.getElementById('single-key-input');
+        if (input) { input.type = 'password'; input.autocomplete = 'current-password'; input.autocapitalize = 'none'; input.spellcheck = false; }
+        try {
+            const identity = await restoreFirebaseSession();
+            // URL parameters and stored MASTER roles confer no authentication.
+            if (identity?.role === 'master') {
+                connectMasterSession(identity);
+                if (!isMasterPage) { window.location.href = 'admin-master.html'; return; }
+                window.showMasterPanel();
                 return;
             }
-
-            // 🌟 허용 동시 접속 회선 수 판정 (기본형: 1대, PRO: 2대 이상)
-            const maxSessions = parseInt(licData.maxSessions) || (licData.isPro ? 2 : 1);
-            let activeSessions = Array.isArray(licData.activeSessions) ? [...licData.activeSessions] : [];
-            
-            if (activeSessions.length === 0 && licData.currentSessionToken) {
-                activeSessions.push(licData.currentSessionToken);
+            if (!identity || identity.role !== 'dispatch') {
+                clearAdminSessionStorage();
+                if (isMasterPage || isDispatchPage) window.location.href = 'admin.html';
+                else if (identity) {
+                    const message = document.getElementById('login-msg');
+                    if (message) message.innerText = AUTH_FAILURE_MESSAGE;
+                }
+                return;
             }
-
-            const newSessionToken = 'SES-' + Math.random().toString(36).substring(2, 10);
-            
-            // 🌟 FIFO 큐: 허용 회선 수를 초과할 경우 가장 오래된 세션부터 순차적으로 제거
-            while (activeSessions.length >= maxSessions) {
-                activeSessions.shift();
+            await connectDispatchSession(identity);
+            if (!isDispatchPage) { window.location.href = 'admin-dispatch.html'; return; }
+            const todayInput = document.getElementById('dispatch-date-picker');
+            if (todayInput) todayInput.value = todayStr;
+            const assignDateInput = document.getElementById('dispatch-assign-date');
+            if (assignDateInput) { assignDateInput.value = todayStr; assignDateInput.onchange = () => window.loadExcelFromFirebase(); }
+            if (document.getElementById('pro-invoice-modal') && typeof loadSavedForms === 'function') loadSavedForms();
+            if (document.getElementById('excel-drop-zone') && typeof initExcelDropZone === 'function') initExcelDropZone();
+            if (document.getElementById('template-pdf-dropzone') && typeof initTemplatePdfDropZone === 'function') initTemplatePdfDropZone();
+            window.showDispatchPanel();
+        } catch {
+            stopAdminDataSync();
+            clearAdminSessionStorage();
+            try { await signOutFirebaseSession(); } catch {}
+            if (isMasterPage || isDispatchPage) window.location.href = 'admin.html';
+            else {
+                const message = document.getElementById('login-msg');
+                if (message) message.innerText = AUTH_FAILURE_MESSAGE;
             }
-            activeSessions.push(newSessionToken);
-
-            await updateDoc(licRef, { 
-                currentSessionToken: newSessionToken,
-                activeSessions: activeSessions,
-                maxSessions: maxSessions,
-                lastLoginAt: Date.now()
-            });
-
-            sessionStorage.setItem('deliveryProRole', 'DISPATCH');
-            sessionStorage.setItem('deliveryProDispatchKey', licSnap.id);
-            sessionStorage.setItem('deliveryProSessionToken', newSessionToken);
-            window.location.href = 'admin-dispatch.html';
-            return;
         }
+    })();
+    return adminBootTask;
+};
 
-        msgEl.innerText = "등록되지 않았거나 권한이 없는 관리자 키입니다.";
-    } catch (e) {
-        msgEl.innerText = "로그인 오류: " + e.message;
+// Existing login input now contains a secret, never a business key.
+window.handleSingleKeyLogin = async function() {
+    if (adminLoginBusy) return;
+    adminLoginBusy = true;
+    const input = document.getElementById('single-key-input');
+    const secret = (input?.value || '').trim();
+    if (input) input.value = '';
+    const message = document.getElementById('login-msg');
+    const button = document.getElementById('login-btn');
+    if (message) message.innerText = '';
+    if (button) { button.disabled = true; button.innerHTML = '인증 확인 중...'; }
+    try {
+        if (adminBootTask) await adminBootTask;
+        const identity = await loginWithSecret(secret, ['dispatch', 'master']);
+        if (identity.role === 'master') {
+            connectMasterSession(identity);
+            window.location.href = 'admin-master.html';
+        } else {
+            await connectDispatchSession(identity, true);
+            window.location.href = 'admin-dispatch.html';
+        }
+    } catch {
+        stopAdminDataSync();
+        clearAdminSessionStorage();
+        try { await signOutFirebaseSession(); } catch {}
+        if (message) message.innerText = AUTH_FAILURE_MESSAGE;
     } finally {
-        btn.disabled = false;
-        btn.innerHTML = '<span>대시보드 접속</span>';
+        if (input) input.value = '';
+        adminLoginBusy = false;
+        if (button) { button.disabled = false; button.innerHTML = '<span>대시보드 접속</span>'; }
     }
 };
 
-window.systemLogout = async function() {
-    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+window.systemLogout = function() {
+    if (adminLogoutTask) return adminLogoutTask;
+    const identity = getVerifiedAuthSession('dispatch');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
-    
-    if (currentKey && localToken && !localToken.startsWith('MONITOR-')) {
+    stopAdminDataSync();
+    clearAdminSessionStorage();
+    adminLogoutTask = (async () => {
         try {
-            const licRef = doc(db, "licenses", currentKey);
-            const licSnap = await getDoc(licRef);
-            if (licSnap.exists()) {
-                const data = licSnap.data();
-                if (Array.isArray(data.activeSessions)) {
-                    const filtered = data.activeSessions.filter(s => s !== localToken);
-                    await updateDoc(licRef, { activeSessions: filtered });
+            if (identity && localToken) await runTransaction(db, async transaction => {
+                const ref = doc(db, 'licenses', identity.accountRef.slice('licenses/'.length));
+                const snapshot = await transaction.get(ref);
+                if (snapshot.exists() && getVerifiedAuthSession('dispatch') === identity) {
+                    const data = snapshot.data();
+                    const sessions = Array.isArray(data.activeSessions) ? data.activeSessions : (data.currentSessionToken ? [data.currentSessionToken] : []);
+                    const filtered = sessions.filter(token => token !== localToken);
+                    transaction.update(ref, { activeSessions: filtered,
+                        currentSessionToken: data.currentSessionToken === localToken ? (filtered.at(-1) || '') : (data.currentSessionToken || '') });
                 }
-            }
-        } catch (e) {
-            console.warn("로그아웃 세션 해제 중 오류:", e);
-        }
-    }
-    
-    if (typeof forceClearMap === 'function') forceClearMap();
-    sessionStorage.clear();
-    window.location.href = 'admin.html';
+            });
+        } catch { /* Firebase signOut still runs when legacy session cleanup fails. */ }
+        try { await signOutFirebaseSession(); window.location.href = 'admin.html'; }
+        catch { alert(AUTH_FAILURE_MESSAGE); }
+        finally { adminLogoutTask = null; }
+    })();
+    return adminLogoutTask;
 };
 
 window.showMasterPanel = function(name = '마스터') {
+    if (!adminIdentity || adminIdentity.role !== 'master' || getVerifiedAuthSession('master') !== adminIdentity) return;
     state.currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
     if (badge) badge.innerText = name;
+    initMasterCredentialControls();
     
     window.initMasterDataSync();
     if (typeof switchMasterTab === 'function') switchMasterTab('regular');
 };
 
 window.showDispatchPanel = function() {
+    if (!adminIdentity || getVerifiedAuthSession('dispatch') !== adminIdentity || dispatchPanelStarted) return;
+    dispatchPanelStarted = true;
     state.currentUserRole = 'DISPATCH';
 
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
@@ -332,15 +348,16 @@ window.showDispatchPanel = function() {
 // 3. 실시간 데이터 동기화 (Firestore Snapshots - 실시간 잔상 소거 연동)
 // ==========================================
 window.initMasterDataSync = function() {
-    const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
+    if (!adminIdentity || getVerifiedAuthSession() !== adminIdentity || dataSyncStarted) return;
+    dataSyncStarted = true;
+    const isMaster = adminIdentity.role === 'master';
+    const dispatchKey = isMaster ? null : adminIdentity.accountRef.slice('licenses/'.length);
+    let reconcileRouteOwners = () => {};
 
     // 1. 라이선스 실시간 동기화
-    onSnapshot(collection(db, "licenses"), (snapshot) => {
-        state.allLicenses = [];
-        snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
-        
-        const currentRole = sessionStorage.getItem('deliveryProRole');
-        const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
+    const renderLicenseState = () => {
+        const currentRole = adminIdentity.role === 'dispatch' ? 'DISPATCH' : 'MASTER';
+        const currentKey = adminIdentity.accountRef.slice('licenses/'.length);
         const localToken = sessionStorage.getItem('deliveryProSessionToken');
         
         if (currentRole === 'DISPATCH' && currentKey) {
@@ -362,10 +379,9 @@ window.initMasterDataSync = function() {
                     ? myAccount.activeSessions 
                     : (myAccount.currentSessionToken ? [myAccount.currentSessionToken] : []);
                 
-                if (activeSessions.length > 0 && !activeSessions.includes(localToken)) {
+                if (!activeSessions.includes(localToken)) {
                     alert(`⚠️ 다른 PC에서 로그인하여 동시 접속 허용 회선 수(${maxAllowed}대)를 초과했습니다.\n시스템 보안을 위해 현재 창이 자동 로그아웃됩니다.`);
-                    sessionStorage.clear();
-                    window.location.href = 'admin.html';
+                    window.systemLogout();
                     return;
                 }
             }
@@ -388,10 +404,44 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
-    });
+    };
+    if (isMaster) {
+        subscribeAdmin(collection(db, "licenses"), snapshot => {
+            state.allLicenses = [];
+            snapshot.forEach(item => state.allLicenses.push({ ...item.data(), id: item.id }));
+            renderLicenseState();
+        });
+    } else {
+        // Preserve the shared array, but receive only this verified account and
+        // its drivers. Wait for both initial snapshots before checking the UI.
+        let ownAccount = null, drivers = [];
+        let ownReady = false, driversReady = false;
+        state.allLicenses = [];
+        const mergeLicenses = () => {
+            if (!ownReady || !driversReady) return;
+            const accounts = new Map(drivers.map(item => [item.id, item]));
+            if (ownAccount) accounts.set(ownAccount.id, ownAccount);
+            state.allLicenses = [...accounts.values()];
+            renderLicenseState();
+            reconcileRouteOwners();
+        };
+        subscribeAdmin(doc(db, 'licenses', dispatchKey), snapshot => {
+            ownAccount = snapshot.exists() ? { ...snapshot.data(), id: snapshot.id } : null;
+            ownReady = true;
+            mergeLicenses();
+        });
+        subscribeAdmin(query(collection(db, 'licenses'), where('dispatchKey', '==', dispatchKey)), snapshot => {
+            drivers = [];
+            snapshot.forEach(item => {
+                if (item.data().type !== 'dispatch') drivers.push({ ...item.data(), id: item.id });
+            });
+            driversReady = true;
+            mergeLicenses();
+        });
+    }
 
     // 2. 접속 제한(블랙리스트) 기기 실시간 동기화
-    onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
+    if (isMaster) subscribeAdmin(collection(db, "blocked_devices"), (snapshot) => {
         state.allBlockedDevices = [];
         snapshot.forEach(docSnap => { state.allBlockedDevices.push({ id: docSnap.id, ...docSnap.data() }); });
         const countBlockedEl = document.getElementById('count-blocked');
@@ -399,9 +449,10 @@ window.initMasterDataSync = function() {
         if (typeof renderBlockedDevicesTable === 'function') renderBlockedDevicesTable();
         if (typeof renderModalBlockedDevices === 'function') renderModalBlockedDevices();
     });
+    else state.allBlockedDevices = [];
 
     // 3. 메모 실시간 동기화
-    onSnapshot(collection(db, "memos"), (snapshot) => {
+    subscribeAdmin(collection(db, "memos"), (snapshot) => {
         state.allMemos = [];
         snapshot.forEach(docSnap => { state.allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
         const countMemosEl = document.getElementById('count-memos');
@@ -411,10 +462,7 @@ window.initMasterDataSync = function() {
     });
 
     // 🌟 4. 경로(Routes) 실시간 동기화 (기사 앱에서 동선 삭제/초기화 시 지도 및 모달 잔상 즉시 소거)
-    onSnapshot(collection(db, "routes"), (snapshot) => {
-        state.activeRoutes = {};
-        snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
-
+    const renderRoutesState = () => {
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
@@ -431,10 +479,160 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
+        const searchInput = document.getElementById('global-search-input');
+        if (!isMaster && searchInput?.value && typeof handleGlobalSearch === 'function') handleGlobalSearch(searchInput.value, false);
+    };
+    if (isMaster) subscribeAdmin(collection(db, 'routes'), snapshot => {
+        state.activeRoutes = {};
+        snapshot.forEach(item => { state.activeRoutes[item.id] = item.data(); });
+        renderRoutesState();
     });
+    else {
+        const identity = adminIdentity;
+        const companyRoutesSource = new Map();
+        const legacyOwnerRoutesSource = new Map();
+        const companyRouteVersions = new Map();
+        let ownerUnsubscribes = [], generation = 0, snapshotVersion = 0, ownerSignature = '';
+        let owners = new Set(), licenses = new Map();
+        let companyUnsubscribes = [], companyGeneration = 0, companySignature = '';
+        const companyChunks = new Map();
+        const current = () => adminIdentity === identity && getVerifiedAuthSession() === identity;
+        const eligible = entry => {
+            const route = entry.data;
+            if (route.dispatchKey !== undefined && route.dispatchKey !== dispatchKey) {
+                const lic = licenses.get(route.licenseKey);
+                if (entry.source !== 'legacy' || typeof route.dispatchKey !== 'string' || !route.dispatchKey.trim() ||
+                    !lic || !lic.routeOwnerId || route.routeOwnerId !== lic.routeOwnerId ||
+                    [...licenses.values()].filter(item => item.routeOwnerId === route.routeOwnerId).length !== 1) return false;
+            }
+            const ownerLicenses = [...licenses.values()].filter(lic => lic.routeOwnerId && lic.routeOwnerId === route.routeOwnerId);
+            if (route.licenseKey !== undefined) {
+                const lic = licenses.get(route.licenseKey);
+                return !!lic && (!route.routeOwnerId || route.routeOwnerId === lic.routeOwnerId);
+            }
+            return ownerLicenses.length > 0;
+        };
+        const readSource = (snapshot, source = 'company') => {
+            const result = new Map(), version = ++snapshotVersion;
+            snapshot.forEach(item => { result.set(item.id, { data: item.data(), version, source, requestRevision: snapshot.requestRevision }); });
+            return result;
+        };
+        const publishRoutes = () => {
+            if (!current()) return;
+            const combined = new Map(companyRoutesSource);
+            for (const source of legacyOwnerRoutesSource.values()) for (const [id, entry] of source) {
+                if (entry.requestRevision !== undefined && entry.requestRevision < (companyRouteVersions.get(id) || 0)) continue;
+                if (!combined.has(id) || combined.get(id).version < entry.version) combined.set(id, entry);
+            }
+            const allowed = [...combined].filter(([, entry]) => eligible(entry));
+            const latest = new Map();
+            for (const [id, entry] of allowed) {
+                const route = entry.data;
+                if (!route.routeOwnerId || !Number.isFinite(route.updatedAt) ||
+                    (!Array.isArray(route.destinations) && route.cleared !== true)) continue;
+                const previous = latest.get(route.routeOwnerId);
+                if (!previous || route.updatedAt > previous[1].data.updatedAt ||
+                    (route.updatedAt === previous[1].data.updatedAt && String(id).localeCompare(String(previous[0])) < 0)) latest.set(route.routeOwnerId, [id, entry]);
+            }
+            state.activeRoutes = Object.fromEntries(allowed.filter(([id, entry]) => {
+                const winner = latest.get(entry.data.routeOwnerId);
+                const historical = entry.source === 'legacy' && entry.data.dispatchKey !== undefined && entry.data.dispatchKey !== dispatchKey;
+                // Historical compatibility never republishes superseded active
+                // routes. A latest empty/cleared route suppresses older pending
+                // data in direct search/export consumers as well as the detail UI.
+                if (historical && (!winner || winner[0] !== id)) return false;
+                if (winner && winner[0] !== id && (winner[1].data.cleared === true || winner[1].data.destinations.length === 0) &&
+                    (entry.data.cleared !== true && Array.isArray(entry.data.destinations) && entry.data.destinations.length > 0)) return false;
+                return true;
+            }).map(([id, entry]) => [id, entry.data.cleared === true ? { ...entry.data, destinations: [] } : entry.data]));
+            renderRoutesState();
+        };
+        reconcileRouteOwners = () => {
+            if (!current()) return;
+            const nextLicenses = new Map(state.allLicenses.filter(lic => lic.type !== 'dispatch' && lic.dispatchKey === dispatchKey)
+                .map(lic => [lic.id, lic]));
+            const ownerIds = [...new Set([...nextLicenses.values()].map(lic => lic.routeOwnerId)
+                .filter(id => typeof id === 'string' && id.trim()))].sort();
+            const ownerLicenseKeys = ownerIds.map(owner => [...nextLicenses.values()].filter(lic => lic.routeOwnerId === owner)
+                .map(lic => lic.id).sort()[0]);
+            const nextOwners = new Set(ownerIds);
+            for (const [id, entry] of companyRoutesSource) {
+                if ((owners.has(entry.data.routeOwnerId) && !nextOwners.has(entry.data.routeOwnerId)) ||
+                    (licenses.has(entry.data.licenseKey) && !nextLicenses.has(entry.data.licenseKey))) companyRoutesSource.delete(id);
+            }
+            licenses = nextLicenses;
+            owners = nextOwners;
+            const licenseIds = [...licenses.keys()].sort();
+            const nextCompanySignature = JSON.stringify(licenseIds);
+            if (nextCompanySignature !== companySignature) {
+                companySignature = nextCompanySignature;
+                const activeGeneration = ++companyGeneration;
+                for (const unsubscribe of companyUnsubscribes) unsubscribe();
+                companyUnsubscribes = [];
+                companyChunks.clear();
+                companyRoutesSource.clear();
+                // 인증 principal/account 2개와 대상 license 조회를 고려해 8개씩 제한합니다.
+                for (let start = 0; start < licenseIds.length; start += 8) {
+                    const chunk = start / 8;
+                    const apply = snapshot => {
+                        if (!current() || companyGeneration !== activeGeneration) return;
+                        const previous = companyChunks.get(chunk) || new Map();
+                        const next = snapshot ? readSource(snapshot) : new Map();
+                        if (!snapshot) snapshotVersion++;
+                        for (const id of new Set([...previous.keys(), ...next.keys()])) companyRouteVersions.set(id, snapshotVersion);
+                        companyChunks.set(chunk, next);
+                        companyRoutesSource.clear();
+                        for (const source of companyChunks.values()) for (const [id, entry] of source) companyRoutesSource.set(id, entry);
+                        publishRoutes();
+                    };
+                    companyUnsubscribes.push(onSnapshot(query(collection(db, 'routes'),
+                        where('dispatchKey', '==', dispatchKey), where('licenseKey', 'in', licenseIds.slice(start, start + 8))),
+                    apply, () => apply(null)));
+                }
+            }
+            const membership = [...nextLicenses.values()].map(lic => [lic.id, lic.routeOwnerId, lic.securityVersion])
+                .sort((a, b) => a[0].localeCompare(b[0]));
+            const signature = JSON.stringify([ownerIds, ownerLicenseKeys, membership,
+                state.allLicenses.find(lic => lic.id === dispatchKey)?.membershipVersion]);
+            if (signature !== ownerSignature) {
+                ownerSignature = signature;
+                const nextGeneration = ++generation;
+                for (const unsubscribe of ownerUnsubscribes) unsubscribe();
+                ownerUnsubscribes = [];
+                legacyOwnerRoutesSource.clear();
+                for (let start = 0; start < ownerIds.length; start += 30) {
+                    const chunk = start / 30;
+                    ownerUnsubscribes.push(subscribeLegacyRoutes(ownerLicenseKeys.slice(start, start + 30), snapshot => {
+                        if (!current() || generation !== nextGeneration) return;
+                        legacyOwnerRoutesSource.set(chunk, readSource(snapshot, 'legacy'));
+                        publishRoutes();
+                    }, () => {
+                        if (!current() || generation !== nextGeneration) return;
+                        legacyOwnerRoutesSource.delete(chunk);
+                        publishRoutes();
+                    }, () => snapshotVersion));
+                }
+            }
+            publishRoutes();
+        };
+        routeSyncCleanup = () => {
+            generation++;
+            companyGeneration++;
+            for (const unsubscribe of companyUnsubscribes) unsubscribe();
+            companyUnsubscribes = [];
+            companyChunks.clear();
+            for (const unsubscribe of ownerUnsubscribes) unsubscribe();
+            ownerUnsubscribes = [];
+            companyRoutesSource.clear();
+            legacyOwnerRoutesSource.clear();
+            companyRouteVersions.clear();
+        };
+        state.activeRoutes = {};
+        reconcileRouteOwners();
+    }
 
     // 🌟 5. 배송 완료 실시간 동기화
-    onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
+    subscribeAdmin(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         state.allCompletions = [];
         snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
 
@@ -455,7 +653,7 @@ window.initMasterDataSync = function() {
     });
 
     // 6. 메시지 실시간 동기화
-    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => {
+    subscribeAdmin(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => {
         state.allDispatchMessages = [];
         snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
         if (typeof renderMessageFeed === 'function') renderMessageFeed(); 
@@ -464,7 +662,9 @@ window.initMasterDataSync = function() {
     });
 
     // 7. 템플릿 실시간 동기화
-    onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
+    const templatesSource = isMaster ? collection(db, 'dispatch_templates') :
+        query(collection(db, 'dispatch_templates'), where('dispatchKey', '==', dispatchKey));
+    subscribeAdmin(templatesSource, (snapshot) => {
         state.allDispatchTemplates = [];
         snapshot.forEach(docSnap => { state.allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
         if (typeof renderCustomTemplates === 'function') renderCustomTemplates();
