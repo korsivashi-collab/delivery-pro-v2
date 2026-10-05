@@ -32,6 +32,16 @@ function lookupId(secret, key) {
     return 'v1_' + createHmac('sha256', hmacKey(key)).update(normalizeSecret(secret), 'utf8').digest('hex');
 }
 function generateSecret() { return randomBytes(SECRET_BYTES).toString('base64url'); }
+function validateMasterSecret(value) {
+    if (typeof value !== 'string' || value.length < 16 || value.length > 128 ||
+        value.trim() !== value || /[\p{Cc}\p{Cf}\p{Cs}]/u.test(value)) {
+        throw new AuthError(400, 'INVALID_SECRET');
+    }
+    return value;
+}
+function masterLookupId(secret, key) {
+    return 'v1_' + createHmac('sha256', hmacKey(key)).update(validateMasterSecret(secret), 'utf8').digest('hex');
+}
 function version(value) { return Number.isSafeInteger(value) && value > 0; }
 function accountPath(role, path) {
     const collections = role === 'master' ? ['admin', 'admins'] :
@@ -201,12 +211,20 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
         });
     }
     async function login(secret) {
-        const id = lookupId(secret, key);
+        let id;
+        try { id = masterLookupId(secret, key); }
+        catch (error) {
+            if (error.code !== 'INVALID_SECRET') throw error;
+            id = lookupId(secret, key); // Retain legacy driver/dispatch input handling.
+        }
         const identity = await db.runTransaction(async tx => {
             const snap = await tx.get(lRef(id));
             if (!snap.exists) deny();
             const lookup = snap.data();
             const p = principalData(await tx.get(pRef(lookup.uid)));
+            if (p.role === 'master') {
+                try { validateMasterSecret(secret); } catch { deny(); }
+            } else if (lookupId(secret, key) !== id) deny();
             if (p.lookupId !== id || lookup.credentialVersion !== p.credentialVersion) deny();
             await checkAccount(tx, p);
             return { uid: lookup.uid, credentialVersion: p.credentialVersion };
@@ -220,15 +238,19 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
         return { customToken };
     }
     async function credentials(actor, input) {
-        if (!input || !['issue', 'rotate'].includes(input.action)) throw new AuthError(400, 'INVALID_REQUEST');
+        if (!input || !['issue', 'rotate', 'changeOwnSecret'].includes(input.action)) throw new AuthError(400, 'INVALID_REQUEST');
+        const ownChange = input.action === 'changeOwnSecret';
+        if (ownChange && Object.keys(input).some(field => !['action', 'currentSecret', 'newSecret'].includes(field))) {
+            throw new AuthError(400, 'INVALID_REQUEST');
+        }
         const issuing = input.action === 'issue';
         // A target role never grants requester authority; master() is checked in
         // the same transaction for every issuance, including another master.
         if (issuing && !['driver', 'dispatch', 'master'].includes(input.role)) deny();
-        let uid = issuing ? randomUUID() : input.uid;
+        let uid = ownChange ? actor.uid : issuing ? randomUUID() : input.uid;
         const operation = randomUUID();
-        const secret = generateSecret();
-        const nextId = lookupId(secret, key);
+        const secret = ownChange ? validateMasterSecret(input.newSecret) : generateSecret();
+        const nextId = ownChange ? masterLookupId(secret, key) : lookupId(secret, key);
         const changed = await db.runTransaction(async tx => {
             await master(tx, actor); // Recheck protected authority inside mutation transaction.
             let bindingRef;
@@ -264,6 +286,12 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
                 if (p.credentialVersion === Number.MAX_SAFE_INTEGER) deny();
                 const old = await tx.get(lRef(p.lookupId));
                 if (!old.exists || old.data().uid !== uid || old.data().credentialVersion !== p.credentialVersion) deny();
+                if (ownChange) {
+                    let currentId;
+                    try { currentId = masterLookupId(input.currentSecret, key); } catch { deny(); }
+                    if (uid !== actor.uid || p.role !== 'master' || currentId !== p.lookupId) deny();
+                    if (nextId === p.lookupId) throw new AuthError(400, 'SECRET_UNCHANGED');
+                }
             }
             await checkAccount(tx, p);
             if ((await tx.get(lRef(nextId))).exists) throw new AuthError(409, 'CREDENTIAL_CONFLICT');
@@ -297,7 +325,8 @@ function createAuthCore({ db, auth, key, now = Date.now }, membershipOnly = fals
                     ...(changed.role === 'master' ? { credentialOperation: null } : {}) });
             });
         }
-        return { uid, secret, credentialVersion: changed.credentialVersion };
+        return ownChange ? { changed: true, credentialVersion: changed.credentialVersion } :
+            { uid, secret, credentialVersion: changed.credentialVersion };
     }
     async function startTrial(input) {
         if (!input || Object.keys(input).some(field => !['action', 'phone', 'deviceId'].includes(field)) ||
