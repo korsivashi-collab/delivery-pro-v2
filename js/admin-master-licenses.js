@@ -1,6 +1,6 @@
 // js/admin-master-licenses.js
 
-import { db, getVerifiedAuthSession, requestAuthCredential, requestLicenseMembership, onVerifiedSessionInvalidated } from "./admin-api.js";
+import { db, getVerifiedAuthSession, requestAuthCredential, changeOwnMasterSecret, requestLicenseMembership, onVerifiedSessionInvalidated } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -10,6 +10,8 @@ let credentialBusy = false;
 let credentialUiGeneration = 0;
 let closeSecretDisplay = null;
 let masterCredentialButton = null;
+let masterPasswordButton = null;
+let masterPasswordChangeUncertain = false;
 let licenseCredentialControls = null;
 const credentialFailure = '발급 완료를 확인하지 못했습니다. 기존 로그인 정보가 변경되었을 수 있으므로 자동으로 재시도하지 마세요. 계정 상태를 확인한 뒤 재발급해 주세요.';
 
@@ -55,7 +57,7 @@ function displaySecretOnce(result, selfRotation) {
 
 async function issueCredential(action, role, accountRef) {
     const identity = getVerifiedAuthSession('master');
-    if (!identity || credentialBusy || closeSecretDisplay) return;
+    if (!identity || credentialBusy || closeSecretDisplay || masterPasswordChangeUncertain) return;
     const selfRotation = action === 'rotate' && accountRef === identity.accountRef;
     const message = action === 'rotate' ? '기존 로그인 정보와 세션을 철회하고 재발급합니다.' : '새 로그인 정보를 최초 발급합니다.';
     if (!confirm(`${accountRef}\n${message}${selfRotation ? '\n본인 계정입니다. 새 정보를 반드시 보관하세요. 처리 중 오류가 발생하면 다른 마스터 또는 별도 승인된 관리자 복구가 필요할 수 있습니다.' : ''}`)) return;
@@ -68,6 +70,57 @@ async function issueCredential(action, role, accountRef) {
         displaySecretOnce(result, selfRotation);
     } catch { closeSecretDisplay?.(false); alert(credentialFailure); }
     finally { if (result) result.secret = ''; credentialBusy = false; }
+}
+
+function openMasterPasswordChange() {
+    const identity = getVerifiedAuthSession('master');
+    if (!identity || credentialBusy || closeSecretDisplay || masterPasswordChangeUncertain) return;
+    const generation = credentialUiGeneration;
+    const dialog = document.createElement('dialog');
+    dialog.className = 'rounded-2xl p-6 shadow-2xl w-full max-w-lg';
+    dialog.setAttribute('aria-label', 'Master 로그인 비밀번호 변경');
+    const inputs = ['현재 비밀번호', '새 비밀번호', '새 비밀번호 확인'].map((label, index) => {
+        const input = document.createElement('input');
+        input.type = 'password'; input.placeholder = label; input.setAttribute('aria-label', label);
+        input.autocomplete = index === 0 ? 'current-password' : 'new-password';
+        input.className = 'w-full border rounded-lg p-3 my-2';
+        input.maxLength = 128; input.spellcheck = false;
+        return input;
+    });
+    const message = document.createElement('p');
+    message.textContent = '새 비밀번호는 16~128자입니다. 앞뒤 공백과 제어문자는 사용할 수 없습니다.';
+    let closed = false;
+    const clear = () => { for (const input of inputs) input.value = ''; };
+    const cleanup = () => {
+        if (closed) return;
+        closed = true; clear(); dialog.remove(); closeSecretDisplay = null;
+    };
+    const submit = credentialButton('변경', async () => {
+        if (closed || credentialBusy || masterPasswordChangeUncertain || generation !== credentialUiGeneration || getVerifiedAuthSession('master') !== identity) return;
+        const validNew = inputs[1].value.length >= 16 && inputs[1].value.length <= 128 &&
+            inputs[1].value.trim() === inputs[1].value && !/[\p{Cc}\p{Cf}\p{Cs}]/u.test(inputs[1].value);
+        if (!validNew || inputs[1].value !== inputs[2].value || !inputs[0].value) {
+            clear(); message.textContent = '현재 비밀번호, 새 비밀번호 형식 및 확인값을 확인해 주세요.'; return;
+        }
+        credentialBusy = true; submit.disabled = true; masterPasswordChangeUncertain = true;
+        try {
+            await changeOwnMasterSecret(inputs[0].value, inputs[1].value);
+            clear();
+            if (closed || generation !== credentialUiGeneration) return;
+            cleanup();
+            await window.systemLogout();
+            alert('비밀번호가 변경되었습니다. 새 비밀번호로 다시 로그인하세요.');
+        } catch {
+            clear();
+            if (!closed && generation === credentialUiGeneration) message.textContent =
+                '변경 완료를 확인하지 못했습니다. 기존 비밀번호가 이미 변경되었을 수 있습니다. 다시 변경하지 말고 계정 상태를 확인하세요.';
+        } finally { clear(); credentialBusy = false; }
+    });
+    closeSecretDisplay = cleanup;
+    dialog.addEventListener('cancel', event => { event.preventDefault(); cleanup(); });
+    dialog.addEventListener('close', cleanup);
+    dialog.append(message, ...inputs, submit, credentialButton('닫기', cleanup));
+    document.body.append(dialog); dialog.showModal(); inputs[0].focus();
 }
 
 export function initMasterCredentialControls() {
@@ -85,6 +138,8 @@ export function initMasterCredentialControls() {
         return issueCredential(choice === '1' ? 'issue' : 'rotate', 'master', accountRef);
     });
     anchor.parentNode.append(masterCredentialButton);
+    masterPasswordButton = credentialButton('Master 로그인 비밀번호 변경', openMasterPasswordChange);
+    anchor.parentNode.append(masterPasswordButton);
 }
 
 function mountLicenseCredentialControls(target) {
@@ -109,6 +164,8 @@ onVerifiedSessionInvalidated(() => {
     credentialUiGeneration++;
     closeSecretDisplay?.(false);
     masterCredentialButton?.remove(); masterCredentialButton = null;
+    masterPasswordButton?.remove(); masterPasswordButton = null;
+    masterPasswordChangeUncertain = false;
     licenseCredentialControls?.remove(); licenseCredentialControls = null;
 });
 window.addEventListener('pagehide', () => { credentialUiGeneration++; closeSecretDisplay?.(false); });

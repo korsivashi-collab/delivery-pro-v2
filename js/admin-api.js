@@ -122,15 +122,17 @@ export async function loginWithSecret(secret, expectedRole) {
     try {
         await readyForAuth();
         invalidateVerifiedSession();
-        const normalized = typeof secret === 'string' ? secret.trim() : '';
-        if (!/^[A-Za-z0-9_-]{24}$/.test(normalized)) throw authFailure();
+        const allowedRoles = Array.isArray(expectedRole) ? expectedRole : [expectedRole];
+        const masterInput = allowedRoles.includes('master');
+        const normalized = typeof secret === 'string' ? (masterInput ? secret : secret.trim()) : '';
+        if (masterInput ? normalized.length < 16 || normalized.length > 128 || normalized.trim() !== normalized ||
+            /[\p{Cc}\p{Cf}\p{Cs}]/u.test(normalized) : !/^[A-Za-z0-9_-]{24}$/.test(normalized)) throw authFailure();
         const response = await authPost({ secret: normalized });
         if (attempt !== loginAttempt) throw authFailure();
         if (typeof response.customToken !== 'string' || !response.customToken) throw authFailure();
         await signInWithCustomToken(firebaseAuth, response.customToken);
         if (attempt !== loginAttempt) throw authFailure();
         const identity = await restoreFirebaseSession();
-        const allowedRoles = Array.isArray(expectedRole) ? expectedRole : [expectedRole];
         if (!identity || !allowedRoles.includes(identity.role)) throw authFailure();
         return identity;
     } catch {
@@ -159,6 +161,19 @@ export async function requestAuthCredential(input) {
         !Number.isSafeInteger(result.credentialVersion) || result.credentialVersion < 1 ||
         typeof result.secret !== 'string' || !/^[A-Za-z0-9_-]{24}$/.test(result.secret)) throw authFailure();
     return { uid: result.uid, secret: result.secret, credentialVersion: result.credentialVersion };
+}
+
+export async function changeOwnMasterSecret(currentSecret, newSecret) {
+    const identity = getVerifiedAuthSession('master');
+    const user = firebaseAuth.currentUser;
+    if (!identity || !user) throw authFailure();
+    const token = await user.getIdToken();
+    if (getVerifiedAuthSession('master') !== identity || firebaseAuth.currentUser !== user) throw authFailure();
+    const result = await authPost({ action: 'changeOwnSecret', currentSecret, newSecret }, token, '/api/auth-credentials');
+    if (getVerifiedAuthSession('master') !== identity || firebaseAuth.currentUser !== user || result.changed !== true ||
+        result.credentialVersion !== identity.credentialVersion + 1 ||
+        Object.keys(result).some(key => !['changed', 'credentialVersion'].includes(key))) throw authFailure();
+    return result;
 }
 
 export function subscribeLegacyRoutes(licenseKeys, callback, onError, getRevision) {
