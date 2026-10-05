@@ -4,7 +4,7 @@ const { AuthError, getServices, createMembershipCore, prepareRequest, sendError 
 function createHandler(getCore = () => createMembershipCore(getServices())) {
     return async (req, res) => {
         try {
-            prepareRequest(req, res, ['action', 'deviceId', 'licenseKey', 'dispatchKey', 'allowed', 'type', 'keyword', 'count', 'expireDate', 'changes', 'licenseKeys', 'routeOwnerId', 'confirmNewOwner']);
+            prepareRequest(req, res, ['action', 'deviceId', 'licenseKey', 'dispatchKey', 'allowed', 'type', 'keyword', 'count', 'expireDate', 'changes', 'licenseKeys', 'routeOwnerId', 'confirmNewOwner', 'phones', 'newKey', 'expectedKey']);
             const header = req.headers?.authorization;
             if (typeof header !== 'string' || !/^Bearer [^\s]+$/.test(header)) throw new AuthError();
             return res.status(200).json(await getCore().membership(header.slice(7), req.body));

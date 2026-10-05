@@ -4,15 +4,20 @@ const { AuthError, getServices, createAuthCore, prepareRequest, sendError } = re
 function createHandler(getCore = (diagnostics = false) => createAuthCore(getServices(process.env, undefined, diagnostics)), beforeLogin = async () => {}) {
     return async (req, res) => {
         try {
-            prepareRequest(req, res, ['secret', 'action', 'phone', 'deviceId']);
+            prepareRequest(req, res, ['secret', 'action', 'phone', 'deviceId', 'licenseKey']);
+            if (req.body.action === 'driverLogin') {
+                if (Object.keys(req.body).length !== 4 || Object.keys(req.body).some(f => !['action', 'licenseKey', 'phone', 'deviceId'].includes(f))) throw new AuthError(400, 'INVALID_REQUEST');
+                await beforeLogin({ remoteAddress: req.socket?.remoteAddress });
+                return res.status(200).json(await getCore().driverLogin(req.body));
+            }
             if (req.body.action === 'startTrial') {
                 if (Object.keys(req.body).length !== 3 || !Object.hasOwn(req.body, 'phone') || !Object.hasOwn(req.body, 'deviceId')) throw new AuthError(400, 'INVALID_REQUEST');
                 // Reuse the admission hook without exposing phone/deviceId or secrets.
                 await beforeLogin({ remoteAddress: req.socket?.remoteAddress });
                 return res.status(200).json(await getCore().startTrial(req.body));
             }
-            if (Object.keys(req.body).some(field => !['secret', 'action'].includes(field))) throw new AuthError(400, 'INVALID_REQUEST');
-            if (req.body.action === 'session' && Object.keys(req.body).length === 1) {
+            if (Object.keys(req.body).some(field => !(req.body.action === 'session' ? ['action', 'deviceId'] : ['secret', 'action']).includes(field))) throw new AuthError(400, 'INVALID_REQUEST');
+            if (req.body.action === 'session') {
                 const header = req.headers?.authorization;
                 if (typeof header !== 'string' || !/^Bearer [^\s]+$/.test(header)) {
                     throw new AuthError();
@@ -20,7 +25,7 @@ function createHandler(getCore = (diagnostics = false) => createAuthCore(getServ
                 // Preserve response-status and core/token validation order.
                 const response = res.status(200);
                 const core = getCore(true);
-                const result = await core.session(header.slice(7));
+                const result = await core.session(header.slice(7), req.body.deviceId);
                 return response.json(result);
             }
             if (req.body.action !== undefined) throw new AuthError(400, 'INVALID_REQUEST');
