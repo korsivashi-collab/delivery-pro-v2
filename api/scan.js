@@ -1,5 +1,5 @@
 // Gemini-only evaluation route. No OCR provider, parser, retry or fallback is connected here.
-const MODEL = 'gemini-2.5-flash-lite';
+const MODEL = 'gemini-3.5-flash-lite';
 const TIMEOUT_MS = 45000;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const FIELD_LIMITS = { storeName: 160, address: 600, phone: 80 };
