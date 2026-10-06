@@ -1,6 +1,6 @@
 import { withRequestDeadline } from './utils.js';
 
-export const GEMINI_SCAN_MODEL = 'gemini-2.5-flash-lite';
+export const GEMINI_SCAN_MODEL = 'gemini-3.5-flash-lite';
 export const GEMINI_SCAN_TIMEOUT_MS = 60000;
 const LIMITS = { storeName: 160, address: 600, phone: 80 };
 function scanError(code) { return Object.assign(new Error('명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.'), { code }); }
