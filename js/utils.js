@@ -75,7 +75,7 @@ export function getPureAddress(address) {
 // ==========================================
 // 3. 사진 고속 안전 압축 및 OCR 전처리 엔진
 // ==========================================
-export function toBase64_SafeCompress(file) {
+export function toBase64_SafeCompress(file, { preserveColor = false } = {}) {
     return new Promise((resolve, reject) => {
         const reader = new FileReader();
         reader.readAsDataURL(file);
@@ -97,7 +97,7 @@ export function toBase64_SafeCompress(file) {
                 
                 const ctx = canvas.getContext('2d'); 
                 // 황색/분홍 명세표 노이즈 제거 및 명암 선명화
-                ctx.filter = 'grayscale(100%) contrast(145%) brightness(105%)';
+                ctx.filter = preserveColor ? 'none' : 'grayscale(100%) contrast(145%) brightness(105%)';
                 ctx.drawImage(img, 0, 0, width, height);
                 resolve(canvas.toDataURL('image/jpeg', 0.85)); 
             };

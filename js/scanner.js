@@ -3,6 +3,7 @@
 // =================================================================
 // [배송 동선 PRO] 카메라 스캔 및 AI 하이브리드 주소/상호명 매칭 전담 모듈
 // ==========================================
+import { performGeminiScan, imageFromDataUrl, buildGeminiDestination, GEMINI_SCAN_MODEL } from './scan-gemini.js';
 import { 
     toBase64_SafeCompress, 
     extractPhoneLogic, 
@@ -74,6 +75,9 @@ export function checkScanLimit() {
 // ==========================================
 export const OCR_REQUEST_TIMEOUT_MS = 60000;
 export async function performOCR(base64Data, includeLayout = false, { signal } = {}) {
+    // LEGACY OCR - disabled during Gemini vision evaluation. No automatic rollback/fallback.
+    throw Object.assign(new Error('Legacy OCR is disabled during Gemini evaluation.'), { code: 'LEGACY_OCR_DISABLED' });
+    /* Preserved below for an explicitly reviewed future rollback. */
     const data = await withRequestDeadline(async requestSignal => {
         const response = await fetch('/api/ocr', { 
             method: 'POST', 
@@ -361,7 +365,9 @@ export function initCameraScan() {
         }
         activeScanRequest?.controller.abort();
         if (activeScanRequest?.loading) hideLoading();
-        const scan = { controller: new AbortController(), owner: state.getRouteOwnerId(), loading: false };
+        const scan = { controller: new AbortController(), owner: state.getRouteOwnerId(), loading: false,
+            diagnostics: { model: GEMINI_SCAN_MODEL, stage: 'validation', geminiSuccess: false, deliveryAdded: false,
+                manualAddressUsed: false, kakaoGeocodeAttemptCount: 0, kakaoRequestCount: 0, kakaoPlaceSearchCount: 0, errorCode: null } };
         activeScanRequest = scan;
         const signal = scan.controller.signal;
         const assertCurrent = () => {
@@ -417,6 +423,10 @@ export function initCameraScan() {
         assertCurrent();
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
+        // LEGACY OCR - disabled during Gemini vision evaluation.
+        // This closure preserves the original complete pipeline; it is never invoked.
+        // Rollback requires deliberate restoration of this call AND both disabled OCR boundaries.
+        async function legacyOCRPipelineDisabled() {
         let addressStr = null; 
         let rawOCRText = ""; 
         let ocrPages = [];
@@ -592,9 +602,68 @@ export function initCameraScan() {
             const newEl = document.querySelector(`li[data-id="${newDestId}"]`);
             if (newEl) newEl.scrollIntoView({ behavior: 'auto', block: 'start' });
         }
+        }
+
+        scan.diagnostics.stage = 'image';
+        showScanLoading('명세서 판독 중...');
+        const dataUrl = await withRequestDeadline(() => toBase64_SafeCompress(file, { preserveColor: true }),
+            15000, { signal, label: '사진 준비' });
+        assertCurrent();
+        scan.diagnostics.stage = 'gemini';
+        const fields = await performGeminiScan(imageFromDataUrl(dataUrl), { signal });
+        assertCurrent();
+        scan.diagnostics.geminiSuccess = true;
+        scan.diagnostics.fieldsPresent = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value !== null]));
+        hideScanLoading();
+        let addressStr = fields.address, extractedPhone = fields.phone, manualAddress = null;
+        if (!addressStr) {
+            const result = await promptScanAddress('배송지 주소를 확인할 수 없습니다.', '', extractedPhone || '', false);
+            if (!result || !result.address) return;
+            addressStr = manualAddress = result.address;
+            extractedPhone = result.phone;
+            scan.diagnostics.manualAddressUsed = true;
+        }
+        let coords = null;
+        scan.diagnostics.stage = 'geocode';
+        while (!coords) {
+            try {
+                showScanLoading('지도 위치 확인 중...');
+                scan.diagnostics.kakaoGeocodeAttemptCount++;
+                coords = await geocodeAddress(addressStr, { signal,
+                    onRequest: () => { scan.diagnostics.kakaoRequestCount++; } });
+                assertCurrent();
+                if (!hasValidDeliveryCoordinates(coords)) throw Object.assign(new Error('Invalid coordinates'), { code: 'KAKAO_ADDRESS_ERROR' });
+                hideScanLoading();
+            } catch (error) {
+                coords = null;
+                hideScanLoading();
+                if (error.name === 'AbortError') throw error;
+                const result = await promptScanAddress('지도에서 주소를 찾을 수 없습니다.', addressStr, extractedPhone || '', true);
+                if (!result || !result.address) return;
+                addressStr = manualAddress = result.address;
+                extractedPhone = result.phone;
+                scan.diagnostics.manualAddressUsed = true;
+            }
+        }
+        // Gemini storeName is kept as returned; no OCR parser or Kakao store-name correction.
+        assertCurrent();
+        scan.diagnostics.stage = 'save';
+        const currentDests = state.getDestinations();
+        const nextNum = currentDests.length > 0 ? Math.max(...currentDests.map(d => d.displayNumber)) + 1 : 1;
+        const added = state.addDestination(buildGeminiDestination({ ...fields, phone: extractedPhone },
+            coords, idCounter++, nextNum, manualAddress), { prepend: true });
+        if (!state.saveActiveData()) { scan.diagnostics.errorCode = 'LOCAL_SAVE_FAILED'; return; }
+        scan.diagnostics.deliveryAdded = true;
+        if (typeof window.renderList === 'function') window.renderList();
+        saveRouteToFirestore(deviceId, localStorage.getItem('deliveryProUserPhone') || '', state.getDestinations());
+        const newEl = document.querySelector('li[data-id="' + added.id + '"]');
+        if (newEl) newEl.scrollIntoView({ behavior: 'auto', block: 'start' });
         } catch (error) {
-            if (error.name !== 'AbortError') alert('스캔 처리를 완료하지 못했습니다. 다시 시도해 주세요.');
+            scan.diagnostics.errorCode = typeof error.code === 'string' && /^[A-Z_]+$/.test(error.code) ? error.code
+                : error.name === 'AbortError' ? 'SCAN_ABORTED' : error.name === 'TimeoutError' ? 'SCAN_TIMEOUT' : 'SCAN_ERROR';
+            if (error.name !== 'AbortError') alert('명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.');
         } finally {
+            console.debug('[Gemini 스캔 진단]', scan.diagnostics);
             if (activeScanRequest === scan) {
                 hideScanLoading(); activeScanRequest = null; e.target.value = '';
             }

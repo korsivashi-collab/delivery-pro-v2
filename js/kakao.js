@@ -41,13 +41,15 @@ function saveGeoCache(cache) {
 // 0-1. 지수 백오프(Exponential Backoff with Jitter) 429 방어 통신 래퍼
 // ==========================================
 async function fetchWithRetry(url, options = {}, maxRetries = 3) {
+    const { onRequest, ...fetchOptions } = options;
     return withRequestDeadline(async signal => {
     const delays = [200, 500, 1000];
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         let responseReceived = false;
         try {
             const res = await withRequestDeadline(async requestSignal => {
-                const response = await fetch(url, { ...options, signal: requestSignal });
+                onRequest?.();
+                const response = await fetch(url, { ...fetchOptions, signal: requestSignal });
                 responseReceived = true;
                 // 성공 응답의 본문까지 읽어야 fetch 이후 JSON pending도 상한에 포함된다.
                 const data = response.ok ? await response.json() : null;
@@ -83,7 +85,7 @@ export const KAKAO_OPERATION_TIMEOUT_MS = 25000;
 // ==========================================
 // 1. 주소 지오코딩 (캐시 우선 확인 & 429 지수 백오프 탑재)
 // ==========================================
-export async function geocodeAddress(address, { signal } = {}) {
+export async function geocodeAddress(address, { signal, onRequest } = {}) {
     return withRequestDeadline(async requestSignal => {
     if (!address) throw new Error('주소가 비어 있습니다.');
     const cleanKey = address.replace(/\[.*?\]/g, '').trim();
@@ -97,7 +99,7 @@ export async function geocodeAddress(address, { signal } = {}) {
 
     // 🌟 2단계: 카카오 1차 정밀 도로명/지번 주소 검색 (지수 백오프 적용)
     let response = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/address.json?query=${encodeURIComponent(cleanKey)}`, { 
-        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal: requestSignal
+        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal: requestSignal, onRequest
     });
     
     if (response && response.ok) {
@@ -116,7 +118,7 @@ export async function geocodeAddress(address, { signal } = {}) {
     
     // 🌟 3단계: 카카오 2차 키워드 검색 (순수 도로명/지번 추출)
     response = await fetchWithRetry(`https://dapi.kakao.com/v2/local/search/keyword.json?query=${encodeURIComponent(cleanKey)}`, { 
-        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal: requestSignal
+        headers: { 'Authorization': `KakaoAK ${KAKAO_REST_API_KEY}` }, signal: requestSignal, onRequest
     });
     
     if (response && response.ok) {
