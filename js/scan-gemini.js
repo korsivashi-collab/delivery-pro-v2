@@ -1,4 +1,5 @@
 import { withRequestDeadline } from './utils.js';
+import { normalizeDeliveryBaseAddress } from './address.js';
 
 export const GEMINI_SCAN_MODEL = 'gemini-3.5-flash-lite';
 export const GEMINI_SCAN_TIMEOUT_MS = 60000;
@@ -23,12 +24,19 @@ export function imageFromDataUrl(dataUrl) {
 }
 export function buildGeminiDestination(fields, coords, id, displayNumber, addressOverride = null) {
     if (!coords || !Number.isFinite(coords.lat) || !Number.isFinite(coords.lng)) throw scanError('KAKAO_ADDRESS_ERROR');
-    let address = addressOverride || fields.address;
+    const originalAddress = addressOverride || fields.address;
+    const baseAddress = normalizeDeliveryBaseAddress(originalAddress);
+    let address = baseAddress;
     if (typeof address !== 'string' || !address.trim()) throw scanError('ADDRESS_REQUIRED');
     address = address.trim();
     const storeName = fields.storeName || '';
     if (storeName && !address.startsWith('[')) address = `[${storeName}] ${address}`;
-    return { id, address, lat: coords.lat, lng: coords.lng, phone: fields.phone, displayNumber, storeName };
+    const destination = { id, address, lat: coords.lat, lng: coords.lng, phone: fields.phone, displayNumber, storeName };
+    // Reuse the project's original-address field only when it adds information.
+    // A manual correction does not overwrite the address recognized by Gemini.
+    const rawAddress = fields.address || originalAddress;
+    if (rawAddress !== baseAddress) destination.fullAddress = rawAddress;
+    return destination;
 }
 export async function performGeminiScan(image, { signal } = {}) {
     return withRequestDeadline(async requestSignal => {

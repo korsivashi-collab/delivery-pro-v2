@@ -1,29 +1,12 @@
 // js/scanner.js
 
 // =================================================================
-// [배송 동선 PRO] 카메라 스캔 및 AI 하이브리드 주소/상호명 매칭 전담 모듈
+// [배송 동선 PRO] 카메라 스캔 및 Gemini 명세서 판독 전담 모듈
 // ==========================================
 import { performGeminiScan, imageFromDataUrl, buildGeminiDestination, GEMINI_SCAN_MODEL } from './scan-gemini.js';
-import { 
-    toBase64_SafeCompress, 
-    extractPhoneLogic, 
-    extractAddressLogic, 
-    extractStoreNameLogic,
-    extractStoreNameByLayout,
-    isInvalidStoreCandidate,
-    logStoreNameDiagnostic, 
-    showLoading, 
-    hideLoading,
-    withRequestDeadline
-} from './utils.js';
-import { 
-    geocodeAddress, 
-    getPOIsByAddress, 
-    matchOCRStoreCandidate,
-    assessOCRStoreCandidate,
-    normalizeStoreMatchText,
-    STORE_NAME_MATCH_THRESHOLD
-} from './kakao.js';
+import { normalizeDeliveryBaseAddress } from './address.js';
+import { toBase64_SafeCompress, showLoading, hideLoading, withRequestDeadline } from './utils.js';
+import { geocodeAddress } from './kakao.js';
 import { state, hasValidDeliveryCoordinates } from './state.js';
 import { 
     isLicenseExpiredLocally, 
@@ -71,34 +54,6 @@ export function checkScanLimit() {
 }
 
 // ==========================================
-// 2. 서버 OCR API 통신
-// ==========================================
-export const OCR_REQUEST_TIMEOUT_MS = 60000;
-export async function performOCR(base64Data, includeLayout = false, { signal } = {}) {
-    // LEGACY OCR - disabled during Gemini vision evaluation. No automatic rollback/fallback.
-    throw Object.assign(new Error('Legacy OCR is disabled during Gemini evaluation.'), { code: 'LEGACY_OCR_DISABLED' });
-    /* Preserved below for an explicitly reviewed future rollback. */
-    const data = await withRequestDeadline(async requestSignal => {
-        const response = await fetch('/api/ocr', { 
-            method: 'POST', 
-            headers: { 'Content-Type': 'application/json' }, 
-            body: JSON.stringify({ imageContent: base64Data }),
-            signal: requestSignal
-        });
-        return response.json();
-    }, OCR_REQUEST_TIMEOUT_MS, { signal, label: '사진 판독' });
-    
-    if (data.error) throw new Error(data.error);
-    if (data.responses && data.responses[0].error) throw new Error(data.responses[0].error.message);
-    if (data.responses && data.responses[0].fullTextAnnotation) {
-        const annotation = data.responses[0].fullTextAnnotation;
-        return includeLayout ? { text: annotation.text, pages: annotation.pages || [] } : annotation.text;
-    }
-    
-    throw new Error("사진에서 글자를 찾을 수 없습니다.");
-}
-
-// ==========================================
 // 3. 주소 수동 입력/수정 모달
 // ==========================================
 let activeAddressModal = null;
@@ -110,8 +65,8 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
         const modal = document.getElementById('address-input-modal');
         const addrInput = document.getElementById('manual-address-input');
         const phoneInput = document.getElementById('manual-phone-input');
-        const snippetEl = document.getElementById('ocr-snippet');
-        const snippetContainer = document.getElementById('ocr-snippet-container');
+        const snippetEl = document.getElementById('scan-snippet');
+        const snippetContainer = document.getElementById('scan-snippet-container');
         const titleEl = document.getElementById('address-modal-title');
         const descEl = document.getElementById('address-modal-desc');
         const btnConfirm = document.getElementById('address-modal-confirm');
@@ -217,97 +172,8 @@ export async function editDestinationAddress(id) {
 }
 
 // ==========================================
-// 5. 카메라 스캔 및 AI 하이브리드 판독 파이프라인
+// 5. 카메라 스캔 및 Gemini 판독 파이프라인
 // ==========================================
-// 한 번 받은 OCR 응답의 복사본을 고정한다. 각 파이프라인은 이 원본만 읽는다.
-let ocrScanSequence = 0;
-function createScanOCRSnapshot(ocrResult) {
-    const pages = JSON.parse(JSON.stringify(ocrResult.pages || []));
-    const freeze = value => {
-        if (value && typeof value === 'object') {
-            Object.values(value).forEach(freeze);
-            Object.freeze(value);
-        }
-        return value;
-    };
-    return freeze({ scanId: `${Date.now()}-${++ocrScanSequence}`, rawOCRText: ocrResult.text || '', ocrPages: pages });
-}
-
-// 상호의 셀/라벨/신뢰도 규칙은 그대로 유지하고 주소 결과에 의존하는 실행 조건만 분리.
-function extractScanStoreOCR(snapshot) {
-    let finalStoreName = null;
-    const storeDecision = {
-        rawOCRText: snapshot.rawOCRText, layoutCandidate: null, textCandidate: null,
-        kakaoMatched: false, selected: null, source: ''
-    };
-    try {
-                // 3-1. 2D 좌표 기반 상호 추출 (회전 대응)
-                let layoutResult = { name: null, candidates: [] };
-                try { 
-                    layoutResult = extractStoreNameByLayout(snapshot.ocrPages); 
-                } catch (err) {}
-                storeDecision.layoutCandidate = layoutResult.name;
-
-                // 3-2. 명시적 상호 라벨의 텍스트 값 추출
-                let storeOCRText = snapshot.rawOCRText;
-                for (const segment of [...(layoutResult.excludedTextSegments || [])].sort((a, b) => b.start - a.start)) {
-                    storeOCRText = storeOCRText.slice(0, segment.start) + storeOCRText.slice(segment.start, segment.end).replace(/[^\r\n]/g, ' ') + storeOCRText.slice(segment.end);
-                }
-                let textStore = null;
-                try { 
-                    textStore = extractStoreNameLogic(storeOCRText); 
-                } catch (err) {}
-                storeDecision.textCandidate = textStore;
-
-                // 후보 풀 구성 (레이아웃 상호 -> 텍스트 영역 상호)
-                const ocrCandidates = [...new Set([layoutResult.name, ...(layoutResult.candidates || []).map(c => c.name), textStore].filter(Boolean))];
-                const normalizedCandidates = [...new Set(ocrCandidates.map(normalizeStoreMatchText))];
-                const assessments = ocrCandidates.map(name => assessOCRStoreCandidate(name, storeOCRText));
-                const trusted = assessments.filter(a => a.trustworthy && !isInvalidStoreCandidate(a.name));
-                const agreement = layoutResult.name && textStore && normalizeStoreMatchText(layoutResult.name) === normalizeStoreMatchText(textStore);
-                const clearCell = (layoutResult.candidates || []).some(c => c.name === layoutResult.name && c.cell?.confidenceReliable);
-                const unambiguous = normalizedCandidates.length === 1 && trusted.length > 0;
-                storeDecision.assessments = assessments;
-                storeDecision.kakaoCalled = false;
-                if (unambiguous && (agreement || clearCell || trusted.length === 1)) {
-                    finalStoreName = layoutResult.name || trusted[0].name;
-                    storeDecision.source = agreement ? 'ocr-agreement' : clearCell ? 'ocr-cell' : 'ocr-trusted';
-                }
-
-        return { finalStoreName, storeDecision, ocrCandidates, unambiguous, trusted };
-    } catch (error) {
-        console.error('상호 추출 오류:', error);
-        return { finalStoreName: null, storeDecision, ocrCandidates: [], unambiguous: false, trusted: [] };
-    }
-}
-
-function runScanOCRPipelines(snapshot) {
-    let address = null, phone = null;
-    const addressDetails = { scanId: snapshot.scanId };
-    // 하나의 추출 실패가 다른 필드의 추출을 막지 않는다.
-    try { address = extractAddressLogic(snapshot.rawOCRText, addressDetails); }
-    catch (error) { console.error('주소 추출 오류:', error); }
-    const store = extractScanStoreOCR(snapshot);
-    try { phone = extractPhoneLogic(snapshot.rawOCRText); }
-    catch (error) { console.error('전화번호 추출 오류:', error); }
-    console.log('[OCR진단-독립파이프라인]', {
-        scanId: snapshot.scanId,
-        rawOCRText: snapshot.rawOCRText,
-        legacyAddress: addressDetails.legacyAddress ?? null,
-        labeledAddress: addressDetails.labeledAddress ?? null,
-        sourceFrozen: Object.isFrozen(snapshot) && Object.isFrozen(snapshot.ocrPages),
-        address, storeName: store.finalStoreName, phone,
-        layoutCandidate: store.storeDecision.layoutCandidate,
-        textCandidate: store.storeDecision.textCandidate,
-        storeCandidates: [...store.ocrCandidates],
-        stage: '주소 수동 보정/geocode/Kakao 교차검증 이전'
-    });
-    return { address, store, phone, scanId: snapshot.scanId,
-        legacyAddress: addressDetails.legacyAddress ?? null,
-        labeledAddress: addressDetails.labeledAddress ?? null,
-        labeledStoreName: store.finalStoreName };
-}
-
 let activeScanRequest = null;
 const initializedCameraInputs = new WeakSet();
 
@@ -338,7 +204,7 @@ export function initCameraScan() {
         cameraInput.value = '';
     });
     cameraInput.addEventListener('cancel', () => {
-        // Picker cancellation is not OCR cancellation and must not abort an active scan.
+        // Picker cancellation is not scan cancellation and must not abort an active scan.
         if (!activeScanRequest) cameraInput.value = '';
     });
     
@@ -423,187 +289,6 @@ export function initCameraScan() {
         assertCurrent();
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
-        // LEGACY OCR - disabled during Gemini vision evaluation.
-        // This closure preserves the original complete pipeline; it is never invoked.
-        // Rollback requires deliberate restoration of this call AND both disabled OCR boundaries.
-        async function legacyOCRPipelineDisabled() {
-        let addressStr = null; 
-        let rawOCRText = ""; 
-        let ocrPages = [];
-        let extractedPhone = null;
-        let ocrFields = null;
-        let manualAddress = null;
-        let kakaoPlaceSearchAttempted = false;
-        
-        // 1단계: OCR 원격 판독 (텍스트 및 공간 좌표 추출)
-        showScanLoading("사진 판독 중...");
-        try {
-            const base64Image = await withRequestDeadline(() => toBase64_SafeCompress(file), 15000, { signal, label: '사진 준비' });
-            const imageContent = base64Image.split(',')[1];
-            const ocrResult = await performOCR(imageContent, true, { signal });
-            assertCurrent();
-            
-            const ocrSnapshot = createScanOCRSnapshot(ocrResult);
-            rawOCRText = ocrSnapshot.rawOCRText;
-            ocrPages = ocrSnapshot.ocrPages;
-            ocrFields = runScanOCRPipelines(ocrSnapshot);
-            
-            addressStr = ocrFields.address;
-            console.log('[주소진단-1 OCR파싱]', {
-                rawOCRText,
-                addressStr
-            });
-            extractedPhone = ocrFields.phone;
-            hideScanLoading();
-        } catch (error) {
-            hideScanLoading();
-            const result = await promptScanAddress("사진 인식 실패", "", "", false);
-            if (!result || !result.address) { e.target.value = ''; return; }
-            manualAddress = result.address;
-            addressStr = manualAddress; 
-            extractedPhone = result.phone;
-        }
-
-        if (!addressStr && rawOCRText) {
-            let snippet = rawOCRText.replace(/\n/g, ' ').substring(0, 40);
-            const result = await promptScanAddress(snippet + "...", "", extractedPhone, false);
-            if (!result || !result.address) { e.target.value = ''; return; }
-            manualAddress = result.address;
-            addressStr = manualAddress; 
-            extractedPhone = result.phone;
-        }
-
-        // 2단계: 카카오 주소 지오코딩 (위도/경도 좌표 획득)
-        let coords = null;
-        while (!coords) {
-            try {
-                showScanLoading("지도 위치 확인 중...");
-                coords = await geocodeAddress(addressStr, { signal });
-                assertCurrent();
-                console.log('[주소진단-2 GEOCODE]', {
-                    addressStr,
-                    coords
-                });
-                hideScanLoading();
-            } catch (error) {
-                hideScanLoading();
-                const result = await promptScanAddress("지도에서 주소를 찾을 수 없습니다.", addressStr, extractedPhone, true);
-                if (!result || !result.address) { e.target.value = ''; return; }
-                manualAddress = result.address;
-            addressStr = manualAddress; 
-                extractedPhone = result.phone;
-            }
-        }
-
-        // 3단계: 독립 OCR 후보를 유지한 채 필요한 Kakao 교차검증만 최종 단계에서 수행.
-        const storeOCR = ocrFields?.store || {
-            finalStoreName: null, ocrCandidates: [], unambiguous: false, trusted: [],
-            storeDecision: { rawOCRText, layoutCandidate: null, textCandidate: null,
-                kakaoMatched: false, selected: null, source: '', kakaoCalled: false }
-        };
-        let finalStoreName = storeOCR.finalStoreName;
-        const storeDecision = storeOCR.storeDecision;
-        const { ocrCandidates, unambiguous, trusted } = storeOCR;
-
-        if (rawOCRText) {
-            showScanLoading("상호명 분석 중...");
-            try {
-                // 최신 기준본의 OCR 상호 선택을 우선 유지한다.
-                if (!finalStoreName) {
-                    const validOcrCandidate = trusted.length > 0 ? trusted[0].name : (ocrCandidates.length > 0 ? ocrCandidates[0] : null);
-                    if (validOcrCandidate) {
-                        finalStoreName = validOcrCandidate;
-                        storeDecision.source = 'ocr-direct-only';
-                    }
-                }
-
-                // OCR 최종 상호가 비었을 때만 원문 교차검증용 장소 조회를 최대 1회 수행.
-                if ((!finalStoreName || !finalStoreName.trim()) && addressStr && !kakaoPlaceSearchAttempted) {
-                    finalStoreName = null;
-                    kakaoPlaceSearchAttempted = true;
-                    storeDecision.kakaoCalled = true;
-                    storeDecision.kakaoCallCount = 1;
-                    try {
-                        const kakaoResult = await getPOIsByAddress(addressStr, true, { signal });
-                        assertCurrent();
-                        storeDecision.kakaoCandidates = kakaoResult.places || [];
-                        finalStoreName = matchOCRStoreCandidate(
-                            ocrCandidates, storeDecision.kakaoCandidates,
-                            STORE_NAME_MATCH_THRESHOLD, rawOCRText, storeDecision
-                        );
-                        storeDecision.kakaoMatched = Boolean(finalStoreName);
-                        storeDecision.source = finalStoreName ? 'kakao-raw-ocr-match' : 'kakao-fallback-unmatched';
-                    } catch (error) {
-                        storeDecision.kakaoMatched = false;
-                        storeDecision.source = 'kakao-fallback-failed';
-                    }
-                }
-            } catch (error) {
-                console.error("상호 추출 오류:", error);
-            }
-            hideScanLoading();
-        }
-
-        storeDecision.selected = finalStoreName;
-        logStoreNameDiagnostic('상호 최종 결정', storeDecision);
-
-        assertCurrent();
-        // 4단계: 배송 목록 추가, 렌더링 및 관제 서버 실시간 동기화
-        if (coords) {
-            let finalAddress = manualAddress || ocrFields?.legacyAddress || ocrFields?.labeledAddress || addressStr;
-            const labeledStoreName = finalStoreName || '';
-            const finalPhone = extractedPhone;
-            
-            // 리스트 UI 표출을 위해 순수 주소 앞에 [상호명]을 강제 결합
-            if (labeledStoreName && !finalAddress.startsWith('[')) {
-                finalAddress = `[${labeledStoreName}] ${finalAddress}`;
-            }
-
-            console.log('[주소진단-3 최종주소]', {
-                scanId: ocrFields?.scanId, addressStr, manualAddress,
-                legacyAddress: ocrFields?.legacyAddress ?? null,
-                labeledAddress: ocrFields?.labeledAddress ?? null,
-                address_name: coords?.address_name, resolvedAddress: finalAddress
-            });
-            console.log('[OCR진단-최종조합]', {
-                scanId: ocrFields?.scanId,
-                legacyAddress: ocrFields?.legacyAddress ?? null,
-                labeledAddress: ocrFields?.labeledAddress ?? null,
-                manualAddress, labeledStoreName, phone: finalPhone,
-                parsedAddress: ocrFields?.address ?? null,
-                geocodeInput: addressStr, geocodeAddressName: coords?.address_name,
-                finalAddress, finalStoreName: labeledStoreName, finalPhone,
-                addressChangedInCombination: Boolean(ocrFields?.address && finalAddress !== ocrFields.address),
-                source: manualAddress ? 'manual' : ocrFields?.legacyAddress ? 'legacy' : ocrFields?.labeledAddress ? 'labeled' : 'manual'
-            });
-
-            const currentDests = state.getDestinations();
-            let nextNum = currentDests.length > 0 ? Math.max(...currentDests.map(d => d.displayNumber)) + 1 : 1;
-            const requestedId = idCounter++;
-            
-            const addedDestination = state.addDestination({
-                id: requestedId,
-                address: finalAddress,
-                lat: coords.lat, 
-                lng: coords.lng, 
-                phone: finalPhone, 
-                displayNumber: nextNum,
-                storeName: labeledStoreName
-            }, { prepend: true });
-            const newDestId = addedDestination.id;
-            
-            if (!state.saveActiveData()) { e.target.value = ''; return; }
-            if (typeof window.renderList === 'function') window.renderList();
-
-            // 관제 센터 서버(routes/{deviceId}) 실시간 동기화
-            const driverPhone = localStorage.getItem('deliveryProUserPhone') || "";
-            saveRouteToFirestore(deviceId, driverPhone, state.getDestinations());
-            
-            const newEl = document.querySelector(`li[data-id="${newDestId}"]`);
-            if (newEl) newEl.scrollIntoView({ behavior: 'auto', block: 'start' });
-        }
-        }
-
         scan.diagnostics.stage = 'image';
         showScanLoading('명세서 판독 중...');
         const dataUrl = await withRequestDeadline(() => toBase64_SafeCompress(file, { preserveColor: true }),
@@ -615,11 +300,12 @@ export function initCameraScan() {
         scan.diagnostics.geminiSuccess = true;
         scan.diagnostics.fieldsPresent = Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, value !== null]));
         hideScanLoading();
-        let addressStr = fields.address, extractedPhone = fields.phone, manualAddress = null;
+        let addressStr = normalizeDeliveryBaseAddress(fields.address), extractedPhone = fields.phone, manualAddress = null;
         if (!addressStr) {
             const result = await promptScanAddress('배송지 주소를 확인할 수 없습니다.', '', extractedPhone || '', false);
             if (!result || !result.address) return;
-            addressStr = manualAddress = result.address;
+            manualAddress = result.address;
+            addressStr = normalizeDeliveryBaseAddress(manualAddress);
             extractedPhone = result.phone;
             scan.diagnostics.manualAddressUsed = true;
         }
@@ -640,12 +326,13 @@ export function initCameraScan() {
                 if (error.name === 'AbortError') throw error;
                 const result = await promptScanAddress('지도에서 주소를 찾을 수 없습니다.', addressStr, extractedPhone || '', true);
                 if (!result || !result.address) return;
-                addressStr = manualAddress = result.address;
+                manualAddress = result.address;
+                addressStr = normalizeDeliveryBaseAddress(manualAddress);
                 extractedPhone = result.phone;
                 scan.diagnostics.manualAddressUsed = true;
             }
         }
-        // Gemini storeName is kept as returned; no OCR parser or Kakao store-name correction.
+        // Gemini storeName is kept as returned, without Kakao store-name correction.
         assertCurrent();
         scan.diagnostics.stage = 'save';
         const currentDests = state.getDestinations();
