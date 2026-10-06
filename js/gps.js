@@ -24,18 +24,14 @@ const gpsRequests = new Map();
 let isGpsWatcherActive = false; // 기사님의 GPS 활성화 설정 상태 보존
 let gpsSession = 0;
 
-function canTrackAutomatically() {
+function canTrackGps() {
     return isGpsWatcherActive && state.getDestinations().length > 0;
 }
 
 // Recheck the list without changing the user's saved GPS preference.
 export function refreshGpsTracking() {
-    if (!isGpsWatcherActive || document.visibilityState === 'hidden') {
+    if (!canTrackGps() || document.visibilityState === 'hidden') {
         if (state.getGpsWatchId() !== null || unsubRequestDevice || unsubRequestKey) _stopHardwareWatcher();
-    } else if (state.getDestinations().length === 0) {
-        if (state.getGpsWatchId() !== null) _stopHardwareWatcher();
-        // Explicit dispatch requests remain separate from automatic tracking.
-        listenToGpsRequests();
     } else {
         _startHardwareWatcher();
     }
@@ -78,14 +74,14 @@ function getDbInstance() {
 // ==========================================
 export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null, request = null) {
     const session = gpsSession;
-    if (!force && !canTrackAutomatically()) return false;
+    if (!canTrackGps()) return false;
     // 수동 요청을 수신한 뒤에는 새 일반 보고가 먼저 전송되지 않도록 한다.
     if (!force && hasPendingForcedGpsRequest()) return false;
     if (reportInFlight) {
         if (!force) return false;
         await reportInFlight;
     }
-    if (session !== gpsSession || document.visibilityState === 'hidden' || navigator.onLine === false) return false;
+    if (!canTrackGps() || session !== gpsSession || document.visibilityState === 'hidden' || navigator.onLine === false) return false;
     if (request && gpsRequestClock() >= request.expiresAt) return false;
     let gps = state.getLastKnownGps();
     // 이전 write를 기다리는 동안 캐시가 만료됐다면 강제 요청에 한해 새 위치를 확보한다.
@@ -115,7 +111,7 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     reportInFlight = Promise.resolve().then(async () => {
         try {
             // SDK에 넘기기 전 예약된 일반 보고도 수동 요청에 우선권을 양보한다.
-            if (session !== gpsSession || (!force && !canTrackAutomatically())) return false;
+            if (session !== gpsSession || !canTrackGps()) return false;
             if (!force && hasPendingForcedGpsRequest()) return false;
             await setDoc(doc(db, 'gps_reports', deviceId), {
                 deviceId, phone, lat, lng, updatedAt: now, requestId: request?.requestId || null
@@ -140,7 +136,7 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
 
 // Device and license documents carry the same requestId (or legacy requestedAt).
 async function handleGpsRequest(snap, identity, deviceId) {
-    if (identity !== requestListenerIdentity || document.visibilityState === 'hidden' || navigator.onLine === false || !snap.exists()) return false;
+    if (!canTrackGps() || identity !== requestListenerIdentity || document.visibilityState === 'hidden' || navigator.onLine === false || !snap.exists()) return false;
     const data = snap.data();
     const timestamp = data.requestedAt;
     const age = Date.now() - timestamp;
@@ -175,7 +171,7 @@ async function handleGpsRequest(snap, identity, deviceId) {
 }
 
 function listenToGpsRequests() {
-    if (!isGpsWatcherActive || document.visibilityState === 'hidden') return;
+    if (!canTrackGps() || document.visibilityState === 'hidden') return;
     const deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
     const licKey = localStorage.getItem('deliveryProKey');
     const identity = deviceId + '|' + (licKey || '');
@@ -202,7 +198,7 @@ function listenToGpsRequests() {
 function _startHardwareWatcher() {
     listenToGpsRequests();
 
-    if (!canTrackAutomatically()) return;
+    if (!canTrackGps()) return;
 
     if (!navigator.geolocation) { invalidateGps(); return; }
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
@@ -212,7 +208,7 @@ function _startHardwareWatcher() {
     try {
         const watchId = navigator.geolocation.watchPosition(
             (pos) => {
-                if (session !== gpsSession || !canTrackAutomatically()) return;
+                if (session !== gpsSession || !canTrackGps()) return;
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
 
@@ -283,6 +279,7 @@ export function stopGpsWatcher() {
 // ==========================================
 export function getDeviceRealGPS() {
     return new Promise((resolve) => {
+        if (!canTrackGps()) return resolve(null);
         if (!navigator.geolocation) {
             invalidateGps();
             return resolve(null);
@@ -294,7 +291,7 @@ export function getDeviceRealGPS() {
         try {
             navigator.geolocation.getCurrentPosition(
                 (pos) => {
-                    if (session !== gpsSession) { resolve(null); return; }
+                    if (session !== gpsSession || !canTrackGps()) { resolve(null); return; }
                     const gps = cachePosition(pos);
                     resolve(gps ? { ...gps, isReal: true } : null);
                 },
@@ -339,7 +336,7 @@ export async function setEndLocationGPS() {
 // The SDK owns retries while a write is pending; reconnect starts no competing write.
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('online', async () => {
-        if (!canTrackAutomatically() || document.visibilityState !== 'visible' || reportInFlight) return;
+        if (!canTrackGps() || document.visibilityState !== 'visible' || reportInFlight) return;
         const gps = await getDeviceRealGPS();
         if (gps && state.isFreshGps(gps)) await reportGpsToFirestore(gps.lat, gps.lng);
     });
