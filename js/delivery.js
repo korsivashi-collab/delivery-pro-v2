@@ -10,6 +10,7 @@ import { completionPhotos } from './completion-photos.js';
 import { archiveCompletedDelivery } from './support.js';
 import { state } from './state.js';
 import { getOrCreateDeviceId, updatePhotoCompButtonState } from './auth.js';
+import { storageDiagnostic } from './storage-diagnostics.js';
 
 let pendingCompletionId = null;
 let selectedCompTag = "";
@@ -18,7 +19,7 @@ function localCompletionContext() {
     try {
         return { deviceId: getOrCreateDeviceId(), phone: localStorage.getItem('deliveryProUserPhone') || '',
             completionOwnership: getCompletionOwnershipContext() };
-    } catch (error) { state.reportStorageFailure(error); return null; }
+    } catch (error) { state.reportStorageFailure(error, { operation: 'localCompletionContext', stage: 'read-before' }); return null; }
 }
 
 // ==========================================
@@ -40,7 +41,7 @@ export function completeDestination(id) {
     if (etcInput) etcInput.value = "";
     
     try { updatePhotoCompButtonState(!!localStorage.getItem('deliveryProDispatchKey')); }
-    catch (error) { state.reportStorageFailure(error); return; }
+    catch (error) { state.reportStorageFailure(error, { operation: 'completeDestination', stage: 'read-before' }); return; }
     document.getElementById('completion-modal')?.classList.remove('hidden');
 }
 
@@ -155,11 +156,11 @@ export function initPhotoCompletion() {
             const currentItem = state.getDestinations().find(destination => destination.id === item.id);
             if (state.getRouteOwnerId() !== context.completionOwnership.routeOwnerId || !currentItem) return;
             committed = finishLocally(currentItem, tag, context, photoId);
-        } catch (error) { state.reportStorageFailure(error); }
+        } catch (error) { state.reportStorageFailure(error, { operation: 'photoCompletion', stage: 'logic', photoBytes: file.size }); }
         finally {
             photoStagingIds.delete(item.id);
             e.target.value = '';
-            if (photoId && !committed) completionPhotos.remove(photoId).catch(error => console.error('사진 정리 실패:', error));
+            if (photoId && !committed) completionPhotos.remove(photoId).catch(error => console.error('사진 정리 실패:', storageDiagnostic(error, { operation: 'photoCompletionCleanup', storage: 'indexedDB' })));
         }
     });
 }

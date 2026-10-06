@@ -1,4 +1,5 @@
 // js/state.js
+import { storageErrorContext, storageDiagnostic } from './storage-diagnostics.js';
 
 // =================================================================
 // [배송 동선 PRO] 공용 상태(데이터) 저장소
@@ -34,47 +35,107 @@ function restoreMemory(snapshot) {
     routeUpdatedAt = saved.routeUpdatedAt;
 }
 
-function restoreLocalValues(before) {
+function localCounts() {
+    const count = key => { try { const value = JSON.parse(localStorage.getItem(key) || '[]'); return Array.isArray(value) ? value.length : null; } catch (_) { return null; } };
+    let journalLength = null;
+    try { journalLength = (localStorage.getItem(LOCAL_TRANSACTION_KEY) || '').length; } catch (_) {}
+    return { activeDestinationCount: destinations.length, historyCount: count('deliveryPro_history'), transmissionCount: count('deliveryPro_transmissions'), journalLength };
+}
+
+function serializeLocal(key, value, operation) {
+    try { return JSON.stringify(value); }
+    catch (error) {
+        let oldLength = null;
+        try { oldLength = localStorage.getItem(key)?.length || 0; } catch (_) {}
+        throw storageErrorContext(error, { operation, stage: 'serialize', key, oldLength, ...localCounts() });
+    }
+}
+
+function restoreLocalValues(before, context = {}) {
     let restored = true;
-    for (const [key, value] of Object.entries(before)) {
+    // Free space before restoring values that grow. Keep the journal until every restore succeeds.
+    const entries = Object.entries(before);
+    const delta = ([key, value]) => { try { return (value?.length || 0) - (localStorage.getItem(key)?.length || 0); } catch (_) { return 0; } };
+    entries.sort((a, b) => delta(a) - delta(b));
+    for (const [key, value] of entries) {
+        let oldLength = null;
         try {
+            const current = localStorage.getItem(key);
+            oldLength = current?.length || 0;
+            if (current === value) continue;
             if (value === null && typeof localStorage.removeItem === 'function') localStorage.removeItem(key);
             else localStorage.setItem(key, value === null ? '' : value);
-        } catch (_) { restored = false; }
+        } catch (error) {
+            restored = false;
+            console.error('배송 저장 복구 실패:', storageDiagnostic(error, { ...localCounts(), ...context, operation: 'restoreLocalValues', stage: 'rollback', key, oldLength, newLength: value?.length || 0 }));
+        }
     }
     if (restored) {
         try { localStorage.setItem(LOCAL_TRANSACTION_KEY, ''); }
-        catch (_) { restored = false; }
+        catch (error) {
+            restored = false;
+            console.error('배송 저장 복구 실패:', storageDiagnostic(error, { ...localCounts(), ...context, operation: 'restoreLocalValues', stage: 'rollback', key: LOCAL_TRANSACTION_KEY, oldLength: context.journalLength ?? null, newLength: 0 }));
+        }
     }
     return restored;
 }
 
 function pendingLocalRecovery() {
-    const raw = localStorage.getItem(LOCAL_TRANSACTION_KEY);
+    let raw;
+    try { raw = localStorage.getItem(LOCAL_TRANSACTION_KEY); }
+    catch (error) { throw storageErrorContext(error, { operation: 'pendingLocalRecovery', stage: 'read-before', key: LOCAL_TRANSACTION_KEY }); }
     if (!raw) return null;
-    const journal = JSON.parse(raw);
+    let journal;
+    try { journal = JSON.parse(raw); }
+    catch (error) { throw storageErrorContext(error, { operation: 'pendingLocalRecovery', stage: 'read-before', key: LOCAL_TRANSACTION_KEY, journalLength: raw.length }); }
     const allowed = ['deliveryPro_active_destinations', 'deliveryPro_end_location', 'deliveryPro_route_metadata', 'deliveryPro_history', 'deliveryPro_transmissions'];
-    if (journal.version !== 1 || !journal.before ||
+    if (!journal || journal.version !== 1 || !journal.before || typeof journal.before !== 'object' || Array.isArray(journal.before) ||
         !Object.entries(journal.before).every(([key, value]) => allowed.includes(key) && (value === null || typeof value === 'string'))) {
-        throw new Error('로컬 복구 기록을 확인할 수 없습니다.');
+        throw storageErrorContext(new TypeError('로컬 복구 기록을 확인할 수 없습니다.'), { operation: 'pendingLocalRecovery', stage: 'read-before', key: LOCAL_TRANSACTION_KEY, journalLength: raw.length });
     }
     return journal.before;
 }
 
-function writeLocalValues(values) {
+function writeLocalValues(values, operation = 'writeLocalValues', counts = localCounts()) {
     const pending = pendingLocalRecovery();
-    if (pending && !restoreLocalValues(pending)) throw new Error('이전 로컬 저장 복구가 필요합니다.');
-    const before = Object.fromEntries(Object.keys(values).map(key => [key, localStorage.getItem(key)]));
+    if (pending && !restoreLocalValues(pending)) throw storageErrorContext(new Error('이전 로컬 저장 복구가 필요합니다.'), { operation, stage: 'rollback', key: LOCAL_TRANSACTION_KEY });
+    if (operation === 'saveActiveData') {
+        // Resolve old journals first. The owned metadata is the sole read source, so these
+        // unused copies can be retired before allocating a new journal, including on upgrade.
+        for (const key of ['deliveryPro_active_destinations', 'deliveryPro_end_location']) {
+            try { localStorage.removeItem(key); }
+            catch (error) { console.error('배송 중복 캐시 정리 실패:', storageDiagnostic(error, { ...counts, operation: 'retireLegacyCache', stage: 'cleanup', key })); }
+        }
+    }
+    const before = {}, changed = {}, lengths = {};
+    for (const [key, value] of Object.entries(values)) {
+        let old;
+        try { old = localStorage.getItem(key); }
+        catch (error) { throw storageErrorContext(error, { operation, stage: 'read-before', key, ...counts, newLength: value.length }); }
+        lengths[key] = { oldLength: old?.length || 0, newLength: value.length };
+        if (old !== value) { before[key] = old; changed[key] = value; }
+    }
+    if (!Object.keys(changed).length) return;
     // All new values and the undo record have already been serialized before any write.
-    localStorage.setItem(LOCAL_TRANSACTION_KEY, JSON.stringify({ version: 1, before }));
+    const journal = serializeLocal(LOCAL_TRANSACTION_KEY, { version: 1, before }, operation);
+    const context = { operation, ...counts, lengths, journalLength: journal.length };
+    try { localStorage.setItem(LOCAL_TRANSACTION_KEY, journal); }
+    catch (error) { throw storageErrorContext(error, { ...context, stage: 'write-journal', key: LOCAL_TRANSACTION_KEY, oldLength: 0, newLength: journal.length }); }
+    let stage = 'write-value', key = null;
     try {
-        for (const [key, value] of Object.entries(values)) localStorage.setItem(key, value);
+        // Shrinking replacements first avoids a needless intermediate peak.
+        const entries = Object.entries(changed).sort(([a], [b]) =>
+            (lengths[a].newLength - lengths[a].oldLength) - (lengths[b].newLength - lengths[b].oldLength));
+        for (const [entryKey, value] of entries) { key = entryKey; localStorage.setItem(key, value); }
         // Clearing the undo record is the commit point. Until then recovery reads the old state.
+        stage = 'clear-journal'; key = LOCAL_TRANSACTION_KEY;
         localStorage.setItem(LOCAL_TRANSACTION_KEY, '');
     } catch (error) {
-        restoreLocalValues(before);
-        throw error;
+        restoreLocalValues(before, context);
+        throw storageErrorContext(error, { ...context, stage, key,
+            ...(lengths[key] || { oldLength: journal.length, newLength: 0 }) });
     }
+    console.debug('배송 로컬 저장 완료:', { ...context, stage: 'committed' });
 }
 
 function safeDeliveryText(value) {
@@ -198,8 +259,8 @@ export const state = {
         startLocation = null;
         committedMemory = memorySnapshot();
     },
-    reportStorageFailure(error) {
-        console.error('배송 데이터 로컬 저장 실패:', error);
+    reportStorageFailure(error, context = {}) {
+        console.error('배송 데이터 로컬 저장 실패:', storageDiagnostic(error, { ...localCounts(), ...context }));
         if (typeof alert === 'function') alert('기기에 배송 데이터를 저장하지 못했습니다. 마지막으로 저장된 상태를 유지합니다. 저장 공간과 저장소 접근 상태를 확인한 후 다시 시도해 주세요.');
         try { if (typeof window !== 'undefined' && typeof window.renderList === 'function') window.renderList(); } catch (_) {}
     },
@@ -209,12 +270,13 @@ export const state = {
             restoreLocalValues(before);
             if (Object.prototype.hasOwnProperty.call(before, key)) return before[key];
         }
-        return localStorage.getItem(key);
+        try { return localStorage.getItem(key); }
+        catch (error) { throw storageErrorContext(error, { operation: 'readLocalData', stage: 'read-before', key }); }
     },
     writeLocalHistory(history) {
         if (localTransaction) { localTransaction.history = history; return true; }
-        try { writeLocalValues({ deliveryPro_history: JSON.stringify(history) }); return true; }
-        catch (error) { this.reportStorageFailure(error); return false; }
+        try { writeLocalValues({ deliveryPro_history: serializeLocal('deliveryPro_history', history, 'writeLocalHistory') }, 'writeLocalHistory', { ...localCounts(), historyCount: history.length }); return true; }
+        catch (error) { this.reportStorageFailure(error, { operation: 'writeLocalHistory' }); return false; }
     },
     writeTransmissions(queue, history = undefined) {
         if (localTransaction) {
@@ -223,13 +285,14 @@ export const state = {
             return true;
         }
         try {
-            const values = { deliveryPro_transmissions: JSON.stringify(queue) };
-            if (history !== undefined) values.deliveryPro_history = JSON.stringify(history);
-            writeLocalValues(values);
+            const values = { deliveryPro_transmissions: serializeLocal('deliveryPro_transmissions', queue, 'writeTransmissions') };
+            if (history !== undefined) values.deliveryPro_history = serializeLocal('deliveryPro_history', history, 'writeTransmissions');
+            writeLocalValues(values, 'writeTransmissions', { ...localCounts(), transmissionCount: queue.length,
+                ...(history !== undefined ? { historyCount: history.length } : {}) });
             return true;
         } catch (error) {
             // Background bookkeeping must retain the previous queue and never show a network popup.
-            console.error('전송대기 로컬 저장 실패:', error);
+            console.error('전송대기 로컬 저장 실패:', storageDiagnostic(error, { ...localCounts(), operation: 'writeTransmissions', stage: 'serialize' }));
             return false;
         }
     },
@@ -246,7 +309,7 @@ export const state = {
         } catch (error) {
             localTransaction = null;
             restoreMemory(before);
-            this.reportStorageFailure(error);
+            this.reportStorageFailure(error, { operation: 'runLocalTransaction', stage: 'logic' });
             return false;
         }
     },
@@ -334,23 +397,30 @@ export const state = {
         try {
             reconcileStartLocation();
             const revision = updatedAt === null ? Math.max(Date.now(), routeUpdatedAt + 1) : updatedAt;
-            const snapshot = memorySnapshot(revision);
+            const snapshot = serializeLocal('deliveryPro_route_metadata', { destinations, endLocation, startLocation, routeUpdatedAt: revision }, 'saveActiveData');
             const values = {};
-            if (history !== undefined) values.deliveryPro_history = JSON.stringify(history);
-            if (transmissions !== undefined) values.deliveryPro_transmissions = JSON.stringify(transmissions);
-            values.deliveryPro_active_destinations = JSON.stringify(destinations);
-            values.deliveryPro_end_location = JSON.stringify(endLocation);
-            values.deliveryPro_route_metadata = JSON.stringify({ routeOwnerId, updatedAt: revision, destinations, endLocation,
-                startSelected: startLocation !== null, startLocation });
-            writeLocalValues(values);
+            if (history !== undefined) values.deliveryPro_history = serializeLocal('deliveryPro_history', history, 'saveActiveData');
+            if (transmissions !== undefined) values.deliveryPro_transmissions = serializeLocal('deliveryPro_transmissions', transmissions, 'saveActiveData');
+            // loadActiveData already reads only this owned snapshot.
+            values.deliveryPro_route_metadata = serializeLocal('deliveryPro_route_metadata', { routeOwnerId, updatedAt: revision, destinations, endLocation,
+                startSelected: startLocation !== null, startLocation }, 'saveActiveData');
+            writeLocalValues(values, 'saveActiveData', { ...localCounts(),
+                ...(history !== undefined ? { historyCount: history.length } : {}),
+                ...(transmissions !== undefined ? { transmissionCount: transmissions.length } : {}) });
             routeUpdatedAt = revision;
             committedMemory = snapshot;
         } catch (error) {
             restoreMemory(committedMemory);
-            this.reportStorageFailure(error);
+            this.reportStorageFailure(error, { operation: 'saveActiveData', stage: 'serialize' });
             return false;
         }
-        if (updatedAt === null && onActiveDataSaved) onActiveDataSaved();
+        if (updatedAt === null && onActiveDataSaved) {
+            const reportCallbackFailure = error => console.error('배송 저장 후 콜백 실패:', storageDiagnostic(error, { ...localCounts(), operation: 'onActiveDataSaved', stage: 'callback', storage: 'memory' }));
+            try {
+                const result = onActiveDataSaved();
+                if (result && typeof result.then === 'function') Promise.resolve(result).catch(reportCallbackFailure);
+            } catch (error) { reportCallbackFailure(error); }
+        }
         return true;
     },
 
@@ -376,7 +446,7 @@ export const state = {
             // Persist repaired input without advancing the server revision.
             if (destinations !== savedList || endLocation !== savedEnd) this.saveActiveData(routeUpdatedAt);
         } catch (error) {
-            this.reportStorageFailure(error);
+            this.reportStorageFailure(error, { operation: 'loadActiveData', stage: 'read-before', key: 'deliveryPro_route_metadata' });
         }
     },
 

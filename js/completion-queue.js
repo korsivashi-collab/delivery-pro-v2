@@ -1,6 +1,7 @@
 import { state } from './state.js';
 import { completionPhotos } from './completion-photos.js';
 import { firebaseUploadDeliveryPhoto, saveCompletionToFirestore, deleteCompletionFromFirestore, saveRouteToFirestore } from './api.js';
+import { storageDiagnostic } from './storage-diagnostics.js';
 
 export function readCompletionQueue() {
     const jobs = JSON.parse(state.readLocalData('deliveryPro_transmissions') || '[]');
@@ -179,17 +180,17 @@ export function createCompletionWorker({
                     }
                     if (!write(jobs.filter(current => !matches(current, job)), records)) throw new Error('전송 완료 상태 저장 실패');
                     try { status(read().filter(current => current.ownership.routeOwnerId === owner())); } catch (_) {}
-                    if (job.photoId) photos.remove(job.photoId).catch(error => console.error('전송 사진 정리 실패:', error));
+                    if (job.photoId) photos.remove(job.photoId).catch(error => console.error('전송 사진 정리 실패:', storageDiagnostic(error, { operation: 'completionPhotoCleanup', storage: 'indexedDB' })));
                 } catch (error) {
                     const longFailure = job.attempts >= 8 || now() - job.completedAt >= 86400000;
                     const delay = longFailure ? 3600000 : Math.min(300000, 5000 * 2 ** Math.min(job.attempts - 1, 6));
                     try { update(job, { status: longFailure ? 'longFailure' : 'pending',
                         lastError: String(error.code || error.message || error).slice(0, 200),
                         lastFailureAt: now(), nextAttemptAt: now() + delay }); }
-                    catch (storageError) { console.error('전송 작업 보존 확인 필요:', storageError); break; }
+                    catch (storageError) { console.error('전송 작업 보존 확인 필요:', storageDiagnostic(storageError, { operation: 'completionWorker', stage: 'bookkeeping' })); break; }
                 }
             }
-        } catch (error) { console.error('전송대기 처리 실패:', error); }
+        } catch (error) { console.error('전송대기 처리 실패:', storageDiagnostic(error, { operation: 'completionWorker', stage: 'read-before' })); }
         finally {
             busy = false;
             try { status(read().filter(job => job.ownership.routeOwnerId === owner())); } catch (_) {}
