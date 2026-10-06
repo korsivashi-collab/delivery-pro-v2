@@ -30,7 +30,8 @@ import {
 
 import { 
     getDeviceRealGPS, 
-    setEndLocationGPS 
+    setEndLocationGPS,
+    refreshGpsTracking
 } from './gps.js';
 
 import { 
@@ -188,6 +189,7 @@ export function updateDisplayNumbers() {
 }
 
 export function renderList() {
+    refreshGpsTracking();
     renderDestinationList(preloadBatchMemos, renderMemoPreview, getAllPersonalMemos);
 }
 

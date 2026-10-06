@@ -24,6 +24,23 @@ const gpsRequests = new Map();
 let isGpsWatcherActive = false; // 기사님의 GPS 활성화 설정 상태 보존
 let gpsSession = 0;
 
+function canTrackAutomatically() {
+    return isGpsWatcherActive && state.getDestinations().length > 0;
+}
+
+// Recheck the list without changing the user's saved GPS preference.
+export function refreshGpsTracking() {
+    if (!isGpsWatcherActive || document.visibilityState === 'hidden') {
+        if (state.getGpsWatchId() !== null || unsubRequestDevice || unsubRequestKey) _stopHardwareWatcher();
+    } else if (state.getDestinations().length === 0) {
+        if (state.getGpsWatchId() !== null) _stopHardwareWatcher();
+        // Explicit dispatch requests remain separate from automatic tracking.
+        listenToGpsRequests();
+    } else {
+        _startHardwareWatcher();
+    }
+}
+
 // 요청 처리 시간은 수신한 기기의 경과 시간으로 제한한다.
 const gpsRequestClock = () => typeof performance !== 'undefined' ? performance.now() : Date.now();
 
@@ -61,6 +78,7 @@ function getDbInstance() {
 // ==========================================
 export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null, request = null) {
     const session = gpsSession;
+    if (!force && !canTrackAutomatically()) return false;
     // 수동 요청을 수신한 뒤에는 새 일반 보고가 먼저 전송되지 않도록 한다.
     if (!force && hasPendingForcedGpsRequest()) return false;
     if (reportInFlight) {
@@ -97,6 +115,7 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     reportInFlight = Promise.resolve().then(async () => {
         try {
             // SDK에 넘기기 전 예약된 일반 보고도 수동 요청에 우선권을 양보한다.
+            if (session !== gpsSession || (!force && !canTrackAutomatically())) return false;
             if (!force && hasPendingForcedGpsRequest()) return false;
             await setDoc(doc(db, 'gps_reports', deviceId), {
                 deviceId, phone, lat, lng, updatedAt: now, requestId: request?.requestId || null
@@ -183,6 +202,8 @@ function listenToGpsRequests() {
 function _startHardwareWatcher() {
     listenToGpsRequests();
 
+    if (!canTrackAutomatically()) return;
+
     if (!navigator.geolocation) { invalidateGps(); return; }
     if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
     if (state.getGpsWatchId() !== null) return;
@@ -191,7 +212,7 @@ function _startHardwareWatcher() {
     try {
         const watchId = navigator.geolocation.watchPosition(
             (pos) => {
-                if (session !== gpsSession) return;
+                if (session !== gpsSession || !canTrackAutomatically()) return;
                 const lat = pos.coords.latitude;
                 const lng = pos.coords.longitude;
 
@@ -235,7 +256,7 @@ if (typeof document !== 'undefined') {
         } else if (document.visibilityState === 'visible') {
             // 화면이 다시 켜졌을 때 사용자가 GPS를 켜둔 상태였다면 즉시 복구
             if (isGpsWatcherActive) {
-                _startHardwareWatcher();
+                refreshGpsTracking();
             }
         }
     });
@@ -246,7 +267,7 @@ if (typeof document !== 'undefined') {
 // ==========================================
 export function startGpsWatcher() {
     isGpsWatcherActive = true;
-    _startHardwareWatcher();
+    refreshGpsTracking();
 }
 
 // ==========================================
@@ -318,7 +339,7 @@ export async function setEndLocationGPS() {
 // The SDK owns retries while a write is pending; reconnect starts no competing write.
 if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     window.addEventListener('online', async () => {
-        if (!isGpsWatcherActive || document.visibilityState !== 'visible' || reportInFlight) return;
+        if (!canTrackAutomatically() || document.visibilityState !== 'visible' || reportInFlight) return;
         const gps = await getDeviceRealGPS();
         if (gps && state.isFreshGps(gps)) await reportGpsToFirestore(gps.lat, gps.lng);
     });
