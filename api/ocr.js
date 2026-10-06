@@ -1,3 +1,10 @@
+// LEGACY OCR - disabled during Gemini vision evaluation.
+// Restore only after explicit review; neither this factory nor its provider client is invoked.
+module.exports = async function disabledLegacyOCR(req, res) {
+    res.setHeader('Cache-Control', 'no-store');
+    return res.status(410).json({ error: { code: 'LEGACY_OCR_DISABLED', message: '기존 OCR은 Gemini 평가 중 비활성화되어 있습니다.' } });
+};
+function createLegacyOCRHandler() {
 const { DocumentProcessorServiceClient } = require('@google-cloud/documentai').v1;
 
 // Vercel 환경 변수에 등록할 서비스 계정 JSON 키 설정
@@ -110,7 +117,7 @@ function getOcrLayoutPages(document) {
     });
 }
 
-module.exports = async function handler(req, res) {
+return async function handler(req, res) {
     if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Method Not Allowed' });
     }
@@ -160,3 +167,5 @@ module.exports = async function handler(req, res) {
         return res.status(500).json({ error: `Document AI 오류: ${error.message}` });
     }
 };
+
+}
