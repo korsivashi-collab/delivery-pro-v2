@@ -563,12 +563,16 @@
             <h3 class="font-black text-slate-900 text-lg mb-1 flex items-center gap-2"><i class="fa-solid fa-pen-to-square text-blue-600"></i> <span id="address-modal-title">정보 확인 및 수정</span></h3>
             <p id="address-modal-desc" class="text-sm text-slate-600 font-bold mb-4">정확한 배송지 정보를 입력해 주세요.</p>
             
-            <div id="ocr-snippet-container" class="mb-4 bg-slate-50 rounded-xl p-3 border border-slate-200 hidden">
+            <div id="scan-snippet-container" class="mb-4 bg-slate-50 rounded-xl p-3 border border-slate-200 hidden">
                 <label class="block text-[11px] font-bold text-slate-400 mb-1">카메라 판독 결과 (참고용)</label>
-                <div id="ocr-snippet" class="text-xs text-slate-700 break-all font-mono leading-relaxed"></div>
+                <div id="scan-snippet" class="text-xs text-slate-700 break-all font-mono leading-relaxed"></div>
             </div>
             
             <div class="space-y-3 mb-5">
+                <div id="manual-store-name-container" class="hidden">
+                    <label class="block text-[11px] font-bold text-slate-500 mb-1 pl-1" for="manual-store-name-input">배송지 상호 (선택)</label>
+                    <input type="text" id="manual-store-name-input" class="w-full bg-white border border-slate-200 text-slate-900 text-sm font-medium rounded-xl p-3.5 outline-none shadow-inner focus:border-blue-600 focus:ring-1 focus:ring-blue-600" placeholder="배송지 상호를 입력하세요">
+                </div>
                 <div>
                     <label class="block text-[11px] font-bold text-slate-500 mb-1 pl-1">배송지 주소</label>
                     <div class="flex gap-1.5">
