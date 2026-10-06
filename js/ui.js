@@ -29,13 +29,14 @@ function sanitizePhoneNumber(rawVal) {
 }
 
 // 상호명 분리 및 주소 원본 보존 헬퍼
-function formatDisplayAddress(rawAddress, storeName = "") {
+function formatDisplayAddress(rawAddress, storeName) {
+    const hasStoreName = storeName !== undefined;
     let extractedStore = storeName ? String(storeName).trim() : "";
     let cleanAddr = (rawAddress || "").trim();
 
     const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
     if (match) {
-        if (!extractedStore) extractedStore = match[1].trim();
+        if (!hasStoreName) extractedStore = match[1].trim();
         cleanAddr = match[2].trim();
     }
 
@@ -166,7 +167,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                     </div>
                     <div class="flex items-center gap-1 shrink-0 -mr-1">
                         ${distHtml}
-                        <button onclick="editDestinationAddress(${idArgument})" class="text-slate-400 hover:text-slate-700 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-slate-100 transition" title="주소 수정"><i class="fa-solid fa-pen text-[13px]"></i></button>
+                        <button onclick="editDestinationAddress(${idArgument})" class="text-slate-400 hover:text-slate-700 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-slate-100 transition" title="상호·주소 수정"><i class="fa-solid fa-pen text-[13px]"></i></button>
                     </div>
                 </div>
                 

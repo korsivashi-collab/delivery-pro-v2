@@ -5,7 +5,7 @@
 // ==========================================
 import { performGeminiScan, imageFromDataUrl, buildGeminiDestination, GEMINI_SCAN_MODEL } from './scan-gemini.js';
 import { normalizeDeliveryBaseAddress } from './address.js';
-import { toBase64_SafeCompress, showLoading, hideLoading, withRequestDeadline } from './utils.js';
+import { toBase64_SafeCompress, showLoading, hideLoading, withRequestDeadline, getPureAddress } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, hasValidDeliveryCoordinates } from './state.js';
 import { 
@@ -58,13 +58,21 @@ export function checkScanLimit() {
 // ==========================================
 let activeAddressModal = null;
 
-export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isEditMode = false, signal = null) {
+export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isEditMode = false, signal = null, defaultStoreName = null) {
     return new Promise((resolve) => {
         if (signal?.aborted) { resolve(null); return; }
         activeAddressModal?.cancel();
         const modal = document.getElementById('address-input-modal');
         const addrInput = document.getElementById('manual-address-input');
         const phoneInput = document.getElementById('manual-phone-input');
+        const storeInput = document.getElementById('manual-store-name-input');
+        const storeContainer = document.getElementById('manual-store-name-container');
+        const editStoreName = isEditMode && defaultStoreName !== null;
+        if (storeContainer) {
+            if (editStoreName) storeContainer.classList.remove('hidden');
+            else storeContainer.classList.add('hidden');
+        }
+        if (storeInput) storeInput.value = editStoreName ? defaultStoreName : '';
         const snippetEl = document.getElementById('scan-snippet');
         const snippetContainer = document.getElementById('scan-snippet-container');
         const titleEl = document.getElementById('address-modal-title');
@@ -95,7 +103,8 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
         const onConfirm = () => {
             if (settled) return; settled = true;
             cleanup(); 
-            resolve({ address: addrInput.value.trim(), phone: phoneInput.value.trim() }); 
+            resolve({ address: addrInput.value.trim(), phone: phoneInput.value.trim(),
+                ...(editStoreName ? { storeName: storeInput ? storeInput.value.trim() : defaultStoreName } : {}) });
         };
         const onCancel = () => {
             if (settled) return; settled = true;
@@ -118,7 +127,7 @@ export function promptAddressCustom(snippet, defaultText, defaultPhone = "", isE
 }
 
 // ==========================================
-// 4. 배송지 주소/전화번호 수정 액션 (관제 서버 동기화 포함)
+// 4. 배송지 상호/주소/전화번호 수정 액션 (관제 서버 동기화 포함)
 // ==========================================
 const activeAddressEdits = new Set();
 let activeAddressEditLoading = null;
@@ -128,18 +137,28 @@ export async function editDestinationAddress(id) {
     if (!item) return;
     const owner = state.getRouteOwnerId();
     const original = JSON.stringify(item);
+    const addressPrefix = item.address.match(/^\[(.*?)\]\s*(.*)$/);
+    // storeName is authoritative; bracket-only legacy records remain editable.
+    const originalStoreName = item.storeName !== undefined ? String(item.storeName || '').trim() : addressPrefix?.[1].trim() || '';
+    const hasStorePrefix = addressPrefix && addressPrefix[1].trim() === originalStoreName;
+    const originalAddress = getPureAddress(item.address);
     const edit = {};
     activeAddressEdits.add(id);
     const stillCurrent = () => owner === state.getRouteOwnerId()
         && JSON.stringify(state.getDestinations().find(d => d.id === id)) === original;
     try {
-        const result = await promptAddressCustom('', item.address, item.phone || '', true);
+        const result = await promptAddressCustom('', originalAddress, item.phone || '', true, null, originalStoreName);
         if (!result || !stillCurrent()) return;
         const newAddr = result.address, newPhone = result.phone;
-        const addrChanged = newAddr !== item.address || !hasValidDeliveryCoordinates(item);
+        const newStoreName = typeof result.storeName === 'string' ? result.storeName : originalStoreName;
+        const storeChanged = newStoreName !== originalStoreName;
         const phoneChanged = newPhone !== (item.phone || '');
-        if (!addrChanged && !phoneChanged) return;
-        let updated = { ...item, phone: newPhone };
+        const nameOnly = storeChanged && newAddr === originalAddress && !phoneChanged;
+        const addrChanged = newAddr !== originalAddress || (!nameOnly && !hasValidDeliveryCoordinates(item));
+        if (!addrChanged && !phoneChanged && !storeChanged) return;
+        let updated = { ...item, phone: newPhone, storeName: newStoreName };
+        // Synchronize the existing display prefix without changing the physical address or coordinates.
+        if (storeChanged && hasStorePrefix) updated.address = newStoreName ? `[${newStoreName}] ${addressPrefix[2]}` : addressPrefix[2];
         if (addrChanged) {
             activeAddressEditLoading = edit;
             showLoading('수정된 주소 확인 중...');
@@ -149,7 +168,10 @@ export async function editDestinationAddress(id) {
                 if (!stillCurrent()) return;
                 if (coords) {
                     const prefixMatch = newAddr.match(/^(\[.*?\])\s*/);
-                    updated = { ...updated, address: (prefixMatch ? prefixMatch[1] + ' ' : '') + (coords.address_name || pureAddr), lat: coords.lat, lng: coords.lng };
+                    const prefix = addressPrefix
+                        ? (hasStorePrefix ? (newStoreName ? `[${newStoreName}] ` : '') : `[${addressPrefix[1]}] `)
+                        : (prefixMatch ? prefixMatch[1] + ' ' : '');
+                    updated = { ...updated, address: prefix + (coords.address_name || pureAddr), lat: coords.lat, lng: coords.lng };
                 }
             } catch (error) {
                 if (stillCurrent()) alert('수정된 주소를 지도에서 찾을 수 없습니다.');
