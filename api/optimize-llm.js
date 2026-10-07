@@ -1,6 +1,6 @@
 // api/optimize-llm.js
 
-const API_MODEL = 'gemini-1.5-flash-latest'; // 🌟 404 에러 방지를 위해 '-latest' 버전명 확실하게 적용
+const API_MODEL = 'gemini-3.5-flash-lite';
 const TIMEOUT_MS = 15000; // 기사님이 오래 기다리지 않도록 15초 제한
 
 // 🌟 제미나이에게 부여할 배송 동선 최적화 전문가 프롬프트
@@ -46,4 +46,80 @@ function createHandler({
                 throw failure('METHOD_NOT_ALLOWED', 405); 
             }
             if (!env.GEMINI_API_KEY?.trim()) {
-                throw failure('GEMINI_KEY_MISSING
+                throw failure('GEMINI_KEY_MISSING', 503);
+            }
+            let body;
+            try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
+            catch (_) { throw failure('DESTINATIONS_INVALID', 400); }
+            const destinations = body?.destinations;
+            if (!Array.isArray(destinations) || destinations.length < 3 || destinations.length > 200 ||
+                !destinations.every(node => node &&
+                    ((typeof node.id === 'string' && node.id.trim() && node.id.length <= 160) ||
+                     (typeof node.id === 'number' && Number.isSafeInteger(node.id))) &&
+                    typeof node.address === 'string' && node.address.trim() && node.address.length <= 600 &&
+                    (node.storeName == null || (typeof node.storeName === 'string' && node.storeName.length <= 160)) &&
+                    Number.isFinite(node.lat) && Math.abs(node.lat) <= 90 &&
+                    Number.isFinite(node.lng) && Math.abs(node.lng) <= 180) ||
+                new Set(destinations.map(node => String(node.id))).size !== destinations.length) {
+                throw failure('DESTINATIONS_INVALID', 400);
+            }
+            // Only send fields needed for ordering, excluding phone and unrelated delivery data.
+            const nodes = destinations.map(({ id, address, storeName, lat, lng }) =>
+                ({ id: String(id), address, storeName: storeName || '', lat, lng }));
+            const controller = new AbortController(); let timer;
+            let upstream;
+            try {
+                upstream = await Promise.race([
+                    Promise.resolve().then(async () => {
+                        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent`, {
+                            method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
+                            signal: controller.signal,
+                            body: JSON.stringify({
+                                systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+                                contents: [{ role: 'user', parts: [{ text: JSON.stringify({ destinations: nodes }) }] }],
+                                generationConfig: { responseMimeType: 'application/json', responseSchema: RESPONSE_SCHEMA,
+                                    temperature: 0, maxOutputTokens: 4096 }
+                            })
+                        });
+                        if (!response.ok) {
+                            const code = response.status === 401 ? 'GEMINI_AUTH_ERROR'
+                                : [403, 404].includes(response.status) ? 'GEMINI_MODEL_ACCESS_ERROR'
+                                : response.status === 429 ? 'GEMINI_RATE_LIMIT' : 'GEMINI_UPSTREAM_ERROR';
+                            throw failure(code, 502);
+                        }
+                        try { return await response.json(); }
+                        catch (_) { throw failure('GEMINI_SCHEMA_ERROR', 502); }
+                    }),
+                    new Promise((_, reject) => {
+                        timer = setTimeout(() => {
+                            reject(failure('GEMINI_TIMEOUT', 504));
+                            controller.abort();
+                        }, timeoutMs);
+                    })
+                ]);
+            } finally { clearTimeout(timer); }
+            const candidate = upstream?.candidates?.[0];
+            if (candidate?.finishReason !== 'STOP') throw failure('GEMINI_SCHEMA_ERROR', 502);
+            let parsed;
+            try {
+                parsed = JSON.parse(candidate.content.parts.filter(part => !part.thought)
+                    .map(part => part.text || '').join(''));
+            } catch (_) { throw failure('GEMINI_SCHEMA_ERROR', 502); }
+            const ids = new Set(nodes.map(node => node.id));
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
+                Object.keys(parsed).length !== 1 || !Array.isArray(parsed.optimized) ||
+                parsed.optimized.length !== ids.size || new Set(parsed.optimized).size !== ids.size ||
+                !parsed.optimized.every(id => typeof id === 'string' && ids.has(id))) {
+                throw failure('GEMINI_SCHEMA_ERROR', 502);
+            }
+            return res.status(200).json({ optimized: parsed.optimized });
+        } catch (error) {
+            return res.status(error.status || 502).json({ error: {
+                code: error.code && error.status ? error.code : 'GEMINI_NETWORK_ERROR'
+            } });
+        }
+    };
+}
+
+module.exports = createHandler();
+module.exports.createHandler = createHandler;

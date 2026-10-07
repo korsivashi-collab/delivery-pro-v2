@@ -1,7 +1,6 @@
 // api/scan.js
 // Gemini-only evaluation route. No OCR provider, parser, retry or fallback is connected here.
-const API_MODEL = 'gemini-1.5-flash-latest'; // 🌟 구글 서버가 확실하게 인식할 수 있도록 '-latest' 버전명 추가
-const CLIENT_MODEL_NAME = 'gemini-3.5-flash-lite'; // 프론트엔드 기존 버전 호환성 유지용 스푸핑 값
+const API_MODEL = 'gemini-3.5-flash-lite';
 const TIMEOUT_MS = 45000;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const FIELD_LIMITS = { storeName: 160, address: 600, phone: 80 };
@@ -98,4 +97,41 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), env = process.
                         upstreamStatus = response.status;
                         let data;
                         try { data = await response.json(); }
-                        catch (_) { throw failure(response.ok ? 'GEMINI_SCHEMA_ERROR' : classifyStatus(response.status), 502);
+                        catch (_) { throw failure(response.ok ? 'GEMINI_SCHEMA_ERROR' : classifyStatus(response.status), 502); }
+                        if (!response.ok) throw failure(classifyStatus(response.status, data), 502);
+                        return data;
+                    }),
+                    new Promise((_, reject) => {
+                        timer = setTimeout(() => {
+                            reject(failure('GEMINI_TIMEOUT', 504));
+                            controller.abort();
+                        }, timeoutMs);
+                    })
+                ]);
+            } finally { clearTimeout(timer); }
+            usage = upstream?.usageMetadata;
+            const candidate = upstream?.candidates?.[0];
+            if (candidate?.finishReason !== 'STOP') throw failure('GEMINI_SCHEMA_ERROR', 502);
+            let parsed;
+            try {
+                const text = candidate.content.parts.filter(part => !part.thought)
+                    .map(part => part.text || '').join('');
+                parsed = JSON.parse(text);
+            } catch (_) { throw failure('GEMINI_SCHEMA_ERROR', 502); }
+            const result = validateFields(parsed);
+            success = true;
+            return res.status(200).json({ engine: 'gemini', model: API_MODEL, result });
+        } catch (error) {
+            code = error.code && error.status ? error.code : 'GEMINI_NETWORK_ERROR';
+            return res.status(error.status || 502).json({ error: { code } });
+        } finally {
+            log({ model: API_MODEL, success, code, upstreamStatus, durationMs: now() - started,
+                inputTokens: usage?.promptTokenCount ?? null,
+                outputTokens: usage?.candidatesTokenCount ?? null,
+                totalTokens: usage?.totalTokenCount ?? null });
+        }
+    };
+}
+
+module.exports = createHandler();
+module.exports.createHandler = createHandler;
