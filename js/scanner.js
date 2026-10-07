@@ -193,6 +193,16 @@ export async function editDestinationAddress(id) {
     }
 }
 
+// 🌟 주소 비교 헬퍼: 공백, 특수문자를 제거하고 핵심 문자열만 비교하여 부분 매칭(Fallback)을 감지합니다.
+function isStrictMatch(geminiAddress, kakaoAddress) {
+    if (!geminiAddress || !kakaoAddress) return false;
+    const cleanG = geminiAddress.replace(/[^가-힣0-9]/g, '');
+    const cleanK = kakaoAddress.replace(/[^가-힣0-9]/g, '');
+    
+    // 두 주소의 핵심 문자열이 정확히 일치하거나, 어느 한쪽이 다른 쪽을 온전히 포함하고 있어야 정상 판정
+    return cleanG === cleanK || cleanG.includes(cleanK) || cleanK.includes(cleanG);
+}
+
 // ==========================================
 // 5. 카메라 스캔 및 Gemini 판독 파이프라인
 // ==========================================
@@ -340,13 +350,28 @@ export function initCameraScan() {
                 coords = await geocodeAddress(addressStr, { signal,
                     onRequest: () => { scan.diagnostics.kakaoRequestCount++; } });
                 assertCurrent();
+                
+                // 🌟 2차 방어선 (Strict Match 검증): 카카오가 찾은 주소와 원본 주소의 텍스트가 확연히 다르면 (부분 매칭/오타 발생)
+                if (!isStrictMatch(addressStr, coords.address_name)) {
+                    throw Object.assign(new Error('Address text mismatch'), { code: 'KAKAO_ADDRESS_MISMATCH', suggestion: coords.address_name });
+                }
+
                 if (!hasValidDeliveryCoordinates(coords)) throw Object.assign(new Error('Invalid coordinates'), { code: 'KAKAO_ADDRESS_ERROR' });
                 hideScanLoading();
             } catch (error) {
                 coords = null;
                 hideScanLoading();
                 if (error.name === 'AbortError') throw error;
-                const result = await promptScanAddress('지도에서 주소를 찾을 수 없습니다.', addressStr, extractedPhone || '', true);
+                
+                // 🌟 팝업 안내 분기 처리: 텍스트 불일치(오타)인지, 검색 완전 실패인지 구분
+                let promptTitle = '지도에서 주소를 찾을 수 없습니다.';
+                if (error.code === 'KAKAO_ADDRESS_MISMATCH') {
+                    promptTitle = '인식된 주소가 불확실합니다. 확인해 주세요.';
+                    // 카카오가 추천한 공식 주소를 팝업에 미리 채워주어 기사님이 한 번에 쉽게 수정할 수 있도록 돕습니다.
+                    if (error.suggestion) addressStr = error.suggestion;
+                }
+                
+                const result = await promptScanAddress(promptTitle, addressStr, extractedPhone || '', true);
                 if (!result || !result.address) return;
                 manualAddress = result.address;
                 addressStr = normalizeDeliveryBaseAddress(manualAddress);
