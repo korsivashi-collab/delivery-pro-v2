@@ -1,6 +1,7 @@
+// api/scan.js
 // Gemini-only evaluation route. No OCR provider, parser, retry or fallback is connected here.
-const API_MODEL = 'gemini-1.5-flash'; // 🌟 실제 구글 API 호출에 사용될 1.5 플래시 모델
-const CLIENT_MODEL_NAME = 'gemini-3.5-flash-lite'; // 🌟 프론트엔드 기존 버전 호환성 유지용 스푸핑 값
+const API_MODEL = 'gemini-1.5-flash-latest'; // 🌟 구글 서버가 확실하게 인식할 수 있도록 '-latest' 버전명 추가
+const CLIENT_MODEL_NAME = 'gemini-3.5-flash-lite'; // 프론트엔드 기존 버전 호환성 유지용 스푸핑 값
 const TIMEOUT_MS = 45000;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
 const FIELD_LIMITS = { storeName: 160, address: 600, phone: 80 };
@@ -10,7 +11,7 @@ const RESPONSE_SCHEMA = {
     required: Object.keys(FIELD_LIMITS), propertyOrdering: Object.keys(FIELD_LIMITS)
 };
 
-// 🌟 프롬프트(명령어) 대폭 강화: 오타 교정 및 불필요한 괄호(동/건물명) 제거 지시 추가
+// 프롬프트(명령어): 오타 교정 및 불필요한 괄호(동/건물명) 제거 지시
 const PROMPT = `배송 명세서 이미지에서 배송 대상 업체/수령처의 상호, 배송지 주소, 배송지 연락처만 추출하세요.
 공급자/발행업체/납품업체의 상호, 주소, 전화번호와 수령처 정보를 혼동하지 마세요.
 
@@ -83,7 +84,6 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), env = process.
             try {
                 upstream = await Promise.race([
                     Promise.resolve().then(async () => {
-                        // 🌟 여기서 API_MODEL 상수를 통해 gemini-1.5-flash 모델을 실제 호출합니다.
                         const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent`, {
                             method: 'POST', headers: { 'Content-Type': 'application/json', 'x-goog-api-key': env.GEMINI_API_KEY },
                             signal: controller.signal,
@@ -98,43 +98,4 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), env = process.
                         upstreamStatus = response.status;
                         let data;
                         try { data = await response.json(); }
-                        catch (_) { throw failure(response.ok ? 'GEMINI_SCHEMA_ERROR' : classifyStatus(response.status), 502); }
-                        if (!response.ok) throw failure(classifyStatus(response.status, data), response.status === 429 ? 429 : 502);
-                        return data;
-                    }),
-                    new Promise((_, reject) => { timer = setTimeout(() => {
-                        reject(failure('GEMINI_TIMEOUT', 504)); controller.abort();
-                    }, timeoutMs); })
-                ]);
-            } catch (error) {
-                if (error.status) throw error;
-                throw failure('GEMINI_NETWORK_ERROR', 502);
-            } finally { clearTimeout(timer); }
-            if (!upstream || typeof upstream !== 'object' || Array.isArray(upstream)) throw failure('GEMINI_SCHEMA_ERROR', 502);
-            usage = upstream.usageMetadata;
-            const candidate = upstream.candidates?.[0];
-            if (!candidate || candidate.finishReason !== 'STOP' || upstream.promptFeedback?.blockReason) throw failure('GEMINI_SCHEMA_ERROR', 502);
-            const parts = candidate.content?.parts;
-            if (!Array.isArray(parts) || !parts.length || parts.some(part => typeof part.text !== 'string' || part.thought)) throw failure('GEMINI_SCHEMA_ERROR', 502);
-            let parsed;
-            try { parsed = JSON.parse(parts.map(part => part.text).join('')); }
-            catch (_) { throw failure('GEMINI_SCHEMA_ERROR', 502); }
-            const result = validateFields(parsed); success = true;
-            
-            // 🌟 리턴 시에는 프론트엔드 검증 로직이 깨지지 않도록 CLIENT_MODEL_NAME(3.5-flash-lite)을 던져줍니다.
-            return res.status(200).json({ engine: 'gemini', model: CLIENT_MODEL_NAME, result });
-        } catch (error) {
-            code = error.status ? error.code : 'GEMINI_SERVER_ERROR';
-            return res.status(error.status || 500).json({ error: { code,
-                message: code === 'GEMINI_KEY_MISSING' ? '서버의 GEMINI_API_KEY 설정이 필요합니다.'
-                    : '명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.' } });
-        } finally {
-            const tokens = key => Number.isSafeInteger(usage?.[key]) && usage[key] >= 0 ? usage[key] : null;
-            log({ model: API_MODEL, inputTokens: tokens('promptTokenCount'), outputTokens: tokens('candidatesTokenCount'),
-                totalTokens: tokens('totalTokenCount'), durationMs: now() - started, success,
-                httpStatus: res.statusCode, upstreamStatus, errorCode: code });
-        }
-    };
-}
-module.exports = createHandler();
-module.exports.createHandler = createHandler;
+                        catch (_) { throw failure(response.ok ? 'GEMINI_SCHEMA_ERROR' : classifyStatus(response.status), 502);
