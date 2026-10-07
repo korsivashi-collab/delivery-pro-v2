@@ -22,6 +22,36 @@ function localCompletionContext() {
     } catch (error) { state.reportStorageFailure(error, { operation: 'localCompletionContext', stage: 'read-before' }); return null; }
 }
 
+// 고속 이미지 압축 유틸리티 (기기 내부 DB 저장 전 용량 초과 에러 방지용)
+async function quickCompressToBlob(file, maxDimension = 960, quality = 0.65) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.readAsDataURL(file);
+        reader.onload = (event) => {
+            const img = new Image();
+            img.src = event.target.result;
+            img.onload = () => {
+                let width = img.width, height = img.height;
+                if (width > height) {
+                    if (width > maxDimension) { height = Math.round((height * maxDimension) / width); width = maxDimension; }
+                } else {
+                    if (height > maxDimension) { width = Math.round((width * maxDimension) / height); height = maxDimension; }
+                }
+                const canvas = document.createElement('canvas');
+                canvas.width = width; canvas.height = height;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(img, 0, 0, width, height);
+                canvas.toBlob(blob => {
+                    if (blob) resolve(blob);
+                    else reject(new Error("사진 압축 실패"));
+                }, 'image/jpeg', quality);
+            };
+            img.onerror = e => reject(e);
+        };
+        reader.onerror = e => reject(e);
+    });
+}
+
 // ==========================================
 // 1. 배송 완료 모달 열기
 // ==========================================
@@ -151,12 +181,19 @@ export function initPhotoCompletion() {
         let committed = false;
         try {
             photoId = crypto.randomUUID();
+            
+            // 🌟 에러 수정 핵심: 원본 사진(수십MB)을 그대로 저장하지 않고 빠르게 압축하여 DB 용량 초과 방지
+            const compressedBlob = await quickCompressToBlob(file, 960, 0.65);
+
             // Only local durable Blob storage precedes completion. Never wait for compression/upload.
-            await completionPhotos.put(photoId, file);
+            await completionPhotos.put(photoId, compressedBlob);
+            
             const currentItem = state.getDestinations().find(destination => destination.id === item.id);
             if (state.getRouteOwnerId() !== context.completionOwnership.routeOwnerId || !currentItem) return;
             committed = finishLocally(currentItem, tag, context, photoId);
-        } catch (error) { state.reportStorageFailure(error, { operation: 'photoCompletion', stage: 'logic', photoBytes: file.size }); }
+        } catch (error) { 
+            state.reportStorageFailure(error, { operation: 'photoCompletion', stage: 'logic', photoBytes: file.size }); 
+        }
         finally {
             photoStagingIds.delete(item.id);
             e.target.value = '';
