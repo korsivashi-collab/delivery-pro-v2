@@ -193,14 +193,29 @@ export async function editDestinationAddress(id) {
     }
 }
 
-// 🌟 주소 비교 헬퍼: 공백, 특수문자를 제거하고 핵심 문자열만 비교하여 부분 매칭(Fallback)을 감지합니다.
-function isStrictMatch(geminiAddress, kakaoAddress) {
-    if (!geminiAddress || !kakaoAddress) return false;
-    const cleanG = geminiAddress.replace(/[^가-힣0-9]/g, '');
-    const cleanK = kakaoAddress.replace(/[^가-힣0-9]/g, '');
-    
-    // 두 주소의 핵심 문자열이 정확히 일치하거나, 어느 한쪽이 다른 쪽을 온전히 포함하고 있어야 정상 판정
-    return cleanG === cleanK || cleanG.includes(cleanK) || cleanK.includes(cleanG);
+// Compare both official representations of the same Kakao result, retaining building numbers.
+function isStrictMatch(geminiAddress, coords) {
+    const normalize = value => {
+        const base = normalizeDeliveryBaseAddress(value);
+        if (!base) return '';
+        return base.normalize('NFKC')
+            .replace(/특별자치도|특별자치시|특별시|광역시/g, '')
+            .replace(/경기도/g, '경기').replace(/강원도/g, '강원').replace(/제주도/g, '제주')
+            .replace(/충청북도/g, '충북').replace(/충청남도/g, '충남')
+            .replace(/전라북도/g, '전북').replace(/전라남도/g, '전남')
+            .replace(/경상북도/g, '경북').replace(/경상남도/g, '경남')
+            .replace(/[^\p{L}\p{N}-]/gu, '');
+    };
+    const input = normalize(geminiAddress);
+    if (!input) return false;
+    const regionPrefix = /^(?:(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)|[가-힣]+(?:시|군|구|읍|면|동|리))+$/u;
+    const sameSuffix = (longer, shorter) => longer.endsWith(shorter) &&
+        /\p{L}/u.test(shorter) && regionPrefix.test(longer.slice(0, -shorter.length));
+    return [coords?.address_name, coords?.road_address_name, coords?.jibun_address_name].some(value => {
+        const candidate = normalize(value);
+        // Optional leading region names may differ in presence, but street/parcel and number must end together.
+        return candidate && (candidate === input || sameSuffix(candidate, input) || sameSuffix(input, candidate));
+    });
 }
 
 // ==========================================
@@ -352,11 +367,11 @@ export function initCameraScan() {
                 assertCurrent();
                 
                 // 🌟 2차 방어선 (Strict Match 검증): 카카오가 찾은 주소와 원본 주소의 텍스트가 확연히 다르면 (부분 매칭/오타 발생)
-                if (!isStrictMatch(addressStr, coords.address_name)) {
+                if (!hasValidDeliveryCoordinates(coords)) throw Object.assign(new Error('Invalid coordinates'), { code: 'KAKAO_ADDRESS_ERROR' });
+                if (!isStrictMatch(addressStr, coords)) {
                     throw Object.assign(new Error('Address text mismatch'), { code: 'KAKAO_ADDRESS_MISMATCH', suggestion: coords.address_name });
                 }
 
-                if (!hasValidDeliveryCoordinates(coords)) throw Object.assign(new Error('Invalid coordinates'), { code: 'KAKAO_ADDRESS_ERROR' });
                 hideScanLoading();
             } catch (error) {
                 coords = null;
