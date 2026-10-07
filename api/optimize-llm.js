@@ -1,6 +1,6 @@
 // api/optimize-llm.js
 
-const API_MODEL = 'gemini-1.5-flash';
+const API_MODEL = 'gemini-1.5-flash-latest'; // 🌟 404 에러 방지를 위해 '-latest' 버전명 확실하게 적용
 const TIMEOUT_MS = 15000; // 기사님이 오래 기다리지 않도록 15초 제한
 
 // 🌟 제미나이에게 부여할 배송 동선 최적화 전문가 프롬프트
@@ -46,98 +46,4 @@ function createHandler({
                 throw failure('METHOD_NOT_ALLOWED', 405); 
             }
             if (!env.GEMINI_API_KEY?.trim()) {
-                throw failure('GEMINI_KEY_MISSING', 503);
-            }
-
-            const body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
-            const destinations = body?.destinations;
-
-            if (!Array.isArray(destinations) || destinations.length < 2) {
-                throw failure('INVALID_INPUT', 400);
-            }
-
-            // LLM 토큰 절약 및 집중도 향상을 위해 불필요한 데이터(고객 전화번호 등) 제거하고 핵심만 추출
-            const promptData = destinations.map(d => ({
-                id: String(d.id),
-                address: d.address,
-                storeName: d.storeName || "상호 없음"
-            }));
-
-            const controller = new AbortController(); 
-            let timer;
-            let upstream;
-
-            try {
-                upstream = await Promise.race([
-                    Promise.resolve().then(async () => {
-                        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent`, {
-                            method: 'POST', 
-                            headers: { 
-                                'Content-Type': 'application/json', 
-                                'x-goog-api-key': env.GEMINI_API_KEY 
-                            },
-                            signal: controller.signal,
-                            body: JSON.stringify({
-                                systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-                                contents: [{ 
-                                    role: 'user', 
-                                    parts: [{ text: JSON.stringify(promptData, null, 2) }] 
-                                }],
-                                generationConfig: { 
-                                    responseMimeType: 'application/json', 
-                                    responseSchema: RESPONSE_SCHEMA,
-                                    temperature: 0.1 // 🌟 창의성보다는 논리적이고 일관된 정답을 내도록 온도 낮춤
-                                }
-                            })
-                        });
-
-                        if (!response.ok) throw failure('GEMINI_API_ERROR', response.status === 429 ? 429 : 502);
-                        return await response.json();
-                    }),
-                    new Promise((_, reject) => { 
-                        timer = setTimeout(() => {
-                            reject(failure('LLM_TIMEOUT', 504)); 
-                            controller.abort();
-                        }, timeoutMs); 
-                    })
-                ]);
-            } catch (error) {
-                if (error.status) throw error;
-                throw failure('NETWORK_ERROR', 502);
-            } finally { 
-                clearTimeout(timer); 
-            }
-
-            // 결과 검증 및 추출
-            const candidate = upstream.candidates?.[0];
-            if (!candidate || candidate.finishReason !== 'STOP') throw failure('INVALID_RESPONSE', 502);
-            
-            const textPart = candidate.content?.parts?.[0]?.text;
-            if (!textPart) throw failure('INVALID_RESPONSE', 502);
-
-            let parsed;
-            try { 
-                parsed = JSON.parse(textPart); 
-            } catch (_) { 
-                throw failure('JSON_PARSE_ERROR', 502); 
-            }
-
-            if (!parsed.optimized || !Array.isArray(parsed.optimized)) {
-                throw failure('SCHEMA_MISMATCH', 502);
-            }
-
-            // 성공적으로 정렬된 ID 배열 반환
-            return res.status(200).json({ optimized: parsed.optimized });
-
-        } catch (error) {
-            console.error('[Optimize LLM Error]', error.code || error.message);
-            // 에러 발생 시 프론트엔드(optimizer.js)가 기본 하버사인 정렬을 유지하도록 500 에러 처리
-            return res.status(error.status || 500).json({ 
-                error: { code: error.code || 'SERVER_ERROR' } 
-            });
-        }
-    };
-}
-
-module.exports = createHandler();
-module.exports.createHandler = createHandler;
+                throw failure('GEMINI_KEY_MISSING
