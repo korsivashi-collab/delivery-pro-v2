@@ -284,5 +284,6 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
             after: finalRoute.slice(candidate.from, candidate.to).map(node => node.id), beforeScore, afterScore,
             fallback: diagnostic.fallback || worsened, ...(worsened ? { skipped: 'SCORE_WORSENED' } : {}) });
     }
-    return finalRoute;
+    // endLocation is a calculation anchor, not a delivery destination.
+    return hasEnd ? finalRoute.slice(0, -1) : finalRoute;
 }

@@ -554,6 +554,7 @@ window.openNaverMap = openNaverMap;
 window.openKakaoNaviDirect = openNaverMap;
 
 window.closeStartModal = closeStartModal;
+window.handleStartSelectTab = handleStartSelectTab;
 window.selectStartDest = selectStartDest;
 window.optimizeRoute = optimizeRouteAction;
 window.selectHeightTag = selectHeightTag;
