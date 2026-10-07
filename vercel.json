@@ -1,6 +1,13 @@
 {
   "functions": {
-    "api/scan.js": { "maxDuration": 60 }
+    "api/scan.js": { 
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/optimize-llm.js": { 
+      "maxDuration": 60,
+      "memory": 1024
+    }
   },
   "rewrites": [
     {
@@ -12,6 +19,10 @@
         }
       ],
       "destination": "/index.html"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/$1"
     }
   ],
   "redirects": [
