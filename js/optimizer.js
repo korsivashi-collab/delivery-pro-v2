@@ -18,23 +18,34 @@ const MIN_CLUSTER_SIZE = 3;
 
 // LLM API를 호출하여 밀집 구간을 최적화하는 비동기 함수
 async function optimizeClusterWithLLM(clusterNodes) {
+    const controller = new AbortController();
+    let timer;
     try {
-        // 향후 추가될 LLM 전용 최적화 API 경로
-        const response = await fetch('/api/optimize-llm', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ destinations: clusterNodes })
-        });
-        
-        // 특정 조건(API 미구현 또는 통신 에러) 발생 시 기존 하버사인 정렬 유지 (안전장치)
-        if (!response.ok) {
-            console.warn('LLM 최적화 API가 아직 준비되지 않았습니다. 기본 정렬을 유지합니다.');
-            return clusterNodes;
-        }
-        
-        const data = await response.json();
+        // 응답 본문까지 제한 시간에 포함하고 실패 시 기본 경로를 유지한다.
+        const data = await Promise.race([
+            Promise.resolve().then(async () => {
+                const response = await fetch('/api/optimize-llm', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ destinations: clusterNodes }),
+                    signal: controller.signal
+                });
+                if (!response.ok) return null;
+                return response.json();
+            }),
+            new Promise((_, reject) => {
+                timer = setTimeout(() => {
+                    reject(new Error('LLM_TIMEOUT'));
+                    controller.abort();
+                }, 20000);
+            })
+        ]);
         // LLM이 특정 조건에 따라 정리해준 순서가 있다면 경로에 반영
-        if (data && data.optimized) {
+        const ids = new Set(clusterNodes.map(node => String(node.id)));
+        if (Array.isArray(data?.optimized) && ids.size === clusterNodes.length &&
+            data.optimized.length === clusterNodes.length &&
+            new Set(data.optimized).size === clusterNodes.length &&
+            data.optimized.every(id => typeof id === 'string' && ids.has(id))) {
             const orderMap = new Map(data.optimized.map((id, index) => [String(id), index]));
             return [...clusterNodes].sort((a, b) => {
                 const idxA = orderMap.has(String(a.id)) ? orderMap.get(String(a.id)) : 999;
@@ -46,7 +57,7 @@ async function optimizeClusterWithLLM(clusterNodes) {
     } catch (error) {
         console.warn('LLM API 호출 실패:', error);
         return clusterNodes; // 에러 발생 시 앱이 멈추지 않도록 원본 경로 안전 유지
-    }
+    } finally { clearTimeout(timer); }
 }
 
 // 동선 최적화 메인 알고리즘 (시작점, 종료점 확정 후 경로 생성 시작)
@@ -176,11 +187,11 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
     }
 
     // 🌟 2단계: 특정 조건(반경 300m 이내, 3개 이상 밀집) 감지 시 LLM 개입
-    let finalRoute = [];
+    let finalRoute = [startPoint];
     let currentCluster = [];
     
     // 출발지와 종료지를 제외한 실제 배송지 목록 추출
-    const macroRoute = hasEnd ? fullRoute.slice(0, fullRoute.length - 1) : fullRoute;
+    const macroRoute = fullRoute.slice(1, hasEnd ? -1 : undefined);
     
     for (let i = 0; i < macroRoute.length; i++) {
         const node = macroRoute[i];
