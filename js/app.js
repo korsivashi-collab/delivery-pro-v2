@@ -1,17 +1,17 @@
-import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 // js/app.js
 
 // =================================================================
 // [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (네이버 내비 완벽 대응)
 // =================================================================
 
+import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 import { calculateOptimizedRoute } from './optimizer.js';
 import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
 
-// 분리된 모듈 임포트 (카카오내비 제거 후 네이버 내비 연동)
+// 분리된 모듈 임포트
 import { renderDestinationList } from './ui.js';
 import { openTmap, openNaverMap, switchStartSelectViewMode, cancelStartMapLoad } from './navigation.js';
 
@@ -142,7 +142,6 @@ export async function initApp() {
             phone: sanitizePhoneNumber(d.phone || d.customerPhone || d.tel || d.contact || d.hp || '')
         }));
         state.setDestinations(formattedList);
-        // 이전 기기/계정의 종료점을 가져오지 않습니다.
         state.setEndLocation(routeData.endLocation || { lat: 0, lng: 0, address: '' });
         state.setStartLocation(routeData.startSelected === true ? routeData.startLocation : null);
         state.updateDisplayNumbers(routeData.updatedAt);
@@ -269,7 +268,6 @@ export function openStartSelectionModal() {
 
     let html = '';
     destinations.forEach(d => {
-        // 상호명 추출 및 주소 정제
         let storeName = d.storeName ? String(d.storeName).trim() : "";
         let cleanAddr = (d.address || "").trim();
         const match = cleanAddr.match(/^\[(.*?)\]\s*(.*)$/);
@@ -323,10 +321,11 @@ export function handleStartSelectTab(mode) {
 }
 
 // ==========================================
-// 5. 동선 최적화 알고리즘 실행
+// 5. 동선 최적화 알고리즘 실행 (🌟 비동기 LLM 호출 완벽 지원)
 // ==========================================
 let activeOptimization = null;
-export function optimizeRouteAction() {
+
+export async function optimizeRouteAction() {
     if (activeOptimization) return;
     let destinations = state.getDestinations();
     const startLocation = state.getStartLocation();
@@ -346,45 +345,62 @@ export function optimizeRouteAction() {
     const task = { snapshot: snapshotKey() };
     activeOptimization = task;
     const isCurrent = () => activeOptimization === task && snapshotKey() === task.snapshot;
-    try {
-    showLoading("최적화중...");
     
-    setTimeout(() => {
-        try {
-            if (!isCurrent()) return;
-            const routeDestinations = destinations.filter(hasValidDeliveryCoordinates).map(d => ({ ...d }));
-            // 계산 알고리즘의 첫 항목 고정 규칙에 명시적으로 선택된 배송지를 전달한다.
-            const selectedIndex = routeDestinations.findIndex(d => d.id === startLocation.id);
-            if (selectedIndex > 0) routeDestinations.unshift(routeDestinations.splice(selectedIndex, 1)[0]);
-            const pendingDestinations = destinations.filter(d => !hasValidDeliveryCoordinates(d));
-            if (!hasValidDeliveryCoordinates(startLocation) || !hasValidDeliveryCoordinates(routeDestinations[0])) {
-                throw new Error('시작점의 주소를 수정하여 위치를 확인해 주세요.');
-            }
-            if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
-            destinations = calculateOptimizedRoute(routeDestinations, { ...startLocation },
-                hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null).concat(pendingDestinations);
-            if (!isCurrent()) return;
-            state.setDestinations(destinations);
-            if (!updateDisplayNumbers()) return;
-            hideLoading();
-            if (pendingDestinations.length) alert(`위치 확인이 필요한 배송지 ${pendingDestinations.length}건은 최적화에서 제외하고 목록 끝에 유지했습니다. 주소를 수정해 주세요.`);
-            
-            const deviceId = getOrCreateDeviceId();
-            const phone = localStorage.getItem('deliveryProUserPhone') || "";
-            saveRouteToFirestore(deviceId, phone, destinations);
-            
-            setTimeout(() => { 
-                const mainContainer = document.querySelector('main'); 
-                if (mainContainer) mainContainer.scrollTo({ top: 0, behavior: 'smooth' }); 
-            }, 100);
-        } catch (error) {
-            alert(error.message);
-        } finally {
-            if (activeOptimization === task) { activeOptimization = null; hideLoading(); }
+    try {
+        // LLM 분석이 포함될 수 있으므로 안내 문구 강화
+        showLoading("동선 최적화 중...\n(밀집 구간 발견 시 AI 분석 진행)");
+        
+        // UI 렌더링이 블로킹되지 않도록 짧은 지연시간 부여
+        await new Promise(resolve => setTimeout(resolve, 100));
+        
+        if (!isCurrent()) return;
+        
+        const routeDestinations = destinations.filter(hasValidDeliveryCoordinates).map(d => ({ ...d }));
+        const selectedIndex = routeDestinations.findIndex(d => d.id === startLocation.id);
+        
+        if (selectedIndex > 0) routeDestinations.unshift(routeDestinations.splice(selectedIndex, 1)[0]);
+        const pendingDestinations = destinations.filter(d => !hasValidDeliveryCoordinates(d));
+        
+        if (!hasValidDeliveryCoordinates(startLocation) || !hasValidDeliveryCoordinates(routeDestinations[0])) {
+            throw new Error('시작점의 주소를 수정하여 위치를 확인해 주세요.');
         }
-    }, 500);
+        if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
+        
+        // 🌟 비동기로 변경된 최적화 엔진 호출 대기(await)
+        const optimizedSection = await calculateOptimizedRoute(
+            routeDestinations, 
+            { ...startLocation },
+            hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null
+        );
+        
+        if (!isCurrent()) return;
+        
+        destinations = optimizedSection.concat(pendingDestinations);
+        state.setDestinations(destinations);
+        
+        if (!updateDisplayNumbers()) return;
+        hideLoading();
+        
+        if (pendingDestinations.length) {
+            alert(`위치 확인이 필요한 배송지 ${pendingDestinations.length}건은 최적화에서 제외하고 목록 끝에 유지했습니다. 주소를 수정해 주세요.`);
+        }
+        
+        const deviceId = getOrCreateDeviceId();
+        const phone = localStorage.getItem('deliveryProUserPhone') || "";
+        saveRouteToFirestore(deviceId, phone, destinations);
+        
+        setTimeout(() => { 
+            const mainContainer = document.querySelector('main'); 
+            if (mainContainer) mainContainer.scrollTo({ top: 0, behavior: 'smooth' }); 
+        }, 100);
+        
     } catch (error) {
-        activeOptimization = null; hideLoading(); throw error;
+        alert(error.message);
+    } finally {
+        if (activeOptimization === task) { 
+            activeOptimization = null; 
+            hideLoading(); 
+        }
     }
 }
 
@@ -535,7 +551,6 @@ window.editDestinationAddress = editDestinationAddress;
 window.triggerCameraScan = triggerCameraScan;
 window.openTmap = openTmap;
 window.openNaverMap = openNaverMap;
-// 구버전 인라인 HTML 호환용 폴백 바인딩
 window.openKakaoNaviDirect = openNaverMap;
 
 window.closeStartModal = closeStartModal;
@@ -545,18 +560,4 @@ window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
-window.moveDestinationUp = moveDestinationUp;
-window.moveDestinationDown = moveDestinationDown;
-
-window.handleStartSelectTab = handleStartSelectTab;
-window.copyAddressModal = copyAddressModal;
-
-window.appActions = {
-    initApp, 
-    optimizeRouteAction, 
-    getDeviceRealGPS, 
-    renderList,
-    updateDisplayNumbers,
-    moveDestinationUp,
-    moveDestinationDown
-};
+window.moveDestinationUp

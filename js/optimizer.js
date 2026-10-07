@@ -11,8 +11,46 @@ export function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// 동선 최적화 메인 알고리즘 (시작점, 종료점 반영)
-export function calculateOptimizedRoute(destinations, startLocation, endLocation) {
+// 🌟 밀집 구역 기준 반경 (km) - 도심지 현실 동선을 반영하여 300m로 조정
+const CLUSTER_RADIUS_KM = 0.3;
+// 🌟 밀집 구역으로 판단하여 LLM을 호출할 최소 배송지 수 (지그재그가 발생할 수 있는 3개 이상부터 발동)
+const MIN_CLUSTER_SIZE = 3;
+
+// LLM API를 호출하여 밀집 구간을 최적화하는 비동기 함수
+async function optimizeClusterWithLLM(clusterNodes) {
+    try {
+        // 향후 추가될 LLM 전용 최적화 API 경로
+        const response = await fetch('/api/optimize-llm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ destinations: clusterNodes })
+        });
+        
+        // 특정 조건(API 미구현 또는 통신 에러) 발생 시 기존 하버사인 정렬 유지 (안전장치)
+        if (!response.ok) {
+            console.warn('LLM 최적화 API가 아직 준비되지 않았습니다. 기본 정렬을 유지합니다.');
+            return clusterNodes;
+        }
+        
+        const data = await response.json();
+        // LLM이 특정 조건에 따라 정리해준 순서가 있다면 경로에 반영
+        if (data && data.optimized) {
+            const orderMap = new Map(data.optimized.map((id, index) => [String(id), index]));
+            return [...clusterNodes].sort((a, b) => {
+                const idxA = orderMap.has(String(a.id)) ? orderMap.get(String(a.id)) : 999;
+                const idxB = orderMap.has(String(b.id)) ? orderMap.get(String(b.id)) : 999;
+                return idxA - idxB;
+            });
+        }
+        return clusterNodes;
+    } catch (error) {
+        console.warn('LLM API 호출 실패:', error);
+        return clusterNodes; // 에러 발생 시 앱이 멈추지 않도록 원본 경로 안전 유지
+    }
+}
+
+// 동선 최적화 메인 알고리즘 (시작점, 종료점 확정 후 경로 생성 시작)
+export async function calculateOptimizedRoute(destinations, startLocation, endLocation) {
     if (destinations.length < 2) {
         throw new Error("출발지를 포함하여 최소 2곳의 배송지가 필요합니다.");
     }
@@ -26,7 +64,6 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
     let allPoints = [startPoint, ...unassigned];
     if (hasEnd) allPoints.push(endLocation);
 
-    // 이번 실행의 실제 좌표로 인덱스를 부여합니다. id와 무관하게 같은 좌표는 공유합니다.
     const coordinateIndices = new Map();
     const pointIndices = new WeakMap();
     allPoints.forEach(point => {
@@ -37,12 +74,13 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
         if (!coordinateIndices.has(key)) coordinateIndices.set(key, coordinateIndices.size);
         pointIndices.set(point, coordinateIndices.get(key));
     });
+    
     const coordinateCount = coordinateIndices.size;
     const distanceCache = [];
+    
     function getCachedDistance(pointA, pointB) {
         const indexA = pointIndices.get(pointA);
         const indexB = pointIndices.get(pointB);
-        // 비정상 입력의 기존 형 변환/계산 동작은 그대로 유지합니다.
         if (indexA === undefined || indexB === undefined) {
             return getDistance(pointA.lat, pointA.lng, pointB.lat, pointB.lng);
         }
@@ -51,12 +89,10 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
             : indexB * coordinateCount + indexA;
         const cachedDistance = distanceCache[key];
         if (cachedDistance !== undefined) return cachedDistance;
-        // 최초 계산은 기존 인자 순서를 유지하고 역방향에서도 같은 값을 재사용합니다.
         const distance = getDistance(pointA.lat, pointA.lng, pointB.lat, pointB.lng);
         distanceCache[key] = distance;
         return distance;
     }
-
 
     let axisStart = startPoint;
     let axisEnd = endLocation;
@@ -112,7 +148,7 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
     let fullRoute = [startPoint, ...route];
     if (hasEnd) fullRoute.push(endLocation);
 
-    // 2-opt 알고리즘을 통한 경로 정밀 개선
+    // 1단계: 하버사인 + 2-opt 알고리즘을 통한 뼈대 경로 구성
     let improved = true; 
     let iter = 0;
     let endIndex = hasEnd ? fullRoute.length - 2 : fullRoute.length - 1;
@@ -139,6 +175,53 @@ export function calculateOptimizedRoute(destinations, startLocation, endLocation
         }
     }
 
-    if (hasEnd) return fullRoute.slice(0, fullRoute.length - 1);
-    else return fullRoute.slice(0);
+    // 🌟 2단계: 특정 조건(반경 300m 이내, 3개 이상 밀집) 감지 시 LLM 개입
+    let finalRoute = [];
+    let currentCluster = [];
+    
+    // 출발지와 종료지를 제외한 실제 배송지 목록 추출
+    const macroRoute = hasEnd ? fullRoute.slice(0, fullRoute.length - 1) : fullRoute;
+    
+    for (let i = 0; i < macroRoute.length; i++) {
+        const node = macroRoute[i];
+        
+        // 첫 번째 노드는 클러스터 검사 시작점
+        if (currentCluster.length === 0) {
+            currentCluster.push(node);
+            continue;
+        }
+        
+        // 이전 노드와의 거리 측정
+        const prevNode = currentCluster[currentCluster.length - 1];
+        const dist = getCachedDistance(prevNode, node);
+        
+        if (dist <= CLUSTER_RADIUS_KM) {
+            // 반경 300m 이내에 있으면 검출 대기열에 담기
+            currentCluster.push(node);
+        } else {
+            // 반경을 벗어나면 조건 충족 여부(3개 이상) 확인 후 분기 처리
+            if (currentCluster.length >= MIN_CLUSTER_SIZE) {
+                // 특정 조건에 부합하므로 LLM이 동선을 정리
+                const optimizedCluster = await optimizeClusterWithLLM(currentCluster);
+                finalRoute.push(...optimizedCluster);
+            } else {
+                // 조건에 걸리지 않으면 기존 하버사인 경로 그대로 통과
+                finalRoute.push(...currentCluster);
+            }
+            
+            // 새로운 클러스터 검사 시작
+            currentCluster = [node];
+        }
+    }
+    
+    // 마지막 남은 클러스터 꼬리표 처리
+    if (currentCluster.length >= MIN_CLUSTER_SIZE) {
+        const optimizedCluster = await optimizeClusterWithLLM(currentCluster);
+        finalRoute.push(...optimizedCluster);
+    } else {
+        finalRoute.push(...currentCluster);
+    }
+
+    if (hasEnd) finalRoute.push(endLocation);
+    return finalRoute;
 }
