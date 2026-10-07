@@ -12,7 +12,7 @@ export function getDistance(lat1, lon1, lat2, lon2) {
 }
 
 // 🌟 밀집 구역 기준 반경 (km) - 도심지 현실 동선을 반영하여 300m로 조정
-const CLUSTER_RADIUS_KM = 0.3;
+const CLUSTER_RADIUS_KM = 0.5;
 // 🌟 밀집 구역으로 판단하여 LLM을 호출할 최소 배송지 수 (지그재그가 발생할 수 있는 3개 이상부터 발동)
 const MIN_CLUSTER_SIZE = 3;
 
