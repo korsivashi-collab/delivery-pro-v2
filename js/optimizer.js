@@ -15,11 +15,11 @@ export function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 🌟 [LLM 개입을 위한 파라미터 설정 - 기사님 요청값 반영]
+// 🌟 [LLM 개입을 위한 파라미터 설정 - 영점 조절(1차 완화) 반영]
 const MIN_CLUSTER_SIZE = 3;        // 최소 3곳 이상이 밀집되어 있을 때 개입
 const ZIGZAG_WINDOW_SIZE = 6;      // 한 번에 검사할 최대 노드 수
-const ZIGZAG_SCORE_THRESHOLD = 3;  // 지그재그 의심 점수 3점 이상 시 발동
-const MAX_LOCAL_SPAN_KM = 0.6;     // 반경 600m 이내의 '초밀집 구역'에서만 발동
+const ZIGZAG_SCORE_THRESHOLD = 2;  // 지그재그 의심 점수 2점 이상 시 발동 (꼬임 감지 예민하게 완화)
+const MAX_LOCAL_SPAN_KM = 0.9;     // 반경 900m 이내의 구역에서 발동 (동네 골목길 커버하도록 확장)
 
 // 지그재그 및 꼬임 현상 점수화 함수
 function scoreZigzag(nodes) {
@@ -270,7 +270,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         }
     }
 
-    // 2단계: 반경 600m 이내, 점수 3점 이상, 3곳 이상인 '심각한 지그재그' 추출 및 LLM 제한적 교정
+    // 2단계: 반경 900m 이내, 점수 2점 이상, 3곳 이상인 '골목 지그재그' 추출 및 LLM 제한적 교정
     const candidates = [];
     const windowSize = Math.min(ZIGZAG_WINDOW_SIZE, fullRoute.length);
     const mutableEnd = hasEnd ? fullRoute.length - 1 : fullRoute.length;
@@ -294,7 +294,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         const window = inspectedRoute.slice(offset, offset + windowSize);
         const { score, reasons } = scoreZigzag(window);
         
-        // 제한조건 2: 심각성 검사 (3점 이상)
+        // 제한조건 2: 심각성 검사 (2점 이상으로 완화)
         if (score < ZIGZAG_SCORE_THRESHOLD) continue;
 
         let spanKm = 0;
@@ -304,7 +304,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
             }
         }
 
-        // 제한조건 3: 초밀집 구역 검사 (반경 600m 이하)
+        // 제한조건 3: 동네 밀집 구역 검사 (반경 900m 이하로 완화)
         const local = Number.isFinite(spanKm) && spanKm <= MAX_LOCAL_SPAN_KM;
         if (local) {
             candidates.push({ from, to, windowFrom: offset, windowTo: offset + windowSize, score, reasons, spanKm });
@@ -332,14 +332,14 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         const optimized = await optimizeClusterWithLLM(clusterNodes, prevAnchor, nextAnchor, diagnostic);
 
         if (!diagnostic.fallback && optimized && optimized.length === clusterNodes.length) {
-            // 🌟 10% 롤백 안전장치: 
-            // LLM이 묶어온 경로의 총 이동 거리가 기존 하버사인 뼈대보다 10% 이상 길어지면 역주행으로 간주하고 버림.
+            // 🌟 15% 롤백 안전장치 완화: 
+            // LLM이 예쁘게 묶어온 경로의 총 이동 거리가 기존 하버사인 뼈대보다 15% 이상 길어질 때만 역주행으로 간주하고 버림.
             const origPath = [prevAnchor, ...clusterNodes, nextAnchor].filter(Boolean);
             const optPath = [prevAnchor, ...optimized, nextAnchor].filter(Boolean);
             const origDist = calculateSectionDistance(origPath);
             const optDist = calculateSectionDistance(optPath);
 
-            if (optDist <= origDist * 1.10) {
+            if (optDist <= origDist * 1.15) {
                 finalRoute.splice(candidate.from, clusterNodes.length, ...optimized);
             }
         }
