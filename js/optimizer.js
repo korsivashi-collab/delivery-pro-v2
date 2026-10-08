@@ -11,13 +11,51 @@ export function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
 }
 
-// 🌟 밀집 구역 기준 반경 (km) - 도심지 현실 동선을 반영하여 300m로 조정
-const CLUSTER_RADIUS_KM = 0.25;
-// 🌟 밀집 구역으로 판단하여 LLM을 호출할 최소 배송지 수 (지그재그가 발생할 수 있는 3개 이상부터 발동)
 const MIN_CLUSTER_SIZE = 3;
+const ZIGZAG_WINDOW_SIZE = 5;
+const ZIGZAG_SCORE_THRESHOLD = 2;
+// Distance is only a guard on the whole inspected window, not the AI trigger.
+const MAX_LOCAL_SPAN_KM = 1;
+
+function scoreZigzag(nodes) {
+    const reasons = { directionReversals: 0, progressRecovery: 0, crossings: 0, consecutiveSharpTurns: 0 };
+    const vectors = [];
+    let previousProgressSign = 0, previousSharpTurn = false;
+    for (let i = 1; i < nodes.length; i++) {
+        const a = nodes[i - 1], b = nodes[i];
+        const vector = { x: (b.lng - a.lng) * Math.cos((a.lat + b.lat) * Math.PI / 360), y: b.lat - a.lat };
+        const length = Math.hypot(vector.x, vector.y);
+        if (length > 0) vectors.push({ ...vector, length });
+        if (Number.isFinite(a.progress) && Number.isFinite(b.progress)) {
+            const delta = b.progress - a.progress;
+            const sign = Math.abs(delta) > 0.000001 ? Math.sign(delta) : 0;
+            if (previousProgressSign < 0 && sign > 0) reasons.progressRecovery++;
+            if (sign) previousProgressSign = sign;
+        }
+    }
+    for (let i = 1; i < vectors.length; i++) {
+        const a = vectors[i - 1], b = vectors[i];
+        const dot = a.x * b.x + a.y * b.y;
+        if (dot < 0) reasons.directionReversals++;
+        const sharp = dot < -Math.SQRT1_2 * a.length * b.length; // turn > 135 degrees
+        if (previousSharpTurn && sharp) reasons.consecutiveSharpTurns++;
+        previousSharpTurn = sharp;
+    }
+    const side = (a, b, c) => (b.lng - a.lng) * (c.lat - a.lat) - (b.lat - a.lat) * (c.lng - a.lng);
+    for (let i = 0; i < nodes.length - 1; i++) {
+        for (let j = i + 2; j < nodes.length - 1; j++) {
+            const a = nodes[i], b = nodes[i + 1], c = nodes[j], d = nodes[j + 1];
+            // Proper crossings only: touching endpoints and collinear segments do not count.
+            if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) reasons.crossings++;
+        }
+    }
+    const score = reasons.directionReversals + reasons.progressRecovery + reasons.crossings * 2 + reasons.consecutiveSharpTurns;
+    return { score, reasons };
+}
 
 // LLM API를 호출하여 밀집 구간을 최적화하는 비동기 함수
-async function optimizeClusterWithLLM(clusterNodes) {
+async function optimizeClusterWithLLM(clusterNodes, diagnostic = {}) {
+    diagnostic.fallback = true;
     const controller = new AbortController();
     let timer;
     try {
@@ -27,7 +65,8 @@ async function optimizeClusterWithLLM(clusterNodes) {
                 const response = await fetch('/api/optimize-llm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ destinations: clusterNodes }),
+                    body: JSON.stringify({ destinations: clusterNodes.map(({ id, address, storeName, lat, lng }) =>
+                        ({ id, address, storeName, lat, lng })) }),
                     signal: controller.signal
                 });
                 if (!response.ok) return null;
@@ -46,6 +85,7 @@ async function optimizeClusterWithLLM(clusterNodes) {
             data.optimized.length === clusterNodes.length &&
             new Set(data.optimized).size === clusterNodes.length &&
             data.optimized.every(id => typeof id === 'string' && ids.has(id))) {
+            diagnostic.fallback = false;
             const orderMap = new Map(data.optimized.map((id, index) => [String(id), index]));
             return [...clusterNodes].sort((a, b) => {
                 const idxA = orderMap.has(String(a.id)) ? orderMap.get(String(a.id)) : 999;
@@ -186,53 +226,64 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         }
     }
 
-    // 🌟 2단계: 특정 조건(반경 300m 이내, 3개 이상 밀집) 감지 시 LLM 개입
-    let finalRoute = [startPoint];
-    let currentCluster = [];
-    
-    // 출발지와 종료지를 제외한 실제 배송지 목록 추출
-    const macroRoute = fullRoute.slice(1, hasEnd ? -1 : undefined);
-    
-    for (let i = 0; i < macroRoute.length; i++) {
-        const node = macroRoute[i];
-        
-        // 첫 번째 노드는 클러스터 검사 시작점
-        if (currentCluster.length === 0) {
-            currentCluster.push(node);
+    // 2단계 실험: baseline 경로의 짧은 window만 검사하고 겹치는 호출은 제외한다.
+    const candidates = [];
+    const windowSize = Math.min(ZIGZAG_WINDOW_SIZE, fullRoute.length);
+    const mutableEnd = hasEnd ? fullRoute.length - 1 : fullRoute.length;
+    const inspectPoint = point => ({ ...point,
+        progress: point === startPoint || (hasEnd && point === endLocation)
+            ? (axisLenSq > 0.000001 ? ((point.lat - axisStart.lat) * axisLat + (point.lng - axisStart.lng) * axisLng) / axisLenSq : 0)
+            : point.progress });
+    const inspectedRoute = fullRoute.map(inspectPoint);
+    for (let offset = 0; offset <= fullRoute.length - windowSize; offset++) {
+        const from = Math.max(1, offset), to = Math.min(mutableEnd, offset + windowSize);
+        if (to - from < MIN_CLUSTER_SIZE) continue;
+        const window = inspectedRoute.slice(offset, offset + windowSize);
+        const { score, reasons } = scoreZigzag(window);
+        if (score < ZIGZAG_SCORE_THRESHOLD) continue;
+        let spanKm = 0;
+        for (let i = offset; i < offset + windowSize; i++) {
+            for (let j = i + 1; j < offset + windowSize; j++) spanKm = Math.max(spanKm, getCachedDistance(fullRoute[i], fullRoute[j]));
+        }
+        const ids = fullRoute.slice(from, to).map(node => node.id);
+        const local = Number.isFinite(spanKm) && spanKm <= MAX_LOCAL_SPAN_KM;
+        if (!local) {
+            console.debug?.('[Zigzag AI]', { ids, score, reasons, spanKm, local: false, called: false,
+                before: ids, after: ids, fallback: true, skipped: 'NON_LOCAL' });
             continue;
         }
-        
-        // 이전 노드와의 거리 측정
-        const prevNode = currentCluster[currentCluster.length - 1];
-        const dist = getCachedDistance(prevNode, node);
-        
-        if (dist <= CLUSTER_RADIUS_KM) {
-            // 반경 300m 이내에 있으면 검출 대기열에 담기
-            currentCluster.push(node);
-        } else {
-            // 반경을 벗어나면 조건 충족 여부(3개 이상) 확인 후 분기 처리
-            if (currentCluster.length >= MIN_CLUSTER_SIZE) {
-                // 특정 조건에 부합하므로 LLM이 동선을 정리
-                const optimizedCluster = await optimizeClusterWithLLM(currentCluster);
-                finalRoute.push(...optimizedCluster);
-            } else {
-                // 조건에 걸리지 않으면 기존 하버사인 경로 그대로 통과
-                finalRoute.push(...currentCluster);
-            }
-            
-            // 새로운 클러스터 검사 시작
-            currentCluster = [node];
-        }
+        candidates.push({ from, to, windowFrom: offset, windowTo: offset + windowSize, score, reasons, spanKm });
     }
-    
-    // 마지막 남은 클러스터 꼬리표 처리
-    if (currentCluster.length >= MIN_CLUSTER_SIZE) {
-        const optimizedCluster = await optimizeClusterWithLLM(currentCluster);
-        finalRoute.push(...optimizedCluster);
-    } else {
-        finalRoute.push(...currentCluster);
+    // Prefer the strongest signal; each delivery can be passed to AI at most once.
+    const selected = [];
+    candidates.sort((a, b) => b.score - a.score || a.from - b.from);
+    for (const candidate of candidates) {
+        if (selected.some(other => candidate.from < other.to && other.from < candidate.to)) {
+            const ids = fullRoute.slice(candidate.from, candidate.to).map(node => node.id);
+            console.debug?.('[Zigzag AI]', { ids, score: candidate.score, reasons: candidate.reasons,
+                spanKm: candidate.spanKm, local: true, called: false, before: ids, after: ids,
+                fallback: true, skipped: 'OVERLAP' });
+        } else selected.push(candidate);
     }
-
-    if (hasEnd) finalRoute.push(endLocation);
-    return finalRoute;
+    const finalRoute = fullRoute.slice();
+    selected.sort((a, b) => a.from - b.from);
+    for (const candidate of selected) {
+        const clusterNodes = fullRoute.slice(candidate.from, candidate.to);
+        const diagnostic = {};
+        const optimized = await optimizeClusterWithLLM(clusterNodes, diagnostic);
+        const proposedRoute = finalRoute.slice();
+        proposedRoute.splice(candidate.from, clusterNodes.length, ...optimized);
+        const scoreWindow = route => scoreZigzag(route.slice(candidate.windowFrom, candidate.windowTo).map(inspectPoint)).score;
+        const beforeScore = scoreWindow(finalRoute), afterScore = scoreWindow(proposedRoute);
+        // A valid ID permutation can still make the detected problem worse.
+        const worsened = afterScore > beforeScore;
+        if (!worsened) finalRoute.splice(candidate.from, clusterNodes.length, ...optimized);
+        console.debug?.('[Zigzag AI]', { ids: clusterNodes.map(node => node.id), score: candidate.score,
+            reasons: candidate.reasons, spanKm: candidate.spanKm, local: true, called: true,
+            before: clusterNodes.map(node => node.id), proposed: optimized.map(node => node.id),
+            after: finalRoute.slice(candidate.from, candidate.to).map(node => node.id), beforeScore, afterScore,
+            fallback: diagnostic.fallback || worsened, ...(worsened ? { skipped: 'SCORE_WORSENED' } : {}) });
+    }
+    // endLocation is a calculation anchor, not a delivery destination.
+    return hasEnd ? finalRoute.slice(0, -1) : finalRoute;
 }
