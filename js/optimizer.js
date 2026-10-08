@@ -1,7 +1,7 @@
 // js/optimizer.js
 
 // =================================================================
-// [배송 동선 PRO] 하버사인 + 2-opt 기반 뼈대 경로 및 LLM 밀집구간 정밀 최적화 엔진
+// [배송 동선 PRO] 하버사인 + 2-opt 기반 뼈대 경로 및 LLM '제한적' 밀집구간 정밀 교정 엔진
 // =================================================================
 
 // 두 지점 간의 거리 계산 (하버사인 공식, 단위: km)
@@ -15,11 +15,11 @@ export function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-const MIN_CLUSTER_SIZE = 3;
-const ZIGZAG_WINDOW_SIZE = 6;
-const ZIGZAG_SCORE_THRESHOLD = 2;
-// 도심지 연속 배송 권역을 충분히 포용하도록 반경 상한을 2km로 완화
-const MAX_LOCAL_SPAN_KM = 2.0;
+// 🌟 [LLM 개입을 위한 파라미터 설정 - 기사님 요청값 반영]
+const MIN_CLUSTER_SIZE = 3;        // 최소 3곳 이상이 밀집되어 있을 때 개입
+const ZIGZAG_WINDOW_SIZE = 6;      // 한 번에 검사할 최대 노드 수
+const ZIGZAG_SCORE_THRESHOLD = 3;  // 지그재그 의심 점수 3점 이상 시 발동
+const MAX_LOCAL_SPAN_KM = 0.6;     // 반경 600m 이내의 '초밀집 구역'에서만 발동
 
 // 지그재그 및 꼬임 현상 점수화 함수
 function scoreZigzag(nodes) {
@@ -119,7 +119,7 @@ async function optimizeClusterWithLLM(clusterNodes, prevAnchor = null, nextAncho
                 return idxA - idxB;
             });
 
-            // 🌟 방향 역전 방어 로직: LLM 정렬 순서와 그 역순(Reverse)을 비교하여
+            // 방향 역전 방어 로직: LLM 정렬 순서와 그 역순(Reverse)을 비교하여
             // 진입점(prevAnchor) -> 진출점(nextAnchor) 흐름에 더 자연스러운 방향을 자동 선택
             if (prevAnchor || nextAnchor) {
                 const forwardPath = [prevAnchor, ...orderedNodes, nextAnchor].filter(Boolean);
@@ -243,7 +243,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
     let fullRoute = [startPoint, ...route];
     if (hasEnd) fullRoute.push(endLocation);
 
-    // 2-opt 알고리즘 교차선 해소
+    // 2-opt 알고리즘 교차선 해소 (우수한 거시적 흐름 보장)
     let improved = true; 
     let iter = 0;
     let endIndex = hasEnd ? fullRoute.length - 2 : fullRoute.length - 1;
@@ -270,7 +270,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         }
     }
 
-    // 2단계: 지그재그 의심 밀집 구역 추출 및 LLM 정밀 교정
+    // 2단계: 반경 600m 이내, 점수 3점 이상, 3곳 이상인 '심각한 지그재그' 추출 및 LLM 제한적 교정
     const candidates = [];
     const windowSize = Math.min(ZIGZAG_WINDOW_SIZE, fullRoute.length);
     const mutableEnd = hasEnd ? fullRoute.length - 1 : fullRoute.length;
@@ -287,10 +287,14 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
     for (let offset = 0; offset <= fullRoute.length - windowSize; offset++) {
         const from = Math.max(1, offset);
         const to = Math.min(mutableEnd, offset + windowSize);
+        
+        // 제한조건 1: 최소 노드 개수 검사 (3곳 이상)
         if (to - from < MIN_CLUSTER_SIZE) continue;
 
         const window = inspectedRoute.slice(offset, offset + windowSize);
         const { score, reasons } = scoreZigzag(window);
+        
+        // 제한조건 2: 심각성 검사 (3점 이상)
         if (score < ZIGZAG_SCORE_THRESHOLD) continue;
 
         let spanKm = 0;
@@ -300,6 +304,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
             }
         }
 
+        // 제한조건 3: 초밀집 구역 검사 (반경 600m 이하)
         const local = Number.isFinite(spanKm) && spanKm <= MAX_LOCAL_SPAN_KM;
         if (local) {
             candidates.push({ from, to, windowFrom: offset, windowTo: offset + windowSize, score, reasons, spanKm });
@@ -327,14 +332,14 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         const optimized = await optimizeClusterWithLLM(clusterNodes, prevAnchor, nextAnchor, diagnostic);
 
         if (!diagnostic.fallback && optimized && optimized.length === clusterNodes.length) {
-            // 🌟 이전 기하학적 SCORE_WORSENED 취소 버그 제거:
-            // 도로/건물 묶음으로 인한 미세 곡률 증가는 허용하되, 총 거리가 비정상적으로 폭증(1.3배 초과)하지만 않으면 AI 결과 확정 적용
+            // 🌟 10% 롤백 안전장치: 
+            // LLM이 묶어온 경로의 총 이동 거리가 기존 하버사인 뼈대보다 10% 이상 길어지면 역주행으로 간주하고 버림.
             const origPath = [prevAnchor, ...clusterNodes, nextAnchor].filter(Boolean);
             const optPath = [prevAnchor, ...optimized, nextAnchor].filter(Boolean);
             const origDist = calculateSectionDistance(origPath);
             const optDist = calculateSectionDistance(optPath);
 
-            if (optDist <= origDist * 1.30) {
+            if (optDist <= origDist * 1.10) {
                 finalRoute.splice(candidate.from, clusterNodes.length, ...optimized);
             }
         }
