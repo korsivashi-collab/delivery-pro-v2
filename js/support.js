@@ -266,7 +266,7 @@ export function openHistoryModal() {
     try {
     const current = getHistoryOwnershipContext();
     let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]')
-        .filter(record => classifyHistoryOwnership(record, current) === 'owned');
+        .filter(record => !record.restoredAt && classifyHistoryOwnership(record, current) === 'owned');
     let container = document.getElementById('history-list-container');
     if (!container) return;
     
@@ -294,6 +294,7 @@ export function openHistoryModal() {
                         tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${h.tag}]</span>`;
                     }
                 }
+                if (h.transmissionStatus === 'failed') tagBadge += '<span class="text-red-600 font-bold" title="전송 실패" aria-label="전송 실패">×</span>';
 
                 // 사진 증빙 뱃지 (클릭 시 원본 사진 새창 확인 지원)
                 let photoBadge = "";
@@ -377,7 +378,7 @@ export function archiveCompletedDelivery(item, tag = "", completionDocId = null,
         completionDocId: completionDocId, 
         date: now.toLocaleDateString(), 
         time: now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
-        timestamp: now.getTime(), 
+        timestamp: history.reduce((at, h) => Math.max(at, Number(h.timestamp) + 1 || 0), now.getTime()),
         routeOwnerId: ownership.routeOwnerId,
         licenseKey: ownership.licenseKey,
         phone: ownership.phone,
@@ -395,11 +396,16 @@ export async function restoreHistoryItem(timestamp) {
     if (!confirm("이 배송지를 다시 진행 목록으로 되돌리시겠습니까?")) return;
     let history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
     const current = getHistoryOwnershipContext();
-    const idx = history.findIndex(h => h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
+    const idx = history.findIndex(h => !h.restoredAt && h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
     
     if (idx > -1) {
         showLoading("배송지 복원 중...");
         const targetHistory = history[idx];
+        if (targetHistory.restoreContext && targetHistory.restoreContext.routeId !== state.getRoutePlan()?.routeId) {
+            hideLoading();
+            alert('다른 날짜·경로의 배송 이력입니다. 현재 경로의 순서를 유지하기 위해 복구하지 않았습니다.');
+            return;
+        }
         if (classifyHistoryOwnership(targetHistory) !== 'owned') {
             hideLoading();
             alert("현재 라이선스의 배송 이력만 복원할 수 있습니다.");
@@ -436,14 +442,14 @@ export async function restoreHistoryItem(timestamp) {
                 return;
             }
             const latestHistory = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
-            const latestIdx = latestHistory.findIndex(h => h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
+            const latestIdx = latestHistory.findIndex(h => !h.restoredAt && h.timestamp === timestamp && classifyHistoryOwnership(h, current) === 'owned');
             if (latestIdx < 0) { hideLoading(); return; }
-            latestHistory.splice(latestIdx, 1);
             const saved = state.runLocalTransaction(() => {
+                latestHistory[latestIdx].restoredAt = Date.now();
                 state.writeLocalHistory(latestHistory);
-                if (onRestoreDestinationCallback) onRestoreDestinationCallback(itemToRestore);
-                else { state.addDestination(itemToRestore); state.updateDisplayNumbers(); }
-                stageCompletionDeletion(targetHistory, current, state.getDestinations().at(-1));
+                const restoredItem = state.restoreDestination(itemToRestore, targetHistory.restoreContext);
+                state.updateDisplayNumbers();
+                stageCompletionDeletion(targetHistory, current, restoredItem);
             });
             if (!saved) { hideLoading(); return; }
             if (typeof window.renderList === 'function') window.renderList();

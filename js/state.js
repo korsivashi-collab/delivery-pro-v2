@@ -9,6 +9,7 @@ import { storageErrorContext, storageDiagnostic } from './storage-diagnostics.js
 let destinations = [];
 let endLocation = { lat: 0, lng: 0, address: "" }; 
 let startLocation = null;
+let routePlan = null;
 let routeOwnerId = null;
 let routeUpdatedAt = 0;
 let onActiveDataSaved = null;
@@ -23,7 +24,7 @@ let committedMemory = null;
 let localTransaction = null;
 
 function memorySnapshot(updatedAt = routeUpdatedAt) {
-    return JSON.stringify({ destinations, endLocation, startLocation, routeUpdatedAt: updatedAt });
+    return JSON.stringify({ destinations, endLocation, startLocation, routePlan, routeUpdatedAt: updatedAt });
 }
 
 function restoreMemory(snapshot) {
@@ -32,6 +33,7 @@ function restoreMemory(snapshot) {
     destinations = saved.destinations;
     endLocation = saved.endLocation;
     startLocation = saved.startLocation;
+    routePlan = saved.routePlan || null;
     routeUpdatedAt = saved.routeUpdatedAt;
 }
 
@@ -242,9 +244,122 @@ export function destinationIdArgument(id) {
     return destinationIdAttribute(JSON.stringify(id));
 }
 
+const copyPlanValue = value => JSON.parse(JSON.stringify(value));
+const deliveryKey = item => String(item.id);
+function routeDay() { const d = new Date(); return `${d.getFullYear()}-${d.getMonth()+1}-${d.getDate()}`; }
+function ensureRoutePlan() {
+    if (!routePlan) routePlan = { version: 1, routeId: `route-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        date: routeDay(), ownerId: routeOwnerId, baseline: null, orderIds: [], deliveries: [], changes: [] };
+    return routePlan;
+}
+function recordPlanChange(action, id = null) {
+    const plan = ensureRoutePlan();
+    const index = destinations.findIndex(d => String(d.id) === String(id));
+    plan.changes.push({ action, id, at: Date.now(), index, deliveryCount: destinations.length,
+        previousId: index > 0 ? deliveryKey(destinations[index - 1]) : null,
+        nextId: index >= 0 && index + 1 < destinations.length ? deliveryKey(destinations[index + 1]) : null });
+    plan.changes = plan.changes.slice(-200);
+}
+// Replace only the active slots; inactive deliveries keep their historical relative positions.
+function syncRoutePlan() {
+    if (!routePlan && !destinations.length) return;
+    const plan = ensureRoutePlan(), current = destinations.map(deliveryKey), active = new Set(current);
+    const known = new Set(plan.orderIds), existing = current.filter(id => known.has(id));
+    let next = 0;
+    plan.orderIds = plan.orderIds.map(id => active.has(id) ? existing[next++] : id);
+    for (let i = 0; i < current.length; i++) {
+        const id = current[i]; if (known.has(id)) continue;
+        const successor = current.slice(i + 1).find(key => plan.orderIds.includes(key));
+        const before = successor === undefined ? plan.orderIds.length : plan.orderIds.indexOf(successor);
+        plan.orderIds.splice(before, 0, id);
+    }
+    plan.orderIds = [...new Set(plan.orderIds)];
+    for (const item of destinations) {
+        let entry = plan.deliveries.find(d => d.id === deliveryKey(item));
+        if (!entry) { entry = { id: deliveryKey(item), stateVersion: 0 }; plan.deliveries.push(entry); }
+        // Full active information already lives in destinations; avoid a second memo/items cache.
+        entry.item = { id: item.id, address: item.address || '', storeName: item.storeName || '', lat: item.lat, lng: item.lng };
+        entry.status = 'active';
+        entry.addedAfterBaseline = !!plan.baseline && !plan.baseline.orderIds.includes(entry.id);
+    }
+}
+function insertionIndex(list, item, context) {
+    const order = context?.orderIds || [], pivot = order.indexOf(deliveryKey(item));
+    if (pivot < 0) return list.length;
+    // Prefer the nearest surviving successor, otherwise the nearest surviving predecessor.
+    for (let i = pivot + 1; i < order.length; i++) {
+        const at = list.findIndex(d => deliveryKey(d) === order[i]); if (at >= 0) return at;
+    }
+    for (let i = pivot - 1; i >= 0; i--) {
+        const at = list.findIndex(d => deliveryKey(d) === order[i]); if (at >= 0) return at + 1;
+    }
+    return list.length;
+}
+
 export const state = {
     getRouteOwnerId() { return routeOwnerId; },
     getRouteUpdatedAt() { return routeUpdatedAt; },
+    getRoutePlan() { return routePlan ? copyPlanValue(routePlan) : null; },
+    prepareRemoteRoute(list, plan) {
+        if (!plan && routePlan && list.length && !list.some(d => routePlan.orderIds.includes(String(d.id)))) routePlan = null;
+        this.setRemoteRoutePlan(plan);
+    },
+    setRemoteRoutePlan(plan) {
+        if (plan?.version === 1 && plan.ownerId === routeOwnerId && typeof plan.routeId === 'string' &&
+            Array.isArray(plan.orderIds) && Array.isArray(plan.deliveries) && Array.isArray(plan.changes)) {
+            routePlan = copyPlanValue(plan);
+        }
+    },
+    captureRemoval(id, status = 'completed') {
+        syncRoutePlan(); const plan = ensureRoutePlan();
+        const entry = plan.deliveries.find(d => d.id === String(id));
+        if (!entry) throw new Error('복구할 배송 정보를 찾을 수 없습니다.');
+        entry.status = status; entry.stateVersion++;
+        const context = { routeId: plan.routeId, ownerId: routeOwnerId, orderIds: [...plan.orderIds],
+            stateVersion: entry.stateVersion, startLocation: startLocation ? { ...startLocation } : null };
+        recordPlanChange(status, id);
+        return context;
+    },
+    restoreDestination(item, context = null) {
+        if (context && (context.ownerId !== routeOwnerId || context.routeId !== routePlan?.routeId)) {
+            throw new Error('다른 날짜·경로의 배송입니다. 현재 경로로 복구할 수 없습니다.');
+        }
+        if (destinations.some(d => deliveryKey(d) === deliveryKey(item))) return destinations.find(d => deliveryKey(d) === deliveryKey(item));
+        const restored = normalizeDeliveryObject({ ...item });
+        const at = insertionIndex(destinations, restored, context);
+        destinations.splice(at, 0, restored);
+        if (!startLocation && context?.startLocation?.id === restored.id) this.setStartLocation(context.startLocation);
+        if (startLocation) { const i = destinations.findIndex(d => d.id === startLocation.id); if (i > 0) destinations.unshift(destinations.splice(i, 1)[0]); }
+        syncRoutePlan(); const entry = routePlan.deliveries.find(d => d.id === deliveryKey(restored));
+        entry.stateVersion++; recordPlanChange('restore', restored.id);
+        return restored;
+    },
+    captureInitialRoute() {
+        syncRoutePlan(); const plan = ensureRoutePlan();
+        if (!plan.baseline) plan.baseline = { orderIds: destinations.map(deliveryKey),
+            deliveries: copyPlanValue(destinations.map((d, i) => ({ ...d, displayNumber: i + 1 }))), startLocation: copyPlanValue(startLocation),
+            endLocation: copyPlanValue(endLocation), routeId: plan.routeId, confirmedAt: Date.now() };
+        recordPlanChange('optimize');
+    },
+    restoreInitialOrder() {
+        const baseline = routePlan?.baseline; if (!baseline) return false;
+        const rank = new Map(baseline.orderIds.map((id, i) => [id, i]));
+        const original = destinations.filter(d => rank.has(deliveryKey(d))).sort((a, b) => rank.get(deliveryKey(a)) - rank.get(deliveryKey(b)));
+        const added = destinations.filter(d => !rank.has(deliveryKey(d)));
+        destinations = original.concat(added);
+        if (startLocation) { const i = destinations.findIndex(d => d.id === startLocation.id); if (i > 0) destinations.unshift(destinations.splice(i, 1)[0]); }
+        syncRoutePlan(); recordPlanChange('restore-initial');
+        return this.updateDisplayNumbers();
+    },
+    moveDestination(id, direction) {
+        const at = destinations.findIndex(d => d.id === id), target = at + direction;
+        if (at < 0 || target < 0 || target >= destinations.length) return '목록의 끝이므로 더 이동할 수 없습니다.';
+        if (startLocation && (destinations[at].id === startLocation.id || destinations[target].id === startLocation.id)) return '선택한 시작점은 첫 위치에 고정됩니다. 시작점을 변경하려면 시작점 선택을 사용하세요.';
+        destinations = [...destinations];
+        [destinations[at], destinations[target]] = [destinations[target], destinations[at]];
+        syncRoutePlan(); recordPlanChange('move', id);
+        return this.updateDisplayNumbers() ? null : '순서를 저장하지 못했습니다.';
+    },
     setActiveDataSavedHandler(handler) { onActiveDataSaved = handler; },
     activateRouteOwner(ownerId) {
         if (routeOwnerId !== (ownerId || null)) this.deactivateRouteOwner();
@@ -257,6 +372,7 @@ export const state = {
         destinations = [];
         endLocation = { lat: 0, lng: 0, address: '' };
         startLocation = null;
+        routePlan = null;
         committedMemory = memorySnapshot();
     },
     reportStorageFailure(error, context = {}) {
@@ -325,11 +441,14 @@ export const state = {
     addDestination(item, { prepend = false } = {}) {
         item = normalizeDeliveryObject(item);
         if (!item) return null;
-        const reservedIds = new Set(destinations.map(destination => String(destination.id)));
+        if (!destinations.length && routePlan && routePlan.date !== routeDay()) routePlan = null;
+        const reservedIds = new Set([...destinations.map(destination => String(destination.id)), ...(routePlan?.orderIds || [])]);
         const addedItem = isDestinationId(item.id) && !reservedIds.has(String(item.id))
             ? item : { ...item, id: createDestinationId(reservedIds) };
-        if (prepend) destinations.unshift(addedItem);
+        if (prepend && !startLocation) destinations.unshift(addedItem);
+        else if (prepend && startLocation) destinations.splice(1, 0, addedItem);
         else destinations.push(addedItem);
+        syncRoutePlan(); recordPlanChange('add', addedItem.id);
         return addedItem;
     },
     removeDestination(id) {
@@ -396,6 +515,7 @@ export const state = {
         if (!routeOwnerId) return false;
         try {
             reconcileStartLocation();
+            syncRoutePlan();
             const revision = updatedAt === null ? Math.max(Date.now(), routeUpdatedAt + 1) : updatedAt;
             const snapshot = serializeLocal('deliveryPro_route_metadata', { destinations, endLocation, startLocation, routeUpdatedAt: revision }, 'saveActiveData');
             const values = {};
@@ -403,7 +523,7 @@ export const state = {
             if (transmissions !== undefined) values.deliveryPro_transmissions = serializeLocal('deliveryPro_transmissions', transmissions, 'saveActiveData');
             // loadActiveData already reads only this owned snapshot.
             values.deliveryPro_route_metadata = serializeLocal('deliveryPro_route_metadata', { routeOwnerId, updatedAt: revision, destinations, endLocation,
-                startSelected: startLocation !== null, startLocation }, 'saveActiveData');
+                startSelected: startLocation !== null, startLocation, routePlan }, 'saveActiveData');
             writeLocalValues(values, 'saveActiveData', { ...localCounts(),
                 ...(history !== undefined ? { historyCount: history.length } : {}),
                 ...(transmissions !== undefined ? { transmissionCount: transmissions.length } : {}) });
@@ -431,6 +551,7 @@ export const state = {
             destinations = [];
             endLocation = { lat: 0, lng: 0, address: '' };
             startLocation = null;
+            routePlan = null;
             routeUpdatedAt = 0;
             committedMemory = memorySnapshot();
             if (!metadata || metadata.routeOwnerId !== routeOwnerId || !Number.isFinite(metadata.updatedAt)) return;
@@ -438,6 +559,7 @@ export const state = {
             const savedList = metadata.destinations;
             if (!Array.isArray(savedList)) return;
             destinations = normalizeDeliveryList(savedList);
+            this.setRemoteRoutePlan(metadata.routePlan);
             const savedEnd = metadata.endLocation;
             this.setEndLocation(savedEnd || endLocation);
             routeUpdatedAt = metadata.updatedAt;

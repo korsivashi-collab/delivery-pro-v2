@@ -35,6 +35,7 @@ export function createCompletionTask(item, tag, context, photoId = null, photoUr
 
 // Called inside the same local transaction as the history and active-list mutation.
 export function stageCompletionTask(job, historyEntry) {
+    historyEntry.transmissionStatus = 'pending';
     historyEntry.transmissionId = job.id;
     historyEntry.completionDocId = job.id;
     historyEntry.hasPhoto = !!(job.photoId || job.photoUrl);
@@ -52,7 +53,9 @@ export function stageCompletionDeletion(record, context, restoredItem) {
         completedAt: Date.now(), completionDocId: record.completionDocId || id,
         ownership: { routeOwnerId: context.routeOwnerId, licenseKey: context.licenseKey },
         deviceId: context.deviceId, phone: context.phone, photoId: previous?.photoId || null,
-        restoredItem
+        restoredItem, restoreContext: record.restoreContext || null,
+        routeId: record.restoreContext?.routeId || null,
+        stateVersion: (record.restoreContext?.stateVersion || 0) + 1
     };
     state.writeTransmissions([...jobs.filter(entry => entry.id !== id), job]);
 }
@@ -61,16 +64,21 @@ export function stageCompletionDeletion(record, context, restoredItem) {
 export function excludeLocallyCompleted(list) {
     const owner = state.getRouteOwnerId();
     const history = JSON.parse(state.readLocalData('deliveryPro_history') || '[]');
-    const completed = new Set(history.filter(h => h.routeOwnerId === owner && h.transmissionId).map(h => String(h.id)));
+    const routeId = state.getRoutePlan()?.routeId;
+    const sameRoute = context => !context?.routeId || context.routeId === routeId;
+    const completed = new Set(history.filter(h => !h.restoredAt && h.routeOwnerId === owner && h.transmissionId && sameRoute(h.restoreContext)).map(h => String(h.id)));
     const jobs = readCompletionQueue();
     for (const job of jobs) {
-        if (job.ownership.routeOwnerId === owner && job.action === 'complete') completed.add(String(job.item.id));
+        if (job.ownership.routeOwnerId === owner && sameRoute(job) && job.action === 'complete') completed.add(String(job.item.id));
     }
     const filtered = list.filter(item => !item || !completed.has(String(item.id)));
     for (const job of jobs) {
-        if (job.action === 'delete' && job.ownership.routeOwnerId === owner && job.restoredItem &&
+        if (job.action === 'delete' && job.ownership.routeOwnerId === owner && sameRoute(job) && job.restoredItem &&
             !completed.has(String(job.restoredItem.id)) && !filtered.some(item => item && String(item.id) === String(job.restoredItem.id))) {
-            filtered.push(job.restoredItem);
+            const order = job.restoreContext?.orderIds || [], pivot = order.indexOf(String(job.restoredItem.id));
+            const successor = pivot < 0 ? -1 : order.slice(pivot + 1).map(id => filtered.findIndex(d => String(d.id) === id)).find(at => at >= 0);
+            const predecessor = pivot < 0 ? -1 : order.slice(0, pivot).reverse().map(id => filtered.findIndex(d => String(d.id) === id)).find(at => at >= 0);
+            filtered.splice(successor >= 0 ? successor : predecessor >= 0 ? predecessor + 1 : filtered.length, 0, job.restoredItem);
         }
     }
     return filtered;
@@ -101,7 +109,12 @@ export function createCompletionWorker({
     status = () => {}, resumeOwner = async () => {}
 } = {}) {
     let busy = false, timer = null, transport = null, stopped = false;
-    const matches = (a, b) => a.id === b.id && a.action === b.action;
+    const refreshHistory = job => {
+        try {
+            if (typeof document.dispatchEvent === 'function' && typeof CustomEvent === 'function') document.dispatchEvent(new CustomEvent('completion-photo-saved', {detail:{transmissionId:job.id,routeOwnerId:job.ownership.routeOwnerId}}));
+        } catch (_) {}
+    };
+    const matches = (a, b) => a.id === b.id && a.action === b.action && a.stateVersion === b.stateVersion && a.ownership.routeOwnerId === b.ownership.routeOwnerId;
     const update = (job, patch) => {
         const jobs = read();
         const index = jobs.findIndex(current => matches(current, job));
@@ -157,7 +170,16 @@ export function createCompletionWorker({
                     if (job.action === 'complete' && job.photoId && !job.photoUrl) {
                         const photoUrl = await request(() => upload(job));
                         if (!photoUrl) throw new Error('사진 업로드 응답 미확인');
-                        if (!update(job, { photoUrl, stage: 'completion' })) continue;
+                        if (!update(job, { photoUrl, stage: 'completion' })) {
+                            // Preserve evidence from a late upload without reviving completion.
+                            const records = history();
+                            const record = records.find(h => h.transmissionId === job.id && h.routeOwnerId === job.ownership.routeOwnerId);
+                            if (record && owner() === job.ownership.routeOwnerId) {
+                                record.photoUrl = photoUrl; record.hasPhoto = true;
+                                if (!write(read(), records)) throw new Error('사진 이력 저장 실패');
+                            }
+                            continue;
+                        }
                     }
                     // Also repairs history on restart/retry when the queue already has the URL.
                     saveHistoryPhoto(job);
@@ -173,20 +195,29 @@ export function createCompletionWorker({
                     if (!jobs.some(current => matches(current, job))) continue;
                     const records = history();
                     const record = records.find(h => h.transmissionId === job.id && h.routeOwnerId === job.ownership.routeOwnerId);
+                    const clearFailure = job.action === 'complete' && record?.transmissionStatus === 'failed';
                     if (record && job.action === 'complete') {
                         record.photoUrl = job.photoUrl;
                         record.hasPhoto = !!job.photoUrl;
                         record.transmissionStatus = 'sent';
                     }
                     if (!write(jobs.filter(current => !matches(current, job)), records)) throw new Error('전송 완료 상태 저장 실패');
+                    if (clearFailure) refreshHistory(job);
                     try { status(read().filter(current => current.ownership.routeOwnerId === owner())); } catch (_) {}
-                    if (job.photoId) photos.remove(job.photoId).catch(error => console.error('전송 사진 정리 실패:', storageDiagnostic(error, { operation: 'completionPhotoCleanup', storage: 'indexedDB' })));
+                    // A restored delivery retains its existing photo evidence.
+                    if (job.photoId && job.action === 'complete') photos.remove(job.photoId).catch(error => console.error('전송 사진 정리 실패:', storageDiagnostic(error, { operation: 'completionPhotoCleanup', storage: 'indexedDB' })));
                 } catch (error) {
                     const longFailure = job.attempts >= 8 || now() - job.completedAt >= 86400000;
                     const delay = longFailure ? 3600000 : Math.min(300000, 5000 * 2 ** Math.min(job.attempts - 1, 6));
-                    try { update(job, { status: longFailure ? 'longFailure' : 'pending',
+                    try { const current = update(job, { status: longFailure ? 'longFailure' : 'pending',
                         lastError: String(error.code || error.message || error).slice(0, 200),
-                        lastFailureAt: now(), nextAttemptAt: now() + delay }); }
+                        lastFailureAt: now(), nextAttemptAt: now() + delay });
+                        if (current && job.action === 'complete' && job.attempts >= 2) {
+                            const records = history();
+                            const record = records.find(h => !h.restoredAt && h.transmissionId === job.id && h.routeOwnerId === job.ownership.routeOwnerId);
+                            if (record && record.transmissionStatus !== 'failed') { record.transmissionStatus = 'failed'; if (!write(read(), records)) throw new Error('전송 결과 저장 실패'); refreshHistory(job); }
+                        }
+                    }
                     catch (storageError) { console.error('전송 작업 보존 확인 필요:', storageDiagnostic(storageError, { operation: 'completionWorker', stage: 'bookkeeping' })); break; }
                 }
             }

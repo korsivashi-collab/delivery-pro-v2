@@ -519,6 +519,7 @@ export async function reportMemoInFirestore(docId) {
 
 // 8. 배송 경로 및 완료 내역 동기화
 const routeSaveRevisions = new Map();
+const routeSaveTasks = new Map();
 const MAX_ROUTE_SAVE_REVISIONS = 64;
 export async function saveRouteToFirestore(deviceId, phone, destinations, requireAcknowledgement = false) {
     let revisionKey;
@@ -534,12 +535,13 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
         }
         routeSaveRevisions.set(revisionKey, revision);
         const routeRef = doc(db, "routes", deviceId);
-        await setDoc(routeRef, {
+        const payload = {
             routeOwnerId,
             deviceId,
             endLocation: state.getEndLocation(),
             startSelected: state.getStartLocation() !== null,
             startLocation: state.getStartLocation(),
+            routePlan: state.getRoutePlan(),
             phone: phone || "연락처 미등록",
             updatedAt: state.getRouteUpdatedAt() || Date.now(),
             destinations: destinations.map(d => ({
@@ -554,8 +556,17 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 memo: d.memo || "",
                 items: d.items || []
             }))
+        };
+        // Serialize this device's writes so a slow older request cannot finish last.
+        const previous = routeSaveTasks.get(revisionKey) || Promise.resolve();
+        const task = previous.catch(() => {}).then(async () => {
+            if (state.getRouteOwnerId() !== routeOwnerId || state.getRouteUpdatedAt() !== revision) return false;
+            await setDoc(routeRef, payload);
+            return true;
         });
-        return true;
+        routeSaveTasks.set(revisionKey, task);
+        try { return await task; }
+        finally { if (routeSaveTasks.get(revisionKey) === task) routeSaveTasks.delete(revisionKey); }
     } catch (e) {
         if (routeSaveRevisions.get(revisionKey) === revision) routeSaveRevisions.delete(revisionKey);
         console.error("동선 전송 오류:", e);

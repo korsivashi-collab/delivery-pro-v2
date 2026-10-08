@@ -133,6 +133,7 @@ export async function initApp() {
             return;
         }
         if (routeData.updatedAt === state.getRouteUpdatedAt()) return;
+        state.prepareRemoteRoute(newDestinations, routeData.routePlan);
         try { newDestinations = excludeLocallyCompleted(newDestinations); }
         catch (error) { console.error('완료 전송 상태 확인 실패:', error); return; }
         state.setDestinations(newDestinations);
@@ -167,7 +168,7 @@ export async function initApp() {
     });
 
     setRestoreDestinationHandler((itemToRestore) => {
-        state.addDestination(itemToRestore);
+        state.restoreDestination(itemToRestore);
         state.updateDisplayNumbers();
     });
 
@@ -188,6 +189,12 @@ export function updateDisplayNumbers() {
 }
 
 export function renderList() {
+    const restoreButton = document.getElementById('restore-initial-order');
+    if (restoreButton) {
+        const available = !!state.getRoutePlan()?.baseline;
+        restoreButton.textContent = available ? '최초 순서 복구' : '복구 기준 없음';
+        restoreButton.title = available ? '완료 상태는 유지하고 남은 배송지를 최초 순서로 복구합니다.' : '최초 최적화가 성공하면 복구 기준을 보존합니다.';
+    }
     refreshGpsTracking();
     renderDestinationList(preloadBatchMemos, renderMemoPreview, getAllPersonalMemos);
 }
@@ -377,6 +384,7 @@ export async function optimizeRouteAction() {
         
         destinations = optimizedSection.concat(pendingDestinations);
         state.setDestinations(destinations);
+        state.captureInitialRoute();
         
         if (!updateDisplayNumbers()) return;
         hideLoading();
@@ -407,42 +415,18 @@ export async function optimizeRouteAction() {
 // ==========================================
 // 6. 버튼식 위치 이동 (위로 / 아래로 순서 변경)
 // ==========================================
-export function moveDestinationUp(id) {
-    const destinations = state.getDestinations();
-    const idx = destinations.findIndex(d => d.id === id);
-    if (idx <= 0) return; 
-
-    const temp = destinations[idx];
-    destinations[idx] = destinations[idx - 1];
-    destinations[idx - 1] = temp;
-
-    state.setDestinations(destinations);
-    if (!updateDisplayNumbers()) return;
-
-    const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone') || "";
-    saveRouteToFirestore(deviceId, phone, destinations);
-
+function moveDelivery(id, direction) {
+    const reason = state.moveDestination(id, direction);
+    if (reason) { alert(reason); return; }
+    renderList();
     if (navigator.vibrate) navigator.vibrate(12);
 }
-
-export function moveDestinationDown(id) {
-    const destinations = state.getDestinations();
-    const idx = destinations.findIndex(d => d.id === id);
-    if (idx === -1 || idx >= destinations.length - 1) return; 
-
-    const temp = destinations[idx];
-    destinations[idx] = destinations[idx + 1];
-    destinations[idx + 1] = temp;
-
-    state.setDestinations(destinations);
-    if (!updateDisplayNumbers()) return;
-
-    const deviceId = getOrCreateDeviceId();
-    const phone = localStorage.getItem('deliveryProUserPhone') || "";
-    saveRouteToFirestore(deviceId, phone, destinations);
-
-    if (navigator.vibrate) navigator.vibrate(12);
+export function moveDestinationUp(id) { moveDelivery(id, -1); }
+export function moveDestinationDown(id) { moveDelivery(id, 1); }
+export function restoreInitialRouteOrder() {
+    if (!state.getRoutePlan()?.baseline) { alert('복구 기준 없음: 이 목록에는 최초 확정 경로 기록이 없습니다.'); return; }
+    if (!confirm('완료 상태는 유지하고, 남은 배송지를 최초 확정 순서로 복구하시겠습니까? 추가 배송지는 현재 상대 순서대로 뒤에 유지됩니다.')) return;
+    if (state.restoreInitialOrder()) renderList();
 }
 
 // ==========================================
@@ -561,4 +545,7 @@ window.selectHeightTag = selectHeightTag;
 window.selectTimeTag = selectTimeTag;
 window.toggleEtcTag = toggleEtcTag;
 
-window.moveDestinationUp
+window.moveDestinationUp = moveDestinationUp;
+window.moveDestinationDown = moveDestinationDown;
+
+window.restoreInitialRouteOrder = restoreInitialRouteOrder;

@@ -121,9 +121,13 @@ export function triggerPhotoCompletion() {
 function finishLocally(item, tag, context, photoId = null, photoUrl = null) {
     let job;
     if (!state.runLocalTransaction(() => {
+        const restoreContext = state.captureRemoval(item.id, tag === '배송 취소' ? 'cancelled' : 'completed');
         job = createCompletionTask(item, tag, context, photoId, photoUrl);
+        job.routeId = restoreContext.routeId;
+        job.stateVersion = restoreContext.stateVersion;
         const historyEntry = archiveCompletedDelivery(item, tag, null, photoUrl,
             { ...context.completionOwnership, phone: context.phone, deviceId: context.deviceId });
+        historyEntry.restoreContext = restoreContext;
         stageCompletionTask(job, historyEntry);
         state.removeDestination(item.id);
         state.updateDisplayNumbers();

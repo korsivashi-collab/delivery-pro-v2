@@ -154,10 +154,10 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             li.innerHTML = `
                 <div class="flex items-start gap-1.5 pb-0.5 mt-0.5">
                     <div class="flex flex-col items-center justify-center gap-1 shrink-0 -ml-0.5 mr-0.5 mt-0.5">
-                        <button onclick="moveDestinationUp(${idArgument})" ${isFirst ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="위로 이동">
+                        <button onclick="moveDestinationUp(${idArgument})" ${isFirst ? 'disabled' : ''} class="w-8 h-[32px] touch-manipulation flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="${isFirst ? '첫 행은 더 위로 이동할 수 없습니다' : '위로 이동'}">
                             <i class="fa-solid fa-chevron-up text-[10px]"></i>
                         </button>
-                        <button onclick="moveDestinationDown(${idArgument})" ${isLast ? 'disabled' : ''} class="w-6 h-[20px] flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="아래로 이동">
+                        <button onclick="moveDestinationDown(${idArgument})" ${isLast ? 'disabled' : ''} class="w-8 h-[32px] touch-manipulation flex items-center justify-center rounded bg-slate-50 hover:bg-slate-100 active:bg-slate-200 border border-slate-200 text-slate-600 disabled:opacity-15 disabled:pointer-events-none transition shadow-2xs" title="${isLast ? '마지막 행은 더 아래로 이동할 수 없습니다' : '아래로 이동'}">
                             <i class="fa-solid fa-chevron-down text-[10px]"></i>
                         </button>
                     </div>
