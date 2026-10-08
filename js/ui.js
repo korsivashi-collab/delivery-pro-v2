@@ -136,7 +136,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                     <span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${state.escapeHtml(formatted.cleanAddr)}</span>
                 `;
             } else {
-                displayAddressHTML = `<span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${formatted.cleanAddr}</span>`;
+                displayAddressHTML = `<span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${state.escapeHtml(formatted.cleanAddr)}</span>`;
             }
 
             let distHtml = "";
