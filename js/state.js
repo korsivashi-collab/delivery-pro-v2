@@ -24,7 +24,7 @@ let committedMemory = null;
 let localTransaction = null;
 
 function memorySnapshot(updatedAt = routeUpdatedAt) {
-    return JSON.stringify({ destinations, endLocation, startLocation, routePlan, routeUpdatedAt: updatedAt });
+    return serializeLocal('deliveryPro_route_metadata', { destinations, endLocation, startLocation, routePlan, routeUpdatedAt: updatedAt }, 'memorySnapshot');
 }
 
 function restoreMemory(snapshot) {
@@ -297,6 +297,15 @@ function insertionIndex(list, item, context) {
 }
 
 export const state = {
+    // Text/attribute encoding and JSON-in-event encoding are separate operations.
+    escapeHtml(value) { return destinationIdAttribute(value ?? ''); },
+    inlineArgument(value) { return destinationIdArgument(value); },
+    safePhotoUrl(value) {
+        try {
+            const url = new URL(String(value));
+            return ['https:', 'http:'].includes(url.protocol) && !url.username && !url.password ? url.href : '';
+        } catch (_) { return ''; }
+    },
     getRouteOwnerId() { return routeOwnerId; },
     getRouteUpdatedAt() { return routeUpdatedAt; },
     getRoutePlan() { return routePlan ? copyPlanValue(routePlan) : null; },
@@ -517,7 +526,7 @@ export const state = {
             reconcileStartLocation();
             syncRoutePlan();
             const revision = updatedAt === null ? Math.max(Date.now(), routeUpdatedAt + 1) : updatedAt;
-            const snapshot = serializeLocal('deliveryPro_route_metadata', { destinations, endLocation, startLocation, routeUpdatedAt: revision }, 'saveActiveData');
+            const snapshot = memorySnapshot(revision);
             const values = {};
             if (history !== undefined) values.deliveryPro_history = serializeLocal('deliveryPro_history', history, 'saveActiveData');
             if (transmissions !== undefined) values.deliveryPro_transmissions = serializeLocal('deliveryPro_transmissions', transmissions, 'saveActiveData');

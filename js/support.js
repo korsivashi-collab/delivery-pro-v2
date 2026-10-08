@@ -209,11 +209,11 @@ export function openNoticeHistoryModal() {
             html += `
             <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs flex flex-col gap-2">
                 <div class="flex justify-between items-center text-xs">
-                    <span class="${badgeClass} font-black text-[10px] px-2 py-0.5 rounded-md">${badgeTitle}</span>
-                    <span class="text-[11px] font-mono text-gray-400">${n.dateStr} ${n.timeStr}</span>
+                    <span class="${badgeClass} font-black text-[10px] px-2 py-0.5 rounded-md">${state.escapeHtml(badgeTitle)}</span>
+                    <span class="text-[11px] font-mono text-gray-400">${state.escapeHtml(n.dateStr)} ${state.escapeHtml(n.timeStr)}</span>
                 </div>
                 <div class="p-3 bg-slate-50 border border-slate-100 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">
-                    ${n.content}
+                    ${state.escapeHtml(n.content)}
                 </div>
             </div>`;
         });
@@ -273,14 +273,14 @@ export function openHistoryModal() {
     if (history.length === 0) {
         container.innerHTML = `<div class="text-center text-gray-400 py-16 text-sm"><p>완료된 배송 이력이 없습니다.</p></div>`;
     } else {
-        let grouped = {}; 
+        let grouped = Object.create(null); 
         history.forEach(h => { 
             if (!grouped[h.date]) grouped[h.date] = []; 
             grouped[h.date].push(h); 
         });
         let html = '';
         for (let date in grouped) {
-            html += `<div class="sticky top-0 bg-white/95 backdrop-blur-sm z-10 py-2 mt-1 mb-2 border-b border-gray-100"><span class="text-[11px] font-black text-gray-600 bg-gray-100 px-2.5 py-1 rounded-md shadow-2xs">${date}</span></div><div class="space-y-2 mb-4">`;
+            html += `<div class="sticky top-0 bg-white/95 backdrop-blur-sm z-10 py-2 mt-1 mb-2 border-b border-gray-100"><span class="text-[11px] font-black text-gray-600 bg-gray-100 px-2.5 py-1 rounded-md shadow-2xs">${state.escapeHtml(date)}</span></div><div class="space-y-2 mb-4">`;
             let dailyTotal = grouped[date].length;
             grouped[date].forEach((h, idx) => { 
                 let sequentialNum = dailyTotal - idx;
@@ -289,17 +289,18 @@ export function openHistoryModal() {
                 let tagBadge = "";
                 if (h.tag) {
                     if (h.tag === "배송 취소") {
-                        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${h.tag}]</span>`;
+                        tagBadge = `<span class="bg-red-50 border border-red-200 text-red-600 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${state.escapeHtml(h.tag)}]</span>`;
                     } else {
-                        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${h.tag}]</span>`;
+                        tagBadge = `<span class="bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 shadow-2xs">[${state.escapeHtml(h.tag)}]</span>`;
                     }
                 }
                 if (h.transmissionStatus === 'failed') tagBadge += '<span class="text-red-600 font-bold" title="전송 실패" aria-label="전송 실패">×</span>';
 
                 // 사진 증빙 뱃지 (클릭 시 원본 사진 새창 확인 지원)
                 let photoBadge = "";
-                if (h.photoUrl) {
-                    photoBadge = `<a href="${h.photoUrl}" target="_blank" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs active:bg-blue-200 transition"><i class="fa-solid fa-camera"></i> 사진보기</a>`;
+                const photoUrl = state.safePhotoUrl(h.photoUrl);
+                if (photoUrl) {
+                    photoBadge = `<a href="${state.escapeHtml(photoUrl)}" target="_blank" rel="noopener noreferrer" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs active:bg-blue-200 transition"><i class="fa-solid fa-camera"></i> 사진보기</a>`;
                 } else if (h.hasPhoto) {
                     photoBadge = `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-camera"></i> 사진</span>`;
                 }
@@ -314,15 +315,15 @@ export function openHistoryModal() {
                             ${photoBadge}
                         </div>
                         <div class="flex items-center gap-2 shrink-0">
-                            <span class="text-gray-400 text-[10px] font-mono">${h.time}</span>
-                            <button onclick="restoreHistoryItem(${h.timestamp})" class="bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition flex items-center">
+                            <span class="text-gray-400 text-[10px] font-mono">${state.escapeHtml(h.time)}</span>
+                            <button onclick="restoreHistoryItem(${state.inlineArgument(h.timestamp)})" class="bg-blue-50 hover:bg-blue-100 active:bg-blue-200 text-blue-600 border border-blue-200 px-2.5 py-1 rounded-lg text-[11px] font-bold shadow-2xs transition flex items-center">
                                 <i class="fa-solid fa-rotate-left mr-1"></i> 복원
                             </button>
                         </div>
                     </div>
                     <!-- 2열: 전체 주소지 및 상호명 (절대 겹치지 않고 시원하게 표시) -->
                     <div class="font-bold text-gray-800 text-[12px] break-keep leading-snug pl-0.5">
-                        ${h.address || "주소 정보 없음"}
+                        ${state.escapeHtml(h.address || "주소 정보 없음")}
                     </div>
                 </div>`; 
             });

@@ -138,7 +138,7 @@ function finishLocally(item, tag, context, photoId = null, photoUrl = null) {
         if (typeof window.renderList === 'function') window.renderList();
         if (navigator.vibrate) navigator.vibrate(40);
     } catch (error) { console.error('완료 화면 갱신 오류:', error); }
-    // Schedule compression/network work after the synchronous completed-UI update.
+    // Start background network transmission after the local completed-UI update.
     try { wakeCompletionQueue(); } catch (error) { console.error('전송대기 재개 오류:', error); }
     return true;
 }
@@ -189,7 +189,7 @@ export function initPhotoCompletion() {
             // 🌟 에러 수정 핵심: 원본 사진(수십MB)을 그대로 저장하지 않고 빠르게 압축하여 DB 용량 초과 방지
             const compressedBlob = await quickCompressToBlob(file, 960, 0.65);
 
-            // Only local durable Blob storage precedes completion. Never wait for compression/upload.
+            // Complete locally after compression and durable Blob storage; network upload runs in the background.
             await completionPhotos.put(photoId, compressedBlob);
             
             const currentItem = state.getDestinations().find(destination => destination.id === item.id);

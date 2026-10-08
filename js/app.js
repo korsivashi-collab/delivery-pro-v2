@@ -289,8 +289,8 @@ export function openStartSelectionModal() {
         html += `
             <button onclick="window.selectStartDest(${destinationIdArgument(d.id)})" class="w-full text-left bg-white hover:bg-slate-50 border border-slate-200 p-3.5 rounded-2xl shadow-xs transition flex items-center justify-between mb-2 active:bg-slate-100">
                 <div class="flex-1 pr-2 min-w-0">
-                    ${storeName ? `<span class="text-blue-600 font-extrabold text-[12px] block mb-0.5 leading-none">🏢 ${storeName}</span>` : ''}
-                    <span class="font-bold text-slate-900 text-[13.5px] break-keep block leading-snug">${cleanAddr}</span>
+                    ${storeName ? `<span class="text-blue-600 font-extrabold text-[12px] block mb-0.5 leading-none">🏢 ${state.escapeHtml(storeName)}</span>` : ''}
+                    <span class="font-bold text-slate-900 text-[13.5px] break-keep block leading-snug">${state.escapeHtml(cleanAddr)}</span>
                 </div>
                 <i class="fa-solid fa-chevron-right text-slate-300 text-xs shrink-0 ml-1"></i>
             </button>

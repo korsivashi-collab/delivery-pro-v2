@@ -25,7 +25,7 @@ function sanitizePhoneNumber(rawVal) {
             return digits.replace(/(\d{3})(\d{3})(\d{4})/, '$1-$2-$3');
         }
     }
-    return strVal;
+    return digits;
 }
 
 // 상호명 분리 및 주소 원본 보존 헬퍼
@@ -119,7 +119,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             // 번호 뱃지: 출발지는 인디고 깃발, 일반 순번은 딥 슬레이트
             let numberBadge = startLocation && startLocation.id === dest.id ? 
                 `<div class="bg-indigo-600 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[10px] shadow-xs shrink-0 ring-2 ring-indigo-100"><i class="fa-solid fa-flag text-[9px]"></i></div>` : 
-                `<div class="bg-slate-900 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-xs shrink-0">${dest.displayNumber}</div>`;
+                `<div class="bg-slate-900 text-white font-black w-6 h-6 rounded-full flex items-center justify-center text-[11px] shadow-xs shrink-0">${state.escapeHtml(dest.displayNumber)}</div>`;
             
             let customerPhoneStr = sanitizePhoneNumber(dest.phone || ""); 
             // 🌟 폰트 크기를 한 단계 낮추고 고정폭(font-mono) 적용으로 자간 여백 확보
@@ -132,8 +132,8 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             
             if (formatted.storeName) {
                 displayAddressHTML = `
-                    <span class="text-blue-600 block text-[11.5px] mb-0.5 leading-none font-bold">🏢 ${formatted.storeName}</span>
-                    <span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${formatted.cleanAddr}</span>
+                    <span class="text-blue-600 block text-[11.5px] mb-0.5 leading-none font-bold">🏢 ${state.escapeHtml(formatted.storeName)}</span>
+                    <span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${state.escapeHtml(formatted.cleanAddr)}</span>
                 `;
             } else {
                 displayAddressHTML = `<span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${formatted.cleanAddr}</span>`;
@@ -145,7 +145,9 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                 distHtml = `<span class="text-[9.5px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded shadow-2xs whitespace-nowrap border border-slate-200 flex items-center h-[20px]"><i class="fa-solid fa-location-arrow text-[9px] mr-1 text-slate-400"></i>${formatDistance(dist)}</span>`;
             }
 
-            let navTargetName = (formatted.storeName || formatted.cleanAddr || dest.address || '목적지').replace(/['"]/g, '');
+            const navTargetName = state.inlineArgument(formatted.storeName || formatted.cleanAddr || dest.address || '목적지');
+            const navLat = needsLocation ? 0 : dest.lat;
+            const navLng = needsLocation ? 0 : dest.lng;
             if (!formatted.cleanAddr && !formatted.storeName) displayAddressHTML = '<span>주소 정보 없음 · 주소 수정 필요</span>';
             if (needsLocation) displayAddressHTML += '<span class="block text-xs text-amber-700">위치 확인 필요 · 주소 수정</span>';
             const isFirst = index === 0;
@@ -192,9 +194,9 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                             <span class="text-[11px] font-bold text-slate-500 px-1.5 shrink-0 whitespace-nowrap leading-none tracking-tight">길찾기</span>
                             <div class="w-px h-3.5 bg-slate-200 shrink-0"></div>
                             <div class="flex-1 grid grid-cols-2 gap-1 h-full">
-                                <button ${navigationDisabled} onclick="openTmap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-slate-900 text-white text-[11px] font-bold rounded-lg active:bg-black flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-map-location-dot text-[10px] shrink-0"></i> 티맵</button>
+                                <button ${navigationDisabled} onclick="openTmap(${navLat}, ${navLng}, ${navTargetName})" class="bg-slate-900 text-white text-[11px] font-bold rounded-lg active:bg-black flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-map-location-dot text-[10px] shrink-0"></i> 티맵</button>
                                 <!-- 🌟 카카오내비 완전 대체: 네이버 내비게이션 버튼 연동 -->
-                                <button ${navigationDisabled} onclick="openNaverMap(${dest.lat}, ${dest.lng}, '${navTargetName}')" class="bg-[#03C75A] hover:bg-[#02B351] text-white text-[11px] font-bold rounded-lg border border-[#02B351] active:bg-[#029b46] flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 네이버</button>
+                                <button ${navigationDisabled} onclick="openNaverMap(${navLat}, ${navLng}, ${navTargetName})" class="bg-[#03C75A] hover:bg-[#02B351] text-white text-[11px] font-bold rounded-lg border border-[#02B351] active:bg-[#029b46] flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 네이버</button>
                             </div>
                         </div>
                         <!-- 취소/삭제: 경고성 소프트 로즈 -->
