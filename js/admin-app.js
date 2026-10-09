@@ -233,7 +233,8 @@ window.handleSingleKeyLogin = async function() {
         // 2. 관제(DISPATCH) 로그인 성공 처리 (기존 동시접속 FIFO 로직 그대로 이식)
         if (result.role === 'DISPATCH') {
             const licData = result.data;
-            const finalKey = keyInput.toUpperCase();
+            // 🌟 [수정점] 서버가 확인한 실제 Firestore 문서 ID(licenseId)를 finalKey로 최우선 사용
+            const finalKey = result.licenseId || (licData && licData.id) || keyInput.toUpperCase();
 
             // 허용 동시 접속 회선 수 판정 (기본형: 1대, PRO: 2대 이상)
             const maxSessions = parseInt(licData.maxSessions) || (licData.isPro ? 2 : 1);
