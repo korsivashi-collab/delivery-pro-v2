@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
     if (!adminDoc.exists) adminDoc = await db.collection('admins').doc(searchKey).get();
     
     if (adminDoc.exists) {
-      // 마스터 토큰 발행 (UID에 비밀키 대신 안전한 고정 식별자 사용)
+      // 마스터 토큰 발행 (안전한 고정 식별자 사용)
       const token = await admin.auth().createCustomToken('admin_master', { role: 'MASTER' });
       return res.status(200).json({ token, role: 'MASTER', data: adminDoc.data() });
     }
@@ -43,7 +43,13 @@ module.exports = async function handler(req, res) {
       
       // 관제(DISPATCH) 또는 기사 토큰 발행
       const token = await admin.auth().createCustomToken(licDoc.id, { role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER' });
-      return res.status(200).json({ token, role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER', data });
+      // 실제 조회된 문서 ID(licDoc.id)를 licenseId로 명시 반환하여 프론트엔드 finalKey/FIFO 일치 보장
+      return res.status(200).json({ 
+        token, 
+        role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER', 
+        licenseId: licDoc.id, 
+        data: { ...data, id: licDoc.id } 
+      });
     }
 
     return res.status(401).json({ error: 'invalid' });
