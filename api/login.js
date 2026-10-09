@@ -28,8 +28,8 @@ module.exports = async function handler(req, res) {
     if (!adminDoc.exists) adminDoc = await db.collection('admins').doc(searchKey).get();
     
     if (adminDoc.exists) {
-      // 마스터 토큰 발행
-      const token = await admin.auth().createCustomToken(key, { role: 'MASTER' });
+      // 마스터 토큰 발행 (UID에 비밀키 대신 안전한 고정 식별자 사용)
+      const token = await admin.auth().createCustomToken('admin_master', { role: 'MASTER' });
       return res.status(200).json({ token, role: 'MASTER', data: adminDoc.data() });
     }
 
