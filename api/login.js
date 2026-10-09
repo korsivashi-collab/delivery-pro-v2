@@ -28,7 +28,7 @@ module.exports = async function handler(req, res) {
     if (!adminDoc.exists) adminDoc = await db.collection('admins').doc(searchKey).get();
     
     if (adminDoc.exists) {
-      // 마스터 토큰 발행 (UID에 비밀키 대신 안전한 고정 식별자 사용)
+      // 마스터 토큰 발행 (안전한 고정 식별자 사용)
       const token = await admin.auth().createCustomToken('admin_master', { role: 'MASTER' });
       return res.status(200).json({ token, role: 'MASTER', data: adminDoc.data() });
     }
@@ -39,7 +39,19 @@ module.exports = async function handler(req, res) {
 
     if (licDoc.exists) {
       const data = licDoc.data();
-      if (data.status === 'suspended') return res.status(403).json({ error: 'suspended' });
+
+      // 기존 앱 기준 상태(정지·회수) 및 만료일자 사전 검증 (토큰 발급 차단)
+      const todayKst = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
+      const isExpired = (data.expireDate && String(data.expireDate) < todayKst) || 
+                        (data.expiresAt && Number(data.expiresAt) < Date.now()) || 
+                        data.status === 'expired';
+
+      if (data.status === 'suspended' || data.status === 'revoked') {
+        return res.status(403).json({ error: data.status });
+      }
+      if (isExpired) {
+        return res.status(403).json({ error: 'expired' });
+      }
       
       // 관제(DISPATCH) 또는 기사 토큰 발행
       const token = await admin.auth().createCustomToken(licDoc.id, { role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER' });
