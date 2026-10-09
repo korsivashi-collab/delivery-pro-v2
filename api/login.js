@@ -40,15 +40,38 @@ module.exports = async function handler(req, res) {
     if (licDoc.exists) {
       const data = licDoc.data();
 
-      // 기존 앱 기준 상태(정지·회수) 및 만료일자 사전 검증 (토큰 발급 차단)
-      const todayKst = new Date(Date.now() + 9 * 60 * 60 * 1000).toISOString().slice(0, 10);
-      const isExpired = (data.expireDate && String(data.expireDate) < todayKst) || 
-                        (data.expiresAt && Number(data.expiresAt) < Date.now()) || 
-                        data.status === 'expired';
-
+      // [상태 검증 1] 정지 및 회수 상태 즉시 차단
       if (data.status === 'suspended' || data.status === 'revoked') {
         return res.status(403).json({ error: data.status });
       }
+
+      // [상태 검증 2] 만료일자 정밀 정규화 검증
+      const now = new Date();
+      // KST (UTC+9) 기준 오늘 날짜를 정수 8자리(YYYYMMDD)로 계산
+      const kstTime = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+      const todayNum = parseInt(kstTime.toISOString().slice(0, 10).replace(/-/g, ''), 10);
+
+      let isExpired = (data.status === 'expired');
+
+      // 1) expireDate 처리: 'YYYY-MM-DD', 'YYYY.MM.DD' 구분자 무관하게 8자리 숫자로 변환
+      if (data.expireDate) {
+        const expNum = parseInt(String(data.expireDate).replace(/\D/g, '').slice(0, 8), 10);
+        // 만료일 숫자가 오늘보다 엄격하게 작은 경우에만 만료 (당일은 사용 허용)
+        if (expNum && expNum < todayNum) {
+          isExpired = true;
+        }
+      }
+
+      // 2) expiresAt 처리: 숫자 밀리초 또는 Firestore Timestamp 지원
+      if (data.expiresAt) {
+        const expMs = typeof data.expiresAt.toMillis === 'function'
+          ? data.expiresAt.toMillis()
+          : Number(data.expiresAt);
+        if (!isNaN(expMs) && expMs > 0 && expMs < Date.now()) {
+          isExpired = true;
+        }
+      }
+
       if (isExpired) {
         return res.status(403).json({ error: 'expired' });
       }
