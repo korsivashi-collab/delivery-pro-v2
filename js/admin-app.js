@@ -216,9 +216,12 @@ window.handleSingleKeyLogin = async function() {
 
         // 🌟 에러 처리: 서버에서 유효하지 않은 키 또는 정지된 계정이라고 응답한 경우
         if (!response.ok) {
-            msgEl.innerText = result.error === 'suspended' 
-                ? "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요." 
-                : "등록되지 않았거나 권한이 없는 관리자 키입니다.";
+            const loginErrors = {
+                suspended: "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요.",
+                revoked: "이용권한이 회수된 계정입니다. 관리자에게 문의하세요.",
+                expired: "사용기간이 만료된 계정입니다. 관리자에게 문의하세요."
+            };
+            msgEl.innerText = loginErrors[result.error] || "등록되지 않았거나 권한이 없는 관리자 키입니다.";
             return;
         }
 
