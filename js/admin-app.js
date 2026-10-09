@@ -1,6 +1,7 @@
 // js/admin-app.js
 
-import { db } from "./admin-api.js";
+// 👇 변경점: auth와 signInWithCustomToken을 admin-api.js에서 추가로 불러옵니다.
+import { db, auth, signInWithCustomToken } from "./admin-api.js";
 import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
@@ -201,39 +202,40 @@ window.handleSingleKeyLogin = async function() {
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인증 확인 중...';
 
     try {
-        let adminSnap = await getDoc(doc(db, "admin", keyInput));
-        if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admin", keyInput.toUpperCase()));
-        if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admins", keyInput));
-        if (!adminSnap.exists()) adminSnap = await getDoc(doc(db, "admins", keyInput.toUpperCase()));
+        // 🌟 변경점: 파이어베이스 DB 직접 조회를 제거하고 Vercel API(api/login)로 검사 요청
+        const response = await fetch('/api/login', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ key: keyInput })
+        });
+        
+        const result = await response.json();
 
-        if (adminSnap.exists()) {
-            const adminData = adminSnap.data();
+        // 🌟 에러 처리: 서버에서 유효하지 않은 키 또는 정지된 계정이라고 응답한 경우
+        if (!response.ok) {
+            msgEl.innerText = result.error === 'suspended' 
+                ? "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요." 
+                : "등록되지 않았거나 권한이 없는 관리자 키입니다.";
+            return;
+        }
+
+        // 🌟 성공: 발급받은 출입증(토큰)으로 파이어베이스 공식 로그인 처리
+        await signInWithCustomToken(auth, result.token);
+
+        // 1. 마스터 로그인 성공 처리
+        if (result.role === 'MASTER') {
             sessionStorage.setItem('deliveryProRole', 'MASTER');
-            sessionStorage.setItem('deliveryProAdminName', adminData.name || '마스터');
+            sessionStorage.setItem('deliveryProAdminName', result.data.name || '마스터');
             window.location.href = 'admin-master.html';
             return;
         }
 
-        let licRef = doc(db, "licenses", keyInput);
-        let licSnap = await getDoc(licRef);
-        if (!licSnap.exists()) {
-            licRef = doc(db, "licenses", keyInput.toUpperCase());
-            licSnap = await getDoc(licRef);
-        }
-        if (!licSnap.exists()) {
-            licRef = doc(db, "licenses", `CTRL-${keyInput.toUpperCase()}`);
-            licSnap = await getDoc(licRef);
-        }
+        // 2. 관제(DISPATCH) 로그인 성공 처리 (기존 동시접속 FIFO 로직 그대로 이식)
+        if (result.role === 'DISPATCH') {
+            const licData = result.data;
+            const finalKey = keyInput.toUpperCase();
 
-        if (licSnap.exists() && licSnap.data().type === 'dispatch') {
-            const licData = licSnap.data();
-
-            if (licData.status === 'suspended') {
-                msgEl.innerText = "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요.";
-                return;
-            }
-
-            // 🌟 허용 동시 접속 회선 수 판정 (기본형: 1대, PRO: 2대 이상)
+            // 허용 동시 접속 회선 수 판정 (기본형: 1대, PRO: 2대 이상)
             const maxSessions = parseInt(licData.maxSessions) || (licData.isPro ? 2 : 1);
             let activeSessions = Array.isArray(licData.activeSessions) ? [...licData.activeSessions] : [];
             
@@ -243,13 +245,13 @@ window.handleSingleKeyLogin = async function() {
 
             const newSessionToken = 'SES-' + Math.random().toString(36).substring(2, 10);
             
-            // 🌟 FIFO 큐: 허용 회선 수를 초과할 경우 가장 오래된 세션부터 순차적으로 제거
+            // FIFO 큐: 허용 회선 수를 초과할 경우 가장 오래된 세션부터 순차적으로 제거
             while (activeSessions.length >= maxSessions) {
                 activeSessions.shift();
             }
             activeSessions.push(newSessionToken);
 
-            await updateDoc(licRef, { 
+            await updateDoc(doc(db, "licenses", finalKey), { 
                 currentSessionToken: newSessionToken,
                 activeSessions: activeSessions,
                 maxSessions: maxSessions,
@@ -257,15 +259,20 @@ window.handleSingleKeyLogin = async function() {
             });
 
             sessionStorage.setItem('deliveryProRole', 'DISPATCH');
-            sessionStorage.setItem('deliveryProDispatchKey', licSnap.id);
+            sessionStorage.setItem('deliveryProDispatchKey', finalKey);
             sessionStorage.setItem('deliveryProSessionToken', newSessionToken);
             window.location.href = 'admin-dispatch.html';
             return;
         }
+        
+        // 3. 기사 로그인일 경우 (관제, 마스터 페이지 접근 방지)
+        if (result.role === 'DRIVER') {
+             msgEl.innerText = "기사 전용 앱에서 로그인해 주세요.";
+             return;
+        }
 
-        msgEl.innerText = "등록되지 않았거나 권한이 없는 관리자 키입니다.";
     } catch (e) {
-        msgEl.innerText = "로그인 오류: " + e.message;
+        msgEl.innerText = "로그인 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
     } finally {
         btn.disabled = false;
         btn.innerHTML = '<span>대시보드 접속</span>';

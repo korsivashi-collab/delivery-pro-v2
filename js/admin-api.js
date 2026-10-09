@@ -3,6 +3,9 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/12.18.0/fireba
 import { getFirestore } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getStorage } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
 
+// 👇 새롭게 추가된 부분: 인증(Auth) 모듈 불러오기
+import { getAuth, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+
 const firebaseConfig = {
     apiKey: "AIzaSyBZKERmiPis4PCVDSYg0SSRTWV7L3z_5tw",
     authDomain: "delivery-pro-dd272.firebaseapp.com",
@@ -15,6 +18,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
+
+// 👇 새롭게 추가된 부분: Auth 객체 초기화 및 내보내기
+export const auth = getAuth(app);
+export { signInWithCustomToken };
 
 export function generateSecureKey() {
     const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
