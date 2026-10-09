@@ -1,0 +1,54 @@
+const admin = require('firebase-admin');
+
+// Vercel 환경 변수에서 비공개 키를 불러와 파이어베이스에 한 번만 연결합니다.
+if (!admin.apps.length) {
+  admin.initializeApp({
+    credential: admin.credential.cert({
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+      privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n'), // Vercel 환경변수 줄바꿈 처리
+    })
+  });
+}
+
+const db = admin.firestore();
+
+module.exports = async function handler(req, res) {
+  // 웹에서 POST 방식으로 키를 받아옵니다.
+  if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
+  
+  const { key } = req.body;
+  if (!key) return res.status(400).json({ error: '키를 입력해주세요.' });
+
+  try {
+    const searchKey = key.toUpperCase();
+
+    // 1. 마스터 계정 확인
+    let adminDoc = await db.collection('admin').doc(key).get();
+    if (!adminDoc.exists) adminDoc = await db.collection('admins').doc(searchKey).get();
+    
+    if (adminDoc.exists) {
+      // 마스터 토큰 발행
+      const token = await admin.auth().createCustomToken(key, { role: 'MASTER' });
+      return res.status(200).json({ token, role: 'MASTER', data: adminDoc.data() });
+    }
+
+    // 2. 관제/일반 라이선스 확인
+    let licDoc = await db.collection('licenses').doc(searchKey).get();
+    if (!licDoc.exists) licDoc = await db.collection('licenses').doc(`CTRL-${searchKey}`).get();
+
+    if (licDoc.exists) {
+      const data = licDoc.data();
+      if (data.status === 'suspended') return res.status(403).json({ error: 'suspended' });
+      
+      // 관제(DISPATCH) 또는 기사 토큰 발행
+      const token = await admin.auth().createCustomToken(licDoc.id, { role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER' });
+      return res.status(200).json({ token, role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER', data });
+    }
+
+    return res.status(401).json({ error: 'invalid' });
+  } catch (error) {
+    console.error('로그인 에러:', error);
+    return res.status(500).json({ error: '서버 에러가 발생했습니다.' });
+  }
+};
