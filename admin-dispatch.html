@@ -10,6 +10,8 @@
     
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
+    <link rel="stylesheet" href="./css/admin-header.css">
+    <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
     <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=893c5c6ec8613974d84fa75fd6d0be11&libraries=services"></script>
@@ -25,18 +27,18 @@
     <!-- 실시간 웹 관제 메인 패널 -->
     <div id="dispatch-panel" class="flex flex-col h-full w-full bg-gray-100">
         <!-- 1. 관제 상단 헤더 바 -->
-        <header class="bg-white border-b border-gray-200 z-20 shadow-sm flex-none px-5 py-2.5 flex items-center justify-between gap-3 overflow-x-auto hide-scrollbar">
-            <!-- 좌측: 로고 및 관제 탭 메뉴 -->
-            <div class="flex items-center gap-4 shrink-0">
-                <div onclick="window.location.reload()" class="flex items-center gap-2 cursor-pointer group">
+        <header class="dispatch-header bg-white border-b border-gray-200 z-20 shadow-sm flex-none px-5 py-2.5 flex items-center justify-between gap-3 overflow-x-auto hide-scrollbar">
+            <!-- 브랜드·계정 및 기존 메뉴 -->
+            <div class="dispatch-header-left flex items-center gap-4 shrink-0">
+                <div onclick="window.location.reload()" class="dispatch-brand flex items-center gap-2 cursor-pointer group">
                     <img src="./icons/delivery-pro-brand-package-02-06/header-logo-06-640.png" alt="배송 경로 PRO" width="640" height="357" style="display:block;width:88px;height:auto;object-fit:contain;flex-shrink:0;">
-                    <div>
-                        <h1 class="text-sm font-black text-gray-900 tracking-tight leading-none group-hover:text-blue-600 transition">관제</h1>
+                    <div class="dispatch-brand-copy">
+                        <h1 class="text-sm font-black text-gray-900 tracking-tight leading-none group-hover:text-blue-600 transition">배송 관제</h1>
                         <span id="dispatch-sub-title" class="text-[9px] text-gray-400 font-bold mt-0.5 block">실시간 관제</span>
                     </div>
                 </div>
-                <div class="w-px h-6 bg-gray-200"></div>
-                <div class="flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
+                <div class="dispatch-brand-divider w-px h-6 bg-gray-200"></div>
+                <div class="dispatch-primary-nav flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
                     <button onclick="window.setDispatchMode('DELIVERY')" id="nav-btn-DELIVERY" class="px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5">
                         <i class="fa-solid fa-route text-[11px]"></i> 배송 관리
                     </button>
@@ -54,7 +56,7 @@
             </div>
 
             <!-- 중앙: 주소 / 목적지 실시간 검색창 (엔터 입력 또는 검색 버튼 클릭 시 우측 패널 연동) -->
-            <div class="flex-1 max-w-md relative min-w-[220px]">
+            <div class="dispatch-search flex-1 max-w-md relative min-w-[220px]">
                 <div class="relative w-full flex items-center">
                     <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
                     <input type="text" id="global-search-input" onkeyup="if(window.event.keyCode===13){window.handleGlobalSearch(this.value)}" placeholder="기사, 주소, 상호, 연락처 검색 (Enter ↵)" class="w-full pl-9 pr-16 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
@@ -70,7 +72,7 @@
             </div>
 
             <!-- 우측: PRO 기능 버튼 및 알림함, 로그아웃 -->
-            <div class="flex items-center gap-2 shrink-0">
+            <div class="dispatch-header-actions flex items-center gap-2 shrink-0">
                 <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3.5 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
                     <span class="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm">PRO</span>
                     <i class="fa-solid fa-robot text-amber-200"></i><span>자동할당</span>
