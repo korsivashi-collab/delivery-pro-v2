@@ -1,0 +1,64 @@
+/* Only the main dispatch header; modal headers and other pages keep their styles. */
+#dispatch-panel > .dispatch-header {
+    background: #FFFFFF; border-color: #E2E8F0; color: #334155;
+    min-height: 80px; padding: 14px 20px; gap: 12px; flex-wrap: wrap;
+    overflow: visible; box-shadow: none; align-items: center;
+}
+#dispatch-panel > .dispatch-header .dispatch-header-left { display: contents; }
+#dispatch-panel > .dispatch-header .dispatch-brand { gap: 12px; flex: 0 0 auto; align-items: center; }
+#dispatch-panel > .dispatch-header .dispatch-brand-copy { width: 154px; min-width: 0; }
+#dispatch-panel > .dispatch-header h1 { font-size: 18px; font-weight: 700; line-height: 1.3; color: #334155; }
+#dispatch-panel > .dispatch-header #dispatch-sub-title {
+    font-size: 13px; font-weight: 500; line-height: 1.4; color: #64748B;
+    display: block; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+#dispatch-panel > .dispatch-header #dispatch-sub-title > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#dispatch-panel > .dispatch-header .dispatch-brand-divider { display: none; }
+#dispatch-panel > .dispatch-header .dispatch-primary-nav {
+    flex: 0 0 auto; padding: 0; gap: 4px; background: transparent; border: 0; box-shadow: none;
+}
+#dispatch-panel > .dispatch-header button {
+    height: 40px; padding: 0 10px; border-radius: 8px; font-size: 14px; font-weight: 600;
+    color: #334155; background: #FFFFFF; background-image: none; box-shadow: none;
+    display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
+}
+#dispatch-panel > .dispatch-header button > i { font-size: 18px; color: inherit; }
+#dispatch-panel > .dispatch-header button:hover { background: #F8FAFC; color: #2563EB; }
+#dispatch-panel > .dispatch-header button:focus-visible,
+#dispatch-panel > .dispatch-header .dispatch-brand:focus-visible { outline: 2px solid #2563EB; outline-offset: 2px; }
+#dispatch-panel > .dispatch-header button:disabled { opacity: 0.45; cursor: not-allowed; }
+#dispatch-panel > .dispatch-header button:disabled:hover { background: #FFFFFF; color: #64748B; }
+#dispatch-panel > .dispatch-header [id^="nav-btn-"].bg-blue-600 { background: #EFF6FF; color: #1D4ED8; }
+#dispatch-panel > .dispatch-header .dispatch-search { min-width: 220px; max-width: 420px; }
+#dispatch-panel > .dispatch-header #global-search-input {
+    height: 40px; padding-top: 0; padding-bottom: 0; padding-right: 86px; border-radius: 8px;
+    background: #F8FAFC; border-color: #E2E8F0; box-shadow: none; font-size: 13px; font-weight: 500; color: #334155;
+}
+#dispatch-panel > .dispatch-header #global-search-input:focus { border-color: #2563EB; box-shadow: 0 0 0 2px #EFF6FF; }
+#dispatch-panel > .dispatch-header .dispatch-search > div > i { font-size: 18px; color: #64748B; }
+#dispatch-panel > .dispatch-header .dispatch-search > div > div { right: 1px; gap: 0; }
+#dispatch-panel > .dispatch-header .dispatch-search button:not(#search-clear-btn) {
+    height: 38px; border-radius: 0 7px 7px 0; border-left: 1px solid #E2E8F0; padding: 0 12px; background: transparent;
+}
+#dispatch-panel > .dispatch-header #search-clear-btn { width: 24px; height: 32px; padding: 0; }
+#dispatch-panel > .dispatch-header #search-clear-btn.hidden { display: none; }
+#dispatch-panel > .dispatch-header #search-clear-btn i { font-size: 14px; }
+#dispatch-panel > .dispatch-header .dispatch-header-actions { gap: 8px; margin-left: auto; }
+#dispatch-panel > .dispatch-header #btn-pro-auto-dispatch { border-left: 1px solid #E2E8F0; border-radius: 0 8px 8px 0; padding-left: 14px; }
+#dispatch-panel > .dispatch-header #btn-pro-auto-dispatch > span:first-child,
+#dispatch-panel > .dispatch-header #btn-pro-invoice > span:first-child {
+    position: static; order: 2; padding: 2px 4px; border: 0; border-radius: 4px; font-size: 9px; line-height: 1.2;
+    box-shadow: none; background: #EFF6FF; color: #1D4ED8;
+}
+#dispatch-panel > .dispatch-header #btn-pro-auto-dispatch > span:first-child.bg-gray-500,
+#dispatch-panel > .dispatch-header #btn-pro-invoice > span:first-child.bg-gray-500 { background: #F1F5F9; color: #64748B; }
+#dispatch-panel > .dispatch-header #btn-dispatch-inbox { width: 40px; padding: 0; border: 1px solid #E2E8F0; }
+#dispatch-panel > .dispatch-header #btn-dispatch-inbox.ring-2 { box-shadow: 0 0 0 2px #EF4444; }
+#dispatch-panel > .dispatch-header button[onclick="window.systemLogout()"] { border: 1px solid #E2E8F0; }
+@media (max-width: 1600px) {
+    #dispatch-panel > .dispatch-header { padding-left: 16px; padding-right: 16px; gap: 8px; }
+    #dispatch-panel > .dispatch-header .dispatch-brand-copy { width: 134px; }
+    #dispatch-panel > .dispatch-header button { padding-left: 8px; padding-right: 8px; }
+    #dispatch-panel > .dispatch-header .dispatch-primary-nav { gap: 2px; }
+    #dispatch-panel > .dispatch-header .dispatch-search { max-width: 280px; }
+}
