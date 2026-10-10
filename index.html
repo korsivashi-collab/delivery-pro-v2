@@ -111,10 +111,11 @@
         }
         #destination-list button[onclick^="cancelDestination("]::after { content: "삭제"; line-height: 14px; }
         #destination-list button:disabled { opacity: 0.3; }
+        #main-app > footer button[onclick="triggerCameraScan()"] { width: 28%; max-width: 120px; flex-shrink: 0; }
         #swipe-container > div:first-child { white-space: normal; text-align: center; line-height: 1.25; }
         #main-app > header > div > div:first-child { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
         #main-app > header > div > div:first-child > div { min-width: 0; }
-        #main-app > header h1 { display: flex; align-items: center; margin: 0; }
+        #main-app > header h1 { display: flex; align-items: center; margin: 0; transform: translateY(8px); }
         #destination-list > li[data-id] > div:first-child > div:last-child > span > i { color: #1D4ED8; }
         #destination-list button[onclick^="openMemoModal("] {
             background: #FFF7ED; color: #9A3412; border-color: #FED7AA;
@@ -397,7 +398,7 @@
                 <div class="grid grid-cols-2 gap-2">
                     <button onclick="window.triggerPhotoCompletion()" id="btn-photo-comp" class="bg-slate-900 hover:bg-slate-800 text-white font-bold py-2.5 px-2 rounded-xl shadow-xs text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer">
                         <span class="flex items-center gap-1 font-black text-sm"><i class="fa-solid fa-camera"></i> 사진 전송</span>
-                        <span id="photo-comp-subtext" class="text-[9px] font-bold text-slate-300 mt-0.5 tracking-tighter">관제/일반 모두 사용 가능</span>
+                        <span id="photo-comp-subtext" class="text-[9px] font-bold text-slate-300 mt-0.5 tracking-tighter">사진 촬영·선택 후 전송</span>
                     </button>
                     <!-- 완료 확정 버튼은 핵심 포인트 컬러(블루) -->
                     <button onclick="window.confirmCompletion(null)" class="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-xs text-sm active:scale-95 transition flex items-center justify-center gap-1.5">
