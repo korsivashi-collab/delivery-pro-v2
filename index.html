@@ -45,15 +45,15 @@
         #main-app > header button, #license-expire-badge { border-color: #E2E8F0; }
         #main-app > header > div > div:first-child button,
         #main-app > header > div > div:nth-child(2) button { background: #FFFFFF; color: #172033; }
-        #license-expire-badge { background: #F5F7FA; color: #64748B; }
+        #license-expire-badge { background: #EEF2FF; color: #4338CA; border-color: #C7D2FE; }
         #main-app > header > div > div:nth-child(3) {
-            flex-wrap: wrap; background: #F5F7FA; border-color: #E2E8F0; color: #172033;
+            flex-wrap: wrap; background: #FFFBEB; border-color: #FDE68A; color: #172033;
         }
         #main-app > header > div > div:nth-child(3) > div:first-child { flex-basis: 100%; }
         #main-app > header > div > div:nth-child(3) > div:first-child > span:first-child {
-            background: #E2E8F0; color: #172033;
+            background: #FEF3C7; color: #92400E;
         }
-        #main-app > header > div > div:nth-child(3) > div:last-child { margin-left: auto; flex-wrap: wrap; }
+        #main-app > header > div > div:nth-child(3) > div:last-child { margin-left: 0; flex-wrap: wrap; }
         #header-end-address {
             color: #172033 !important; white-space: normal; overflow: visible;
             text-overflow: clip; overflow-wrap: anywhere; line-height: 1.4;
@@ -66,7 +66,7 @@
             background: #FFFFFF; color: #172033; border-color: #E2E8F0; padding: 10px; gap: 6px;
         }
         #destination-list > li[data-id] > div:first-child {
-            display: grid; grid-template-columns: 68px 24px minmax(0, 1fr) 32px;
+            display: grid; grid-template-columns: 68px 24px minmax(0, 1fr) 64px;
             gap: 4px 6px; align-items: start; margin-top: 0; padding-bottom: 0;
         }
         #destination-list > li[data-id] > div:first-child > div:first-child {
@@ -80,19 +80,23 @@
             white-space: normal; word-break: normal; overflow-wrap: anywhere; line-height: 1.35;
         }
         #destination-list > li[data-id] > div:first-child > div:nth-child(3) > span:not(.text-amber-700) { color: #172033; }
-        #destination-list > li[data-id] > div:first-child > div:last-child { display: contents; }
-        #destination-list > li[data-id] > div:first-child > div:last-child > span {
-            grid-column: 3; grid-row: 2; justify-self: start; color: #64748B; border-color: #E2E8F0;
+        #destination-list > li[data-id] > div:first-child > div:last-child {
+            grid-column: 4; grid-row: 1; display: flex; flex-direction: column; align-items: flex-end;
+            justify-self: end; gap: 2px; margin: 0; min-width: 0; max-width: 100%;
         }
-        #destination-list > li[data-id] > div:first-child > div:last-child > button { grid-column: 4; grid-row: 1; }
+        #destination-list > li[data-id] > div:first-child > div:last-child > span {
+            order: 2; color: #1D4ED8; background: #EFF6FF; border-color: #BFDBFE;
+            white-space: normal; height: auto; min-height: 20px; overflow-wrap: anywhere;
+        }
+        #destination-list > li[data-id] > div:first-child > div:last-child > button { order: 1; }
         #destination-list [id^="memo-tags-"] { margin: 0; }
-        #destination-list [id^="memo-tags-"] > span { background: #F5F7FA; color: #64748B; border-color: #E2E8F0; }
+        #destination-list [id^="memo-tags-"] > span { background: #FFFBEB; color: #78350F; border-color: #E2E8F0; }
         #destination-list [id^="memo-preview-"], #destination-list [id^="personal-memo-preview-"] {
             white-space: pre-wrap; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
-            margin: 0; color: #172033; background: #F5F7FA; border-color: #E2E8F0; line-height: 1.5;
+            margin: 0; color: #78350F; background: #FFFBEB; border-color: #E2E8F0; line-height: 1.5;
         }
         #destination-list [id^="memo-preview-"] > span, #destination-list [id^="personal-memo-preview-"] > span,
-        #destination-list [id^="memo-preview-"] > i, #destination-list [id^="personal-memo-preview-"] > i { color: #172033; }
+        #destination-list [id^="memo-preview-"] > i, #destination-list [id^="personal-memo-preview-"] > i { color: #78350F; }
         #destination-list > li[data-id] > div:last-child { margin-top: 0; padding-top: 6px; border-color: #E2E8F0; }
         #destination-list a[href^="tel:"], #destination-list a[href^="sms:"],
         #destination-list button[onclick^="openMemoModal("] {
@@ -108,9 +112,20 @@
         #destination-list button[onclick^="cancelDestination("]::after { content: "삭제"; line-height: 14px; }
         #destination-list button:disabled { opacity: 0.3; }
         #swipe-container > div:first-child { white-space: normal; text-align: center; line-height: 1.25; }
-        @media (max-width: 375px) {
-            #main-app > footer > div { flex-wrap: wrap; }
-            #swipe-container { flex-basis: 100%; }
+        #main-app > header > div > div:first-child { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; }
+        #main-app > header > div > div:first-child > div { min-width: 0; }
+        #main-app > header h1 { display: flex; align-items: center; margin: 0; }
+        #destination-list > li[data-id] > div:first-child > div:last-child > span > i { color: #1D4ED8; }
+        #destination-list button[onclick^="openMemoModal("] {
+            background: #FFF7ED; color: #9A3412; border-color: #FED7AA;
+        }
+        #destination-list button[onclick^="openMemoModal("] i { color: #9A3412; }
+        @media (min-width: 640px) {
+            #main-app > header > div > div:nth-child(3) { flex-wrap: nowrap; align-items: center; }
+            #main-app > header > div > div:nth-child(3) > div:first-child { flex-basis: auto; }
+            #main-app > header > div > div:nth-child(3) > div:last-child { margin-left: auto; }
+            #destination-list > li[data-id] > div:first-child { grid-template-columns: 68px 24px minmax(0, 1fr) max-content; }
+            #destination-list > li[data-id] > div:first-child > div:last-child { grid-column: 4; grid-row: 1; }
         }
         .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -315,7 +330,6 @@
                     <span>스캔</span>
                 </button>
                 
-                <button id="restore-initial-order" onclick="restoreInitialRouteOrder()" class="text-xs text-slate-600 border rounded-lg px-2 py-2 shrink-0" title="정상 완료는 유지하고 남은 배송지만 최초 확정 순서로 복구">최초 순서<br>복구</button>
                 <div id="swipe-container" class="flex-1 min-w-0 bg-slate-100 rounded-xl relative overflow-hidden flex items-center justify-center border border-slate-200 h-[52px]">
                     <div class="absolute inset-0 flex items-center justify-center pl-[84px] pr-2 text-slate-600 font-extrabold text-[12.5px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
                         밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-600 animate-pulse"></i>
