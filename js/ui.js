@@ -136,13 +136,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                     <span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${state.escapeHtml(formatted.cleanAddr)}</span>
                 `;
             } else {
-                displayAddressHTML = `<span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${state.escapeHtml(formatted.cleanAddr)}</span>`;
-            }
-
-            let distHtml = "";
-            if (hasValidDeliveryCoordinates(lastGps) && !needsLocation) {
-                const dist = calculateDistance(lastGps.lat, lastGps.lng, dest.lat, dest.lng);
-                distHtml = `<span class="text-[9.5px] text-slate-600 font-bold bg-slate-100 px-1.5 py-0.5 rounded shadow-2xs whitespace-nowrap border border-slate-200 flex items-center h-[20px]"><i class="fa-solid fa-location-arrow text-[9px] mr-1 text-slate-400"></i>${formatDistance(dist)}</span>`;
+                displayAddressHTML = `<span class="block leading-snug text-slate-900 break-keep font-bold text-[13.5px]">${formatted.cleanAddr}</span>`;
             }
 
             const navTargetName = state.inlineArgument(formatted.storeName || formatted.cleanAddr || dest.address || '목적지');
@@ -168,7 +162,6 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                         ${displayAddressHTML}
                     </div>
                     <div class="flex items-center gap-1 shrink-0 -mr-1">
-                        ${distHtml}
                         <button onclick="editDestinationAddress(${idArgument})" class="text-slate-400 hover:text-slate-700 w-8 h-8 flex items-center justify-center shrink-0 rounded-lg active:bg-slate-100 transition" title="상호·주소 수정"><i class="fa-solid fa-pen text-[13px]"></i></button>
                     </div>
                 </div>
