@@ -189,12 +189,6 @@ export function updateDisplayNumbers() {
 }
 
 export function renderList() {
-    const restoreButton = document.getElementById('restore-initial-order');
-    if (restoreButton) {
-        const available = !!state.getRoutePlan()?.baseline;
-        restoreButton.textContent = available ? '최초 순서 복구' : '복구 기준 없음';
-        restoreButton.title = available ? '완료 상태는 유지하고 남은 배송지를 최초 순서로 복구합니다.' : '최초 최적화가 성공하면 복구 기준을 보존합니다.';
-    }
     refreshGpsTracking();
     renderDestinationList(preloadBatchMemos, renderMemoPreview, getAllPersonalMemos);
 }
@@ -423,11 +417,6 @@ function moveDelivery(id, direction) {
 }
 export function moveDestinationUp(id) { moveDelivery(id, -1); }
 export function moveDestinationDown(id) { moveDelivery(id, 1); }
-export function restoreInitialRouteOrder() {
-    if (!state.getRoutePlan()?.baseline) { alert('복구 기준 없음: 이 목록에는 최초 확정 경로 기록이 없습니다.'); return; }
-    if (!confirm('완료 상태는 유지하고, 남은 배송지를 최초 확정 순서로 복구하시겠습니까? 추가 배송지는 현재 상대 순서대로 뒤에 유지됩니다.')) return;
-    if (state.restoreInitialOrder()) renderList();
-}
 
 // ==========================================
 // 7. 주소 복사 (클립보드 - 상호명 제외) 및 종료지 제어
@@ -548,4 +537,3 @@ window.toggleEtcTag = toggleEtcTag;
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
-window.restoreInitialRouteOrder = restoreInitialRouteOrder;

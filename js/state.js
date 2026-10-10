@@ -350,16 +350,6 @@ export const state = {
             endLocation: copyPlanValue(endLocation), routeId: plan.routeId, confirmedAt: Date.now() };
         recordPlanChange('optimize');
     },
-    restoreInitialOrder() {
-        const baseline = routePlan?.baseline; if (!baseline) return false;
-        const rank = new Map(baseline.orderIds.map((id, i) => [id, i]));
-        const original = destinations.filter(d => rank.has(deliveryKey(d))).sort((a, b) => rank.get(deliveryKey(a)) - rank.get(deliveryKey(b)));
-        const added = destinations.filter(d => !rank.has(deliveryKey(d)));
-        destinations = original.concat(added);
-        if (startLocation) { const i = destinations.findIndex(d => d.id === startLocation.id); if (i > 0) destinations.unshift(destinations.splice(i, 1)[0]); }
-        syncRoutePlan(); recordPlanChange('restore-initial');
-        return this.updateDisplayNumbers();
-    },
     moveDestination(id, direction) {
         const at = destinations.findIndex(d => d.id === id), target = at + direction;
         if (at < 0 || target < 0 || target >= destinations.length) return '목록의 끝이므로 더 이동할 수 없습니다.';
