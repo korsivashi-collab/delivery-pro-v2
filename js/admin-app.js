@@ -1,8 +1,11 @@
+import {signOut} from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
+let dispatchLogoutPending=false;
+let dispatchSessionWatchUnsubscribe=null;
 // js/admin-app.js
 
 import { db, auth, signInWithCustomToken } from "./admin-api.js";
 // 🌟 where 임포트 추가 완료
-import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 import { renderPaginationControls } from "./admin-ui.js";
@@ -274,12 +277,30 @@ window.handleSingleKeyLogin = async function() {
 };
 
 window.systemLogout = async function() {
+    const isDispatchLogout=sessionStorage.getItem('deliveryProRole')==='DISPATCH';
+    if(isDispatchLogout){
+        if(dispatchLogoutPending)return;
+        dispatchLogoutPending=true;
+        if(dispatchSessionWatchUnsubscribe){dispatchSessionWatchUnsubscribe();dispatchSessionWatchUnsubscribe=null;}
+    }
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
     
     if (currentKey && localToken && !localToken.startsWith('MONITOR-')) {
         try {
             const licRef = doc(db, "licenses", currentKey);
+            if(isDispatchLogout){
+                await runTransaction(db,async transaction=>{
+                    const snapshot=await transaction.get(licRef);
+                    if(!snapshot.exists())return;
+                    const data=snapshot.data();
+                    const sessions=Array.isArray(data.activeSessions)?data.activeSessions:(data.currentSessionToken?[data.currentSessionToken]:[]);
+                    const remaining=sessions.filter(value=>value!==localToken);
+                    const changes={activeSessions:remaining};
+                    if(data.currentSessionToken===localToken)changes.currentSessionToken=remaining[remaining.length-1]||'';
+                    transaction.update(licRef,changes);
+                });
+            }else{
             const licSnap = await getDoc(licRef);
             if (licSnap.exists()) {
                 const data = licSnap.data();
@@ -288,12 +309,14 @@ window.systemLogout = async function() {
                     await updateDoc(licRef, { activeSessions: filtered });
                 }
             }
+            }
         } catch (e) {
             console.warn("로그아웃 세션 해제 중 오류:", e);
         }
     }
     
     if (typeof forceClearMap === 'function') forceClearMap();
+    if(isDispatchLogout){try{await signOut(auth);}catch{console.warn('Firebase 로그아웃 실패');}}
     sessionStorage.clear();
     window.location.href = 'admin.html';
 };
@@ -337,7 +360,9 @@ window.initMasterDataSync = function() {
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
 
     // 1. 라이선스 실시간 동기화
-    onSnapshot(collection(db, "licenses"), (snapshot) => {
+    if(!isMaster&&dispatchSessionWatchUnsubscribe)dispatchSessionWatchUnsubscribe();
+    const licenseWatchUnsubscribe=onSnapshot(collection(db, "licenses"), (snapshot) => {
+        if(sessionStorage.getItem('deliveryProRole')==='DISPATCH'&&dispatchLogoutPending)return;
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
         
@@ -365,8 +390,7 @@ window.initMasterDataSync = function() {
                 
                 if (activeSessions.length > 0 && !activeSessions.includes(localToken)) {
                     alert(`⚠️ 다른 PC에서 로그인하여 동시 접속 허용 회선 수(${maxAllowed}대)를 초과했습니다.\n시스템 보안을 위해 현재 창이 자동 로그아웃됩니다.`);
-                    sessionStorage.clear();
-                    window.location.href = 'admin.html';
+                    window.systemLogout();
                     return;
                 }
             }
@@ -390,6 +414,8 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
     });
+
+    if(!isMaster)dispatchSessionWatchUnsubscribe=licenseWatchUnsubscribe;
 
     // 2. 접속 제한(블랙리스트) 기기 실시간 동기화
     onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
