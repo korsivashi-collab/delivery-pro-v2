@@ -143,7 +143,9 @@ export async function initApp() {
             phone: sanitizePhoneNumber(d.phone || d.customerPhone || d.tel || d.contact || d.hp || '')
         }));
         state.setDestinations(formattedList);
-        state.setEndLocation(routeData.endLocation || { lat: 0, lng: 0, address: '' });
+        if (Object.prototype.hasOwnProperty.call(routeData, 'endLocation')) {
+            state.setEndLocation(routeData.endLocation || { lat: 0, lng: 0, address: '' });
+        }
         state.setStartLocation(routeData.startSelected === true ? routeData.startLocation : null);
         state.updateDisplayNumbers(routeData.updatedAt);
         renderList();

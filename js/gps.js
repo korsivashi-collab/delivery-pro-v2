@@ -308,19 +308,37 @@ export function getDeviceRealGPS() {
 // ==========================================
 // 6. 헤더의 [현위치] 버튼 클릭 시 종료 지점으로 설정
 // ==========================================
+let endpointLocationRequestPending = false;
 export async function setEndLocationGPS() {
-    showLoading("현위치 파악 중...");
+    if (endpointLocationRequestPending) return;
+    endpointLocationRequestPending = true;
     const owner = state.getRouteOwnerId();
-    const session = gpsSession;
     try {
-        const gps = await getDeviceRealGPS();
-        if (!gps || !state.isFreshGps(gps)) {
-            alert("현재 위치를 확인할 수 없습니다. GPS와 위치 권한을 확인한 후 다시 시도해 주세요.");
+        showLoading("현위치 파악 중...");
+        if (window.isSecureContext === false) {
+            alert("현위치 기능은 HTTPS 보안 연결에서 사용할 수 있습니다.");
+            return;
+        }
+        if (typeof navigator.geolocation?.getCurrentPosition !== 'function') {
+            alert("이 브라우저에서는 위치 확인을 지원하지 않습니다.");
+            return;
+        }
+        // A user-requested fix is independent of delivery lists and GPS reporting preferences.
+        const gps = await new Promise((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(
+                pos => resolve({ lat: pos.coords?.latitude, lng: pos.coords?.longitude,
+                    timestamp: pos.timestamp, accuracy: pos.coords?.accuracy }),
+                reject,
+                { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
+            );
+        });
+        if (!state.isFreshGps(gps)) {
+            alert("위치 정보가 유효하지 않거나 만료되었습니다. 현위치를 다시 확인해 주세요.");
             return;
         }
         const addr = await coordToAddress(gps.lng, gps.lat);
-        // Address lookup may outlive the fix or an external-app/account transition.
-        if (session !== gpsSession || owner !== state.getRouteOwnerId() || !state.isFreshGps(gps)) {
+        // Keep the existing endpoint if the account changes or the fix expires during lookup.
+        if (owner !== state.getRouteOwnerId() || !state.isFreshGps(gps)) {
             alert("위치 정보가 만료되었습니다. 현위치를 다시 확인해 주세요.");
             return;
         }
@@ -328,9 +346,19 @@ export async function setEndLocationGPS() {
         if (!state.saveActiveData()) return;
         if (typeof window.renderList === 'function') window.renderList();
     } catch (error) {
-        console.warn('현위치 종료점 설정 실패:', error);
-        alert("현재 위치를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.");
-    } finally { hideLoading(); }
+        if (error?.code === 1 || error?.name === 'NotAllowedError' || error?.name === 'SecurityError') {
+            alert("위치 권한이 거부되었습니다. 브라우저와 기기의 위치 권한 설정을 확인한 후 다시 시도해 주세요.");
+        } else if (error?.code === 2) {
+            alert("현재 위치를 확인할 수 없습니다. GPS 수신 상태를 확인한 후 다시 시도해 주세요.");
+        } else if (error?.code === 3) {
+            alert("위치 확인 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.");
+        } else {
+            alert("현재 위치를 확인할 수 없습니다. 잠시 후 다시 시도해 주세요.");
+        }
+    } finally {
+        endpointLocationRequestPending = false;
+        hideLoading();
+    }
 }
 
 // The SDK owns retries while a write is pending; reconnect starts no competing write.
