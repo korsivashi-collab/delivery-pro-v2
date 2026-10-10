@@ -1,11 +1,8 @@
-import {signOut} from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
-let dispatchLogoutPending=false;
-let dispatchSessionWatchUnsubscribe=null;
 // js/admin-app.js
 
-// 👇 변경점: auth와 signInWithCustomToken을 admin-api.js에서 추가로 불러옵니다.
 import { db, auth, signInWithCustomToken } from "./admin-api.js";
-import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+// 🌟 where 임포트 추가 완료
+import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 import { renderPaginationControls } from "./admin-ui.js";
@@ -205,7 +202,6 @@ window.handleSingleKeyLogin = async function() {
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인증 확인 중...';
 
     try {
-        // 🌟 변경점: 파이어베이스 DB 직접 조회를 제거하고 Vercel API(api/login)로 검사 요청
         const response = await fetch('/api/login', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -214,18 +210,13 @@ window.handleSingleKeyLogin = async function() {
         
         const result = await response.json();
 
-        // 🌟 에러 처리: 서버에서 유효하지 않은 키 또는 정지된 계정이라고 응답한 경우
         if (!response.ok) {
-            const loginErrors = {
-                suspended: "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요.",
-                revoked: "이용권한이 회수된 계정입니다. 관리자에게 문의하세요.",
-                expired: "사용기간이 만료된 계정입니다. 관리자에게 문의하세요."
-            };
-            msgEl.innerText = loginErrors[result.error] || "등록되지 않았거나 권한이 없는 관리자 키입니다.";
+            msgEl.innerText = result.error === 'suspended' 
+                ? "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요." 
+                : "등록되지 않았거나 권한이 없는 관리자 키입니다.";
             return;
         }
 
-        // 🌟 성공: 발급받은 출입증(토큰)으로 파이어베이스 공식 로그인 처리
         await signInWithCustomToken(auth, result.token);
 
         // 1. 마스터 로그인 성공 처리
@@ -236,13 +227,11 @@ window.handleSingleKeyLogin = async function() {
             return;
         }
 
-        // 2. 관제(DISPATCH) 로그인 성공 처리 (기존 동시접속 FIFO 로직 그대로 이식)
+        // 2. 관제(DISPATCH) 로그인 성공 처리
         if (result.role === 'DISPATCH') {
             const licData = result.data;
-            // 🌟 [수정점] 서버가 확인한 실제 Firestore 문서 ID(licenseId)를 finalKey로 최우선 사용
             const finalKey = result.licenseId || (licData && licData.id) || keyInput.toUpperCase();
 
-            // 허용 동시 접속 회선 수 판정 (기본형: 1대, PRO: 2대 이상)
             const maxSessions = parseInt(licData.maxSessions) || (licData.isPro ? 2 : 1);
             let activeSessions = Array.isArray(licData.activeSessions) ? [...licData.activeSessions] : [];
             
@@ -252,7 +241,6 @@ window.handleSingleKeyLogin = async function() {
 
             const newSessionToken = 'SES-' + Math.random().toString(36).substring(2, 10);
             
-            // FIFO 큐: 허용 회선 수를 초과할 경우 가장 오래된 세션부터 순차적으로 제거
             while (activeSessions.length >= maxSessions) {
                 activeSessions.shift();
             }
@@ -272,7 +260,6 @@ window.handleSingleKeyLogin = async function() {
             return;
         }
         
-        // 3. 기사 로그인일 경우 (관제, 마스터 페이지 접근 방지)
         if (result.role === 'DRIVER') {
              msgEl.innerText = "기사 전용 앱에서 로그인해 주세요.";
              return;
@@ -287,30 +274,12 @@ window.handleSingleKeyLogin = async function() {
 };
 
 window.systemLogout = async function() {
-    const isDispatchLogout=sessionStorage.getItem('deliveryProRole')==='DISPATCH';
-    if(isDispatchLogout){
-        if(dispatchLogoutPending)return;
-        dispatchLogoutPending=true;
-        if(dispatchSessionWatchUnsubscribe){dispatchSessionWatchUnsubscribe();dispatchSessionWatchUnsubscribe=null;}
-    }
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
     
     if (currentKey && localToken && !localToken.startsWith('MONITOR-')) {
         try {
             const licRef = doc(db, "licenses", currentKey);
-            if(isDispatchLogout){
-                await runTransaction(db,async transaction=>{
-                    const snapshot=await transaction.get(licRef);
-                    if(!snapshot.exists())return;
-                    const data=snapshot.data();
-                    const sessions=Array.isArray(data.activeSessions)?data.activeSessions:(data.currentSessionToken?[data.currentSessionToken]:[]);
-                    const remaining=sessions.filter(value=>value!==localToken);
-                    const changes={activeSessions:remaining};
-                    if(data.currentSessionToken===localToken)changes.currentSessionToken=remaining[remaining.length-1]||'';
-                    transaction.update(licRef,changes);
-                });
-            }else{
             const licSnap = await getDoc(licRef);
             if (licSnap.exists()) {
                 const data = licSnap.data();
@@ -319,14 +288,12 @@ window.systemLogout = async function() {
                     await updateDoc(licRef, { activeSessions: filtered });
                 }
             }
-            }
         } catch (e) {
             console.warn("로그아웃 세션 해제 중 오류:", e);
         }
     }
     
     if (typeof forceClearMap === 'function') forceClearMap();
-    if(isDispatchLogout){try{await signOut(auth);}catch{console.warn('Firebase 로그아웃 실패');}}
     sessionStorage.clear();
     window.location.href = 'admin.html';
 };
@@ -358,25 +325,23 @@ window.showDispatchPanel = function() {
     if (typeof initKakaoMap === 'function') initKakaoMap();
     window.initMasterDataSync();
     if (typeof setDispatchMode === 'function') setDispatchMode('DELIVERY');
-    // 🌟 관제 진입 시 당일 저장된 엑셀/주문 데이터가 있으면 자동 로드
     if (typeof loadExcelFromFirebase === 'function') loadExcelFromFirebase();
 };
 
 // ==========================================
-// 3. 실시간 데이터 동기화 (Firestore Snapshots - 실시간 잔상 소거 연동)
+// 3. 실시간 데이터 동기화 (Firestore Snapshots)
 // ==========================================
 window.initMasterDataSync = function() {
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
+    // 🌟 [수정점] currentKey를 상위 스코프로 끌어올려 ReferenceError 원천 차단
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
 
     // 1. 라이선스 실시간 동기화
-    if(!isMaster&&dispatchSessionWatchUnsubscribe)dispatchSessionWatchUnsubscribe();
-    const licenseWatchUnsubscribe=onSnapshot(collection(db, "licenses"), (snapshot) => {
-        if(sessionStorage.getItem('deliveryProRole')==='DISPATCH'&&dispatchLogoutPending)return;
+    onSnapshot(collection(db, "licenses"), (snapshot) => {
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
         
         const currentRole = sessionStorage.getItem('deliveryProRole');
-        const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
         const localToken = sessionStorage.getItem('deliveryProSessionToken');
         
         if (currentRole === 'DISPATCH' && currentKey) {
@@ -400,7 +365,8 @@ window.initMasterDataSync = function() {
                 
                 if (activeSessions.length > 0 && !activeSessions.includes(localToken)) {
                     alert(`⚠️ 다른 PC에서 로그인하여 동시 접속 허용 회선 수(${maxAllowed}대)를 초과했습니다.\n시스템 보안을 위해 현재 창이 자동 로그아웃됩니다.`);
-                    window.systemLogout();
+                    sessionStorage.clear();
+                    window.location.href = 'admin.html';
                     return;
                 }
             }
@@ -425,8 +391,6 @@ window.initMasterDataSync = function() {
         }
     });
 
-    if(!isMaster)dispatchSessionWatchUnsubscribe=licenseWatchUnsubscribe;
-
     // 2. 접속 제한(블랙리스트) 기기 실시간 동기화
     onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
         state.allBlockedDevices = [];
@@ -447,7 +411,7 @@ window.initMasterDataSync = function() {
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
     });
 
-    // 🌟 4. 경로(Routes) 실시간 동기화 (기사 앱에서 동선 삭제/초기화 시 지도 및 모달 잔상 즉시 소거)
+    // 4. 경로(Routes) 실시간 동기화
     onSnapshot(collection(db, "routes"), (snapshot) => {
         state.activeRoutes = {};
         snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
@@ -463,14 +427,13 @@ window.initMasterDataSync = function() {
         if (typeof populateDriverSelect === 'function') populateDriverSelect();
         if (typeof renderAccountHistoryView === 'function') renderAccountHistoryView();
 
-        // 🌟 기사 앱에서 동선이 삭제/비워졌을 때 자동할당 모달 UI(기사 목록/상세 테이블) 즉시 동기화
         if (document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
     });
 
-    // 🌟 5. 배송 완료 실시간 동기화
+    // 5. 배송 완료 실시간 동기화
     onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
         state.allCompletions = [];
         snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -484,7 +447,6 @@ window.initMasterDataSync = function() {
             renderPhotoGalleryTable();
         }
 
-        // 🌟 완료 건수 변경 시 자동할당 모달 UI 실시간 갱신
         if (document.getElementById('auto-dispatch-modal') && !document.getElementById('auto-dispatch-modal').classList.contains('hidden')) {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
@@ -500,8 +462,14 @@ window.initMasterDataSync = function() {
         if (typeof renderMasterNoticeHistoryList === 'function') renderMasterNoticeHistoryList();
     });
 
-    // 7. 템플릿 실시간 동기화
-    onSnapshot(collection(db, "dispatch_templates"), (snapshot) => {
+    // 🌟 7. 템플릿 실시간 동기화 (권한별 제한 쿼리 및 공용 템플릿 일치)
+    const templatesQuery = isMaster 
+        ? collection(db, "dispatch_templates")
+        : (currentKey 
+            ? query(collection(db, "dispatch_templates"), where("dispatchKey", "in", [currentKey, "MASTER", "SYSTEM"]))
+            : query(collection(db, "dispatch_templates"), where("dispatchKey", "in", ["MASTER", "SYSTEM"])));
+
+    onSnapshot(templatesQuery, (snapshot) => {
         state.allDispatchTemplates = [];
         snapshot.forEach(docSnap => { state.allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
         if (typeof renderCustomTemplates === 'function') renderCustomTemplates();
@@ -671,7 +639,7 @@ export async function deletePhotoCompletion(id) {
 }
 
 // ==========================================
-// 5. HTML 인라인 이벤트를 위한 전역 Window 객체 바인딩 (forceClearMap 포함 누락 완전 방지)
+// 5. HTML 인라인 이벤트를 위한 전역 Window 객체 바인딩
 // ==========================================
 window.formatNumber = formatNumber;
 
@@ -735,7 +703,7 @@ window.closePhotoPreviewModal = closePhotoPreviewModal;
 window.deletePhotoCompletion = deletePhotoCompletion;
 
 // [관제 코어]
-window.forceClearMap = forceClearMap; // 🌟 외부 모듈에서 호출 가능한 전역 바인딩 등록
+window.forceClearMap = forceClearMap;
 window.setDispatchMode = setDispatchMode;
 window.renderSidebar = renderSidebar;
 window.getFilteredVisibleDrivers = getFilteredVisibleDrivers;
