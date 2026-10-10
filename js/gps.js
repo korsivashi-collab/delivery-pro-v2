@@ -13,6 +13,7 @@ import { state } from './state.js';
 
 let unsubRequestDevice = null;
 let unsubRequestKey = null;
+let gpsRequestRetryTimer = null;
 let lastReportTime = 0;
 let reportInFlight = null;
 let reportRetryAfter = 0;
@@ -31,7 +32,7 @@ function canTrackGps() {
 // Recheck the list without changing the user's saved GPS preference.
 export function refreshGpsTracking() {
     if (!canTrackGps() || document.visibilityState === 'hidden') {
-        if (state.getGpsWatchId() !== null || unsubRequestDevice || unsubRequestKey) _stopHardwareWatcher();
+        if (state.getGpsWatchId() !== null || unsubRequestDevice || unsubRequestKey || gpsRequestRetryTimer !== null) _stopHardwareWatcher();
     } else {
         _startHardwareWatcher();
     }
@@ -182,7 +183,19 @@ function listenToGpsRequests() {
         requestListenerIdentity = identity;
     }
     const db = getDbInstance();
-    if (!db) { setTimeout(listenToGpsRequests, 1000); return; }
+    if (!db) {
+        if (gpsRequestRetryTimer === null) {
+            gpsRequestRetryTimer = setTimeout(() => {
+                gpsRequestRetryTimer = null;
+                listenToGpsRequests();
+            }, 1000);
+        }
+        return;
+    }
+    if (gpsRequestRetryTimer !== null) {
+        clearTimeout(gpsRequestRetryTimer);
+        gpsRequestRetryTimer = null;
+    }
     const handle = snap => handleGpsRequest(snap, identity, deviceId);
     if (deviceId && !unsubRequestDevice) {
         try { unsubRequestDevice = onSnapshot(doc(db, 'gps_requests', deviceId), handle); } catch (error) { console.warn('GPS 요청 구독 실패:', error); }
@@ -227,6 +240,10 @@ function _startHardwareWatcher() {
 }
 
 function _stopHardwareWatcher() {
+    if (gpsRequestRetryTimer !== null) {
+        clearTimeout(gpsRequestRetryTimer);
+        gpsRequestRetryTimer = null;
+    }
     gpsSession++;
     requestListenerIdentity = '';
     invalidateGps();
