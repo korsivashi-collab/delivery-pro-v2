@@ -161,20 +161,14 @@ export function updateExpireBadge(serverDate) {
     badge.classList.remove('hidden');
 }
 
-export function updatePhotoCompButtonState(isLinked) {
+export function updatePhotoCompButtonState() {
     const btn = document.getElementById('btn-photo-comp');
     const subtext = document.getElementById('photo-comp-subtext');
     if (!btn || !subtext) return;
 
-    if (isLinked) {
-        btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
-        subtext.className = "text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter flex items-center gap-1";
-        subtext.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span> 관제 연결됨';
-    } else {
-        btn.className = "bg-gray-100 border border-gray-200 text-gray-400 font-bold py-2.5 px-2 rounded-xl text-xs transition flex flex-col items-center justify-center cursor-not-allowed opacity-75";
-        subtext.className = "text-[9px] font-normal text-gray-400 mt-0.5 tracking-tighter";
-        subtext.innerText = "(계정 연결 시 사용)";
-    }
+    btn.className = "bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 px-2 rounded-xl shadow-md text-xs active:scale-95 transition flex flex-col items-center justify-center cursor-pointer";
+    subtext.className = "text-[9px] font-bold text-blue-100 mt-0.5 tracking-tighter";
+    subtext.innerText = "사진 촬영·선택 후 전송";
 }
 
 // ==========================================
@@ -208,7 +202,7 @@ export function startLicenseRealtimeWatcher(key) {
     }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
-        updatePhotoCompButtonState(!!linkedKey);
+        updatePhotoCompButtonState();
     });
 }
 
@@ -260,7 +254,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
         }
     );
 
-    updatePhotoCompButtonState(!!dispatchKey);
+    updatePhotoCompButtonState();
 }
 
 // ==========================================

@@ -70,7 +70,7 @@ export function completeDestination(id) {
     if (etcContainer) etcContainer.classList.add('hidden');
     if (etcInput) etcInput.value = "";
     
-    try { updatePhotoCompButtonState(!!localStorage.getItem('deliveryProDispatchKey')); }
+    try { updatePhotoCompButtonState(); }
     catch (error) { state.reportStorageFailure(error, { operation: 'completeDestination', stage: 'read-before' }); return; }
     document.getElementById('completion-modal')?.classList.remove('hidden');
 }
