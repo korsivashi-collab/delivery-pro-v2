@@ -118,8 +118,9 @@
     <div id="auth-screen" class="hidden fixed inset-0 bg-slate-50 z-50 flex flex-col items-center justify-center p-6">
         <div class="w-full max-w-sm bg-white border border-slate-200 rounded-3xl p-8 shadow-2xl text-center relative overflow-hidden">
             <div class="absolute top-0 left-0 w-full h-1.5 bg-blue-600"></div>
-            <i class="fa-solid fa-truck-fast text-5xl text-blue-600 mb-4 mt-2"></i>
-            <h2 class="text-2xl font-black text-slate-900 mb-1 tracking-tight">배송 경로 PRO</h2>
+            <h2 class="mb-4 mt-2">
+                <img src="./icons/delivery-pro-brand-package-02-06/header-logo-06-640.png" alt="배송 경로 PRO" width="640" height="357" style="display:block;width:144px;max-width:100%;height:auto;object-fit:contain;margin:0 auto;">
+            </h2>
             <p class="text-xs text-slate-500 mb-6 font-semibold">발급받은 키와 본인 휴대폰 번호를 입력해 주세요.</p>
             <div class="space-y-3 mb-5 text-left">
                 <div>
@@ -173,9 +174,8 @@
         <header class="bg-white px-2.5 pt-safe pb-2.5 shadow-xs z-20 flex-none border-b border-slate-200 relative w-full">
             <div class="flex flex-col gap-1.5 w-full">
                 <div class="flex items-center justify-between gap-1 w-full min-w-0">
-                    <h1 class="text-[14px] font-black text-slate-900 tracking-tight flex items-center gap-1 shrink-0 whitespace-nowrap">
-                        <i class="fa-solid fa-route text-blue-600 text-[15px] shrink-0"></i>
-                        <span>배송경로PRO</span>
+                    <h1 class="shrink-0">
+                        <img src="./icons/delivery-pro-brand-package-02-06/header-logo-06-640.png" alt="배송 경로 PRO" width="640" height="357" style="display:block;width:96px;height:auto;object-fit:contain;">
                     </h1>
                     
                     <div class="flex items-center gap-1 shrink-0">
@@ -191,9 +191,7 @@
                     </div>
                 </div>
                 
-                <div class="flex justify-between items-center w-full min-w-0">
-                    <span class="text-[10.5px] text-slate-400 font-extrabold tracking-tight shrink-0 whitespace-nowrap ml-0.5">물류 라스트마일</span>
-                    
+                <div class="flex justify-end items-center w-full min-w-0">
                     <div class="flex items-center gap-1.5 shrink-0">
                         <span id="license-expire-badge" class="text-[10.5px] bg-slate-100 text-slate-700 border border-slate-200 px-2.5 py-1 rounded-md font-extrabold whitespace-nowrap shadow-2xs">
                             사용기한: 확인중...
@@ -241,6 +239,7 @@
                     <span>스캔</span>
                 </button>
                 
+                <button id="restore-initial-order" onclick="restoreInitialRouteOrder()" class="text-xs text-slate-600 border rounded-lg px-2 py-2 shrink-0" title="정상 완료는 유지하고 남은 배송지만 최초 확정 순서로 복구">최초 순서<br>복구</button>
                 <div id="swipe-container" class="flex-1 min-w-0 bg-slate-100 rounded-xl relative overflow-hidden flex items-center justify-center border border-slate-200 h-[52px]">
                     <div class="absolute inset-0 flex items-center justify-center pl-[84px] pr-2 text-slate-600 font-extrabold text-[12.5px] z-0 select-none pointer-events-none tracking-tight whitespace-nowrap">
                         밀어서 경로 최적화 <i class="fa-solid fa-angles-right ml-1 text-blue-600 animate-pulse"></i>
