@@ -586,14 +586,12 @@ export function getCompletionOwnershipContext() {
 
 export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null, ownership = getCompletionOwnershipContext(), transmission = null) {
     try {
-        if (!ownership.routeOwnerId || !ownership.licenseKey) throw new Error('배송 처리 소유자 정보가 없습니다.');
+        if (!ownership.routeOwnerId) throw new Error('배송 처리 소유자 정보가 없습니다.');
         const now = new Date(transmission ? transmission.completedAt : Date.now());
         const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         
         const data = {
             routeOwnerId: ownership.routeOwnerId,
-            licenseKey: ownership.licenseKey,
-            dispatchKey: ownership.dispatchKey || '',
             destinationId: item.id ?? null,
             deviceId: deviceId,
             phone: driverPhone || "연락처 미등록",
