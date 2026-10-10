@@ -36,6 +36,82 @@
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
         .pt-safe { padding-top: max(0.5rem, env(safe-area-inset-top, 0px)); }
         .pb-safe { padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 8px)); }
+        /* 기사 메인 화면 표시만 조정합니다. 기존 DOM과 이벤트는 유지합니다. */
+        #main-app { background: #F5F7FA; color: #172033; }
+        #main-app > header, #main-app > footer { background: #FFFFFF; border-color: #E2E8F0; }
+        #main-app > header > div > div:first-child { flex-wrap: wrap; gap: 8px; }
+        #main-app > header > div > div:first-child > div { flex-wrap: wrap; justify-content: flex-end; }
+        #main-app > header > div > div:nth-child(2) > div { flex-wrap: wrap; justify-content: flex-end; }
+        #main-app > header button, #license-expire-badge { border-color: #E2E8F0; }
+        #main-app > header > div > div:first-child button,
+        #main-app > header > div > div:nth-child(2) button { background: #FFFFFF; color: #172033; }
+        #license-expire-badge { background: #F5F7FA; color: #64748B; }
+        #main-app > header > div > div:nth-child(3) {
+            flex-wrap: wrap; background: #F5F7FA; border-color: #E2E8F0; color: #172033;
+        }
+        #main-app > header > div > div:nth-child(3) > div:first-child { flex-basis: 100%; }
+        #main-app > header > div > div:nth-child(3) > div:first-child > span:first-child {
+            background: #E2E8F0; color: #172033;
+        }
+        #main-app > header > div > div:nth-child(3) > div:last-child { margin-left: auto; flex-wrap: wrap; }
+        #header-end-address {
+            color: #172033 !important; white-space: normal; overflow: visible;
+            text-overflow: clip; overflow-wrap: anywhere; line-height: 1.4;
+        }
+        #header-inline-end-input { border-color: #E2E8F0; color: #172033; }
+        #header-inline-end-input:focus { border-color: #2563EB; }
+        #header-end-edit-area > button { background: #2563EB; }
+        #main-app > main { min-height: 0; background: #F5F7FA; }
+        #destination-list > li[data-id] {
+            background: #FFFFFF; color: #172033; border-color: #E2E8F0; padding: 10px; gap: 6px;
+        }
+        #destination-list > li[data-id] > div:first-child {
+            display: grid; grid-template-columns: 68px 24px minmax(0, 1fr) 32px;
+            gap: 4px 6px; align-items: start; margin-top: 0; padding-bottom: 0;
+        }
+        #destination-list > li[data-id] > div:first-child > div:first-child {
+            grid-column: 1; grid-row: 1; flex-direction: row; gap: 4px; margin: 0;
+        }
+        #destination-list > li[data-id] > div:first-child > div:nth-child(2) { grid-column: 2; grid-row: 1; }
+        #destination-list > li[data-id] > div:first-child > div:nth-child(3) {
+            grid-column: 3; grid-row: 1; margin-left: 0; overflow-wrap: anywhere;
+        }
+        #destination-list > li[data-id] > div:first-child > div:nth-child(3) > span {
+            white-space: normal; word-break: normal; overflow-wrap: anywhere; line-height: 1.35;
+        }
+        #destination-list > li[data-id] > div:first-child > div:nth-child(3) > span:not(.text-amber-700) { color: #172033; }
+        #destination-list > li[data-id] > div:first-child > div:last-child { display: contents; }
+        #destination-list > li[data-id] > div:first-child > div:last-child > span {
+            grid-column: 3; grid-row: 2; justify-self: start; color: #64748B; border-color: #E2E8F0;
+        }
+        #destination-list > li[data-id] > div:first-child > div:last-child > button { grid-column: 4; grid-row: 1; }
+        #destination-list [id^="memo-tags-"] { margin: 0; }
+        #destination-list [id^="memo-tags-"] > span { background: #F5F7FA; color: #64748B; border-color: #E2E8F0; }
+        #destination-list [id^="memo-preview-"], #destination-list [id^="personal-memo-preview-"] {
+            white-space: pre-wrap; overflow: visible; text-overflow: clip; overflow-wrap: anywhere;
+            margin: 0; color: #172033; background: #F5F7FA; border-color: #E2E8F0; line-height: 1.5;
+        }
+        #destination-list [id^="memo-preview-"] > span, #destination-list [id^="personal-memo-preview-"] > span,
+        #destination-list [id^="memo-preview-"] > i, #destination-list [id^="personal-memo-preview-"] > i { color: #172033; }
+        #destination-list > li[data-id] > div:last-child { margin-top: 0; padding-top: 6px; border-color: #E2E8F0; }
+        #destination-list a[href^="tel:"], #destination-list a[href^="sms:"],
+        #destination-list button[onclick^="openMemoModal("] {
+            background: #FFFFFF; color: #172033; border-color: #E2E8F0;
+        }
+        #destination-list a[href^="tel:"] i, #destination-list a[href^="sms:"] i,
+        #destination-list button[onclick^="openMemoModal("] i { color: #172033; }
+        #destination-list button[onclick^="completeDestination("] { background: #2563EB; color: #FFFFFF; }
+        #destination-list button[onclick^="cancelDestination("] {
+            background: #FFFFFF; color: #DC2626; border-color: #E2E8F0;
+            flex-direction: column; gap: 0; font-size: 11px;
+        }
+        #destination-list button[onclick^="cancelDestination("]::after { content: "삭제"; line-height: 14px; }
+        #destination-list button:disabled { opacity: 0.3; }
+        #swipe-container > div:first-child { white-space: normal; text-align: center; line-height: 1.25; }
+        @media (max-width: 375px) {
+            #main-app > footer > div { flex-wrap: wrap; }
+            #swipe-container { flex-basis: 100%; }
+        }
         .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     </style>
