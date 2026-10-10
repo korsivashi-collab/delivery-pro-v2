@@ -19,6 +19,7 @@ import {
     doc, 
     increment, 
     setDoc, 
+    writeBatch,
     runTransaction,
     deleteDoc, 
     orderBy, 
@@ -99,6 +100,18 @@ export async function firebaseUploadDeliveryPhoto(file, deviceId, operationId = 
     return await getDownloadURL(snapshot.ref);
 }
 
+// 신분증이 없는 경우에만 기존 라이선스 조회 경로를 한 번 사용합니다.
+async function findDriverLicense(key) {
+    const keys = [...new Set([key, `PRO-${key}`, `TRIAL-${key}`])];
+    for (const collectionName of ['driver_profiles', 'licenses']) {
+        for (const candidate of keys) {
+            const snapshot = await getDoc(doc(db, collectionName, candidate));
+            if (snapshot.exists()) return { snapshot, isProfile: collectionName === 'driver_profiles' };
+        }
+    }
+    return null;
+}
+
 // 2. 라이선스 검증
 export async function firebaseVerifyLicense(key, phone, deviceId) {
     const cleanDigits = (phone || "").replace(/[^0-9]/g, '');
@@ -106,22 +119,11 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
         return { valid: false, msg: "휴대폰 번호를 정확하게 입력해야 로그인이 완료됩니다." };
     }
 
-    let docRef = doc(db, "licenses", key);
-    let docSnap = await getDoc(docRef);
-
-    if (!docSnap.exists()) {
-        docRef = doc(db, "licenses", `PRO-${key}`);
-        docSnap = await getDoc(docRef);
-    }
-    if (!docSnap.exists()) {
-        docRef = doc(db, "licenses", `TRIAL-${key}`);
-        docSnap = await getDoc(docRef);
-    }
-
-    if (!docSnap.exists()) {
+    const found = await findDriverLicense(key);
+    if (!found) {
         return { valid: false, msg: "등록되지 않은 라이선스 키입니다." };
     }
-
+    const { snapshot: docSnap, isProfile } = found;
     const data = docSnap.data();
 
     if (data.status === 'suspended') {
@@ -139,7 +141,43 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     if (data.deviceId && data.deviceId !== deviceId) {
         return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다. 관리자에게 기기 초기화를 요청하세요." };
     }
-    const routeOwnerId = await ensureRouteOwner(db, docSnap.id, deviceId, phone);
+    const routeOwnerId = isProfile
+        ? await runTransaction(db, async transaction => {
+            const profileRef = doc(db, 'driver_profiles', docSnap.id);
+            const snapshot = await transaction.get(profileRef);
+            if (!snapshot.exists()) throw new Error('기사 신분증이 존재하지 않습니다.');
+            const profile = snapshot.data();
+            if (profile.status === 'suspended') throw new Error('사용이 일시 정지된 계정입니다.');
+            if (profile.expireDate) {
+                const parts = profile.expireDate.split('.');
+                if (new Date() > new Date(parts[0], parts[1] - 1, parts[2], 23, 59, 59)) {
+                    throw new Error('라이선스 유효기간이 만료되었습니다.');
+                }
+            }
+            if (profile.deviceId && profile.deviceId !== deviceId) {
+                throw new Error('다른 기기에 등록된 라이선스입니다.');
+            }
+            const ownerId = profile.routeOwnerId;
+            if (!ownerId) throw new Error('기사 신분증 소유자 정보가 없습니다.');
+            const changes = { phone };
+            if (deviceId) changes.deviceId = deviceId;
+            transaction.update(profileRef, changes);
+            return ownerId;
+        })
+        : await ensureRouteOwner(db, docSnap.id, deviceId, phone);
+
+    if (!isProfile) {
+        // 신분증 발급 실패가 기존 라이선스의 로그인 성공을 막지 않습니다.
+        void setDoc(doc(db, 'driver_profiles', docSnap.id), {
+            key: docSnap.id,
+            status: data.status || 'active',
+            expireDate: data.expireDate || '',
+            deviceId: deviceId || data.deviceId || '',
+            phone,
+            routeOwnerId,
+            allowTms: data.allowTms !== false
+        }).catch(error => console.warn('기사 신분증 자동 발급 오류:', error));
+    }
 
     return { 
         valid: true, 
@@ -147,7 +185,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
         phone: phone, 
         actualKey: docSnap.id,
         routeOwnerId,
-        dispatchKey: data.dispatchKey || "",
+        dispatchKey: isProfile ? "" : data.dispatchKey || "",
         allowTms: data.allowTms !== false
     };
 }
@@ -156,24 +194,13 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
 export function watchLicenseStatus(key, callback, onUpdateCallback) {
     (async () => {
         try {
-            let docRef = doc(db, "licenses", key);
-            let docSnap = await getDoc(docRef);
-
-            if (!docSnap.exists()) {
-                docRef = doc(db, "licenses", `PRO-${key}`);
-                docSnap = await getDoc(docRef);
-            }
-            if (!docSnap.exists()) {
-                docRef = doc(db, "licenses", `TRIAL-${key}`);
-                docSnap = await getDoc(docRef);
-            }
-
-            if (!docSnap.exists()) {
+            const found = await findDriverLicense(key);
+            if (!found) {
                 if (callback) callback('DELETED', '관리자에 의해 라이선스가 삭제되었습니다.');
                 return;
             }
 
-            const data = docSnap.data();
+            const data = found.snapshot.data();
             if (data.status === 'suspended') {
                 if (callback) callback('SUSPENDED', '관리자에 의해 라이선스가 일시 정지되었습니다.');
                 return;
@@ -203,22 +230,11 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
 export async function firebaseCheckLicenseOnce(key, deviceId) {
     if (!key) return { valid: false, msg: "라이선스 키가 올바르지 않습니다." };
     try {
-        let docRef = doc(db, "licenses", key);
-        let docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-
-        if (!docSnap.exists()) {
+        const found = await findDriverLicense(key);
+        if (!found) {
             return { valid: false, msg: "등록되지 않은 라이선스 키입니다." };
         }
-
+        const { snapshot: docSnap, isProfile } = found;
         const data = docSnap.data();
 
         if (data.status === 'suspended') {
@@ -240,7 +256,7 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
         return { 
             valid: true, 
             data: data, 
-            dispatchKey: data.dispatchKey || "", 
+            dispatchKey: isProfile ? "" : data.dispatchKey || "", 
             expireDate: data.expireDate || "",
             allowTms: data.allowTms !== false 
         };
@@ -354,7 +370,8 @@ export async function firebaseStartTrial(phone, deviceId) {
     const trialKey = `TRIAL-${p1}-${p2}`;
 
     const routeOwnerId = crypto.randomUUID();
-    await setDoc(doc(db, "licenses", trialKey), {
+    const batch = writeBatch(db);
+    batch.set(doc(db, "licenses", trialKey), {
         routeOwnerId,
         key: trialKey,
         type: 'trial',
@@ -366,6 +383,16 @@ export async function firebaseStartTrial(phone, deviceId) {
         allowTms: true,
         createdAt: now.getTime()
     });
+    batch.set(doc(db, "driver_profiles", trialKey), {
+        key: trialKey,
+        status: 'active',
+        expireDate: expDateStr,
+        deviceId,
+        phone,
+        routeOwnerId,
+        allowTms: true
+    });
+    await batch.commit();
 
     return { valid: true, trialKey: trialKey, expireDate: expDateStr, dispatchKey: '', routeOwnerId };
 }
@@ -481,8 +508,12 @@ export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) 
         }
 
         if (cleanPhone) {
-            const licQ = query(collection(db, "licenses"), where("phone", "==", phone));
-            const licSnap = await getDocs(licQ);
+            const profileQ = query(collection(db, "driver_profiles"), where("phone", "==", phone));
+            let licSnap = await getDocs(profileQ);
+            if (licSnap.empty) {
+                const licQ = query(collection(db, "licenses"), where("phone", "==", phone));
+                licSnap = await getDocs(licQ);
+            }
             const userDevIds = new Set();
             licSnap.forEach(ld => {
                 const dId = ld.data().deviceId;
@@ -579,22 +610,22 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
 export function getCompletionOwnershipContext() {
     return Object.freeze({
         routeOwnerId: state.getRouteOwnerId(),
-        licenseKey: localStorage.getItem('deliveryProKey') || '',
-        dispatchKey: localStorage.getItem('deliveryProDispatchKey') || ''
+        licenseKey: localStorage.getItem('deliveryProKey') || ''
     });
 }
 
 export async function saveCompletionToFirestore(deviceId, driverPhone, item, tagText, actualLat, actualLng, isReal, photoUrl = null, ownership = getCompletionOwnershipContext(), transmission = null) {
     try {
-        if (!ownership.routeOwnerId) throw new Error('배송 처리 소유자 정보가 없습니다.');
+        if (!ownership.routeOwnerId || !ownership.licenseKey) throw new Error('배송 처리 소유자 정보가 없습니다.');
         const now = new Date(transmission ? transmission.completedAt : Date.now());
         const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
         
         const data = {
             routeOwnerId: ownership.routeOwnerId,
+            licenseKey: ownership.licenseKey,
             destinationId: item.id ?? null,
             deviceId: deviceId,
-            phone: driverPhone || "연락처 미등록",
+            phone: driverPhone || "",
             customerPhone: item.phone || "",
             address: item.address || "",
             orderNo: item.orderNo || "",
@@ -647,20 +678,18 @@ export async function deleteCompletionFromFirestore(docId, operationId = null, r
 export async function firebaseClearDeviceData(key) {
     try {
         if (!key) return;
-        let docRef = doc(db, "licenses", key);
-        let docSnap = await getDoc(docRef);
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${key}`);
-            docSnap = await getDoc(docRef);
+        const found = await findDriverLicense(key);
+        if (!found) return;
+        const { snapshot, isProfile } = found;
+        const changes = { deviceId: "", phone: "" };
+        const batch = writeBatch(db);
+        if (isProfile) {
+            batch.update(doc(db, "driver_profiles", snapshot.id), changes);
         }
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        
-        if ((await getDoc(docRef)).exists()) {
-            await updateDoc(docRef, { deviceId: "", phone: "" });
-        }
+        const licenseRef = doc(db, "licenses", snapshot.id);
+        const licenseSnap = isProfile ? await getDoc(licenseRef) : snapshot;
+        if (licenseSnap.exists()) batch.update(licenseRef, changes);
+        await batch.commit();
     } catch(e) {
         console.error("서버 기기 정보 초기화 오류:", e);
     }
@@ -670,28 +699,23 @@ export async function firebaseClearDeviceData(key) {
 export async function firebaseSetTmsPermission(key, isAllowed) {
     try {
         if (!key) throw new Error("유효한 라이선스 키 값이 없습니다.");
-        
-        let docRef = doc(db, "licenses", key);
-        let docSnap = await getDoc(docRef);
-
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        if (!docSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${key}`);
-            docSnap = await getDoc(docRef);
-        }
-        
-        if (docSnap.exists()) {
-            if (isAllowed) {
-                await updateDoc(docRef, { allowTms: true });
-            } else {
-                await updateDoc(docRef, { allowTms: false, dispatchKey: "" });
-            }
-        } else {
+        const found = await findDriverLicense(key);
+        if (!found) {
             throw new Error("서버에서 계정 정보를 찾을 수 없습니다.");
         }
+        const { snapshot, isProfile } = found;
+        const batch = writeBatch(db);
+        if (isProfile) {
+            batch.update(doc(db, "driver_profiles", snapshot.id), { allowTms: !!isAllowed });
+        }
+        const licenseRef = doc(db, "licenses", snapshot.id);
+        const licenseSnap = isProfile ? await getDoc(licenseRef) : snapshot;
+        if (licenseSnap.exists()) {
+            batch.update(licenseRef, isAllowed
+                ? { allowTms: true }
+                : { allowTms: false, dispatchKey: "" });
+        }
+        await batch.commit();
     } catch(e) {
         console.error("TMS 상태 변경 오류:", e);
         throw e;

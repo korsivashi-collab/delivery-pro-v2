@@ -27,7 +27,8 @@ export function createCompletionTask(item, tag, context, photoId = null, photoUr
     return {
         id: photoId || crypto.randomUUID(), action: 'complete', status: 'pending',
         completedAt: Date.now(), attempts: 0, nextAttemptAt: 0,
-        ownership: context.completionOwnership, deviceId: context.deviceId, phone: context.phone,
+        ownership: { routeOwnerId: context.completionOwnership.routeOwnerId,
+            licenseKey: context.completionOwnership.licenseKey }, deviceId: context.deviceId, phone: context.phone,
         item: { ...item }, tag, lat: real ? gps.lat : item.lat, lng: real ? gps.lng : item.lng,
         isReal: real, photoId, photoUrl: photoUrl || '', stage: photoId ? 'photo' : 'completion'
     };
@@ -94,7 +95,9 @@ export function createCompletionWorker({
         return firebaseUploadDeliveryPhoto(blob, job.deviceId, job.id);
     }),
     complete = job => saveCompletionToFirestore(job.deviceId, job.phone, job.item, job.tag,
-        job.lat, job.lng, job.isReal, job.photoUrl, job.ownership, job),
+        job.lat, job.lng, job.isReal, job.photoUrl,
+        { routeOwnerId: job.ownership.routeOwnerId, licenseKey: job.ownership.licenseKey },
+        { id: job.id, completedAt: job.completedAt }),
     remove = job => deleteCompletionFromFirestore(job.completionDocId, job.id, job.ownership.routeOwnerId),
     route = async job => {
         const revision = state.getRouteUpdatedAt();
