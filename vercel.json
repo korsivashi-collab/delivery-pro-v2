@@ -1,5 +1,6 @@
 {
   "functions": {
+    "api/start-trial.js": { "maxDuration": 60, "memory": 1024 },
     "api/admin-license-save.js": {
       "maxDuration": 60,
       "memory": 1024

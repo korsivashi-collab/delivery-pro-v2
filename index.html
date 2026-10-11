@@ -259,7 +259,17 @@
             </p>
             <div class="mb-5">
                 <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">본인 휴대폰 번호</label>
-                <input type="tel" id="trial-phone-input" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold font-mono rounded-xl p-3.5 outline-none shadow-inner focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-center" placeholder="예: 010-1234-5678" onkeyup="if(window.event.keyCode==13){window.startFreeTrial()}">
+                <div class="flex gap-2">
+                    <input type="tel" id="trial-phone-input" class="min-w-0 flex-1 bg-slate-50 border border-slate-200 text-slate-900 text-sm font-bold font-mono rounded-xl p-3.5 outline-none shadow-inner focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 text-center" placeholder="예: 010-1234-5678" onkeyup="if(window.event.keyCode==13){window.sendTrialSmsCode()}">
+                    <button type="button" id="btn-trial-send-sms" onclick="window.sendTrialSmsCode()" class="text-xs font-bold bg-slate-900 text-white rounded-xl px-3 py-3.5 shrink-0 shadow-xs active:scale-95 transition whitespace-nowrap">인증요청</button>
+                </div>
+                <div id="trial-sms-group" class="space-y-1 hidden mt-3">
+                    <label for="trial-sms-code-input" class="block text-[10px] font-bold text-slate-400 pl-1">SMS 인증번호 6자리</label>
+                    <div class="flex gap-2">
+                        <input type="tel" id="trial-sms-code-input" placeholder="인증번호 6자리" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="min-w-0 flex-1 text-center font-mono font-bold tracking-widest text-sm rounded-xl border border-slate-200 bg-slate-50 p-3.5" onkeydown="if(!event.isComposing &amp;&amp; !event.repeat &amp;&amp; event.key==='Enter'){event.preventDefault();window.startFreeTrial()}">
+                        <span id="trial-sms-timer" class="text-xs font-mono font-extrabold text-rose-500 self-center px-2">03:00</span>
+                    </div>
+                </div>
                 <p id="trial-error-msg" class="text-rose-500 text-[10px] font-bold mt-1.5 hidden text-center"></p>
             </div>
             <div class="flex gap-2.5">
