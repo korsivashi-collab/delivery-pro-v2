@@ -3,7 +3,7 @@
 import { db } from "./admin-api.js";
 import { state, todayStr } from "./admin-state.js";
 import { processSinglePdfFile } from "./admin-dispatch-pdf.js";
-import { doc, setDoc, getDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, getDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
 // 0. 로컬 스토리지 기반 주소 캐시(Cache) 관리 엔진
@@ -188,12 +188,24 @@ export async function autoSaveExcelToFirebase() {
     if (!dispatchKey) return; 
     const dateVal = document.getElementById('dispatch-assign-date')?.value || todayStr; 
     try {
-        await setDoc(doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`), { 
-            date: dateVal, 
-            dispatchKey: dispatchKey, 
-            orders: state.parsedExcelList || [], 
-            updatedAt: Date.now() 
-        }, { merge: true });
+        const orderRef = doc(db, "dispatch_orders", `${dateVal}_${dispatchKey}`);
+        const orders = state.parsedExcelList || [];
+        await runTransaction(db, async transaction => {
+            const snapshot = await transaction.get(orderRef);
+            const previous = snapshot.exists() ? snapshot.data() : {};
+            const now = Date.now();
+            // 기존 문서는 마지막 저장 시간을 기준으로 보완하고, 이후 저장으로 수명을 연장하지 않습니다.
+            const createdAt = Number.isFinite(previous.createdAt) ? previous.createdAt
+                : Number.isFinite(previous.updatedAt) ? previous.updatedAt : now;
+            transaction.set(orderRef, {
+                date: dateVal,
+                dispatchKey: dispatchKey,
+                orders,
+                createdAt,
+                expireAt: new Date(createdAt + 14 * 24 * 60 * 60 * 1000),
+                updatedAt: now
+            }, { merge: true });
+        });
     } catch (error) {
         console.error("엑셀 데이터 자동 저장 실패:", error);
     }
