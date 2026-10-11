@@ -337,6 +337,11 @@
                     <input type="text" id="new-key-keyword" maxlength="7" placeholder="예: 토박이, KSCO (미입력 시 무작위 생성)" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm">
                     <p class="text-[10px] text-gray-400 mt-1 font-bold">* 한글/영문 키워드 포함 총 8자리(예: 토박이X-XXXX)로 자동 생성됩니다.</p>
                 </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-gray-700 mb-1" for="new-key-phone">사전 등록 휴대폰 번호 (선택)</label>
+                    <input type="tel" id="new-key-phone" inputmode="tel" onchange="window.formatMasterPhoneInput(this)" placeholder="예: 010-1234-5678" class="w-full bg-gray-50 border border-gray-300 text-gray-900 text-xs font-bold rounded-xl p-3 outline-none focus:border-blue-500 shadow-sm">
+                    <p class="text-[10px] text-gray-400 mt-1 font-bold">번호 지정 시 1개 계정만 발급합니다. 무료체험 이력은 정식 계정으로 승급됩니다.</p>
+                </div>
                 <div class="grid grid-cols-2 gap-2.5">
                     <div>
                         <label class="block text-[11px] font-bold text-gray-700 mb-1">생성 수량 (개)</label>
@@ -368,7 +373,7 @@
                     <span class="text-[11px] font-black text-gray-700 flex items-center gap-1 mb-1"><i class="fa-solid fa-sliders text-blue-600"></i> 기본 계정 정보</span>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">라이선스 키 (8자리)</label><input type="text" id="edit-key-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-mono font-black uppercase outline-none focus:border-blue-500"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">등록 휴대폰 번호</label><input type="tel" id="edit-phone-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500" placeholder="예: 010-1234-5678"></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">등록 휴대폰 번호</label><input type="tel" id="edit-phone-input" onchange="window.formatMasterPhoneInput(this)" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500" placeholder="예: 010-1234-5678"></div>
                     </div>
                     <div>
                         <label class="block text-[10px] font-bold text-gray-500 mb-1">기기 고유번호 (deviceId / 세션ID)</label>
@@ -408,7 +413,7 @@
             <div class="flex gap-2 pt-3 border-t border-gray-100 mt-2">
                 <button type="button" onclick="window.deleteLicenseFromModal()" class="bg-red-50 hover:bg-red-100 text-red-600 font-black py-2.5 px-3 rounded-xl text-xs transition">계정 삭제</button>
                 <button type="button" onclick="window.closeEditModal()" class="flex-1 bg-gray-100 text-gray-600 font-bold py-2.5 rounded-xl text-xs">취소</button>
-                <button type="button" onclick="window.saveLicenseEdit()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-2.5 rounded-xl text-xs shadow">수정 저장</button>
+                <button type="button" id="btn-save-license-edit" onclick="window.saveLicenseEdit()" class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-2.5 rounded-xl text-xs shadow">수정 저장</button>
             </div>
         </div>
     </div>

@@ -1,5 +1,9 @@
 {
   "functions": {
+    "api/admin-license-save.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
     "api/scan.js": { 
       "maxDuration": 60,
       "memory": 1024
