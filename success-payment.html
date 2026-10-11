@@ -20,6 +20,7 @@
             <dl class="mt-5 border-t pt-4 flex justify-between text-sm"><dt>이용 만료일</dt><dd id="expire-date" class="font-bold"></dd></dl>
             <p class="text-xs text-slate-500 mt-4">라이선스 키를 보관하고 앱의 인증 화면에 입력해 주세요.</p>
         </section>
+        <aside id="app-guide" hidden class="mt-4 rounded-2xl border-2 border-blue-200 bg-blue-50 p-5 text-left text-sm font-bold leading-relaxed text-blue-900">📱 [배송경로PRO] 앱을 열고 본인 휴대폰 번호와 위 라이선스 키를 입력하면 바로 시작됩니다.</aside>
         <p id="order-label" class="text-xs text-slate-500 mt-5 break-all"></p>
         <button id="retry-btn" type="button" hidden class="w-full mt-6 bg-blue-600 text-white font-bold rounded-xl py-4">승인 결과 다시 확인</button>
         <a id="home-link" href="/index.html" hidden class="block mt-6 bg-blue-600 text-white font-bold rounded-xl py-4">배송경로PRO 시작하기</a>
@@ -30,6 +31,9 @@
             phone: query.get('phone'), months: Number(query.get('months')) };
         const message = document.getElementById('message');
         const retry = document.getElementById('retry-btn');
+        const copyButton = document.getElementById('copy-btn');
+        const copyButtonLabel = copyButton.textContent;
+        let copyFeedbackTimer = null;
         let busy = false, licenseKey = '';
         if (input.orderId) document.getElementById('order-label').textContent = '주문번호: ' + input.orderId;
         async function confirmPayment() {
@@ -54,6 +58,7 @@
                 document.getElementById('license-key').textContent = licenseKey;
                 document.getElementById('expire-date').textContent = data.expireDate;
                 document.getElementById('result').hidden = false;
+                document.getElementById('app-guide').hidden = false;
                 document.getElementById('home-link').hidden = false;
                 // 새로고침 시 서버 감사 로그에서 같은 결과를 반환하므로 기간이 중복 연장되지 않습니다.
             } catch (error) {
@@ -64,8 +69,17 @@
             } finally { busy = false; }
         }
         retry.addEventListener('click', confirmPayment);
-        document.getElementById('copy-btn').addEventListener('click', async () => {
-            try { await navigator.clipboard.writeText(licenseKey); message.textContent = '라이선스 키를 복사했습니다.'; }
+        copyButton.addEventListener('click', async () => {
+            try {
+                await navigator.clipboard.writeText(licenseKey);
+                message.textContent = '라이선스 키를 복사했습니다.';
+                clearTimeout(copyFeedbackTimer);
+                copyButton.textContent = '✅ 복사 완료!';
+                copyFeedbackTimer = setTimeout(() => {
+                    copyButton.textContent = copyButtonLabel;
+                    copyFeedbackTimer = null;
+                }, 2000);
+            }
             catch (_) { message.textContent = '키를 길게 눌러 직접 복사해 주세요.'; }
         });
         confirmPayment();
