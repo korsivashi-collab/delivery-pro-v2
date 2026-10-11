@@ -382,6 +382,42 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
             return { valid: false, msg: "다른 기기에 등록된 라이선스 키입니다." };
         }
 
+        // 실제로 찾은 문서 ID를 사용합니다. PRO-/TRIAL- 별칭도 같은 계정의 문서와 대조합니다.
+        try {
+            const counterpartRef = doc(db, isProfile ? 'licenses' : 'driver_profiles', docSnap.id);
+            const counterpart = await getDoc(counterpartRef);
+            if (counterpart.exists()) {
+                const other = counterpart.data();
+                const sameOwner = !data.routeOwnerId || !other.routeOwnerId || data.routeOwnerId === other.routeOwnerId;
+                const otherPhone = typeof other.phone === 'string' ? other.phone.trim() : '';
+                const ownPhone = typeof data.phone === 'string' ? data.phone.trim() : '';
+                const otherExpiry = String(other.expireDate || '').replace(/\D/g, '');
+                const today = `${new Date().getFullYear()}${String(new Date().getMonth() + 1).padStart(2, '0')}${String(new Date().getDate()).padStart(2, '0')}`;
+                const otherUsable = !['suspended', 'revoked', 'expired', 'upgraded'].includes(other.status) &&
+                    (!otherExpiry || otherExpiry >= today) && (!deviceId || !other.deviceId || other.deviceId === deviceId);
+                if (sameOwner && !ownPhone && otherUsable && otherPhone.replace(/\D/g, '').length >= 9) data.phone = otherPhone;
+
+                // 반대편 번호가 비었을 때만 보완하며, 실패해도 유효한 조회 결과는 그대로 반환합니다.
+                const donorRef = ownPhone ? docSnap.ref : counterpartRef;
+                const receiverRef = ownPhone ? counterpartRef : docSnap.ref;
+                const phone = ownPhone || (otherUsable ? otherPhone : '');
+                if (sameOwner && phone.replace(/\D/g, '').length >= 9 && (!ownPhone || !otherPhone)) {
+                    runTransaction(db, async transaction => {
+                        const donor = await transaction.get(donorRef);
+                        const receiver = await transaction.get(receiverRef);
+                        if (!donor.exists() || !receiver.exists()) return;
+                        const latestDonor = donor.data(), latestReceiver = receiver.data();
+                        if (String(latestReceiver.phone || '').trim() || latestDonor.phone !== phone) return;
+                        if (latestDonor.routeOwnerId && latestReceiver.routeOwnerId && latestDonor.routeOwnerId !== latestReceiver.routeOwnerId) return;
+                        transaction.set(receiverRef, { phone }, { merge: true });
+                    }).catch(() => console.warn('전화번호 누락 필드 동기화 실패: 다음 조회 시 재시도합니다.'));
+                }
+            }
+        } catch (_) {
+            // 추가 조회 실패가 기존 라이선스 검사 결과를 오프라인 성공으로 바꾸지 않습니다.
+            console.warn('전화번호 보완 조회 실패: 기존 조회 결과를 사용합니다.');
+        }
+
         return { 
             valid: true, 
             data: data, 

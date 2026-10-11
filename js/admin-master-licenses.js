@@ -8,6 +8,25 @@ import { doc, setDoc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.c
 
 let generatingLicense = false;
 let savingLicenseEdit = false;
+let licensePhoneRepairPromise = null;
+
+export function reconcileMasterLicensePhones() {
+    if (!licensePhoneRepairPromise) {
+        licensePhoneRepairPromise = (async () => {
+            let result;
+            do {
+                result = await saveMasterLicenses({ action: 'repairPhones' });
+                if (result.conflicts?.length || result.skipped?.length) {
+                    console.warn('전화번호 자동 보완: 서로 다른 번호·소유권 또는 잘못된 번호는 관리자 수정이 필요합니다.', result);
+                }
+            } while (result.hasMore);
+            return result;
+        })().catch(() => {
+            console.warn('전화번호 자동 보완 실패: 마스터 재접속 또는 수정 저장으로 재시도해 주세요.');
+        });
+    }
+    return licensePhoneRepairPromise;
+}
 
 // ==========================================
 // 1. 마스터 탭 및 계정 테이블 렌더링

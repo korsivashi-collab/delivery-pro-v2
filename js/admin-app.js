@@ -14,7 +14,7 @@ import { renderPaginationControls } from "./admin-ui.js";
 // [마스터 기능 모듈 가져오기]
 // ==========================================
 import {
-    switchMasterTab, changeMasterTabPagination, renderMasterTables,
+    switchMasterTab, changeMasterTabPagination, renderMasterTables, reconcileMasterLicensePhones,
     generateNewLicense, openEditLicenseModal, closeEditModal,
     renderModalConnectedDrivers, linkDriverFromModal, unlinkDriverFromModal,
     saveLicenseEdit, deleteLicense, deleteLicenseFromModal,
@@ -252,7 +252,6 @@ window.handleSingleKeyLogin = async function() {
             await updateDoc(doc(db, "licenses", finalKey), { 
                 currentSessionToken: newSessionToken,
                 activeSessions: activeSessions,
-                maxSessions: maxSessions,
                 lastLoginAt: Date.now()
             });
 
@@ -367,6 +366,7 @@ window.initMasterDataSync = function() {
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
         
         const currentRole = sessionStorage.getItem('deliveryProRole');
+        if (currentRole === 'MASTER') reconcileMasterLicensePhones();
         const localToken = sessionStorage.getItem('deliveryProSessionToken');
         
         if (currentRole === 'DISPATCH' && currentKey) {
