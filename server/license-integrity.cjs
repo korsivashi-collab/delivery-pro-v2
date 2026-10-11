@@ -160,4 +160,55 @@ async function saveLicenses(db, request, now = Date.now()) {
     });
 }
 
-module.exports = { normalizePhone, phoneDigits, saveLicenses, problem };
+async function repairLicensePhones(db, now = Date.now()) {
+    const lockRef = db.collection('admin_license_controls').doc('phone_integrity');
+    return db.runTransaction(async tx => {
+        const lock = await tx.get(lockRef);
+        const [licensesSnap, profilesSnap] = await Promise.all([
+            tx.get(db.collection('licenses')), tx.get(db.collection('driver_profiles'))
+        ]);
+        const profiles = new Map(profilesSnap.docs.map(doc => [doc.id, doc.data()]));
+        const repaired = [], conflicts = [], skipped = [];
+        let hasMore = false;
+        const writes = [];
+        for (const snapshot of licensesSnap.docs) {
+            const license = snapshot.data(), profile = profiles.get(snapshot.id);
+            if (license.type === 'dispatch' && !profile) continue;
+            if (license.routeOwnerId && profile?.routeOwnerId && license.routeOwnerId !== profile.routeOwnerId) {
+                conflicts.push(snapshot.id); continue;
+            }
+            const licensePhone = String(license.phone || '').trim(), profilePhone = String(profile?.phone || '').trim();
+            if (licensePhone && profilePhone) {
+                if (phoneDigits(licensePhone) !== phoneDigits(profilePhone)) conflicts.push(snapshot.id);
+                continue;
+            }
+            const donorPhone = licensePhone ? license.phone : profile?.phone;
+            if (!donorPhone) continue;
+            try { normalizePhone(donorPhone); } catch (_) { skipped.push(snapshot.id); continue; }
+            const accountWriteStart = writes.length;
+            // 누락 필드만 복사합니다. 기존 메모의 phone 표기와 소유권을 그대로 보존합니다.
+            if (!licensePhone) writes.push([snapshot.ref, { phone: donorPhone }]);
+            else if (profile) writes.push([db.collection('driver_profiles').doc(snapshot.id), { phone: donorPhone }]);
+            else {
+                const routeOwnerId = license.routeOwnerId || randomUUID();
+                if (!license.routeOwnerId) writes.push([snapshot.ref, { routeOwnerId }]);
+                writes.push([db.collection('driver_profiles').doc(snapshot.id), {
+                    key: snapshot.id, phone: donorPhone, routeOwnerId, status: license.status || 'active',
+                    expireDate: license.expireDate || '', deviceId: license.deviceId || '', allowTms: license.allowTms !== false
+                }]);
+            }
+            if (writes.length > 440) {
+                writes.length = accountWriteStart;
+                hasMore = true;
+                continue;
+            }
+            repaired.push(snapshot.id);
+        }
+        // 계정별 양쪽 문서를 한 트랜잭션에 묶고, 초과분은 다음 요청에서 계속합니다.
+        for (const [ref, data] of writes) tx.set(ref, data, { merge: true });
+        if (writes.length) tx.set(lockRef, { revision: (lock.data()?.revision || 0) + 1, updatedAt: now });
+        return { repaired, conflicts, skipped, hasMore };
+    });
+}
+
+module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, problem };
