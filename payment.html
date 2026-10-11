@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="referrer" content="no-referrer">
+    <meta name="theme-color" content="#2563eb">
+    <title>이용권 신청 | 배송경로PRO</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://js.tosspayments.com/v2/standard"></script>
+    <style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}input:checked+span{border-color:#2563eb;background:#eff6ff}button:disabled{opacity:.5}body{padding-bottom:env(safe-area-inset-bottom)}</style>
+</head>
+<body class="bg-slate-50 text-slate-900">
+    <main class="max-w-lg mx-auto px-5 py-8">
+        <a href="/index.html" class="text-sm font-bold text-blue-600"><i class="fa-solid fa-arrow-left" aria-hidden="true"></i> 배송경로PRO</a>
+        <header class="mt-7 mb-7"><p class="text-blue-600 font-bold text-sm">기사님 전용 이용권</p><h1 class="text-3xl font-black mt-2">계정 등록 · 이용권 신청</h1><p class="text-sm text-slate-500 mt-3">휴대폰 번호로 이용권을 등록하고 배송을 시작하세요.<br>기존 계정은 남은 이용 기간에 선택한 기간이 더해집니다.</p></header>
+        <form id="payment-form" class="space-y-6">
+            <section class="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm">
+                <label for="phone" class="block font-bold mb-3">기사님 휴대폰 번호</label>
+                <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel-national" maxlength="13" placeholder="010-0000-0000" required aria-describedby="phone-help" class="w-full border border-slate-300 rounded-xl p-3.5 text-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <p id="phone-help" class="text-xs text-slate-500 mt-2">본인의 번호를 정확히 입력해 주세요. (10~11자리)</p>
+            </section>
+            <fieldset class="space-y-3"><legend class="font-bold mb-3">이용 기간 선택</legend>
+                <label class="block cursor-pointer"><input type="radio" name="months" value="1" checked class="sr-only peer"><span class="flex justify-between items-center p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500"><span class="font-bold">1개월</span><strong class="text-xl">9,900원</strong></span></label>
+                <label class="block cursor-pointer"><input type="radio" name="months" value="3" class="sr-only peer"><span class="flex justify-between items-center p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500"><span class="font-bold">3개월</span><strong class="text-xl">26,700원</strong></span></label>
+                <label class="block cursor-pointer"><input type="radio" name="months" value="6" class="sr-only peer"><span class="flex justify-between items-center p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500"><span class="font-bold">6개월</span><strong class="text-xl">47,500원</strong></span></label>
+            </fieldset>
+            <section class="bg-white border border-slate-200 rounded-2xl overflow-hidden" aria-label="결제수단 및 결제 약관"><div id="payment-method"></div><div id="agreement"></div></section>
+            <label class="flex gap-3 text-sm items-start"><input id="service-consent" type="checkbox" required class="mt-1 w-4 h-4 accent-blue-600"><span><a href="/terms.html" target="_blank" rel="noopener" class="underline text-blue-600">이용약관</a> 및 <a href="/privacy.html" target="_blank" rel="noopener" class="underline text-blue-600">개인정보 처리방침</a>, <a href="/terms.html" target="_blank" rel="noopener" class="underline text-blue-600">환불정책 (제6조)</a>을 확인하고 동의합니다.</span></label>
+            <p id="message" role="status" aria-live="polite" class="text-sm text-rose-600 whitespace-pre-line"></p>
+            <button id="pay-btn" type="submit" disabled class="w-full bg-blue-600 hover:bg-blue-700 text-white font-black rounded-xl py-4 shadow-md transition active:scale-95">9,900원 결제하기</button>
+            <p class="text-xs text-center text-slate-500">선택한 기간만 결제되며 자동으로 갱신되지 않습니다.<br>결제 후 발급되는 라이선스 키로 앱에서 인증해 주세요.</p>
+        </form>
+    </main>
+    <script>
+        const prices = { 1: 9900, 3: 26700, 6: 47500 };
+        const form = document.getElementById('payment-form');
+        const phoneInput = document.getElementById('phone');
+        const button = document.getElementById('pay-btn');
+        const message = document.getElementById('message');
+        let widgets, agreement, ready = false, busy = false;
+        const periodControls = [...form.querySelectorAll('input[name="months"]')];
+        periodControls.forEach(control => control.disabled = true);
+        let amountQueue = Promise.resolve();
+        const selectedMonths = () => Number(form.elements.months.value);
+        phoneInput.addEventListener('input', () => {
+            const digits = phoneInput.value.replace(/\D/g, '').slice(0, 11);
+            phoneInput.value = digits.length <= 3 ? digits : digits.length <= 7 ?
+                digits.slice(0, 3) + '-' + digits.slice(3) :
+                digits.slice(0, 3) + '-' + digits.slice(3, digits.length - 4) + '-' + digits.slice(-4);
+            phoneInput.setCustomValidity('');
+        });
+        async function api(body) {
+            const response = await fetch('/api/payment-confirm', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || '결제 요청을 준비하지 못했습니다.');
+            return data;
+        }
+        form.addEventListener('change', event => {
+            if (event.target.name !== 'months' || !ready || busy) return;
+            button.disabled = true;
+            const amount = prices[selectedMonths()];
+            button.textContent = amount.toLocaleString('ko-KR') + '원 결제하기';
+            amountQueue = amountQueue.then(() => widgets.setAmount({ currency: 'KRW', value: amount })).then(() => {
+                message.textContent = ''; button.disabled = busy;
+            }).catch(() => { ready = false; message.textContent = '금액 변경에 실패했습니다. 페이지를 새로고침해 주세요.'; button.disabled = true; });
+        });
+        form.addEventListener('submit', async event => {
+            event.preventDefault();
+            if (!ready || busy) return;
+            if (!/^01[016789]\d{7,8}$/.test(phoneInput.value.replace(/\D/g, ''))) {
+                phoneInput.setCustomValidity('10~11자리 휴대폰 번호를 정확히 입력해 주세요.'); phoneInput.reportValidity(); return;
+            }
+            if (!agreement.getAgreementStatus().agreedRequiredTerms) { message.textContent = '결제 필수 약관에 동의해 주세요.'; return; }
+            busy = true; button.disabled = true; message.textContent = '결제를 준비하고 있습니다…';
+            const controls = [...form.querySelectorAll('input')];
+            controls.forEach(control => control.disabled = true);
+            try {
+                await amountQueue;
+                if (!ready) throw new Error('결제 금액을 확인하지 못했습니다. 새로고침해 주세요.');
+                const order = await api({ action: 'create-order', phone: phoneInput.value, months: selectedMonths() });
+                const success = new URL('/success-payment.html', location.origin);
+                success.searchParams.set('phone', order.phone); success.searchParams.set('months', order.months);
+                await widgets.requestPayment({ orderId: order.orderId, orderName: `배송경로PRO ${order.months}개월 이용권`,
+                    successUrl: success.href, failUrl: new URL('/payment.html', location.origin).href });
+                message.textContent = '';
+            } catch (error) { message.textContent = error.code === 'USER_CANCEL' ? '결제를 취소했습니다. 다시 신청할 수 있습니다.' : (error.message || '결제 요청에 실패했습니다.'); }
+            finally { busy = false; controls.forEach(control => control.disabled = false); button.disabled = !ready; }
+        });
+        async function initialize() {
+            const query = new URLSearchParams(location.search);
+            if (query.has('code')) { message.textContent = '결제를 완료하지 못했습니다. 이용 기간과 결제수단을 확인하고 다시 시도해 주세요.'; history.replaceState(null, '', location.pathname); }
+            try {
+                const response = await fetch('/api/payment-confirm');
+                const config = await response.json();
+                if (!response.ok) throw new Error(config.error || '결제 설정을 불러오지 못했습니다.');
+                const toss = TossPayments(config.clientKey);
+                widgets = toss.widgets({ customerKey: TossPayments.ANONYMOUS });
+                await widgets.setAmount({ currency: 'KRW', value: prices[selectedMonths()] });
+                await widgets.renderPaymentMethods({ selector: '#payment-method', variantKey: 'DEFAULT' });
+                agreement = await widgets.renderAgreement({ selector: '#agreement', variantKey: 'AGREEMENT' });
+                ready = true; button.disabled = false;
+                periodControls.forEach(control => control.disabled = false);
+                button.textContent = prices[selectedMonths()].toLocaleString('ko-KR') + '원 결제하기';
+            } catch (error) { message.textContent = error.message || '결제 위젯을 불러오지 못했습니다. 새로고침해 주세요.'; }
+        }
+        initialize();
+    </script>
+</body>
+</html>
