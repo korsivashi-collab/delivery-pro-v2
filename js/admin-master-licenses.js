@@ -1,10 +1,13 @@
-import { ensureRouteOwner } from './route-owner.js';
+import { normalizeMasterPhone, formatMasterPhoneInput, saveMasterLicenses } from './admin-license-save.js';
 // js/admin-master-licenses.js
 
 import { db, generateSecureKey } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { doc, setDoc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+
+let generatingLicense = false;
+let savingLicenseEdit = false;
 
 // ==========================================
 // 1. 마스터 탭 및 계정 테이블 렌더링
@@ -352,11 +355,17 @@ function getUniqueLicenseKey(keyword) {
 }
 
 export async function generateNewLicense() {
+    if (generatingLicense) return;
     const type = document.getElementById('new-key-type')?.value || 'regular';
     const keyword = document.getElementById('new-key-keyword')?.value?.trim() || '';
     const countInput = document.getElementById('new-key-count');
     const expireDate = document.getElementById('new-key-expire')?.value;
     const btn = document.getElementById('btn-generate-license');
+    const phoneInput = document.getElementById('new-key-phone');
+    let phone;
+    try { phone = normalizeMasterPhone(phoneInput?.value || ''); }
+    catch (error) { alert(error.message); phoneInput?.focus(); return; }
+    if (phoneInput) { phoneInput.value = phone; phoneInput.setCustomValidity(''); }
 
     if (!expireDate) { 
         alert("만료일을 선택해 주세요."); 
@@ -369,10 +378,15 @@ export async function generateNewLicense() {
         alert("한 번에 최대 50개까지만 일괄 생성할 수 있습니다.");
         count = 50;
     }
+    if (phone && count > 1) {
+        alert('전화번호 사전 등록은 계정 1개씩 발급해 주세요. 일괄 발급은 전화번호를 비워 주세요.');
+        return;
+    }
 
     const typeName = (type === 'dispatch') ? '관제 계정' : '일반 계정';
     const expStr = expireDate.replace(/-/g, '.');
 
+    generatingLicense = true;
     if (btn) {
         btn.disabled = true;
         btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 생성 중...';
@@ -380,12 +394,18 @@ export async function generateNewLicense() {
 
     try {
         const createdKeys = [];
+        const entries = [];
         for (let i = 0; i < count; i++) {
-            const newKey = getUniqueLicenseKey(keyword);
-            await setDoc(doc(db, "licenses", newKey), {
+            let newKey;
+            for (let attempts = 0; attempts < 100; attempts++) {
+                newKey = getUniqueLicenseKey(keyword);
+                if (!createdKeys.includes(newKey)) break;
+            }
+            if (createdKeys.includes(newKey)) throw new Error('발급 키가 중복되었습니다. 다시 시도해 주세요.');
+            entries.push({
                 key: newKey,
                 type: type,
-                phone: "",
+                phone,
                 expireDate: expStr,
                 deviceId: "",
                 status: "active",
@@ -396,19 +416,23 @@ export async function generateNewLicense() {
             });
             createdKeys.push(newKey);
         }
+        const result = await saveMasterLicenses({ action: 'create', entries });
 
         document.getElementById('create-account-modal')?.classList.add('hidden');
         if (document.getElementById('new-key-keyword')) document.getElementById('new-key-keyword').value = '';
         if (document.getElementById('new-key-count')) document.getElementById('new-key-count').value = '1';
+        if (phoneInput) { phoneInput.value = ''; phoneInput.setCustomValidity(''); }
 
         if (count === 1) {
             alert(`[${typeName} 발급 완료]\n\n라이선스 키: ${createdKeys[0]}`);
         } else {
             alert(`[${typeName} 총 ${count}개 일괄 발급 완료]\n\n발급된 키 목록:\n${createdKeys.join('\n')}`);
         }
+        if (result.upgradedTrials.length) alert('기존 무료체험 계정이 정식 계정으로 승급 처리되었습니다. 주차 메모는 동일 전화번호로 이어집니다.');
     } catch (e) {
         alert("계정 발급 오류: " + e.message);
     } finally {
+        generatingLicense = false;
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-check"></i> 계정 발급';
@@ -648,9 +672,15 @@ export async function unlinkDriverFromModal(driverKey) {
 }
 
 export async function saveLicenseEdit() {
+    if (savingLicenseEdit) return;
     const origKey = document.getElementById('edit-orig-key').value;
     const newKey = document.getElementById('edit-key-input').value.trim().toUpperCase();
-    const phone = document.getElementById('edit-phone-input').value.trim();
+    const phoneInput = document.getElementById('edit-phone-input');
+    let phone;
+    try { phone = normalizeMasterPhone(phoneInput.value); }
+    catch (error) { alert(error.message); phoneInput.focus(); return; }
+    phoneInput.value = phone;
+    phoneInput.setCustomValidity('');
     const deviceId = document.getElementById('edit-device-input').value.trim();
     const expireDate = document.getElementById('edit-expire-input').value;
     const status = document.getElementById('edit-status-select').value;
@@ -676,21 +706,19 @@ export async function saveLicenseEdit() {
         isPro: type === 'dispatch' ? isPro : false
     };
 
+    const btn = document.getElementById('btn-save-license-edit');
+    const originalButton = btn?.innerHTML;
+    savingLicenseEdit = true;
+    if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i> 저장 중...'; }
     try {
-        updatePayload.routeOwnerId = await ensureRouteOwner(db, origKey);
-        if (newKey !== origKey) {
-            await setDoc(doc(db, "licenses", newKey), updatePayload);
-            await deleteDoc(doc(db, "licenses", origKey));
-            if (type === 'dispatch') {
-                const linked = state.allLicenses.filter(l => l.dispatchKey === origKey);
-                for (const l of linked) await updateDoc(doc(db, "licenses", l.key), { dispatchKey: newKey });
-            }
-        } else {
-            await updateDoc(doc(db, "licenses", origKey), updatePayload);
-        }
+        await saveMasterLicenses({ action: 'edit', origKey, license: updatePayload });
         alert(`계정 정보가 성공적으로 수정되었습니다.\n(동시 접속 허용: ${maxSessions}대)`);
         closeEditModal();
     } catch (e) { alert("오류: " + e.message); }
+    finally {
+        savingLicenseEdit = false;
+        if (btn) { btn.disabled = false; btn.innerHTML = originalButton; }
+    }
 }
 
 export async function deleteLicense(key) {
@@ -732,6 +760,7 @@ window.addBlockedDevice = addBlockedDevice;
 window.unblockDevice = unblockDevice;
 
 window.generateNewLicense = generateNewLicense;
+window.formatMasterPhoneInput = formatMasterPhoneInput;
 window.adjustLicenseSessions = adjustLicenseSessions;
 window.onSessionsInputChange = onSessionsInputChange;
 window.openEditLicenseModal = openEditLicenseModal;
