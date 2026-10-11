@@ -61,7 +61,7 @@ module.exports = async function handler(req, res) {
         if (completed.exists) {
             const data = completed.data();
             if (data.paymentKey !== paymentKey) throw problem('결제 정보가 일치하지 않습니다.', 409);
-            return res.status(200).json({ success: true, licenseKey: data.licenseKey, expireDate: data.expireDate });
+            return res.status(200).json({ success: true, licenseKey: data.licenseKey, expireDate: data.expireDate, phone });
         }
         const headers = { Authorization: `Basic ${Buffer.from(process.env.TOSS_SECRET_KEY + ':').toString('base64')}`,
             'Content-Type': 'application/json', 'Idempotency-Key': orderId };
@@ -111,7 +111,7 @@ module.exports = async function handler(req, res) {
             if (previous.routeOwnerId && profile.routeOwnerId && previous.routeOwnerId !== profile.routeOwnerId) throw problem('계정 소유권 확인이 필요합니다.', 409);
             const routeOwnerId = previous.routeOwnerId || profile.routeOwnerId || randomUUID();
             const expireDate = extendDate(previous.expireDate, months);
-            const data = { key: licenseKey, phone, routeOwnerId, expireDate, status: 'active', type: 'standard',
+            const data = { key: licenseKey, phone, routeOwnerId, expireDate, status: 'active', type: previous.type || 'regular',
                 updatedAt: admin.firestore.FieldValue.serverTimestamp() };
             tx.set(db.collection('licenses').doc(licenseKey), { ...data, expiresAt: admin.firestore.FieldValue.delete() }, { merge: true });
             tx.set(profileRef, { ...data, expiresAt: admin.firestore.FieldValue.delete() }, { merge: true });
@@ -121,7 +121,7 @@ module.exports = async function handler(req, res) {
             tx.set(lockRef, { updatedAt: admin.firestore.FieldValue.serverTimestamp() }, { merge: true });
             return { licenseKey, expireDate };
         });
-        return res.status(200).json({ success: true, ...result });
+        return res.status(200).json({ success: true, ...result, phone });
     } catch (error) {
         console.error('Payment pipeline failed:', error.code || error.name);
         return res.status(error.status || 500).json({ success: false, error: error.status ? error.message :
