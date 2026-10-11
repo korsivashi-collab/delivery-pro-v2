@@ -22,9 +22,38 @@
                 <p id="phone-help" class="text-xs text-slate-500 mt-2">본인의 번호를 정확히 입력해 주세요. (10~11자리)</p>
             </section>
             <fieldset class="space-y-3"><legend class="font-bold mb-3">이용 기간 선택</legend>
-                <label class="block cursor-pointer"><input type="radio" name="months" value="1" checked class="sr-only peer"><span class="flex justify-between items-center p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500"><span class="font-bold">1개월</span><strong class="text-xl">9,900원</strong></span></label>
-                <label class="block cursor-pointer"><input type="radio" name="months" value="3" class="sr-only peer"><span class="flex justify-between items-center p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500"><span class="font-bold">3개월</span><strong class="text-xl">26,700원</strong></span></label>
-                <label class="block cursor-pointer"><input type="radio" name="months" value="6" class="sr-only peer"><span class="flex justify-between items-center p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500"><span class="font-bold">6개월</span><strong class="text-xl">47,500원</strong></span></label>
+                <label class="block cursor-pointer">
+                    <input type="radio" name="months" value="1" checked class="sr-only peer">
+                    <span class="block p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 transition">
+                        <span class="block font-bold">1개월</span>
+                        <span class="block mt-3 font-mono text-xl font-black text-slate-900">9,900원</span>
+                        <span class="block mt-2 text-sm text-slate-500">월 9,900원</span>
+                    </span>
+                </label>
+                <label class="block cursor-pointer">
+                    <input type="radio" name="months" value="3" class="sr-only peer">
+                    <span class="block p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 transition">
+                        <span class="flex items-center gap-2"><span class="font-bold">3개월</span><span class="bg-rose-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full">5% 할인</span></span>
+                        <span class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-3"><span class="line-through text-slate-400 text-sm"><span class="sr-only">정가 </span>29,700원</span><span class="font-mono text-xl font-black text-slate-900"><span class="sr-only">최종 결제 금액 </span>28,200원</span></span>
+                        <span class="block mt-2 text-sm text-slate-500">월 9,400원꼴 <span class="font-bold text-rose-600">· 1,500원 절약</span></span>
+                    </span>
+                </label>
+                <label class="block cursor-pointer">
+                    <input type="radio" name="months" value="6" class="sr-only peer">
+                    <span class="block p-5 rounded-2xl border-2 border-slate-200 bg-white peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 transition">
+                        <span class="flex items-center gap-2"><span class="font-bold">6개월</span><span class="bg-rose-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full">10% 할인</span></span>
+                        <span class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-3"><span class="line-through text-slate-400 text-sm"><span class="sr-only">정가 </span>59,400원</span><span class="font-mono text-xl font-black text-slate-900"><span class="sr-only">최종 결제 금액 </span>53,400원</span></span>
+                        <span class="block mt-2 text-sm text-slate-500">월 8,900원꼴 <span class="font-bold text-rose-600">· 6,000원 절약</span></span>
+                    </span>
+                </label>
+                <label class="block cursor-pointer">
+                    <input type="radio" name="months" value="12" class="sr-only peer">
+                    <span class="block p-5 rounded-2xl border-2 border-blue-300 bg-white shadow-sm peer-focus-visible:ring-2 peer-focus-visible:ring-blue-500 transition">
+                        <span class="flex flex-wrap items-center gap-2"><span class="font-bold">12개월</span><span class="bg-rose-500 text-white font-black text-[10px] px-2 py-0.5 rounded-full">20% 할인</span><span class="bg-blue-600 text-white font-black text-[10px] px-2 py-0.5 rounded-full">BEST</span></span>
+                        <span class="flex flex-wrap items-baseline gap-x-3 gap-y-1 mt-3"><span class="line-through text-slate-400 text-sm"><span class="sr-only">정가 </span>118,800원</span><span class="font-mono text-xl font-black text-slate-900"><span class="sr-only">최종 결제 금액 </span>95,000원</span></span>
+                        <span class="block mt-2 text-sm text-slate-500">월 7,900원꼴 <span class="font-bold text-rose-600">(23,800원 절약)</span></span>
+                    </span>
+                </label>
             </fieldset>
             <section class="bg-white border border-slate-200 rounded-2xl overflow-hidden" aria-label="결제수단 및 결제 약관"><div id="payment-method"></div><div id="agreement"></div></section>
             <label class="flex gap-3 text-sm items-start"><input id="service-consent" type="checkbox" required class="mt-1 w-4 h-4 accent-blue-600"><span><a href="/terms.html" target="_blank" rel="noopener" class="underline text-blue-600">이용약관</a> 및 <a href="/privacy.html" target="_blank" rel="noopener" class="underline text-blue-600">개인정보 처리방침</a>, <a href="/terms.html" target="_blank" rel="noopener" class="underline text-blue-600">환불정책 (제6조)</a>을 확인하고 동의합니다.</span></label>
@@ -34,7 +63,7 @@
         </form>
     </main>
     <script>
-        const prices = { 1: 9900, 3: 26700, 6: 47500 };
+        const prices = { 1: 9900, 3: 28200, 6: 53400, 12: 95000 };
         const form = document.getElementById('payment-form');
         const phoneInput = document.getElementById('phone');
         const button = document.getElementById('pay-btn');
