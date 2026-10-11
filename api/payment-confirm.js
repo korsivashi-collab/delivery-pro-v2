@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { randomBytes, randomUUID } = require('node:crypto');
 
-const PRICES = { 1: 9900, 3: 26700, 6: 47500 };
+const PRICES = { 1: 9900, 3: 28200, 6: 53400, 12: 95000 };
 const problem = (message, status = 400) => Object.assign(new Error(message), { status });
 function phoneValue(value) {
     if (typeof value !== 'string' || !/^01[016789][\d -]+$/.test(value)) throw problem('휴대폰 번호를 확인해 주세요.');
