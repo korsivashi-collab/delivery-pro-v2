@@ -505,61 +505,32 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
 
 // 6. 7일 무료 체험 시작
 export async function firebaseStartTrial(phone, deviceId) {
-    const cleanDigits = (phone || "").replace(/[^0-9]/g, '');
-    if (!cleanDigits || cleanDigits.length < 9) {
-        return { valid: false, msg: "휴대폰 번호를 정확하게 입력해 주세요." };
+    const digits = String(phone || '').replace(/[^0-9]/g, '');
+    const national = String(phone || '').trim().startsWith('+82') ? '0' + digits.slice(2).replace(/^0/, '') : digits;
+    if (!/^010[0-9]{8}$/.test(national)) return { valid: false, msg: '휴대폰 번호를 정확하게 입력해 주세요. (예: 010-1234-5678)' };
+    const formattedPhone = national.replace(/^(\d{3})(\d{4})(\d{4})$/, '$1-$2-$3');
+    const user = auth.currentUser;
+    const verifiedDigits = String(user?.phoneNumber || '').replace(/\D/g, '');
+    if (!user || verifiedDigits !== '82' + national.slice(1)) {
+        return { valid: false, msg: '전화번호 [인증요청]을 진행해 주세요.' };
     }
-
-    const q = query(
-        collection(db, "licenses"),
-        where("deviceId", "==", deviceId),
-        where("type", "==", "trial")
-    );
-    const querySnapshot = await getDocs(q);
-
-    if (!querySnapshot.empty) {
-        return { valid: false, msg: "이미 7일 무료 체험을 사용하신 기기입니다.\n정식 라이선스를 이용해 주세요." };
+    const variants = [formattedPhone, national, '+82' + national.slice(1), '+82 10-' + national.slice(3, 7) + '-' + national.slice(7)];
+    // 화면 안내용 사전 조회. 최종 중복 판정과 발급은 서버에서 같은 트랜잭션으로 수행합니다.
+    const snapshots = await Promise.all(['licenses', 'driver_profiles'].map(name =>
+        getDocs(query(collection(db, name), where('phone', 'in', variants)))));
+    if (snapshots.some(snapshot => !snapshot.empty)) {
+        return { valid: false, msg: '이미 가입 또는 무료 체험 이력이 있는 휴대폰 번호입니다. 정식 라이선스를 이용해 주세요.' };
     }
-
-    const now = new Date();
-    const expDate = new Date();
-    expDate.setDate(expDate.getDate() + 7);
-    const expDateStr = `${expDate.getFullYear()}.${String(expDate.getMonth() + 1).padStart(2, '0')}.${String(expDate.getDate()).padStart(2, '0')}`;
-
-    const chars = "23456789ABCDEFGHJKMNPQRSTUVWXYZ";
-    let p1 = "", p2 = "";
-    for (let i = 0; i < 4; i++) {
-        p1 += chars.charAt(Math.floor(Math.random() * chars.length));
-        p2 += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    const trialKey = `TRIAL-${p1}-${p2}`;
-
-    const routeOwnerId = crypto.randomUUID();
-    const batch = writeBatch(db);
-    batch.set(doc(db, "licenses", trialKey), {
-        routeOwnerId,
-        key: trialKey,
-        type: 'trial',
-        phone: phone,
-        deviceId: deviceId,
-        expireDate: expDateStr,
-        status: 'active',
-        dispatchKey: '',
-        allowTms: true,
-        createdAt: now.getTime()
+    const deviceSnapshot = await getDocs(query(collection(db, 'licenses'), where('deviceId', '==', deviceId), where('type', '==', 'trial')));
+    if (!deviceSnapshot.empty) return { valid: false, msg: '이미 7일 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.' };
+    const token = await user.getIdToken();
+    const response = await fetch('/api/start-trial', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+        body: JSON.stringify({ phone: formattedPhone, deviceId })
     });
-    batch.set(doc(db, "driver_profiles", trialKey), {
-        key: trialKey,
-        status: 'active',
-        expireDate: expDateStr,
-        deviceId,
-        phone,
-        routeOwnerId,
-        allowTms: true
-    });
-    await batch.commit();
-
-    return { valid: true, trialKey: trialKey, expireDate: expDateStr, dispatchKey: '', routeOwnerId };
+    const result = await response.json();
+    if (!response.ok && result.valid !== false) throw new Error('무료 체험 발급에 실패했습니다.');
+    return result;
 }
 
 // 7. 주차 및 건물 메모 (공용 메모) 관련 함수들

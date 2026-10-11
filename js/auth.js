@@ -268,6 +268,7 @@ export function getOrCreateDeviceId() {
 // ==========================================
 export function clearAuthStorage() {
     resetSmsSession();
+    resetTrialSmsSession();
     resetGpsPreferenceSession();
     for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
         try { if (typeof unsubscribe === 'function') unsubscribe(); } catch (_) {}
@@ -628,7 +629,118 @@ export async function verifyLicense() {
 // ==========================================
 // 9. 7일 무료 체험 모달 제어 및 신청
 // ==========================================
+let trialSmsConfirmationResult = null;
+let trialSmsTimerInterval = null;
+let isTrialSmsVerified = false;
+let verifiedTrialPhoneNumber = '';
+let trialRequestedPhoneNumber = '';
+let trialSmsExpiresAt = 0;
+let trialSmsVersion = 0;
+let trialSmsSendInProgress = false;
+let trialSubmitInProgress = false;
+
+function showTrialSmsMessage(message, success = false) {
+    const element = document.getElementById('trial-error-msg');
+    if (!element) return;
+    element.innerText = message;
+    element.classList.remove('hidden', 'text-rose-500', 'text-emerald-600');
+    element.classList.add(success ? 'text-emerald-600' : 'text-rose-500');
+}
+
+function stopTrialSmsCountdown() {
+    if (trialSmsTimerInterval !== null) clearInterval(trialSmsTimerInterval);
+    trialSmsTimerInterval = null;
+}
+
+function resetTrialSmsSession() {
+    trialSmsVersion++;
+    stopTrialSmsCountdown();
+    trialSmsConfirmationResult = null;
+    isTrialSmsVerified = false;
+    verifiedTrialPhoneNumber = '';
+    trialRequestedPhoneNumber = '';
+    trialSmsExpiresAt = 0;
+    trialSmsSendInProgress = false;
+    trialSubmitInProgress = false;
+    document.getElementById('trial-sms-group')?.classList.add('hidden');
+    const code = document.getElementById('trial-sms-code-input');
+    if (code) code.value = '';
+    const timer = document.getElementById('trial-sms-timer');
+    if (timer) timer.innerText = '03:00';
+    const send = document.getElementById('btn-trial-send-sms');
+    if (send) { send.disabled = false; send.innerText = '인증요청'; }
+    const submit = document.getElementById('trial-submit-btn');
+    if (submit) { submit.disabled = false; submit.innerHTML = '무료로 시작하기'; }
+    document.getElementById('trial-error-msg')?.classList.add('hidden');
+}
+
+function trialPhoneValue() {
+    const raw = (document.getElementById('trial-phone-input')?.value || '').trim();
+    const digits = phoneIdentity(raw);
+    if (!/^(?:\+82)?[0-9\s()-]+$/.test(raw) || !/^010[0-9]{8}$/.test(digits)) {
+        throw new Error('휴대폰 번호를 정확하게 입력해 주세요. (예: 010-1234-5678)');
+    }
+    return digits.replace(/^(\d{3})(\d{4})(\d{4})$/, '$1-$2-$3');
+}
+
+function startTrialSmsCountdown(seconds = 180) {
+    stopTrialSmsCountdown();
+    trialSmsExpiresAt = Date.now() + seconds * 1000;
+    const update = () => {
+        const remaining = Math.max(0, Math.ceil((trialSmsExpiresAt - Date.now()) / 1000));
+        const timer = document.getElementById('trial-sms-timer');
+        if (!remaining) {
+            stopTrialSmsCountdown();
+            trialSmsConfirmationResult = null;
+            if (timer) timer.innerText = '만료';
+            showTrialSmsMessage('인증번호 유효시간이 만료되었습니다. 재전송을 눌러주세요.');
+            return;
+        }
+        if (timer) timer.innerText = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+    };
+    trialSmsTimerInterval = setInterval(update, 1000);
+    update();
+}
+
+export async function sendTrialSmsCode() {
+    if (trialSmsSendInProgress || trialSubmitInProgress || smsSendInProgress || smsVerifyInProgress) return;
+    trialSmsSendInProgress = true;
+    let version = trialSmsVersion;
+    const button = document.getElementById('btn-trial-send-sms');
+    try {
+        if (await checkIfDeviceBlocked(getOrCreateDeviceId())) { window.location.replace('error.html'); return; }
+        if (version !== trialSmsVersion) return;
+        const phone = trialPhoneValue();
+        resetTrialSmsSession();
+        version = trialSmsVersion;
+        trialSmsSendInProgress = true;
+        if (button) { button.disabled = true; button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>발송 중...'; }
+        // 로그인 카드의 invisible reCAPTCHA 인스턴스를 공유합니다.
+        const result = await firebaseSendSmsVerification(phone, 'recaptcha-container');
+        if (version !== trialSmsVersion) return;
+        if (phoneIdentity(phone) !== phoneIdentity(document.getElementById('trial-phone-input')?.value)) {
+            resetTrialSmsSession(); showTrialSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.'); return;
+        }
+        trialSmsConfirmationResult = result;
+        trialRequestedPhoneNumber = phone;
+        document.getElementById('trial-sms-group')?.classList.remove('hidden');
+        startTrialSmsCountdown();
+        document.getElementById('trial-sms-code-input')?.focus();
+        showTrialSmsMessage('인증번호가 발송되었습니다.', true);
+    } catch (error) {
+        if (version !== trialSmsVersion) return;
+        resetTrialSmsSession(); version = trialSmsVersion;
+        showTrialSmsMessage(error?.message || '인증번호 발송에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+        if (version === trialSmsVersion) {
+            trialSmsSendInProgress = false;
+            if (button) { button.disabled = false; button.innerText = trialSmsConfirmationResult ? '재전송' : '인증요청'; }
+        }
+    }
+}
+
 export function openTrialModal() {
+    resetTrialSmsSession();
     const input = document.getElementById('trial-phone-input');
     const msg = document.getElementById('trial-error-msg');
     const modal = document.getElementById('trial-modal');
@@ -639,50 +751,62 @@ export function openTrialModal() {
 }
 
 export function closeTrialModal() { 
+    resetTrialSmsSession();
     document.getElementById('trial-modal')?.classList.add('hidden'); 
 }
 
 export async function startFreeTrial() {
-    const phoneInput = (document.getElementById('trial-phone-input')?.value || '').trim();
+    if (trialSubmitInProgress || trialSmsSendInProgress) return;
+    const version = trialSmsVersion;
+    trialSubmitInProgress = true;
     const msgEl = document.getElementById('trial-error-msg');
     const btn = document.getElementById('trial-submit-btn');
     const deviceId = getOrCreateDeviceId();
 
-    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
     try {
-        const isBlocked = await checkIfDeviceBlocked(deviceId);
-        if (isBlocked) {
-            window.location.replace('error.html');
-            return;
+        if (await checkIfDeviceBlocked(deviceId)) { window.location.replace('error.html'); return; }
+        if (version !== trialSmsVersion) return;
+        const formattedPhone = trialPhoneValue();
+        if (!isTrialSmsVerified && !trialSmsConfirmationResult) {
+            showTrialSmsMessage('전화번호 [인증요청]을 진행해 주세요.'); return;
         }
-    } catch (err) {}
-    
-    const cleanDigits = phoneInput.replace(/[^0-9]/g, '');
-    if (!phoneInput || cleanDigits.length < 9 || cleanDigits.length > 13) {
-        if (msgEl) {
-            msgEl.innerText = "휴대폰 번호를 정확하게 입력해 주세요 (숫자 9~13자리).";
-            msgEl.classList.remove('hidden');
+        if (phoneIdentity(formattedPhone) !== phoneIdentity(isTrialSmsVerified ? verifiedTrialPhoneNumber : trialRequestedPhoneNumber)) {
+            resetTrialSmsSession(); showTrialSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.'); return;
         }
-        return;
-    }
-    
-    if (msgEl) msgEl.classList.add('hidden');
-    if (btn) {
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 처리 중...';
-        btn.disabled = true;
-    }
-
-    try {
-        const res = await firebaseStartTrial(phoneInput, deviceId);
+        if (msgEl) msgEl.classList.add('hidden');
+        if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 처리 중...'; }
+        if (!isTrialSmsVerified) {
+            const code = (document.getElementById('trial-sms-code-input')?.value || '').trim();
+            if (!/^[0-9]{6}$/.test(code)) { showTrialSmsMessage('SMS 인증번호 6자리를 입력해 주세요.'); return; }
+            const confirmation = trialSmsConfirmationResult;
+            if (Date.now() >= trialSmsExpiresAt) { showTrialSmsMessage('인증번호가 만료되었습니다. 재전송을 눌러주세요.'); return; }
+            const user = await firebaseConfirmSmsCode(confirmation, code);
+            if (version !== trialSmsVersion) return;
+            if (confirmation !== trialSmsConfirmationResult || Date.now() >= trialSmsExpiresAt) {
+                showTrialSmsMessage('인증번호가 만료되었습니다. 재전송을 눌러주세요.'); return;
+            }
+            if (phoneIdentity(user?.phoneNumber) !== phoneIdentity(formattedPhone) ||
+                phoneIdentity(document.getElementById('trial-phone-input')?.value) !== phoneIdentity(formattedPhone)) {
+                resetTrialSmsSession(); showTrialSmsMessage('인증된 휴대폰 번호가 다릅니다. 다시 인증해 주세요.'); return;
+            }
+            isTrialSmsVerified = true;
+            verifiedTrialPhoneNumber = formattedPhone;
+            stopTrialSmsCountdown();
+        }
+        const res = await firebaseStartTrial(formattedPhone, deviceId);
+        if (version !== trialSmsVersion) return;
+        if (phoneIdentity(document.getElementById('trial-phone-input')?.value) !== phoneIdentity(formattedPhone)) {
+            resetTrialSmsSession(); showTrialSmsMessage('휴대폰 번호가 변경되었습니다. 다시 인증해 주세요.'); return;
+        }
         if (res.valid) {
             localStorage.setItem('deliveryProKey', res.trialKey);
-            localStorage.setItem('deliveryProUserPhone', phoneInput);
+            localStorage.setItem('deliveryProUserPhone', formattedPhone);
             localStorage.setItem('deliveryProExpireDate', res.expireDate);
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
             alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
             closeTrialModal();
             
-            startActiveServices(deviceId, phoneInput, res.trialKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
+            startActiveServices(deviceId, formattedPhone, res.trialKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
         } else {
             if (msgEl) {
                 msgEl.innerText = res.msg;
@@ -690,14 +814,11 @@ export async function startFreeTrial() {
             }
         }
     } catch (e) {
-        if (msgEl) {
-            msgEl.innerText = "오류 발생: " + e.message;
-            msgEl.classList.remove('hidden');
-        }
+        if (version === trialSmsVersion) showTrialSmsMessage("오류 발생: " + e.message);
     } finally {
-        if (btn) {
-            btn.innerHTML = '무료로 시작하기';
-            btn.disabled = false;
+        if (version === trialSmsVersion) {
+            trialSubmitInProgress = false;
+            if (btn) { btn.innerHTML = '무료로 시작하기'; btn.disabled = false; }
         }
     }
 }
@@ -724,3 +845,4 @@ export async function logout() {
 
 window.isLicenseExpiredLocally = isLicenseExpiredLocally;
 window.sendPhoneAuthCode = sendPhoneAuthCode;
+window.sendTrialSmsCode = sendTrialSmsCode;
