@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const { saveLicenses } = require('../server/license-integrity.cjs');
+const { saveLicenses, repairLicensePhones } = require('../server/license-integrity.cjs');
 
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
@@ -18,7 +18,9 @@ module.exports = async function handler(req, res) {
         try { identity = await admin.auth().verifyIdToken(token, true); }
         catch (_) { return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' }); }
         if (identity.role !== 'MASTER') return res.status(403).json({ error: '마스터 관리자만 계정을 저장할 수 있습니다.' });
-        const result = await saveLicenses(admin.firestore(), req.body);
+        const result = req.body?.action === 'repairPhones'
+            ? await repairLicensePhones(admin.firestore())
+            : await saveLicenses(admin.firestore(), req.body);
         return res.status(200).json(result);
     } catch (error) {
         if (error.status) return res.status(error.status).json({ error: error.message });
