@@ -27,6 +27,12 @@ import {
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
 
+import {
+    getAuth,
+    RecaptchaVerifier,
+    signInWithPhoneNumber
+} from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
+
 const firebaseConfig = {
     apiKey: "AIzaSyBZKERmiPis4PCVDSYg0SSRTWV7L3z_5tw",
     authDomain: "delivery-pro-dd272.firebaseapp.com",
@@ -37,8 +43,91 @@ const firebaseConfig = {
 };
 
 const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+auth.languageCode = 'ko';
 const db = getFirestore(app);
 const storage = getStorage(app);
+
+// Firebase 전화번호 인증: confirmationResult는 호출 측 메모리에 보관합니다.
+let appRecaptchaVerifier = null;
+
+function setupRecaptchaVerifier(containerId = 'recaptcha-container') {
+    if (!appRecaptchaVerifier) {
+        appRecaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
+            'size': 'invisible',
+            'callback': () => {},
+            'expired-callback': () => {
+                if (appRecaptchaVerifier) {
+                    try { appRecaptchaVerifier.clear(); } catch (_) {}
+                    appRecaptchaVerifier = null;
+                }
+            }
+        });
+    }
+    return appRecaptchaVerifier;
+}
+
+export async function firebaseSendSmsVerification(phoneNumber, containerId = 'recaptcha-container') {
+    try {
+        const input = String(phoneNumber ?? '').trim();
+        if (!/^\+?[0-9\s()-]+$/.test(input)) {
+            const error = new Error('올바른 전화번호를 입력해 주세요.');
+            error.code = 'auth/invalid-phone-number';
+            throw error;
+        }
+        let formattedPhone = input.replace(/[\s()-]/g, '');
+        // 국내 번호의 맨 앞 0을 국가번호 +82로 교체합니다.
+        if (formattedPhone.startsWith('+82')) {
+            formattedPhone = '+82' + formattedPhone.slice(3).replace(/^0/, '');
+        } else if (/^0[0-9]{8,10}$/.test(formattedPhone)) {
+            formattedPhone = '+82' + formattedPhone.slice(1);
+        }
+        if (!/^\+[1-9][0-9]{7,14}$/.test(formattedPhone)) {
+            const error = new Error('전화번호를 010-1234-5678 또는 국제 전화번호 형식으로 입력해 주세요.');
+            error.code = 'auth/invalid-phone-number';
+            throw error;
+        }
+        const verifier = setupRecaptchaVerifier(containerId);
+        const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
+        return confirmationResult;
+    } catch (error) {
+        if (appRecaptchaVerifier) {
+            try { appRecaptchaVerifier.clear(); } catch (_) {}
+            appRecaptchaVerifier = null;
+        }
+        throw error;
+    }
+}
+
+export async function firebaseConfirmSmsCode(confirmationResult, code) {
+    if (!confirmationResult || typeof confirmationResult.confirm !== 'function') {
+        const error = new Error('먼저 SMS 인증번호를 요청해 주세요.');
+        error.code = 'auth/missing-verification-id';
+        throw error;
+    }
+    // 문자열로 검증하여 0으로 시작하는 인증번호도 보존합니다.
+    const verificationCode = String(code ?? '').trim();
+    if (!/^[0-9]{6}$/.test(verificationCode)) {
+        const error = new Error('SMS 인증번호 6자리를 입력해 주세요.');
+        error.code = 'auth/invalid-verification-code';
+        throw error;
+    }
+    try {
+        const credential = await confirmationResult.confirm(verificationCode);
+        return credential.user;
+    } catch (cause) {
+        const messages = {
+            'auth/invalid-verification-code': '인증번호가 일치하지 않습니다. 다시 확인해 주세요.',
+            'auth/code-expired': '인증번호가 만료되었습니다. 인증번호를 다시 요청해 주세요.',
+            'auth/session-expired': '인증 시간이 만료되었습니다. 인증번호를 다시 요청해 주세요.',
+            'auth/too-many-requests': '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+            'auth/network-request-failed': '네트워크 연결을 확인한 뒤 다시 시도해 주세요.'
+        };
+        const error = new Error(messages[cause?.code] || 'SMS 인증에 실패했습니다. 다시 시도해 주세요.', { cause });
+        error.code = cause?.code || 'auth/verification-failed';
+        throw error;
+    }
+}
 
 // 이미지 클라이언트 초고속 압축 함수 (배송 증빙 최적화: 960px / 0.65 품질)
 async function compressImageToBlob(file, maxDimension = 960, quality = 0.65) {

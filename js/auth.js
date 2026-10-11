@@ -13,7 +13,9 @@ import {
     firebaseClearDeviceData,
     checkIfDeviceBlocked,
     syncMyParkingMemosFromServer,
-    listenToActiveRoutes
+    listenToActiveRoutes,
+    firebaseSendSmsVerification,
+    firebaseConfirmSmsCode
 } from './api.js';
 import { 
     saveMessageToLocalHistory, 
@@ -24,6 +26,137 @@ import { startGpsWatcher, stopGpsWatcher } from './gps.js';
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
 let activeRoutesWatcherUnsub = null;
+
+let smsConfirmationResult = null;
+let smsTimerInterval = null;
+let isSmsVerified = false;
+let verifiedPhoneNumber = '';
+let smsRequestedPhoneNumber = '';
+let smsExpiresAt = 0;
+let smsSessionVersion = 0;
+let smsSendInProgress = false;
+let smsVerifyInProgress = false;
+
+function phoneIdentity(phone) {
+    const value = String(phone || '').trim();
+    const digits = value.replace(/[^0-9]/g, '');
+    return value.startsWith('+82') ? '0' + digits.slice(2).replace(/^0/, '') : digits;
+}
+
+function showSmsMessage(message, success = false) {
+    const element = document.getElementById('auth-message');
+    if (!element) return;
+    element.innerText = message;
+    element.classList.remove('text-rose-500', 'text-emerald-600');
+    element.classList.add(success ? 'text-emerald-600' : 'text-rose-500');
+}
+
+function stopSmsCountdown() {
+    if (smsTimerInterval !== null) clearInterval(smsTimerInterval);
+    smsTimerInterval = null;
+}
+
+function resetSmsSession() {
+    smsSessionVersion++;
+    stopSmsCountdown();
+    smsConfirmationResult = null;
+    isSmsVerified = false;
+    verifiedPhoneNumber = '';
+    smsRequestedPhoneNumber = '';
+    smsExpiresAt = 0;
+    smsSendInProgress = false;
+    smsVerifyInProgress = false;
+    document.getElementById('auth-sms-group')?.classList.add('hidden');
+    const codeInput = document.getElementById('sms-code-input');
+    if (codeInput) codeInput.value = '';
+    const timer = document.getElementById('auth-sms-timer');
+    if (timer) timer.innerText = '03:00';
+    const sendButton = document.getElementById('btn-send-sms');
+    if (sendButton) { sendButton.disabled = false; sendButton.innerText = '인증요청'; }
+    const verifyButton = document.getElementById('verify-btn');
+    if (verifyButton) { verifyButton.disabled = false; verifyButton.innerHTML = '인증하고 시작하기'; }
+    showSmsMessage('');
+}
+
+function startSmsCountdown(seconds = 180) {
+    stopSmsCountdown();
+    smsExpiresAt = Date.now() + seconds * 1000;
+    const update = () => {
+        // 화면이 백그라운드에 있어도 실제 경과 시간으로 만료를 판단합니다.
+        const remaining = Math.max(0, Math.ceil((smsExpiresAt - Date.now()) / 1000));
+        const timer = document.getElementById('auth-sms-timer');
+        if (remaining === 0) {
+            stopSmsCountdown();
+            smsConfirmationResult = null;
+            isSmsVerified = false;
+            verifiedPhoneNumber = '';
+            smsRequestedPhoneNumber = '';
+            smsExpiresAt = 0;
+            if (timer) timer.innerText = '만료';
+            showSmsMessage('인증번호 유효시간이 만료되었습니다. 재전송을 눌러주세요.');
+            return;
+        }
+        if (timer) timer.innerText = `${String(Math.floor(remaining / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}`;
+    };
+    smsTimerInterval = setInterval(update, 1000);
+    update();
+}
+
+export async function sendPhoneAuthCode() {
+    if (smsSendInProgress || smsVerifyInProgress) return;
+    smsSendInProgress = true;
+    let version = smsSessionVersion;
+    const button = document.getElementById('btn-send-sms');
+    try {
+        const deviceId = getOrCreateDeviceId();
+        const blocked = await checkIfDeviceBlocked(deviceId);
+        if (version !== smsSessionVersion) return;
+        if (blocked) { window.location.replace('error.html'); return; }
+        const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
+        if (!rawPhone || rawPhone.replace(/[^0-9]/g, '').length < 9) {
+            showSmsMessage('휴대폰 번호를 정확하게 입력해 주세요. (숫자 9자리 이상)');
+            document.getElementById('auth-phone-input')?.focus();
+            return;
+        }
+        // 재발송 시 이전 코드·인증 결과를 즉시 폐기합니다.
+        resetSmsSession();
+        version = smsSessionVersion;
+        smsSendInProgress = true;
+        if (button) {
+            button.disabled = true;
+            button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>발송 중...';
+        }
+        const result = await firebaseSendSmsVerification(rawPhone, 'recaptcha-container');
+        if (version !== smsSessionVersion) return;
+        if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) {
+            resetSmsSession();
+            showSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.');
+            return;
+        }
+        smsConfirmationResult = result;
+        smsRequestedPhoneNumber = rawPhone;
+        document.getElementById('auth-sms-group')?.classList.remove('hidden');
+        startSmsCountdown(180);
+        document.getElementById('sms-code-input')?.focus();
+        showSmsMessage('인증번호가 발송되었습니다.', true);
+    } catch (error) {
+        if (version !== smsSessionVersion) return;
+        resetSmsSession();
+        version = smsSessionVersion;
+        const messages = {
+            'auth/too-many-requests': '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
+            'auth/quota-exceeded': 'SMS 발송 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.',
+            'auth/network-request-failed': '네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+            'auth/captcha-check-failed': '보안 확인에 실패했습니다. 인증번호를 다시 요청해 주세요.'
+        };
+        showSmsMessage(messages[error?.code] || error?.message || '인증번호 발송에 실패했습니다. 다시 시도해 주세요.');
+    } finally {
+        if (version === smsSessionVersion) {
+            smsSendInProgress = false;
+            if (button) { button.disabled = false; button.innerText = smsConfirmationResult ? '재전송' : '인증요청'; }
+        }
+    }
+}
 
 let onRemoteRoutesReceivedCallback = null;
 let onRemoteRoutesClearedCallback = null;
@@ -133,6 +266,7 @@ export function getOrCreateDeviceId() {
 // 2. 인증 정보 로컬 스토리지 초기화
 // ==========================================
 export function clearAuthStorage() {
+    resetSmsSession();
     resetGpsPreferenceSession();
     for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
         try { if (typeof unsubscribe === 'function') unsubscribe(); } catch (_) {}
@@ -331,11 +465,14 @@ export async function checkSavedAuth() {
 // 8. 수동 라이선스 키 인증 (로그인 버튼 클릭)
 // ==========================================
 export async function verifyLicense() {
+    if (smsSendInProgress || smsVerifyInProgress) return;
+    const smsVersion = smsSessionVersion;
     const keyInput = (document.getElementById('license-input')?.value || '').trim().toUpperCase();
     const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
     const msgEl = document.getElementById('auth-message');
     const btn = document.getElementById('verify-btn');
     const deviceId = getOrCreateDeviceId(); 
+    showSmsMessage('');
 
     // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
     try {
@@ -346,6 +483,7 @@ export async function verifyLicense() {
         }
     } catch (err) {}
     
+    if (smsVersion !== smsSessionVersion || smsVerifyInProgress) return;
     if (!keyInput) { 
         if (msgEl) msgEl.innerText = "라이선스 키를 입력해 주세요."; 
         document.getElementById('license-input')?.focus();
@@ -359,6 +497,17 @@ export async function verifyLicense() {
         return;
     }
 
+    if (isSmsVerified && phoneIdentity(rawPhone) !== phoneIdentity(verifiedPhoneNumber)) {
+        resetSmsSession();
+        showSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.');
+        return;
+    }
+    if (!isSmsVerified && smsRequestedPhoneNumber && phoneIdentity(rawPhone) !== phoneIdentity(smsRequestedPhoneNumber)) {
+        resetSmsSession();
+        showSmsMessage('인증번호를 요청한 휴대폰 번호와 다릅니다. 인증번호를 다시 요청해 주세요.');
+        return;
+    }
+    showSmsMessage('');
     let formattedPhone = rawPhone;
     if (!rawPhone.includes('-')) {
         if (cleanDigits.startsWith('010') && cleanDigits.length === 11) {
@@ -374,8 +523,57 @@ export async function verifyLicense() {
         btn.disabled = true;
     }
 
+    smsVerifyInProgress = true;
     try {
+        if (!isSmsVerified) {
+            const code = (document.getElementById('sms-code-input')?.value || '').trim();
+            if (!/^[0-9]{6}$/.test(code)) {
+                showSmsMessage('SMS 인증번호 6자리를 입력해 주세요.');
+                document.getElementById('sms-code-input')?.focus();
+                return;
+            }
+            const confirmation = smsConfirmationResult;
+            if (!confirmation || Date.now() >= smsExpiresAt) {
+                stopSmsCountdown();
+                smsConfirmationResult = null;
+                const timer = document.getElementById('auth-sms-timer');
+                if (timer) timer.innerText = '만료';
+                showSmsMessage('인증번호 유효시간이 만료되었습니다. 재전송을 눌러주세요.');
+                return;
+            }
+            let user;
+            try {
+                user = await firebaseConfirmSmsCode(confirmation, code);
+            } catch (error) {
+                if (smsVersion === smsSessionVersion) showSmsMessage(error?.message || 'SMS 인증에 실패했습니다. 다시 시도해 주세요.');
+                return;
+            }
+            if (smsVersion !== smsSessionVersion) return;
+            if (confirmation !== smsConfirmationResult || Date.now() >= smsExpiresAt) {
+                stopSmsCountdown();
+                smsConfirmationResult = null;
+                const timer = document.getElementById('auth-sms-timer');
+                if (timer) timer.innerText = '만료';
+                showSmsMessage('인증번호 유효시간이 만료되었습니다. 재전송을 눌러주세요.');
+                return;
+            }
+            if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value) ||
+                !user?.phoneNumber || phoneIdentity(user.phoneNumber) !== phoneIdentity(rawPhone)) {
+                resetSmsSession();
+                showSmsMessage('인증된 휴대폰 번호가 입력 번호와 다릅니다. 인증번호를 다시 요청해 주세요.');
+                return;
+            }
+            isSmsVerified = true;
+            verifiedPhoneNumber = rawPhone;
+            stopSmsCountdown();
+        }
         const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId);
+        if (smsVersion !== smsSessionVersion) return;
+        if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) {
+            resetSmsSession();
+            showSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.');
+            return;
+        }
         
         if (res && res.valid) {
             const actualKey = res.actualKey || keyInput;
@@ -391,9 +589,12 @@ export async function verifyLicense() {
     } catch (e) {
         if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
     } finally {
-        if (btn) {
-            btn.innerHTML = '인증하고 시작하기';
-            btn.disabled = false;
+        if (smsVersion === smsSessionVersion) {
+            smsVerifyInProgress = false;
+            if (btn) {
+                btn.innerHTML = '인증하고 시작하기';
+                btn.disabled = false;
+            }
         }
     }
 }
@@ -496,3 +697,4 @@ export async function logout() {
 }
 
 window.isLicenseExpiredLocally = isLicenseExpiredLocally;
+window.sendPhoneAuthCode = sendPhoneAuthCode;

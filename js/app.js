@@ -25,7 +25,8 @@ import {
     logout, 
     getOrCreateDeviceId,
     setRemoteRoutesHandler,
-    setGpsPreference
+    setGpsPreference,
+    sendPhoneAuthCode
 } from './auth.js';
 
 import { 
@@ -102,7 +103,16 @@ function sanitizePhoneNumber(rawVal) {
 // ==========================================
 // 1. 앱 기동 및 라이프사이클 초기화
 // ==========================================
+function handleSmsCodeEnter(event) {
+    if (event.isComposing || event.repeat || (event.key !== 'Enter' && event.keyCode !== 13)) return;
+    const code = (event.currentTarget.value || '').trim();
+    if (!/^[0-9]{6}$/.test(code)) return;
+    event.preventDefault();
+    window.verifyLicense();
+}
+
 export async function initApp() {
+    document.getElementById('sms-code-input')?.addEventListener('keydown', handleSmsCodeEnter);
     initResponsiveViewport();
 
     state.loadActiveData();
@@ -500,6 +510,7 @@ window.logout = logout;
 window.renderList = renderList;
 window.updateDisplayNumbers = updateDisplayNumbers;
 window.verifyLicense = verifyLicense;
+window.sendPhoneAuthCode = sendPhoneAuthCode;
 window.openTrialModal = openTrialModal;
 window.closeTrialModal = closeTrialModal;
 window.startFreeTrial = startFreeTrial;
