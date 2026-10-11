@@ -7,6 +7,7 @@ import { state } from './state.js';
 
 import { 
     firebaseVerifyLicense, 
+    firebaseCheckLicenseOnce,
     watchLicenseStatus, 
     startDispatchMessageListener, 
     firebaseStartTrial, 
@@ -466,7 +467,7 @@ export async function checkSavedAuth() {
 // ==========================================
 export async function verifyLicense() {
     if (smsSendInProgress || smsVerifyInProgress) return;
-    const smsVersion = smsSessionVersion;
+    let smsVersion = smsSessionVersion;
     const keyInput = (document.getElementById('license-input')?.value || '').trim().toUpperCase();
     const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
     const msgEl = document.getElementById('auth-message');
@@ -499,13 +500,7 @@ export async function verifyLicense() {
 
     if (isSmsVerified && phoneIdentity(rawPhone) !== phoneIdentity(verifiedPhoneNumber)) {
         resetSmsSession();
-        showSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.');
-        return;
-    }
-    if (!isSmsVerified && smsRequestedPhoneNumber && phoneIdentity(rawPhone) !== phoneIdentity(smsRequestedPhoneNumber)) {
-        resetSmsSession();
-        showSmsMessage('인증번호를 요청한 휴대폰 번호와 다릅니다. 인증번호를 다시 요청해 주세요.');
-        return;
+        smsVersion = smsSessionVersion;
     }
     showSmsMessage('');
     let formattedPhone = rawPhone;
@@ -524,8 +519,34 @@ export async function verifyLicense() {
     }
 
     smsVerifyInProgress = true;
+    let smsExemptedForThisLicense = false;
     try {
         if (!isSmsVerified) {
+            const licCheck = await firebaseCheckLicenseOnce(keyInput, deviceId);
+            if (smsVersion !== smsSessionVersion) return;
+            if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) {
+                resetSmsSession();
+                showSmsMessage('휴대폰 번호가 변경되었습니다. 다시 인증해 주세요.');
+                return;
+            }
+            const registeredPhone = licCheck?.valid && licCheck.data ? phoneIdentity(licCheck.data.phone) : '';
+            if (registeredPhone && registeredPhone === phoneIdentity(rawPhone)) {
+                isSmsVerified = true;
+                verifiedPhoneNumber = rawPhone;
+                smsExemptedForThisLicense = true;
+                stopSmsCountdown();
+            }
+        }
+        if (!isSmsVerified) {
+            if (smsRequestedPhoneNumber && phoneIdentity(rawPhone) !== phoneIdentity(smsRequestedPhoneNumber)) {
+                resetSmsSession();
+                showSmsMessage('인증번호를 요청한 휴대폰 번호와 다릅니다. 인증번호를 다시 요청해 주세요.');
+                return;
+            }
+            if (!smsConfirmationResult) {
+                showSmsMessage('휴대폰 번호 [인증요청]을 먼저 진행해 주세요.');
+                return;
+            }
             const code = (document.getElementById('sms-code-input')?.value || '').trim();
             if (!/^[0-9]{6}$/.test(code)) {
                 showSmsMessage('SMS 인증번호 6자리를 입력해 주세요.');
@@ -590,6 +611,11 @@ export async function verifyLicense() {
         if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
     } finally {
         if (smsVersion === smsSessionVersion) {
+            // 번호 일치 면제는 조회한 라이선스에만 적용하고 다른 키로 재사용하지 않습니다.
+            if (smsExemptedForThisLicense) {
+                isSmsVerified = false;
+                verifiedPhoneNumber = '';
+            }
             smsVerifyInProgress = false;
             if (btn) {
                 btn.innerHTML = '인증하고 시작하기';
