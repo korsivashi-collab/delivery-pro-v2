@@ -218,8 +218,19 @@
                 </div>
                 <div>
                     <label class="block text-[10px] font-bold text-slate-400 mb-1 pl-1">본인 휴대폰 번호 <span class="text-rose-500 font-black">*필수</span></label>
-                    <input type="tel" id="auth-phone-input" placeholder="예: 010-1234-5678" class="w-full bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3.5 text-center outline-none font-bold font-mono transition" onkeyup="if(window.event.keyCode==13){window.verifyLicense()}">
+                    <div class="flex gap-2">
+                        <input type="tel" id="auth-phone-input" placeholder="예: 010-1234-5678" class="min-w-0 flex-1 bg-slate-50 border border-slate-200 text-slate-900 text-sm rounded-xl focus:ring-blue-600 focus:border-blue-600 block p-3.5 text-center outline-none font-bold font-mono transition" onkeyup="if(window.event.keyCode==13){window.verifyLicense()}">
+                        <button type="button" id="btn-send-sms" onclick="window.sendPhoneAuthCode()" class="text-xs font-bold bg-slate-900 text-white rounded-xl px-3 py-3.5 shrink-0 shadow-xs active:scale-95 transition whitespace-nowrap">인증요청</button>
+                    </div>
                 </div>
+                <div id="auth-sms-group" class="space-y-1 hidden">
+                    <label for="sms-code-input" class="block text-[10px] font-bold text-slate-400 pl-1">SMS 인증번호 6자리</label>
+                    <div class="flex gap-2">
+                        <input id="sms-code-input" type="tel" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="123456" class="text-center font-mono font-bold tracking-widest text-sm rounded-xl border border-slate-200 bg-slate-50 p-3.5 flex-1 min-w-0">
+                        <span id="auth-sms-timer" class="text-xs font-mono font-extrabold text-rose-500 self-center px-2">03:00</span>
+                    </div>
+                </div>
+                <div id="recaptcha-container" class="flex justify-center my-1"></div>
             </div>
             <button onclick="window.verifyLicense()" id="verify-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-black rounded-xl text-base px-5 py-3.5 text-center shadow-md transition active:scale-95">인증하고 시작하기</button>
             <p id="auth-message" class="text-rose-500 text-xs mt-3 font-bold min-h-[16px] whitespace-pre-line"></p>
