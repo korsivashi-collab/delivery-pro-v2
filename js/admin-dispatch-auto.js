@@ -4,7 +4,7 @@ import { ensureRouteOwner } from './route-owner.js';
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
-import { doc, setDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, deleteDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
 import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
 
@@ -424,7 +424,11 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 // ==========================================
 // 5. 할당 초기화 (🌟 deviceId, key, phone 전수 삭제로 9건 잔상 완전 소거)
 // ==========================================
+let resettingAssignments = false;
+let sendingRoutes = false;
 export async function revertAutoDispatch() {
+    if (resettingAssignments) return;
+    if (sendingRoutes) { alert('동선 전송이 끝난 후 초기화해 주세요.'); return; }
     const hasExcelOrders = state.parsedExcelList && state.parsedExcelList.length > 0;
     const hasActiveRoutes = Object.keys(state.activeRoutes || {}).length > 0;
 
@@ -437,6 +441,44 @@ export async function revertAutoDispatch() {
         return;
     }
 
+    resettingAssignments = true;
+    const resetButton = document.getElementById('btn-revert-auto-dispatch');
+    if (resetButton) resetButton.disabled = true;
+    let clearedDriverCount = 0;
+    try {
+        // Keep an owned empty route so offline/restarted clients receive the reset,
+        // rather than interpreting a missing document as an unsynced local route.
+        for (const driver of getFilteredVisibleDrivers()) {
+            const routeOwnerId = await ensureRouteOwner(db, driver.key);
+            const owned = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
+            const documents = new Map();
+            let revision = Date.now();
+            owned.forEach(snapshot => {
+                documents.set(snapshot.id, snapshot.ref);
+                const data = snapshot.data();
+                if (Number.isFinite(data.updatedAt)) revision = Math.max(revision, data.updatedAt + 1);
+            });
+            // Include old key/phone document IDs as well as the current device.
+            for (const id of new Set([driver.deviceId, driver.key, driver.phone].filter(Boolean))) {
+                documents.set(id, doc(db, 'routes', id));
+            }
+            if (documents.size > 500) throw new Error('기사 동선 문서 수가 한 번에 처리 가능한 범위를 초과했습니다.');
+            const batch = writeBatch(db);
+            const emptyRoutes = [];
+            for (const [id, ref] of documents) {
+                const emptyRoute = {
+                    routeOwnerId, deviceId: id, phone: driver.phone || '',
+                    dispatchKey: driver.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
+                    destinations: [], routePlan: null, startSelected: false, startLocation: null,
+                    endLocation: { lat: 0, lng: 0, address: '' }, updatedAt: revision, cleared: true
+                };
+                batch.set(ref, emptyRoute);
+                emptyRoutes.push([id, emptyRoute]);
+            }
+            await batch.commit();
+            for (const [id, emptyRoute] of emptyRoutes) state.activeRoutes[id] = emptyRoute;
+            clearedDriverCount++;
+        }
     // 1. 주문 데이터 배정 정보 초기화
     if (state.parsedExcelList) {
         state.parsedExcelList.forEach(item => {
@@ -451,30 +493,22 @@ export async function revertAutoDispatch() {
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
-    if (window.autoSaveExcelToFirebase) await window.autoSaveExcelToFirebase();
-
-    // 🌟 3. 핵심: 기사별 식별자(deviceId, key, phone)에 생성된 모든 Firestore 동선 문서를 전수 삭제
-    const visibleDrivers = getFilteredVisibleDrivers();
-    let clearedDriverCount = 0;
-
-    for (const d of visibleDrivers) {
-        const keysToDelete = new Set([d.deviceId, d.key, d.phone].filter(Boolean));
-        for (const k of keysToDelete) {
-            try {
-                await deleteDoc(doc(db, "routes", k));
-                if (state.activeRoutes) delete state.activeRoutes[k];
-            } catch (e) {
-                console.error(`기사 동선 삭제 오류 (${k}):`, e);
-            }
-        }
-        clearedDriverCount++;
+    if (window.autoSaveExcelToFirebase && await window.autoSaveExcelToFirebase() === false) {
+        throw new Error('기사 동선은 취소되었지만 주문서의 미배정 상태를 저장하지 못했습니다.');
     }
 
     // 🌟 4. 메인 지도 오버레이 및 사이드바 동선 잔상 즉시 소거
     if (typeof forceClearMap === 'function') forceClearMap();
     if (typeof renderSidebar === 'function') renderSidebar();
 
-    alert(`[할당 초기화 완료]\n관제 엑셀 배정이 미배정으로 초기화되었으며,\n운행 기사(${clearedDriverCount}명) 스마트폰 앱의 동선도 즉시 초기화되었습니다.`);
+    alert(`[할당 초기화 완료]\n관제 엑셀 배정이 미배정으로 초기화되었습니다.\n기사 ${clearedDriverCount}명의 동선 취소를 저장했습니다. 연결된 단말기는 즉시, 오프라인 단말기는 재연결 시 반영됩니다.`);
+    } catch (error) {
+        console.error('할당 초기화 실패:', error);
+        alert(`할당 초기화를 완료하지 못했습니다.\n${clearedDriverCount}명의 동선 취소는 저장되었습니다. 다시 시도해 주세요.\n${error.message}`);
+    } finally {
+        resettingAssignments = false;
+        if (resetButton) resetButton.disabled = false;
+    }
 }
 
 // ==========================================
@@ -536,6 +570,7 @@ export function runAutoDispatchAlgorithm() {
 // 7. 토글 선택 기반 동선 전송 엔진 (🌟 잔여 옛날 키 자동 소거 연동)
 // ==========================================
 export async function sendRoutesToDrivers() {
+    if (resettingAssignments || sendingRoutes) { alert('현재 동선 작업이 끝난 후 다시 시도해 주세요.'); return; }
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("전송할 배송 데이터가 없습니다.");
         return;
@@ -587,6 +622,7 @@ export async function sendRoutesToDrivers() {
     }
 
     try {
+        sendingRoutes = true;
         let successCount = 0;
         const nowTs = Date.now();
 
@@ -607,13 +643,19 @@ export async function sendRoutesToDrivers() {
             }));
 
             const routeOwnerId = await ensureRouteOwner(db, matchedLic.key);
+            const previousRoutes = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
+            let routeRevision = nowTs;
+            previousRoutes.forEach(snapshot => {
+                const previous = snapshot.data();
+                if (Number.isFinite(previous.updatedAt)) routeRevision = Math.max(routeRevision, previous.updatedAt + 1);
+            });
             const routePayload = {
                 routeOwnerId,
                 deviceId: devId,
                 phone: matchedLic.phone || devId,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                 destinations: destinations,
-                updatedAt: nowTs
+                updatedAt: routeRevision
             };
 
             await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
@@ -641,6 +683,7 @@ export async function sendRoutesToDrivers() {
     } catch (e) {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
+        sendingRoutes = false;
         if (btn) {
             btn.disabled = false;
             btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 동선 전송';

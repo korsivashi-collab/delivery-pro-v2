@@ -1,5 +1,5 @@
 import { state } from './state.js';
-import { isNativeApp, getApiUrl } from './native-platform.js';
+import { isNativeApp, apiFetch } from './native-platform.js';
 import { sendNativePhoneVerification } from './native-phone-auth.js';
 import { ensureRouteOwner, selectLatestOwnedRoute } from './route-owner.js';
 // js/api.js
@@ -127,7 +127,8 @@ export async function firebaseConfirmSmsCode(confirmationResult, code) {
             'auth/code-expired': '인증번호가 만료되었습니다. 인증번호를 다시 요청해 주세요.',
             'auth/session-expired': '인증 시간이 만료되었습니다. 인증번호를 다시 요청해 주세요.',
             'auth/too-many-requests': '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
-            'auth/network-request-failed': '네트워크 연결을 확인한 뒤 다시 시도해 주세요.'
+            'auth/network-request-failed': '네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
+            'auth/native-session-failed': cause?.message || '앱 로그인 서버 연결에 실패했습니다. 다시 시도해 주세요.'
         };
         const error = new Error(messages[cause?.code] || 'SMS 인증에 실패했습니다. 다시 시도해 주세요.', { cause });
         error.code = cause?.code || 'auth/verification-failed';
@@ -530,7 +531,7 @@ export async function firebaseStartTrial(phone, deviceId) {
     const deviceSnapshot = await getDocs(query(collection(db, 'licenses'), where('deviceId', '==', deviceId), where('type', '==', 'trial')));
     if (!deviceSnapshot.empty) return { valid: false, msg: '이미 7일 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.' };
     const token = await user.getIdToken();
-    const response = await fetch(getApiUrl('/api/start-trial'), {
+    const response = await apiFetch('/api/start-trial', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ phone: formattedPhone, deviceId })
     });
@@ -734,8 +735,15 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
         const previous = routeSaveTasks.get(revisionKey) || Promise.resolve();
         const task = previous.catch(() => {}).then(async () => {
             if (state.getRouteOwnerId() !== routeOwnerId || state.getRouteUpdatedAt() !== revision) return false;
-            await setDoc(routeRef, payload);
-            return true;
+            return runTransaction(db, async transaction => {
+                const snapshot = await transaction.get(routeRef);
+                const remote = snapshot.exists() ? snapshot.data() : null;
+                // A newer dispatch/reset must survive an older delayed device write.
+                if (remote?.routeOwnerId === routeOwnerId && Number.isFinite(remote.updatedAt) &&
+                    remote.updatedAt > payload.updatedAt) return false;
+                transaction.set(routeRef, payload);
+                return true;
+            });
         });
         routeSaveTasks.set(revisionKey, task);
         try { return await task; }

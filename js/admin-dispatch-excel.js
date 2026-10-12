@@ -208,7 +208,9 @@ export async function autoSaveExcelToFirebase() {
         });
     } catch (error) {
         console.error("엑셀 데이터 자동 저장 실패:", error);
+        return false;
     }
+    return true;
 }
 
 // ==========================================
