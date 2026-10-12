@@ -1,8 +1,8 @@
 import { withRequestDeadline } from './utils.js';
-import { getApiUrl } from './native-platform.js';
+import { apiFetch } from './native-platform.js';
 import { normalizeDeliveryBaseAddress } from './address.js';
 
-export const GEMINI_SCAN_MODEL = 'gemini-3.5-flash-lite';
+export const GEMINI_SCAN_MODEL = 'gemini-2.5-flash-lite';
 export const GEMINI_SCAN_TIMEOUT_MS = 60000;
 const LIMITS = { storeName: 160, address: 600, phone: 80 };
 function scanError(code) { return Object.assign(new Error('명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.'), { code }); }
@@ -41,7 +41,7 @@ export function buildGeminiDestination(fields, coords, id, displayNumber, addres
 }
 export async function performGeminiScan(image, { signal } = {}) {
     return withRequestDeadline(async requestSignal => {
-        const response = await fetch(getApiUrl('/api/scan'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const response = await apiFetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(image), signal: requestSignal });
         let data;
         try { data = await response.json(); } catch (_) { throw scanError('GEMINI_SCHEMA_ERROR'); }
