@@ -1,5 +1,5 @@
 // js/optimizer.js
-import { getApiUrl } from './native-platform.js';
+import { apiFetch } from './native-platform.js';
 
 // =================================================================
 // [배송 동선 PRO] 하버사인 + 2-opt 기반 뼈대 경로 및 LLM '제한적' 밀집구간 정밀 교정 엔진
@@ -89,7 +89,7 @@ async function optimizeClusterWithLLM(clusterNodes, prevAnchor = null, nextAncho
 
         const data = await Promise.race([
             Promise.resolve().then(async () => {
-                const response = await fetch(getApiUrl('/api/optimize-llm'), {
+                const response = await apiFetch('/api/optimize-llm', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestPayload),
@@ -218,18 +218,15 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
     let route = []; 
     let curr = startPoint;
     
-    // 1단계: 진행 방향(progress)과 거리를 균형 있게 고려한 최근접 이웃 뼈대 생성
+    // 1단계: 거리 기반 최근접 이웃 뼈대 생성
     while (unassigned.length > 0) {
         let bestIdx = -1; 
         let bestScore = Infinity;
         for (let i = 0; i < unassigned.length; i++) {
             let n = unassigned[i];
             let dist = getCachedDistance(curr, n);
-            let progressDiff = (curr !== startPoint && curr.progress !== undefined && n.progress !== undefined)
-                ? (curr.progress - n.progress) : 0;
-            // 목적지와 반대 방향으로 과도하게 되돌아가는 현상 억제 (가중치 3.0)
-            let backwardPenalty = progressDiff > 0 ? (progressDiff * 3.0) : 0;
-            let score = dist + backwardPenalty;
+            // 방향 투영값은 진단에만 사용한다. 짧은 출발-도착 축의 우회 편향을 제거한다.
+            let score = dist;
 
             if (score < bestScore) { 
                 bestScore = score; 
@@ -244,31 +241,71 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
     let fullRoute = [startPoint, ...route];
     if (hasEnd) fullRoute.push(endLocation);
 
-    // 2-opt 알고리즘 교차선 해소 (우수한 거시적 흐름 보장)
-    let improved = true; 
-    let iter = 0;
-    let endIndex = hasEnd ? fullRoute.length - 2 : fullRoute.length - 1;
-
-    while (improved && iter < 1000) {
-        improved = false; 
-        iter++;
-        for (let i = 1; i < endIndex; i++) {
-            for (let j = i + 1; j <= endIndex; j++) {
-                let nodeI_prev = fullRoute[i - 1]; 
-                let nodeI = fullRoute[i]; 
-                let nodeJ = fullRoute[j]; 
-                let nodeJ_next = fullRoute[j + 1];
-                let d_curr = getCachedDistance(nodeI_prev, nodeI);
-                if (nodeJ_next) d_curr += getCachedDistance(nodeJ, nodeJ_next);
-                let d_new = getCachedDistance(nodeI_prev, nodeJ);
-                if (nodeJ_next) d_new += getCachedDistance(nodeI, nodeJ_next);
-                if (d_new < d_curr - 0.0001) {
-                    let subArray = fullRoute.slice(i, j + 1).reverse();
-                    fullRoute.splice(i, subArray.length, ...subArray);
-                    improved = true;
+    // 출발/도착을 고정한 2-opt 및 단일 배송지 이동. 지역 최솟값을 피하기 위해
+    // 첫 배송지를 달리한 후보도 비교하며, 기존 후보보다 짧은 결과만 채택한다.
+    function improvePath(path) {
+        const last = hasEnd ? path.length - 2 : path.length - 1;
+        for (let pass = 0; pass < 100; pass++) {
+            let changed = false;
+            for (let i = 1; i < last; i++) {
+                for (let j = i + 1; j <= last; j++) {
+                    const before = getCachedDistance(path[i - 1], path[i]) +
+                        (path[j + 1] ? getCachedDistance(path[j], path[j + 1]) : 0);
+                    const after = getCachedDistance(path[i - 1], path[j]) +
+                        (path[j + 1] ? getCachedDistance(path[i], path[j + 1]) : 0);
+                    if (after < before - 0.0001) {
+                        path.splice(i, j - i + 1, ...path.slice(i, j + 1).reverse());
+                        changed = true;
+                    }
                 }
             }
+            // 2-opt로 해결되지 않는 고립 배송지는 다른 두 배송지 사이로 이동한다.
+            let bestDelta = -0.0001, moveFrom = -1, moveAfter = -1;
+            for (let from = 1; from <= last; from++) {
+                const point = path[from], prev = path[from - 1], next = path[from + 1];
+                const removal = (next ? getCachedDistance(prev, next) - getCachedDistance(point, next) : 0)
+                    - getCachedDistance(prev, point);
+                for (let after = 0; after <= last; after++) {
+                    if (after === from || after === from - 1) continue;
+                    const a = path[after], b = path[after + 1];
+                    const delta = removal + getCachedDistance(a, point) +
+                        (b ? getCachedDistance(point, b) - getCachedDistance(a, b) : 0);
+                    if (delta < bestDelta) { bestDelta = delta; moveFrom = from; moveAfter = after; }
+                }
+            }
+            if (moveFrom >= 0) {
+                const [point] = path.splice(moveFrom, 1);
+                path.splice(moveAfter + (moveAfter < moveFrom ? 1 : 0), 0, point);
+                changed = true;
+            }
+            if (!changed) break;
         }
+        return path;
+    }
+    const pathCost = path => path.slice(1).reduce((sum, point, i) =>
+        sum + getCachedDistance(path[i], point), 0);
+    fullRoute = improvePath(fullRoute);
+    let bestCost = pathCost(fullRoute);
+    const stops = allPoints.slice(1, hasEnd ? -1 : undefined);
+    // 작은 경로는 모든 시작 후보, 큰 경로는 가까운/먼 후보를 포함한 최대 12개만 탐색.
+    const seeds = [...stops].sort((a, b) => getCachedDistance(startPoint, a) - getCachedDistance(startPoint, b));
+    const sampled = seeds.length <= 32 ? seeds :
+        Array.from({ length: 12 }, (_, i) => seeds[Math.round(i * (seeds.length - 1) / 11)]);
+    for (const seed of sampled) {
+        const remaining = stops.filter(point => point !== seed);
+        const candidate = [startPoint, seed];
+        while (remaining.length) {
+            let next = 0;
+            for (let i = 1; i < remaining.length; i++) {
+                if (getCachedDistance(candidate.at(-1), remaining[i]) <
+                    getCachedDistance(candidate.at(-1), remaining[next])) next = i;
+            }
+            candidate.push(remaining.splice(next, 1)[0]);
+        }
+        if (hasEnd) candidate.push(endLocation);
+        improvePath(candidate);
+        const cost = pathCost(candidate);
+        if (cost < bestCost - 0.0001) { fullRoute = candidate; bestCost = cost; }
     }
 
     // 2단계: 반경 900m 이내, 점수 2점 이상, 3곳 이상인 '골목 지그재그' 추출 및 LLM 제한적 교정
@@ -333,14 +370,13 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         const optimized = await optimizeClusterWithLLM(clusterNodes, prevAnchor, nextAnchor, diagnostic);
 
         if (!diagnostic.fallback && optimized && optimized.length === clusterNodes.length) {
-            // 🌟 15% 롤백 안전장치 완화: 
-            // LLM이 예쁘게 묶어온 경로의 총 이동 거리가 기존 하버사인 뼈대보다 15% 이상 길어질 때만 역주행으로 간주하고 버림.
+            // 진입/진출을 포함해 길어지는 AI 제안은 원래 구간으로 복원한다.
             const origPath = [prevAnchor, ...clusterNodes, nextAnchor].filter(Boolean);
             const optPath = [prevAnchor, ...optimized, nextAnchor].filter(Boolean);
             const origDist = calculateSectionDistance(origPath);
             const optDist = calculateSectionDistance(optPath);
 
-            if (optDist <= origDist * 1.15) {
+            if (optDist <= origDist + 0.0001) {
                 finalRoute.splice(candidate.from, clusterNodes.length, ...optimized);
             }
         }

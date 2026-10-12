@@ -141,9 +141,10 @@ export function optimizeRoute2Opt(orderList, basePos = null) {
         improved = false;
         iterations++;
 
-        for (let i = 0; i < n - 1; i++) {
+        // 거점은 고정하고 첫 배송지도 교환 대상에 포함한다.
+        for (let i = basePos && basePos.lat && basePos.lng ? -1 : 0; i < n - 1; i++) {
             for (let j = i + 2; j < n; j++) {
-                const pA = route[i];
+                const pA = i < 0 ? basePos : route[i];
                 const pB = route[i + 1];
                 const pC = route[j];
                 const pD = (j + 1 < n) ? route[j + 1] : null;
@@ -295,7 +296,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     // 4. 각 기사별 배정 결과에 대해 2-opt 순서 최적화 실행 (현장 퇴근을 위한 동선 정렬)
     driverStats.forEach(ds => {
         if (ds.assignedOrders.length > 0) {
-            optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng });
+            ds.assignedOrders = optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng });
         }
     });
 
