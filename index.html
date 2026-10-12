@@ -34,8 +34,8 @@
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
         .hide-scrollbar::-webkit-scrollbar { display: none; }
         .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
-        .pt-safe { padding-top: max(0.5rem, env(safe-area-inset-top, 0px)); }
-        .pb-safe { padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 8px)); }
+        .pt-safe { padding-top: max(0.5rem, var(--safe-area-inset-top, env(safe-area-inset-top, 0px))); }
+        .pb-safe { padding-bottom: max(0.75rem, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 8px))); }
         /* 기사 메인 화면 표시만 조정합니다. 기존 DOM과 이벤트는 유지합니다. */
         #main-app { background: #F5F7FA; color: #172033; }
         #main-app > header, #main-app > footer { background: #FFFFFF; border-color: #E2E8F0; }
@@ -723,11 +723,11 @@
 
     <!-- 로딩 오버레이 -->
     <div id="delivery-photo-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-photo-title" class="hidden fixed inset-0 bg-slate-950 z-[310] flex flex-col">
-        <div class="shrink-0 flex items-center justify-between gap-4 px-4 pb-3 border-b border-white/15" style="padding-top: max(12px, env(safe-area-inset-top));">
+        <div class="shrink-0 flex items-center justify-between gap-4 px-4 pb-3 border-b border-white/15" style="padding-top: max(12px, var(--safe-area-inset-top, env(safe-area-inset-top, 0px)));">
             <h3 id="delivery-photo-title" class="text-white font-bold text-base">배송 완료 사진</h3>
             <button id="delivery-photo-close" type="button" onclick="window.closeDeliveryPhoto()" aria-label="사진 닫기" class="min-w-12 min-h-12 px-3 rounded-xl bg-white/15 text-white text-2xl font-bold active:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">×</button>
         </div>
-        <div class="flex-1 min-h-0 flex items-center justify-center overflow-auto p-3" style="padding-bottom: max(12px, env(safe-area-inset-bottom));">
+        <div class="flex-1 min-h-0 flex items-center justify-center overflow-auto p-3" style="padding-bottom: max(12px, var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px)));">
             <img id="delivery-photo-image" alt="배송 완료 증빙 사진" class="max-w-full max-h-full object-contain" referrerpolicy="no-referrer">
         </div>
     </div>
