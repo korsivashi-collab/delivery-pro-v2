@@ -3,7 +3,7 @@ let dispatchLogoutPending=false;
 let dispatchSessionWatchUnsubscribe=null;
 // js/admin-app.js
 
-import { db, auth, signInWithCustomToken } from "./admin-api.js";
+import { db, auth, signInWithCustomToken, requestMasterSms, resetMasterSms } from "./admin-api.js";
 // 🌟 where 임포트 추가 완료
 import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
@@ -126,11 +126,27 @@ import {
 // ==========================================
 // 1. 초기화 및 페이지 라우팅 제어 (Lifecycle)
 // ==========================================
-window.onload = () => {
+async function hasVerifiedMasterSession() {
+    try {
+        await auth.authStateReady();
+        const result = await auth.currentUser?.getIdTokenResult();
+        return result?.claims.role === 'MASTER' && result.claims.masterSmsVerified === true &&
+            result.claims.masterSessionExpiresAt > Date.now() / 1000;
+    } catch (_) { return false; }
+}
+
+window.onload = async () => {
     const path = window.location.pathname;
     const isMasterPage = path.includes('admin-master.html');
     const isDispatchPage = path.includes('admin-dispatch.html');
     const isLoginPage = !isMasterPage && !isDispatchPage;
+    if (isMasterPage || sessionStorage.getItem('deliveryProRole') === 'MASTER') {
+        if (!await hasVerifiedMasterSession()) {
+            sessionStorage.removeItem('deliveryProRole');
+            sessionStorage.removeItem('deliveryProAdminName');
+            if (isMasterPage) { window.location.replace('admin.html'); return; }
+        }
+    }
 
     // 날짜 기본값 설정
     const todayInput = document.getElementById('dispatch-date-picker');
@@ -194,12 +210,116 @@ window.onload = () => {
 // ==========================================
 // 2. 통합 로그인 및 로그아웃 (다중 회선 FIFO 제어 엔진)
 // ==========================================
+let singleKeyLoginBusy = false;
+let masterPendingKey = '';
+let masterPendingPhone = '';
+let masterSmsConfirmation = null;
+let masterSmsExpiresAt = 0;
+let masterSmsResendAt = 0;
+let masterSmsEpoch = 0;
+let masterSmsSending = false;
+let masterSmsConfirming = false;
+
+function masterSmsMessage(error) {
+    if (error?.code === 'auth/invalid-verification-code') return '인증번호가 일치하지 않습니다. 다시 입력해 주세요.';
+    if (error?.code === 'auth/code-expired') return '인증번호가 만료되었습니다. 다시 받아 주세요.';
+    if (error?.code === 'auth/too-many-requests') return '인증 요청이 많습니다. 잠시 후 다시 시도해 주세요.';
+    return error?.message || '인증 연결에 실패했습니다. 잠시 후 다시 시도해 주세요.';
+}
+
+window.cancelMasterSmsLogin = function() {
+    masterSmsEpoch++;
+    masterPendingKey = ''; masterPendingPhone = ''; masterSmsConfirmation = null;
+    masterSmsExpiresAt = 0; masterSmsResendAt = 0;
+    document.getElementById('master-sms-step')?.classList.add('hidden');
+    document.getElementById('master-key-step')?.classList.remove('hidden');
+    document.getElementById('master-sms-code').value = '';
+    document.getElementById('login-msg').innerText = '';
+    resetMasterSms().catch(() => {});
+};
+
+window.sendMasterLoginSms = async function() {
+    if (!masterPendingKey || masterSmsSending || masterSmsConfirming) return;
+    const msg = document.getElementById('login-msg');
+    if (Date.now() < masterSmsResendAt) {
+        msg.innerText = '인증번호 재발송은 60초 후 가능합니다.'; return;
+    }
+    const epoch = ++masterSmsEpoch;
+    masterSmsSending = true;
+    masterSmsConfirmation = null;
+    const resend = document.getElementById('master-sms-resend');
+    const confirm = document.getElementById('master-sms-confirm');
+    resend.disabled = true; confirm.disabled = true;
+    document.getElementById('master-sms-code').value = '';
+    msg.innerText = '등록된 관리자 번호로 인증번호를 요청하고 있습니다.';
+    try {
+        const confirmation = await requestMasterSms(masterPendingPhone);
+        if (epoch !== masterSmsEpoch) return;
+        masterSmsConfirmation = confirmation;
+        masterSmsExpiresAt = Date.now() + 180000;
+        masterSmsResendAt = Date.now() + 60000;
+        msg.innerText = '인증번호를 발송했습니다. 3분 이내에 입력해 주세요.';
+        document.getElementById('master-sms-code').focus();
+    } catch (error) {
+        if (epoch === masterSmsEpoch) msg.innerText = masterSmsMessage(error);
+    } finally {
+        masterSmsSending = false;
+        resend.disabled = false; confirm.disabled = false;
+    }
+};
+
+window.confirmMasterSmsLogin = async function() {
+    if (masterSmsConfirming || masterSmsSending || !masterPendingKey) return;
+    const msg = document.getElementById('login-msg');
+    const code = document.getElementById('master-sms-code').value.trim();
+    if (!masterSmsConfirmation || Date.now() >= masterSmsExpiresAt) {
+        msg.innerText = '인증번호를 다시 받아 주세요.'; return;
+    }
+    if (!/^\d{6}$/.test(code)) { msg.innerText = '인증번호 6자리를 입력해 주세요.'; return; }
+    const epoch = masterSmsEpoch;
+    const key = masterPendingKey;
+    const confirmation = masterSmsConfirmation;
+    masterSmsConfirming = true;
+    const button = document.getElementById('master-sms-confirm');
+    button.disabled = true;
+    msg.innerText = '인증 확인 중입니다.';
+    try {
+        const credential = await confirmation.confirm(code);
+        if (epoch !== masterSmsEpoch) return;
+        if (Date.now() >= masterSmsExpiresAt) throw new Error('인증 시간이 만료되었습니다. 인증번호를 다시 받아 주세요.');
+        const phoneToken = await credential.user.getIdToken(true);
+        if (epoch !== masterSmsEpoch) return;
+        const response = await fetch('/api/login', { method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + phoneToken },
+            body: JSON.stringify({ key }) });
+        const result = await response.json();
+        if (epoch !== masterSmsEpoch) return;
+        if (!response.ok || result.role !== 'MASTER' || !result.token) {
+            throw new Error(result.error || '마스터 인증을 완료하지 못했습니다.');
+        }
+        await signInWithCustomToken(auth, result.token);
+        if (epoch !== masterSmsEpoch) { await signOut(auth); return; }
+        if (!await hasVerifiedMasterSession()) throw new Error('마스터 권한 확인에 실패했습니다.');
+        if (epoch !== masterSmsEpoch) { await signOut(auth); return; }
+        sessionStorage.setItem('deliveryProRole', 'MASTER');
+        sessionStorage.setItem('deliveryProAdminName', result.data?.name || '마스터');
+        masterPendingKey = '';
+        await resetMasterSms();
+        if (epoch !== masterSmsEpoch) { await signOut(auth); return; }
+        window.location.href = 'admin-master.html';
+    } catch (error) {
+        if (epoch === masterSmsEpoch) msg.innerText = masterSmsMessage(error);
+    } finally { masterSmsConfirming = false; button.disabled = false; }
+};
+
 window.handleSingleKeyLogin = async function() {
+    if (singleKeyLoginBusy || masterSmsSending || masterSmsConfirming) return;
     const keyInput = document.getElementById('single-key-input').value.trim();
     const msgEl = document.getElementById('login-msg');
     const btn = document.getElementById('login-btn');
 
     if (!keyInput) { msgEl.innerText = "관리자 키를 입력해 주세요."; return; }
+    singleKeyLoginBusy = true;
     msgEl.innerText = "";
     btn.disabled = true;
     btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인증 확인 중...';
@@ -214,21 +334,27 @@ window.handleSingleKeyLogin = async function() {
         const result = await response.json();
 
         if (!response.ok) {
-            msgEl.innerText = result.error === 'suspended' 
+            msgEl.innerText = result.error === 'suspended'
                 ? "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요." 
                 : "등록되지 않았거나 권한이 없는 관리자 키입니다.";
             return;
         }
 
-        await signInWithCustomToken(auth, result.token);
-
-        // 1. 마스터 로그인 성공 처리
-        if (result.role === 'MASTER') {
-            sessionStorage.setItem('deliveryProRole', 'MASTER');
-            sessionStorage.setItem('deliveryProAdminName', result.data.name || '마스터');
-            window.location.href = 'admin-master.html';
+        if (result.requiresSms) {
+            masterPendingKey = keyInput; masterPendingPhone = result.phone;
+            document.getElementById('single-key-input').value = '';
+            document.getElementById('master-key-step').classList.add('hidden');
+            document.getElementById('master-sms-step').classList.remove('hidden');
+            await window.sendMasterLoginSms();
             return;
         }
+
+        // 구버전 서버가 키만으로 MASTER를 발급해도 접속을 허용하지 않습니다.
+        if (result.role === 'MASTER') {
+            msgEl.innerText = '마스터 2차 인증 서버 업데이트가 필요합니다.'; return;
+        }
+
+        await signInWithCustomToken(auth, result.token);
 
         // 2. 관제(DISPATCH) 로그인 성공 처리
         if (result.role === 'DISPATCH') {
@@ -270,6 +396,7 @@ window.handleSingleKeyLogin = async function() {
     } catch (e) {
         msgEl.innerText = "로그인 통신 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.";
     } finally {
+        singleKeyLoginBusy = false;
         btn.disabled = false;
         btn.innerHTML = '<span>대시보드 접속</span>';
     }
@@ -315,12 +442,15 @@ window.systemLogout = async function() {
     }
     
     if (typeof forceClearMap === 'function') forceClearMap();
-    if(isDispatchLogout){try{await signOut(auth);}catch{console.warn('Firebase 로그아웃 실패');}}
+    try{await signOut(auth);}catch{console.warn('Firebase 로그아웃 실패');}
     sessionStorage.clear();
     window.location.href = 'admin.html';
 };
 
-window.showMasterPanel = function(name = '마스터') {
+window.showMasterPanel = async function(name = '마스터') {
+    if (!await hasVerifiedMasterSession()) { window.location.replace('admin.html'); return; }
+    const panel = document.getElementById('master-panel');
+    if (panel) panel.style.display = '';
     state.currentUserRole = 'MASTER';
     const badge = document.getElementById('master-name-badge');
     if (badge) badge.innerText = name;
