@@ -25,7 +25,7 @@ function angleMetrics(points, originAngle=null) {
   if(prev!=null) {const d=Math.abs(((angle-prev+540)%360)-180);angleSum+=d;if(d>135)reversals++;}
   prev=angle;
  }
- return {angleSum,directionReversals:reversals,turnScore:angleSum+reversals*180};
+ return {angleSum,directionReversals:reversals};
 }
 // Remove small road digitization wiggles before measuring meaningful direction changes (15m RDP).
 function roadPoints(route) {
@@ -54,7 +54,7 @@ function roadPoints(route) {
  }
  return [...keep].sort((a,b)=>a-b).map(i=>raw[i]);
 }
-function candidateOrders(nodes, core, prev, next, heading, excursion=false) {
+function candidateOrders(nodes, core, excursion=false) {
  const permutations=[];
  function walk(prefix,remaining){if(!remaining.length){permutations.push(prefix);return;}remaining.forEach((p,i)=>walk([...prefix,p],remaining.filter((_,j)=>i!==j)));}
  walk([],nodes);
@@ -76,8 +76,7 @@ function candidateOrders(nodes, core, prev, next, heading, excursion=false) {
  // Explicit front/back attachment candidates, entirely inside the same local region.
  const members=new Set(core.map(p=>p.id)),outside=nodes.filter(p=>!members.has(p.id));
  for(let i=0;i<=outside.length;i++)for(const group of [core,[...core].reverse()])add([...outside.slice(0,i),...group,...outside.slice(i)]);
- const byAngle=[...permutations].sort((a,b)=>angleMetrics([prev,...a,next].filter(Boolean),heading).turnScore-angleMetrics([prev,...b,next].filter(Boolean),heading).turnScore);
- for(const order of byAngle.slice(0,6))add(order);
+ // 후보 선택에서도 각도 점수를 제외한다. 기존/앞뒤 배치/분산 후보를 비교한다.
  for(let i=0;i<MAX_CANDIDATES;i++)add(permutations[Math.round(i*(permutations.length-1)/(MAX_CANDIDATES-1))]);
  for(const order of permutations){add(order);if(selected.length>=MAX_CANDIDATES)break;}
  return selected;
@@ -101,7 +100,7 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
    const key=env.KAKAO_REST_API_KEY?.trim();if(!key)throw failure('KAKAO_KEY_MISSING',503);
    const nodes=context.map(({id,lat,lng})=>({id:String(id),lat,lng}));
    const group=core.map(({id,lat,lng})=>({id:String(id),lat,lng}));
-   const candidates=candidateOrders(nodes,group,body.prevAnchor,body.nextAnchor,body.originAngle??null,excursion);
+   const candidates=candidateOrders(nodes,group,excursion);
    controller=new AbortController();const coordinate=p=>({x:p.lng,y:p.lat});
    const cache=new Map(),results=new Array(candidates.length);let cursor=0,calls=0;
    async function worker(){while(cursor<candidates.length){
@@ -125,13 +124,10 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
    await Promise.race([Promise.all(Array.from({length:3},worker)),new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('KAKAO_TIMEOUT',504));},timeoutMs);})]);
    const viable=results.filter(Boolean);if(!viable.length)throw failure('KAKAO_NO_ROUTE',502);
    const fastest=[...viable].sort((a,b)=>a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
-   // Time limits detours; angle sum plus direction reversals ranks simplicity within that limit.
-   const simple=viable.filter(r=>r.duration<=fastest.duration*1.15)
-    .sort((a,b)=>(excursion?a.angleSum-b.angleSum:a.turnScore-b.turnScore)||
-     (excursion?a.duration-b.duration:0)||a.directionReversals-b.directionReversals||
-     a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
+   // 각도/반전 가점 및 15% 시간 증가 허용을 제거한다. 각도는 비교 기록에만 남긴다.
+   const simple=fastest;
    const metrics=r=>r?{optimized:r.order.map(p=>p.id),duration:r.duration,distance:r.distance,angleSum:r.angleSum,directionReversals:r.directionReversals}:null;
-   return res.status(200).json({source:'kakao',...metrics(simple),compared:candidates.length,calls,exhaustive:!excursion&&nodes.length<=4,
+   return res.status(200).json({source:'kakao',selectionPolicy:'road-time',...metrics(simple),compared:candidates.length,calls,exhaustive:!excursion&&nodes.length<=4,
     comparison:{baseline:metrics(results[0]),fastest:metrics(fastest),simple:metrics(simple)}});
   }catch(error){controller?.abort();return res.status(error.status||502).json({error:{code:error.code||'KAKAO_NETWORK_ERROR'}});}
   finally{clearTimeout(timer);}
