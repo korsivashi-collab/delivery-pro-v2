@@ -1,4 +1,5 @@
 // js/optimizer.js
+import { getApiUrl } from './native-platform.js';
 
 // =================================================================
 // [배송 동선 PRO] 하버사인 + 2-opt 기반 뼈대 경로 및 LLM '제한적' 밀집구간 정밀 교정 엔진
@@ -88,7 +89,7 @@ async function optimizeClusterWithLLM(clusterNodes, prevAnchor = null, nextAncho
 
         const data = await Promise.race([
             Promise.resolve().then(async () => {
-                const response = await fetch('/api/optimize-llm', {
+                const response = await fetch(getApiUrl('/api/optimize-llm'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(requestPayload),

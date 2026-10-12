@@ -1,4 +1,5 @@
 import { withRequestDeadline } from './utils.js';
+import { getApiUrl } from './native-platform.js';
 import { normalizeDeliveryBaseAddress } from './address.js';
 
 export const GEMINI_SCAN_MODEL = 'gemini-3.5-flash-lite';
@@ -40,7 +41,7 @@ export function buildGeminiDestination(fields, coords, id, displayNumber, addres
 }
 export async function performGeminiScan(image, { signal } = {}) {
     return withRequestDeadline(async requestSignal => {
-        const response = await fetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const response = await fetch(getApiUrl('/api/scan'), { method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(image), signal: requestSignal });
         let data;
         try { data = await response.json(); } catch (_) { throw scanError('GEMINI_SCHEMA_ERROR'); }

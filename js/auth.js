@@ -139,7 +139,8 @@ export async function sendPhoneAuthCode() {
         document.getElementById('auth-sms-group')?.classList.remove('hidden');
         startSmsCountdown(180);
         document.getElementById('sms-code-input')?.focus();
-        showSmsMessage('인증번호가 발송되었습니다.', true);
+        if (result.autoVerified) document.getElementById('auth-sms-group')?.classList.add('hidden');
+        showSmsMessage(result.autoVerified ? '휴대폰 자동 인증이 완료되었습니다. 인증하고 시작하기를 눌러 주세요.' : '인증번호가 발송되었습니다.', true);
     } catch (error) {
         if (version !== smsSessionVersion) return;
         resetSmsSession();
@@ -148,7 +149,9 @@ export async function sendPhoneAuthCode() {
             'auth/too-many-requests': '요청이 너무 많습니다. 잠시 후 다시 시도해 주세요.',
             'auth/quota-exceeded': 'SMS 발송 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.',
             'auth/network-request-failed': '네트워크 연결을 확인한 뒤 다시 시도해 주세요.',
-            'auth/captcha-check-failed': '보안 확인에 실패했습니다. 인증번호를 다시 요청해 주세요.'
+            'auth/captcha-check-failed': '보안 확인에 실패했습니다. 인증번호를 다시 요청해 주세요.',
+            'auth/invalid-app-credential': '앱 보안 인증에 실패했습니다. 앱 등록 정보와 인증 설정 확인이 필요합니다.',
+            'auth/unauthorized-domain': '허용되지 않은 인증 주소입니다. 앱 인증 설정 확인이 필요합니다.'
         };
         showSmsMessage(messages[error?.code] || error?.message || '인증번호 발송에 실패했습니다. 다시 시도해 주세요.');
     } finally {
@@ -549,7 +552,7 @@ export async function verifyLicense() {
                 return;
             }
             const code = (document.getElementById('sms-code-input')?.value || '').trim();
-            if (!/^[0-9]{6}$/.test(code)) {
+            if (!smsConfirmationResult?.autoVerified && !/^[0-9]{6}$/.test(code)) {
                 showSmsMessage('SMS 인증번호 6자리를 입력해 주세요.');
                 document.getElementById('sms-code-input')?.focus();
                 return;
@@ -726,7 +729,8 @@ export async function sendTrialSmsCode() {
         document.getElementById('trial-sms-group')?.classList.remove('hidden');
         startTrialSmsCountdown();
         document.getElementById('trial-sms-code-input')?.focus();
-        showTrialSmsMessage('인증번호가 발송되었습니다.', true);
+        if (result.autoVerified) document.getElementById('trial-sms-group')?.classList.add('hidden');
+        showTrialSmsMessage(result.autoVerified ? '휴대폰 자동 인증이 완료되었습니다. 무료 체험 시작을 눌러 주세요.' : '인증번호가 발송되었습니다.', true);
     } catch (error) {
         if (version !== trialSmsVersion) return;
         resetTrialSmsSession(); version = trialSmsVersion;
@@ -777,7 +781,7 @@ export async function startFreeTrial() {
         if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 처리 중...'; }
         if (!isTrialSmsVerified) {
             const code = (document.getElementById('trial-sms-code-input')?.value || '').trim();
-            if (!/^[0-9]{6}$/.test(code)) { showTrialSmsMessage('SMS 인증번호 6자리를 입력해 주세요.'); return; }
+            if (!trialSmsConfirmationResult?.autoVerified && !/^[0-9]{6}$/.test(code)) { showTrialSmsMessage('SMS 인증번호 6자리를 입력해 주세요.'); return; }
             const confirmation = trialSmsConfirmationResult;
             if (Date.now() >= trialSmsExpiresAt) { showTrialSmsMessage('인증번호가 만료되었습니다. 재전송을 눌러주세요.'); return; }
             const user = await firebaseConfirmSmsCode(confirmation, code);

@@ -1,4 +1,6 @@
 import { state } from './state.js';
+import { isNativeApp, getApiUrl } from './native-platform.js';
+import { sendNativePhoneVerification } from './native-phone-auth.js';
 import { ensureRouteOwner, selectLatestOwnedRoute } from './route-owner.js';
 // js/api.js
 // =================================================================
@@ -30,7 +32,8 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstati
 import {
     getAuth,
     RecaptchaVerifier,
-    signInWithPhoneNumber
+    signInWithPhoneNumber,
+    signInWithCustomToken
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -87,6 +90,9 @@ export async function firebaseSendSmsVerification(phoneNumber, containerId = 're
             error.code = 'auth/invalid-phone-number';
             throw error;
         }
+        if (isNativeApp()) {
+            return await sendNativePhoneVerification(formattedPhone, token => signInWithCustomToken(auth, token));
+        }
         const verifier = setupRecaptchaVerifier(containerId);
         const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
         return confirmationResult;
@@ -107,7 +113,7 @@ export async function firebaseConfirmSmsCode(confirmationResult, code) {
     }
     // 문자열로 검증하여 0으로 시작하는 인증번호도 보존합니다.
     const verificationCode = String(code ?? '').trim();
-    if (!/^[0-9]{6}$/.test(verificationCode)) {
+    if (!confirmationResult.autoVerified && !/^[0-9]{6}$/.test(verificationCode)) {
         const error = new Error('SMS 인증번호 6자리를 입력해 주세요.');
         error.code = 'auth/invalid-verification-code';
         throw error;
@@ -524,7 +530,7 @@ export async function firebaseStartTrial(phone, deviceId) {
     const deviceSnapshot = await getDocs(query(collection(db, 'licenses'), where('deviceId', '==', deviceId), where('type', '==', 'trial')));
     if (!deviceSnapshot.empty) return { valid: false, msg: '이미 7일 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.' };
     const token = await user.getIdToken();
-    const response = await fetch('/api/start-trial', {
+    const response = await fetch(getApiUrl('/api/start-trial'), {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ phone: formattedPhone, deviceId })
     });
