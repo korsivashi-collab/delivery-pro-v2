@@ -1,6 +1,13 @@
 import { FirebaseAuthentication, isNativeApp, exchangeNativePhoneSession } from './native-platform.js';
 
 let requestInProgress = false;
+function nativeVerificationError(event) {
+    const message = event.message || '휴대폰 인증에 실패했습니다. 다시 시도해 주세요.';
+    if (/valid app identifier|Play Integrity|reCAPTCHA|invalid.app.credential/i.test(message)) {
+        return Object.assign(new Error('앱 보안 인증에 실패했습니다. 최신 버전으로 업데이트하거나 고객센터로 문의해 주세요.'), { code: 'auth/invalid-app-credential' });
+    }
+    return new Error(message);
+}
 export async function sendNativePhoneVerification(phoneNumber, signInWebSession) {
     if (!isNativeApp()) throw new Error('Native phone verification requires a native app');
     if (requestInProgress) throw new Error('휴대폰 인증 요청을 처리 중입니다. 잠시 기다려 주세요.');
@@ -33,7 +40,7 @@ export async function sendNativePhoneVerification(phoneNumber, signInWebSession)
         (async () => {
             try {
                 timer = setTimeout(() => finish(new Error('앱 인증 요청 시간이 만료되었습니다. 다시 요청해 주세요.')), 90000);
-                await listen('phoneVerificationFailed', event => finish(new Error(event.message || '앱 인증 설정을 확인해 주세요.')));
+                await listen('phoneVerificationFailed', event => finish(nativeVerificationError(event)));
                 await listen('phoneCodeSent', event => {
                     if (!event.verificationId) return finish(new Error('인증 요청 결과를 확인할 수 없습니다.'));
                     finish(null, { confirm: async code => {
