@@ -2,7 +2,9 @@ const { randomUUID, randomInt } = require('node:crypto');
 const { normalizePhone, phoneDigits, problem } = require('./license-integrity.cjs');
 
 async function registerTrial(db, identity, input, now = Date.now()) {
-    if (identity?.firebase?.sign_in_provider !== 'phone' || !identity.phone_number) {
+    const provider = identity?.firebase?.sign_in_provider;
+    const verifiedPhoneSession = provider === 'phone' || (provider === 'custom' && identity?.nativePhoneVerified === true);
+    if (!verifiedPhoneSession || !identity.phone_number) {
         throw problem('전화번호 SMS 인증을 먼저 완료해 주세요.', 403);
     }
     const phone = normalizePhone(input?.phone);
