@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "build:android:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-release.ps1",
     "icons:android": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/generate-android-icons.ps1",
     "firebase:check": "node scripts/check-native-firebase.cjs",
     "postinstall": "node scripts/prepare-capacitor.cjs",
