@@ -12,13 +12,18 @@ if (!admin.apps.length) {
 }
 
 const db = admin.firestore();
+const MASTER_AUTH_PHONE = '+821084557060';
+const MASTER_SESSION_SECONDS = 8 * 60 * 60;
 
 module.exports = async function handler(req, res) {
   // 웹에서 POST 방식으로 키를 받아옵니다.
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
+  res.setHeader('Cache-Control', 'no-store');
   
-  const { key } = req.body;
-  if (!key) return res.status(400).json({ error: '키를 입력해주세요.' });
+  const { key } = req.body || {};
+  if (typeof key !== 'string' || !key.trim() || key.length > 200 || key.includes('/')) {
+    return res.status(400).json({ error: '키를 입력해주세요.' });
+  }
 
   try {
     const searchKey = key.toUpperCase();
@@ -28,9 +33,21 @@ module.exports = async function handler(req, res) {
     if (!adminDoc.exists) adminDoc = await db.collection('admins').doc(searchKey).get();
     
     if (adminDoc.exists) {
-      // 마스터 토큰 발행 (안전한 고정 식별자 사용)
-      const token = await admin.auth().createCustomToken('admin_master', { role: 'MASTER' });
-      return res.status(200).json({ token, role: 'MASTER', data: adminDoc.data() });
+      // 키 확인만으로 MASTER 토큰이나 관리자 문서를 반환하지 않습니다.
+      const phoneToken = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+      if (!phoneToken) return res.status(200).json({ requiresSms: true, phone: MASTER_AUTH_PHONE });
+      let identity;
+      try { identity = await admin.auth().verifyIdToken(phoneToken, true); }
+      catch (_) { return res.status(401).json({ error: 'SMS 인증이 만료되었습니다. 다시 인증해 주세요.' }); }
+      const now = Math.floor(Date.now() / 1000);
+      if (identity.firebase?.sign_in_provider !== 'phone' || identity.phone_number !== MASTER_AUTH_PHONE ||
+          !Number.isInteger(identity.auth_time) || now - identity.auth_time > 300 || identity.auth_time > now + 30) {
+        return res.status(403).json({ error: '지정된 관리자 번호의 최근 SMS 인증이 필요합니다.' });
+      }
+      const token = await admin.auth().createCustomToken('admin_master', {
+        role: 'MASTER', masterSmsVerified: true, masterSessionExpiresAt: now + MASTER_SESSION_SECONDS
+      });
+      return res.status(200).json({ token, role: 'MASTER', data: { name: adminDoc.data().name || '마스터' } });
     }
 
     // 2. 관제/일반 라이선스 확인

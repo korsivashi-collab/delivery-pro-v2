@@ -18,6 +18,9 @@ module.exports = async function handler(req, res) {
         try { identity = await admin.auth().verifyIdToken(token, true); }
         catch (_) { return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' }); }
         if (identity.role !== 'MASTER') return res.status(403).json({ error: '마스터 관리자만 계정을 저장할 수 있습니다.' });
+        if (identity.masterSmsVerified !== true || !(identity.masterSessionExpiresAt > Date.now() / 1000)) {
+            return res.status(403).json({ error: '마스터 SMS 인증이 필요합니다. 다시 로그인해 주세요.' });
+        }
         const result = req.body?.action === 'repairPhones'
             ? await repairLicensePhones(admin.firestore())
             : await saveLicenses(admin.firestore(), req.body);
