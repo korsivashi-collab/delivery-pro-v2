@@ -1,210 +1,122 @@
-// api/optimize-llm.js
-
-// 🌟 실제 구글 Gemini API 호출에 사용될 모델 (환경변수 우선, 기본값 1.5 플래시)
-const API_MODEL = process.env.GEMINI_MODEL || 'gemini-1.5-flash';
-const TIMEOUT_MS = 15000; // 기사님이 대기하지 않도록 15초 제한
-
-// 🌟 제미나이 배송 동선 최적화 전문가 시스템 프롬프트 (진입/진출 흐름 연계 강화)
-const SYSTEM_INSTRUCTION = `당신은 한국의 식자재 및 화물 배송 동선 최적화 전문가입니다.
-제공되는 데이터는 밀집된 배송지(destinations) 목록과, 진입 직전 지점(previousLocation), 완료 후 이동할 다음 목적지(nextLocation) 정보입니다.
-단순 직선거리(하버사인) 알고리즘만으로는 해결할 수 없는 '지그재그 동선', '도로 횡단', '비효율적인 유턴', '진행 방향 역전'을 방지하기 위해 당신이 호출되었습니다.
-
-[동선 정렬 규칙]
-1. [방향성 흐름 유지 - 최우선]:
-   - previousLocation이 주어지면 그 위치에서 가장 자연스럽게 진입할 수 있는 배송지부터 배송을 시작하세요.
-   - nextLocation이 주어지면 마지막 배송지는 nextLocation으로 이동하기 가장 편리한 출구 쪽 배송지가 되도록 배치하세요.
-   - 클러스터 내부에서 동선이 역주행하거나 거꾸로 돌아가지 않고, previousLocation -> [destinations 순서] -> nextLocation 으로 물 흐르듯 한 방향으로 통과하도록 정렬하세요.
-2. [도로 및 건물 단위 묶음 배송]:
-   - 주소의 텍스트(도로명, 지번, 건물명, 아파트 단지명, 동/호수)와 상호명을 분석하여 실제 배송 기사가 이동하기 가장 매끄러운 순서를 결정하세요.
-   - 같은 건물, 같은 상가, 같은 아파트 단지, 혹은 같은 도로나 골목 라인에 있는 배송지는 반드시 연달아 묶어서 배치하세요.
-   - 도로 반대편이나 블록이 다른 배송지는 한쪽 라인의 배송이 완전히 끝난 후 도로를 건너가도록 배치하여 왔다 갔다 하는 지그재그 횡단을 없애세요.
-3. [결과 제약 사항]:
-   - 반드시 destinations에 포함된 배송지 ID(문자열)만 빠짐없이 포함하여 가장 효율적인 방문 순서대로 정렬해야 합니다.
-   - previousLocation이나 nextLocation은 진행 방향 참고용이므로 반환할 ID 목록에 절대 포함하지 마세요.
-
-결과는 반드시 지정된 JSON 스키마에 맞춰 '배송지 ID(문자열)'가 정렬된 배열만 반환하세요.`;
-
-// 반환받을 JSON 구조 정의 (프론트엔드 파싱 오류 방지)
-const RESPONSE_SCHEMA = {
-    type: 'OBJECT',
-    properties: {
-        optimized: {
-            type: 'ARRAY',
-            description: "최적화된 방문 순서대로 정렬된 destinations의 배송지 ID 목록",
-            items: { type: 'STRING' }
-        }
-    },
-    required: ["optimized"]
-};
-
-function failure(code, status) { 
-    return Object.assign(new Error(code), { code, status }); 
+// Existing endpoint retained; route ordering now uses Kakao roads, not an LLM.
+const TIMEOUT_MS = 40000;
+const MAX_CANDIDATES = 24;
+function failure(code, status) { return Object.assign(new Error(code), { code, status }); }
+function validPoint(p) { return p && Number.isFinite(p.lat) && Math.abs(p.lat)<=90 && Number.isFinite(p.lng) && Math.abs(p.lng)<=180; }
+function validNodes(nodes) {
+ return Array.isArray(nodes) && nodes.length>=3 && nodes.length<=6 && nodes.every(p=>validPoint(p) &&
+  ((typeof p.id==='string' && p.id.trim() && p.id.length<=160)||(typeof p.id==='number' && Number.isSafeInteger(p.id)))) &&
+  new Set(nodes.map(p=>String(p.id))).size===nodes.length;
 }
-
-function createHandler({ 
-    fetchImpl = (...args) => fetch(...args), 
-    env = process.env,
-    timeoutMs = TIMEOUT_MS 
-} = {}) {
-    return async function handler(req, res) {
-        res.setHeader('Cache-Control', 'no-store');
-        
-        try {
-            if (req.method !== 'POST') { 
-                res.setHeader('Allow', 'POST'); 
-                throw failure('METHOD_NOT_ALLOWED', 405); 
-            }
-            if (!env.GEMINI_API_KEY?.trim()) {
-                throw failure('GEMINI_KEY_MISSING', 503);
-            }
-
-            let body;
-            try { 
-                body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; 
-            } catch (_) { 
-                throw failure('DESTINATIONS_INVALID', 400); 
-            }
-
-            const destinations = body?.destinations;
-            if (!Array.isArray(destinations) || destinations.length < 2 || destinations.length > 200 ||
-                !destinations.every(node => node &&
-                    ((typeof node.id === 'string' && node.id.trim() && node.id.length <= 160) ||
-                     (typeof node.id === 'number' && Number.isSafeInteger(node.id))) &&
-                    typeof node.address === 'string' && node.address.trim() && node.address.length <= 600 &&
-                    (node.storeName == null || (typeof node.storeName === 'string' && node.storeName.length <= 160)) &&
-                    Number.isFinite(node.lat) && Math.abs(node.lat) <= 90 &&
-                    Number.isFinite(node.lng) && Math.abs(node.lng) <= 180) ||
-                new Set(destinations.map(node => String(node.id))).size !== destinations.length) {
-                throw failure('DESTINATIONS_INVALID', 400);
-            }
-
-            // 앵커(진입점/진출점) 데이터 정제
-            const prevAnchor = body?.prevAnchor && typeof body.prevAnchor === 'object' ? {
-                address: String(body.prevAnchor.address || '').slice(0, 600),
-                storeName: String(body.prevAnchor.storeName || '').slice(0, 160)
-            } : null;
-
-            const nextAnchor = body?.nextAnchor && typeof body.nextAnchor === 'object' ? {
-                address: String(body.nextAnchor.address || '').slice(0, 600),
-                storeName: String(body.nextAnchor.storeName || '').slice(0, 160)
-            } : null;
-
-            // LLM 토큰 효율화 및 핵심 정렬 데이터 구성
-            const nodes = destinations.map(({ id, address, storeName, lat, lng }) => ({
-                id: String(id),
-                address,
-                storeName: storeName || '상호 없음',
-                lat,
-                lng
-            }));
-
-            const promptData = {
-                ...(prevAnchor ? {
-                    previousLocation: {
-                        description: "클러스터 진입 직전 배송지 (진입 방향 참고)",
-                        address: prevAnchor.address,
-                        storeName: prevAnchor.storeName || "상호 없음"
-                    }
-                } : {}),
-                destinations: nodes.map(n => ({
-                    id: n.id,
-                    address: n.address,
-                    storeName: n.storeName
-                })),
-                ...(nextAnchor ? {
-                    nextLocation: {
-                        description: "클러스터 완료 후 이동할 목적지 (진출 방향 참고)",
-                        address: nextAnchor.address,
-                        storeName: nextAnchor.storeName || "상호 없음"
-                    }
-                } : {})
-            };
-
-            const controller = new AbortController();
-            let timer;
-            let upstream;
-
-            try {
-                upstream = await Promise.race([
-                    Promise.resolve().then(async () => {
-                        const response = await fetchImpl(`https://generativelanguage.googleapis.com/v1beta/models/${API_MODEL}:generateContent`, {
-                            method: 'POST',
-                            headers: { 
-                                'Content-Type': 'application/json', 
-                                'x-goog-api-key': env.GEMINI_API_KEY 
-                            },
-                            signal: controller.signal,
-                            body: JSON.stringify({
-                                systemInstruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-                                contents: [{ 
-                                    role: 'user', 
-                                    parts: [{ text: JSON.stringify(promptData, null, 2) }] 
-                                }],
-                                generationConfig: { 
-                                    responseMimeType: 'application/json', 
-                                    responseSchema: RESPONSE_SCHEMA,
-                                    temperature: 0.1,
-                                    maxOutputTokens: 4096
-                                }
-                            })
-                        });
-
-                        if (!response.ok) {
-                            const code = response.status === 401 ? 'GEMINI_AUTH_ERROR'
-                                : [403, 404].includes(response.status) ? 'GEMINI_MODEL_ACCESS_ERROR'
-                                : response.status === 429 ? 'GEMINI_RATE_LIMIT' : 'GEMINI_UPSTREAM_ERROR';
-                            throw failure(code, 502);
-                        }
-
-                        try { 
-                            return await response.json(); 
-                        } catch (_) { 
-                            throw failure('GEMINI_SCHEMA_ERROR', 502); 
-                        }
-                    }),
-                    new Promise((_, reject) => {
-                        timer = setTimeout(() => {
-                            reject(failure('GEMINI_TIMEOUT', 504));
-                            controller.abort();
-                        }, timeoutMs);
-                    })
-                ]);
-            } finally { 
-                clearTimeout(timer); 
-            }
-
-            const candidate = upstream?.candidates?.[0];
-            if (!candidate || candidate.finishReason !== 'STOP') {
-                throw failure('GEMINI_SCHEMA_ERROR', 502);
-            }
-
-            let parsed;
-            try {
-                parsed = JSON.parse(candidate.content.parts.filter(part => !part.thought)
-                    .map(part => part.text || '').join(''));
-            } catch (_) { 
-                throw failure('GEMINI_SCHEMA_ERROR', 502); 
-            }
-
-            const ids = new Set(nodes.map(node => node.id));
-            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) ||
-                !Array.isArray(parsed.optimized) ||
-                parsed.optimized.length !== ids.size ||
-                new Set(parsed.optimized).size !== ids.size ||
-                !parsed.optimized.every(id => typeof id === 'string' && ids.has(id))) {
-                throw failure('GEMINI_SCHEMA_ERROR', 502);
-            }
-
-            return res.status(200).json({ optimized: parsed.optimized });
-
-        } catch (error) {
-            console.error('[Optimize LLM Error]', error.code || error.message);
-            return res.status(error.status || 502).json({ 
-                error: { code: error.code && error.status ? error.code : 'GEMINI_NETWORK_ERROR' } 
-            });
-        }
-    };
+function distance(a,b) {
+ const r=Math.PI/180,x=(b.lat-a.lat)*r,y=(b.lng-a.lng)*r;
+ const h=Math.sin(x/2)**2+Math.cos(a.lat*r)*Math.cos(b.lat*r)*Math.sin(y/2)**2;
+ return 6371*2*Math.atan2(Math.sqrt(Math.min(1,h)),Math.sqrt(Math.max(0,1-h)));
 }
-
-module.exports = createHandler();
-module.exports.createHandler = createHandler;
+function bearing(a,b) {
+ if(a.lat===b.lat && a.lng===b.lng)return null;
+ const r=Math.PI/180,d=(b.lng-a.lng)*r;
+ return (Math.atan2(Math.sin(d)*Math.cos(b.lat*r),Math.cos(a.lat*r)*Math.sin(b.lat*r)-Math.sin(a.lat*r)*Math.cos(b.lat*r)*Math.cos(d))*180/Math.PI+360)%360;
+}
+function angleMetrics(points, originAngle=null) {
+ let prev=originAngle,angleSum=0,reversals=0;
+ for(let i=1;i<points.length;i++) {
+  const angle=bearing(points[i-1],points[i]);if(angle==null)continue;
+  if(prev!=null) {const d=Math.abs(((angle-prev+540)%360)-180);angleSum+=d;if(d>135)reversals++;}
+  prev=angle;
+ }
+ return {angleSum,directionReversals:reversals,turnScore:angleSum+reversals*180};
+}
+// Remove small road digitization wiggles before measuring meaningful direction changes (15m RDP).
+function roadPoints(route) {
+ const raw=[];
+ for(const section of route.sections||[])for(const road of section.roads||[]) {
+  const vertices=road.vertexes;
+  if(!Array.isArray(vertices)||vertices.length%2)throw failure('KAKAO_GEOMETRY_INVALID',502);
+  for(let i=0;i<vertices.length;i+=2) {
+   const p={lng:vertices[i],lat:vertices[i+1]};if(!validPoint(p))throw failure('KAKAO_GEOMETRY_INVALID',502);
+   if(!raw.length||p.lng!==raw.at(-1).lng||p.lat!==raw.at(-1).lat)raw.push(p);
+  }
+ }
+ if(raw.length<2) {if(route.summary.distance===0)return raw;throw failure('KAKAO_GEOMETRY_INVALID',502);}
+ const scale=111320*Math.cos(raw[0].lat*Math.PI/180);
+ const points=raw.map(p=>({x:(p.lng-raw[0].lng)*scale,y:(p.lat-raw[0].lat)*111320}));
+ const keep=new Set([0,points.length-1]),stack=[[0,points.length-1]];
+ while(stack.length) {
+  const [a,b]=stack.pop(),p=points[a],q=points[b],dx=q.x-p.x,dy=q.y-p.y,len=dx*dx+dy*dy;
+  let max=225,chosen=-1;
+  for(let i=a+1;i<b;i++) {
+   const t=len?Math.max(0,Math.min(1,((points[i].x-p.x)*dx+(points[i].y-p.y)*dy)/len)):0;
+   const d=(points[i].x-p.x-t*dx)**2+(points[i].y-p.y-t*dy)**2;
+   if(d>max){max=d;chosen=i;}
+  }
+  if(chosen>=0){keep.add(chosen);stack.push([a,chosen],[chosen,b]);}
+ }
+ return [...keep].sort((a,b)=>a-b).map(i=>raw[i]);
+}
+function candidateOrders(nodes, core, prev, next, heading) {
+ const permutations=[];
+ function walk(prefix,remaining){if(!remaining.length){permutations.push(prefix);return;}remaining.forEach((p,i)=>walk([...prefix,p],remaining.filter((_,j)=>i!==j)));}
+ walk([],nodes);
+ if(permutations.length<=MAX_CANDIDATES)return permutations;
+ const selected=[],seen=new Set();
+ function add(order){const k=JSON.stringify(order.map(p=>p.id));if(!seen.has(k)&&selected.length<MAX_CANDIDATES){seen.add(k);selected.push(order);}}
+ add(nodes);add([...nodes].reverse());
+ // Explicit front/back attachment candidates, entirely inside the same local region.
+ const members=new Set(core.map(p=>p.id)),outside=nodes.filter(p=>!members.has(p.id));
+ for(let i=0;i<=outside.length;i++)for(const group of [core,[...core].reverse()])add([...outside.slice(0,i),...group,...outside.slice(i)]);
+ const byAngle=[...permutations].sort((a,b)=>angleMetrics([prev,...a,next].filter(Boolean),heading).turnScore-angleMetrics([prev,...b,next].filter(Boolean),heading).turnScore);
+ for(const order of byAngle.slice(0,6))add(order);
+ for(let i=0;i<MAX_CANDIDATES;i++)add(permutations[Math.round(i*(permutations.length-1)/(MAX_CANDIDATES-1))]);
+ for(const order of permutations){add(order);if(selected.length>=MAX_CANDIDATES)break;}
+ return selected;
+}
+function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,timeoutMs=TIMEOUT_MS}={}) {
+ return async function handler(req,res) {
+  res.setHeader('Cache-Control','no-store');let timer,controller;
+  try {
+   if(req.method!=='POST'){res.setHeader('Allow','POST');throw failure('METHOD_NOT_ALLOWED',405);}
+   let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;}catch(_){throw failure('DESTINATIONS_INVALID',400);}
+   const core=body?.destinations,context=body?.context||core;
+   if(!validNodes(core)||!validNodes(context)||!validPoint(body.prevAnchor)||(body.nextAnchor!=null&&!validPoint(body.nextAnchor))||
+    (body.originAngle!=null&&(!Number.isFinite(body.originAngle)||body.originAngle<0||body.originAngle>=360))||
+    !core.every(p=>context.some(c=>String(c.id)===String(p.id)&&c.lat===p.lat&&c.lng===p.lng)))throw failure('DESTINATIONS_INVALID',400);
+   if(context.some((p,i)=>context.slice(i+1).some(q=>distance(p,q)>.900001)))throw failure('CLUSTER_TOO_WIDE',400);
+   const key=env.KAKAO_REST_API_KEY?.trim();if(!key)throw failure('KAKAO_KEY_MISSING',503);
+   const nodes=context.map(({id,lat,lng})=>({id:String(id),lat,lng}));
+   const group=core.map(({id,lat,lng})=>({id:String(id),lat,lng}));
+   const candidates=candidateOrders(nodes,group,body.prevAnchor,body.nextAnchor,body.originAngle??null);
+   controller=new AbortController();const coordinate=p=>({x:p.lng,y:p.lat});
+   const cache=new Map(),results=new Array(candidates.length);let cursor=0,calls=0;
+   async function worker(){while(cursor<candidates.length){
+    if(controller.signal.aborted)throw failure('KAKAO_TIMEOUT',504);
+    const index=cursor++,order=candidates[index],target=body.nextAnchor||order.at(-1);
+    const origin=coordinate(body.prevAnchor);if(body.originAngle!=null)origin.angle=Math.round(body.originAngle)%360;
+    const payload=JSON.stringify({origin,destination:coordinate(target),waypoints:(body.nextAnchor?order:order.slice(0,-1)).map(coordinate),
+     priority:'RECOMMEND',avoid:['uturn'],alternatives:false,road_details:false,summary:false});
+    if(!cache.has(payload)){calls++;cache.set(payload,Promise.resolve().then(async()=>{
+     const response=await fetchImpl('https://apis-navi.kakaomobility.com/v1/waypoints/directions',{
+      method:'POST',headers:{'Content-Type':'application/json',Authorization:`KakaoAK ${key}`},body:payload,signal:controller.signal});
+     if(!response.ok)throw failure(response.status===429?'KAKAO_RATE_LIMIT':[401,403].includes(response.status)?'KAKAO_AUTH_ERROR':'KAKAO_UPSTREAM_ERROR',502);
+     let data;try{data=await response.json();}catch(_){throw failure('KAKAO_SCHEMA_ERROR',502);}
+     if(!Array.isArray(data?.routes)||!data.routes.length)throw failure('KAKAO_SCHEMA_ERROR',502);
+     const route=data.routes[0];if(route.result_code!==0)return null;
+     const s=route.summary;if(!Number.isFinite(s?.duration)||s.duration<0||!Number.isFinite(s?.distance)||s.distance<0)throw failure('KAKAO_SCHEMA_ERROR',502);
+     return {duration:s.duration,distance:s.distance,...angleMetrics(roadPoints(route),body.originAngle??null)};
+    }));}
+    const result=await cache.get(payload);results[index]=result&&{...result,index,order};
+   }}
+   await Promise.race([Promise.all(Array.from({length:3},worker)),new Promise((_,reject)=>{timer=setTimeout(()=>{controller.abort();reject(failure('KAKAO_TIMEOUT',504));},timeoutMs);})]);
+   const viable=results.filter(Boolean);if(!viable.length)throw failure('KAKAO_NO_ROUTE',502);
+   const fastest=[...viable].sort((a,b)=>a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
+   // Time limits detours; angle sum plus direction reversals ranks simplicity within that limit.
+   const simple=viable.filter(r=>r.duration<=fastest.duration*1.15)
+    .sort((a,b)=>a.turnScore-b.turnScore||a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
+   const metrics=r=>r?{optimized:r.order.map(p=>p.id),duration:r.duration,distance:r.distance,angleSum:r.angleSum,directionReversals:r.directionReversals}:null;
+   return res.status(200).json({source:'kakao',...metrics(simple),compared:candidates.length,calls,exhaustive:nodes.length<=4,
+    comparison:{baseline:metrics(results[0]),fastest:metrics(fastest),simple:metrics(simple)}});
+  }catch(error){controller?.abort();return res.status(error.status||502).json({error:{code:error.code||'KAKAO_NETWORK_ERROR'}});}
+  finally{clearTimeout(timer);}
+ };
+}
+module.exports=createHandler();module.exports.createHandler=createHandler;
