@@ -139,11 +139,14 @@ export async function initApp() {
     const applyOwnedRoute = (newDestinations, routeData) => {
         if (!routeData || routeData.routeOwnerId !== state.getRouteOwnerId() ||
             !Array.isArray(newDestinations) || !Number.isFinite(routeData.updatedAt)) return;
-        if (routeData.updatedAt < state.getRouteUpdatedAt()) {
+        const newReset = typeof routeData.resetId === 'string' && routeData.resetId.length > 0 &&
+            routeData.resetId !== state.getRouteResetId();
+        if (!newReset && routeData.updatedAt < state.getRouteUpdatedAt()) {
             saveRouteToFirestore(getOrCreateDeviceId(), localStorage.getItem('deliveryProUserPhone') || '', state.getDestinations());
             return;
         }
-        if (routeData.updatedAt === state.getRouteUpdatedAt()) return;
+        if (!newReset && routeData.updatedAt === state.getRouteUpdatedAt()) return;
+        if (typeof routeData.resetId === 'string') state.setRouteResetId(routeData.resetId);
         state.prepareRemoteRoute(newDestinations, routeData.routePlan);
         try { newDestinations = excludeLocallyCompleted(newDestinations); }
         catch (error) { console.error('완료 전송 상태 확인 실패:', error); return; }

@@ -12,6 +12,7 @@ let startLocation = null;
 let routePlan = null;
 let routeOwnerId = null;
 let routeUpdatedAt = 0;
+let routeResetId = '';
 let onActiveDataSaved = null;
 let lastKnownGps = null;
 // One watcher cache window (15s) plus its acquisition timeout (15s).
@@ -24,7 +25,7 @@ let committedMemory = null;
 let localTransaction = null;
 
 function memorySnapshot(updatedAt = routeUpdatedAt) {
-    return serializeLocal('deliveryPro_route_metadata', { destinations, endLocation, startLocation, routePlan, routeUpdatedAt: updatedAt }, 'memorySnapshot');
+    return serializeLocal('deliveryPro_route_metadata', { destinations, endLocation, startLocation, routePlan, routeResetId, routeUpdatedAt: updatedAt }, 'memorySnapshot');
 }
 
 function restoreMemory(snapshot) {
@@ -35,6 +36,7 @@ function restoreMemory(snapshot) {
     startLocation = saved.startLocation;
     routePlan = saved.routePlan || null;
     routeUpdatedAt = saved.routeUpdatedAt;
+    routeResetId = saved.routeResetId || '';
 }
 
 function localCounts() {
@@ -308,6 +310,8 @@ export const state = {
     },
     getRouteOwnerId() { return routeOwnerId; },
     getRouteUpdatedAt() { return routeUpdatedAt; },
+    getRouteResetId() { return routeResetId; },
+    setRouteResetId(value) { routeResetId = typeof value === 'string' ? value : ''; },
     getRoutePlan() { return routePlan ? copyPlanValue(routePlan) : null; },
     prepareRemoteRoute(list, plan) {
         if (!plan && routePlan && list.length && !list.some(d => routePlan.orderIds.includes(String(d.id)))) routePlan = null;
@@ -366,6 +370,7 @@ export const state = {
         this.loadActiveData();
     },
     deactivateRouteOwner() {
+        routeResetId = '';
         routeOwnerId = null;
         routeUpdatedAt = 0;
         destinations = [];
@@ -521,7 +526,7 @@ export const state = {
             if (history !== undefined) values.deliveryPro_history = serializeLocal('deliveryPro_history', history, 'saveActiveData');
             if (transmissions !== undefined) values.deliveryPro_transmissions = serializeLocal('deliveryPro_transmissions', transmissions, 'saveActiveData');
             // loadActiveData already reads only this owned snapshot.
-            values.deliveryPro_route_metadata = serializeLocal('deliveryPro_route_metadata', { routeOwnerId, updatedAt: revision, destinations, endLocation,
+            values.deliveryPro_route_metadata = serializeLocal('deliveryPro_route_metadata', { routeOwnerId, routeResetId, updatedAt: revision, destinations, endLocation,
                 startSelected: startLocation !== null, startLocation, routePlan }, 'saveActiveData');
             writeLocalValues(values, 'saveActiveData', { ...localCounts(),
                 ...(history !== undefined ? { historyCount: history.length } : {}),
@@ -552,6 +557,7 @@ export const state = {
             startLocation = null;
             routePlan = null;
             routeUpdatedAt = 0;
+            routeResetId = '';
             committedMemory = memorySnapshot();
             if (!metadata || metadata.routeOwnerId !== routeOwnerId || !Number.isFinite(metadata.updatedAt)) return;
             // 하나의 소유자 스냅샷을 읽어 다른 탭의 별도 키 쓰기와 섞이지 않게 합니다.
@@ -562,6 +568,7 @@ export const state = {
             const savedEnd = metadata.endLocation;
             this.setEndLocation(savedEnd || endLocation);
             routeUpdatedAt = metadata.updatedAt;
+            routeResetId = metadata.routeResetId || '';
             if (metadata.startSelected === true && isDestinationId(metadata.startLocation?.id)) this.setStartLocation(metadata.startLocation);
             committedMemory = memorySnapshot();
             // Persist repaired input without advancing the server revision.

@@ -711,6 +711,7 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
         const routeRef = doc(db, "routes", deviceId);
         const payload = {
             routeOwnerId,
+            resetId: state.getRouteResetId(),
             deviceId,
             endLocation: state.getEndLocation(),
             startSelected: state.getStartLocation() !== null,
@@ -738,6 +739,7 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
             return runTransaction(db, async transaction => {
                 const snapshot = await transaction.get(routeRef);
                 const remote = snapshot.exists() ? snapshot.data() : null;
+                if (remote?.routeOwnerId === routeOwnerId && remote.resetId && remote.resetId !== payload.resetId) return false;
                 // A newer dispatch/reset must survive an older delayed device write.
                 if (remote?.routeOwnerId === routeOwnerId && Number.isFinite(remote.updatedAt) &&
                     remote.updatedAt > payload.updatedAt) return false;

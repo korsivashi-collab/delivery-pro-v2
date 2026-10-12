@@ -450,6 +450,7 @@ export async function revertAutoDispatch() {
         // rather than interpreting a missing document as an unsynced local route.
         for (const driver of getFilteredVisibleDrivers()) {
             const routeOwnerId = await ensureRouteOwner(db, driver.key);
+            const resetId = crypto.randomUUID();
             const owned = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
             const documents = new Map();
             let revision = Date.now();
@@ -467,7 +468,7 @@ export async function revertAutoDispatch() {
             const emptyRoutes = [];
             for (const [id, ref] of documents) {
                 const emptyRoute = {
-                    routeOwnerId, deviceId: id, phone: driver.phone || '',
+                    routeOwnerId, resetId, deviceId: id, phone: driver.phone || '',
                     dispatchKey: driver.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                     destinations: [], routePlan: null, startSelected: false, startLocation: null,
                     endLocation: { lat: 0, lng: 0, address: '' }, updatedAt: revision, cleared: true
@@ -645,12 +646,18 @@ export async function sendRoutesToDrivers() {
             const routeOwnerId = await ensureRouteOwner(db, matchedLic.key);
             const previousRoutes = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
             let routeRevision = nowTs;
+            let resetId = '';
+            let resetRevision = -1;
             previousRoutes.forEach(snapshot => {
                 const previous = snapshot.data();
                 if (Number.isFinite(previous.updatedAt)) routeRevision = Math.max(routeRevision, previous.updatedAt + 1);
+                if (previous.resetId && previous.updatedAt > resetRevision) {
+                    resetId = previous.resetId; resetRevision = previous.updatedAt;
+                }
             });
             const routePayload = {
                 routeOwnerId,
+                resetId, cleared: false,
                 deviceId: devId,
                 phone: matchedLic.phone || devId,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
