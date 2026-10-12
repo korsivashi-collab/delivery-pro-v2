@@ -3,8 +3,8 @@ const TIMEOUT_MS = 40000;
 const MAX_CANDIDATES = 24;
 function failure(code, status) { return Object.assign(new Error(code), { code, status }); }
 function validPoint(p) { return p && Number.isFinite(p.lat) && Math.abs(p.lat)<=90 && Number.isFinite(p.lng) && Math.abs(p.lng)<=180; }
-function validNodes(nodes) {
- return Array.isArray(nodes) && nodes.length>=3 && nodes.length<=6 && nodes.every(p=>validPoint(p) &&
+function validNodes(nodes, minimum=3) {
+ return Array.isArray(nodes) && nodes.length>=minimum && nodes.length<=6 && nodes.every(p=>validPoint(p) &&
   ((typeof p.id==='string' && p.id.trim() && p.id.length<=160)||(typeof p.id==='number' && Number.isSafeInteger(p.id)))) &&
   new Set(nodes.map(p=>String(p.id))).size===nodes.length;
 }
@@ -54,10 +54,21 @@ function roadPoints(route) {
  }
  return [...keep].sort((a,b)=>a-b).map(i=>raw[i]);
 }
-function candidateOrders(nodes, core, prev, next, heading) {
+function candidateOrders(nodes, core, prev, next, heading, excursion=false) {
  const permutations=[];
  function walk(prefix,remaining){if(!remaining.length){permutations.push(prefix);return;}remaining.forEach((p,i)=>walk([...prefix,p],remaining.filter((_,j)=>i!==j)));}
  walk([],nodes);
+ if(excursion) {
+  // 가까운 배송지는 연속 처리하고, 떨어진 두 묶음의 앞뒤를 비교한다.
+  const coreIds=new Set(core.map(p=>p.id));
+  const outside=nodes.filter(p=>!coreIds.has(p.id));
+  const grouped=permutations.filter(order=>
+   order.filter(p=>coreIds.has(p.id)).every((p,i)=>p.id===core[i].id) &&
+   order.filter(p=>!coreIds.has(p.id)).every((p,i)=>p.id===outside[i].id) &&
+   nodes.every((p,i)=>nodes.slice(i+1).every(q=>
+    distance(p,q)>.9 || Math.abs(order.indexOf(p)-order.indexOf(q))===1)));
+  permutations.splice(0,permutations.length,nodes,...grouped.filter(order=>order.some((p,i)=>p!==nodes[i])));
+ }
  if(permutations.length<=MAX_CANDIDATES)return permutations;
  const selected=[],seen=new Set();
  function add(order){const k=JSON.stringify(order.map(p=>p.id));if(!seen.has(k)&&selected.length<MAX_CANDIDATES){seen.add(k);selected.push(order);}}
@@ -77,15 +88,20 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
   try {
    if(req.method!=='POST'){res.setHeader('Allow','POST');throw failure('METHOD_NOT_ALLOWED',405);}
    let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;}catch(_){throw failure('DESTINATIONS_INVALID',400);}
-   const core=body?.destinations,context=body?.context||core;
-   if(!validNodes(core)||!validNodes(context)||!validPoint(body.prevAnchor)||(body.nextAnchor!=null&&!validPoint(body.nextAnchor))||
+   const core=body?.destinations,context=body?.context||core,excursion=body?.mode==='excursion';
+   if(!validNodes(core,excursion?2:3)||!validNodes(context)||!validPoint(body.prevAnchor)||(body.nextAnchor!=null&&!validPoint(body.nextAnchor))||
     (body.originAngle!=null&&(!Number.isFinite(body.originAngle)||body.originAngle<0||body.originAngle>=360))||
     !core.every(p=>context.some(c=>String(c.id)===String(p.id)&&c.lat===p.lat&&c.lng===p.lng)))throw failure('DESTINATIONS_INVALID',400);
-   if(context.some((p,i)=>context.slice(i+1).some(q=>distance(p,q)>.900001)))throw failure('CLUSTER_TOO_WIDE',400);
+   if(excursion) {
+    const ends = core.length===2 && String(core[0].id)===String(context[0].id) && String(core[1].id)===String(context.at(-1).id);
+    const close = distance(context[0],context.at(-1));
+    const travel = context.slice(1).reduce((sum,p,i)=>sum+distance(context[i],p),0);
+    if(!ends||close>.900001||travel-close<1.2||travel<close*2||context.some((p,i)=>context.slice(i+1).some(q=>distance(p,q)>6)))throw failure('EXCURSION_INVALID',400);
+   } else if(context.some((p,i)=>context.slice(i+1).some(q=>distance(p,q)>.900001)))throw failure('CLUSTER_TOO_WIDE',400);
    const key=env.KAKAO_REST_API_KEY?.trim();if(!key)throw failure('KAKAO_KEY_MISSING',503);
    const nodes=context.map(({id,lat,lng})=>({id:String(id),lat,lng}));
    const group=core.map(({id,lat,lng})=>({id:String(id),lat,lng}));
-   const candidates=candidateOrders(nodes,group,body.prevAnchor,body.nextAnchor,body.originAngle??null);
+   const candidates=candidateOrders(nodes,group,body.prevAnchor,body.nextAnchor,body.originAngle??null,excursion);
    controller=new AbortController();const coordinate=p=>({x:p.lng,y:p.lat});
    const cache=new Map(),results=new Array(candidates.length);let cursor=0,calls=0;
    async function worker(){while(cursor<candidates.length){
@@ -111,9 +127,11 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
    const fastest=[...viable].sort((a,b)=>a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
    // Time limits detours; angle sum plus direction reversals ranks simplicity within that limit.
    const simple=viable.filter(r=>r.duration<=fastest.duration*1.15)
-    .sort((a,b)=>a.turnScore-b.turnScore||a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
+    .sort((a,b)=>(excursion?a.angleSum-b.angleSum:a.turnScore-b.turnScore)||
+     (excursion?a.duration-b.duration:0)||a.directionReversals-b.directionReversals||
+     a.duration-b.duration||a.distance-b.distance||a.index-b.index)[0];
    const metrics=r=>r?{optimized:r.order.map(p=>p.id),duration:r.duration,distance:r.distance,angleSum:r.angleSum,directionReversals:r.directionReversals}:null;
-   return res.status(200).json({source:'kakao',...metrics(simple),compared:candidates.length,calls,exhaustive:nodes.length<=4,
+   return res.status(200).json({source:'kakao',...metrics(simple),compared:candidates.length,calls,exhaustive:!excursion&&nodes.length<=4,
     comparison:{baseline:metrics(results[0]),fastest:metrics(fastest),simple:metrics(simple)}});
   }catch(error){controller?.abort();return res.status(error.status||502).json({error:{code:error.code||'KAKAO_NETWORK_ERROR'}});}
   finally{clearTimeout(timer);}
