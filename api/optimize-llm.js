@@ -103,7 +103,11 @@ async function compareWithGemini(body,fetchImpl,env) {
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),40000);
  try {
   const response=await fetchImpl('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent',{method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':env.GEMINI_API_KEY.trim()},signal:controller.signal,body:JSON.stringify({systemInstruction:{parts:[{text:instruction}]},contents:[{role:'user',parts:[{text:JSON.stringify(clean)}]}],generationConfig:{temperature:0,responseMimeType:'application/json',maxOutputTokens:2048}})});
-  if(!response.ok)throw failure('GEMINI_UPSTREAM_ERROR',502);
+  if(!response.ok){
+   const status=response.status;
+   const code=status===401?'GEMINI_AUTH_ERROR':status===403?'GEMINI_PERMISSION_ERROR':status===404?'GEMINI_MODEL_NOT_FOUND':status===429?'GEMINI_RATE_LIMIT':status===400?'GEMINI_REQUEST_REJECTED':'GEMINI_UPSTREAM_ERROR';
+   throw Object.assign(failure(code,502),{upstreamStatus:status});
+  }
   const result=await response.json();let choices;
   try{if(result.candidates?.[0]?.finishReason!=='STOP')throw Error();choices=JSON.parse(result.candidates[0].content.parts.filter(p=>!p.thought).map(p=>p.text||'').join('')).choices;}catch(_){throw failure('GEMINI_SCHEMA_ERROR',502);}
   if(!Array.isArray(choices)||choices.length!==windows.length||choices.some((c,i)=>!Number.isInteger(c)||c<0||c>=windows[i].candidates.length))throw failure('GEMINI_SCHEMA_ERROR',502);
@@ -161,7 +165,7 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
    const metrics=r=>r?{optimized:r.order.map(p=>p.id),duration:r.duration,distance:r.distance,angleSum:r.angleSum,directionReversals:r.directionReversals}:null;
    return res.status(200).json({source:'kakao',selectionPolicy:'road-time',...metrics(simple),compared:candidates.length,calls,exhaustive:!excursion&&nodes.length<=4,
     comparison:{baseline:metrics(results[0]),fastest:metrics(fastest),simple:metrics(simple)}});
-  }catch(error){controller?.abort();return res.status(error.status||502).json({error:{code:error.code||'KAKAO_NETWORK_ERROR'}});}
+  }catch(error){controller?.abort();return res.status(error.status||502).json({error:{code:error.code||'KAKAO_NETWORK_ERROR',...(Number.isInteger(error.upstreamStatus)?{upstreamStatus:error.upstreamStatus}: {})}});}
   finally{clearTimeout(timer);}
  };
 }
