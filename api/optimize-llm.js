@@ -54,10 +54,14 @@ function roadPoints(route) {
  }
  return [...keep].sort((a,b)=>a-b).map(i=>raw[i]);
 }
-function candidateOrders(nodes, core, excursion=false) {
+function candidateOrders(nodes, core, excursion=false, fixedLastId=null) {
  const permutations=[];
  function walk(prefix,remaining){if(!remaining.length){permutations.push(prefix);return;}remaining.forEach((p,i)=>walk([...prefix,p],remaining.filter((_,j)=>i!==j)));}
  walk([],nodes);
+ if(fixedLastId!=null) {
+  const permitted=permutations.filter(order=>order.at(-1).id===fixedLastId);
+  permutations.splice(0,permutations.length,...permitted);
+ }
  if(excursion) {
   // 가까운 배송지는 연속 처리하고, 떨어진 두 묶음의 앞뒤를 비교한다.
   const coreIds=new Set(core.map(p=>p.id));
@@ -71,7 +75,7 @@ function candidateOrders(nodes, core, excursion=false) {
  }
  if(permutations.length<=MAX_CANDIDATES)return permutations;
  const selected=[],seen=new Set();
- function add(order){const k=JSON.stringify(order.map(p=>p.id));if(!seen.has(k)&&selected.length<MAX_CANDIDATES){seen.add(k);selected.push(order);}}
+ function add(order){if(fixedLastId!=null&&order.at(-1).id!==fixedLastId)return;const k=JSON.stringify(order.map(p=>p.id));if(!seen.has(k)&&selected.length<MAX_CANDIDATES){seen.add(k);selected.push(order);}}
  add(nodes);add([...nodes].reverse());
  // Explicit front/back attachment candidates, entirely inside the same local region.
  const members=new Set(core.map(p=>p.id)),outside=nodes.filter(p=>!members.has(p.id));
@@ -88,6 +92,7 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
    if(req.method!=='POST'){res.setHeader('Allow','POST');throw failure('METHOD_NOT_ALLOWED',405);}
    let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;}catch(_){throw failure('DESTINATIONS_INVALID',400);}
    const core=body?.destinations,context=body?.context||core,excursion=body?.mode==='excursion';
+   if(body?.fixedLastId!=null && (!Array.isArray(context)||typeof body.fixedLastId!=='string'||String(context.at(-1)?.id)!==body.fixedLastId))throw failure('FIXED_LAST_INVALID',400);
    if(!validNodes(core,excursion?2:3)||!validNodes(context)||!validPoint(body.prevAnchor)||(body.nextAnchor!=null&&!validPoint(body.nextAnchor))||
     (body.originAngle!=null&&(!Number.isFinite(body.originAngle)||body.originAngle<0||body.originAngle>=360))||
     !core.every(p=>context.some(c=>String(c.id)===String(p.id)&&c.lat===p.lat&&c.lng===p.lng)))throw failure('DESTINATIONS_INVALID',400);
@@ -100,7 +105,7 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
    const key=env.KAKAO_REST_API_KEY?.trim();if(!key)throw failure('KAKAO_KEY_MISSING',503);
    const nodes=context.map(({id,lat,lng})=>({id:String(id),lat,lng}));
    const group=core.map(({id,lat,lng})=>({id:String(id),lat,lng}));
-   const candidates=candidateOrders(nodes,group,excursion);
+   const candidates=candidateOrders(nodes,group,excursion,body.fixedLastId??null);
    controller=new AbortController();const coordinate=p=>({x:p.lng,y:p.lat});
    const cache=new Map(),results=new Array(candidates.length);let cursor=0,calls=0;
    async function worker(){while(cursor<candidates.length){
