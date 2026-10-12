@@ -26,6 +26,7 @@
             <h2 class="text-xl font-black text-gray-900 mb-1 tracking-tight">통합 관리자 센터</h2>
             <p class="text-xs text-gray-400 mb-6 font-bold">마스터 비밀키 또는 관제 키를 입력해 주세요.</p>
             
+            <div id="master-key-step">
             <div class="space-y-3 mb-5 text-left">
                 <div class="relative">
                     <i class="fa-solid fa-key absolute left-4 top-4 text-gray-400 text-sm"></i>
@@ -36,6 +37,19 @@
             <button onclick="window.handleSingleKeyLogin()" id="login-btn" class="w-full text-white bg-blue-600 hover:bg-blue-700 font-black rounded-xl text-sm px-5 py-3.5 text-center shadow-lg transition active:scale-95 flex items-center justify-center gap-2">
                 <span>대시보드 접속</span>
             </button>
+            </div>
+            <div id="master-sms-step" class="hidden text-left space-y-3">
+                <p class="text-sm font-black text-slate-900">마스터 2차 인증</p>
+                <p class="text-xs text-slate-600 leading-relaxed">등록된 관리자 번호 <strong>010-8455-7060</strong>로 발송한 인증번호를 입력해 주세요.</p>
+                <label for="master-sms-code" class="block text-xs font-bold text-slate-700">인증번호</label>
+                <input id="master-sms-code" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="인증번호 6자리" class="w-full p-3.5 border border-slate-300 rounded-xl text-center text-lg font-mono tracking-widest outline-none focus:border-blue-600" onkeydown="if(event.key==='Enter') window.confirmMasterSmsLogin()">
+                <button id="master-sms-confirm" type="button" onclick="window.confirmMasterSmsLogin()" class="w-full bg-blue-600 text-white font-black py-3.5 rounded-xl disabled:opacity-50">인증하고 접속</button>
+                <div class="flex justify-between gap-3 text-xs font-bold">
+                    <button id="master-sms-resend" type="button" onclick="window.sendMasterLoginSms()" class="text-blue-600 py-2 disabled:opacity-50">인증번호 다시 받기</button>
+                    <button type="button" onclick="window.cancelMasterSmsLogin()" class="text-slate-500 py-2">키 입력으로 돌아가기</button>
+                </div>
+                <div id="master-sms-recaptcha"></div>
+            </div>
             <p id="login-msg" class="text-red-500 text-xs mt-3 font-bold min-h-[16px] whitespace-pre-line"></p>
 
             <!-- 법적 고지 및 약관 링크 -->

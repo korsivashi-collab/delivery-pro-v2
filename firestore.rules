@@ -3,10 +3,16 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // 기존 웹 로그인에서 발급하는 MASTER/DISPATCH 권한만 사용합니다.
+    function isVerifiedMaster() {
+      return request.auth != null && request.auth.token.get('role', '') == 'MASTER' &&
+        request.auth.token.get('masterSmsVerified', false) == true &&
+        request.auth.token.get('masterSessionExpiresAt', 0) > request.time.toMillis() / 1000;
+    }
+
+    // MASTER는 키 + SMS 검증이 완료된 유효 세션만 인정합니다.
     function isWebAdmin() {
-      return request.auth != null &&
-        request.auth.token.get('role', '') in ['MASTER', 'DISPATCH'];
+      return isVerifiedMaster() ||
+        (request.auth != null && request.auth.token.get('role', '') == 'DISPATCH');
     }
 
     function validCompletion(data) {
@@ -68,10 +74,10 @@ service cloud.firestore {
     match /licenses/{licenseKey} {
       allow read, delete: if true;
       // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
-      allow create: if request.auth != null && request.auth.token.get('role', '') == 'MASTER';
+      allow create: if isVerifiedMaster();
       allow update: if resource.data.get('type', '') == 'trial' ||
         request.resource.data.get('type', '') != 'trial' ||
-        (request.auth != null && request.auth.token.get('role', '') == 'MASTER');
+        isVerifiedMaster();
     }
 
     match /driver_profiles/{profileId} {
