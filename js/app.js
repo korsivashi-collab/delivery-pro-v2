@@ -338,7 +338,7 @@ export function handleStartSelectTab(mode) {
 }
 
 // ==========================================
-// 5. 동선 최적화 알고리즘 실행 (🌟 비동기 LLM 호출 완벽 지원)
+// 5. 기본 경로 및 카카오 밀집 구간 최적화
 // ==========================================
 let activeOptimization = null;
 
@@ -364,8 +364,8 @@ export async function optimizeRouteAction() {
     const isCurrent = () => activeOptimization === task && snapshotKey() === task.snapshot;
     
     try {
-        // LLM 분석이 포함될 수 있으므로 안내 문구 강화
-        showLoading("동선 최적화 중...\n(밀집 구간 발견 시 AI 분석 진행)");
+        // 가까운 배송지 묶음은 카카오 실제 도로 경로로 비교
+        showLoading("동선 최적화 중...\n(가까운 배송지의 도로 경로 비교)");
         
         // UI 렌더링이 블로킹되지 않도록 짧은 지연시간 부여
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -383,11 +383,18 @@ export async function optimizeRouteAction() {
         }
         if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
         
-        // 🌟 비동기로 변경된 최적화 엔진 호출 대기(await)
+        // 카카오 비교가 실패하면 해당 구간은 기본 순서를 유지하고 안내한다.
+        let routeComparison = { clusters: 0, failed: 0 };
         const optimizedSection = await calculateOptimizedRoute(
             routeDestinations, 
             { ...startLocation },
-            hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null
+            hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null,
+            {
+                onProgress: ({ current, total }) => {
+                    if (isCurrent()) showLoading(`도로 경로 비교 중...\n(${current}/${total} 구간)`);
+                },
+                onComplete: result => { routeComparison = result; }
+            }
         );
         
         if (!isCurrent()) return;
@@ -399,6 +406,9 @@ export async function optimizeRouteAction() {
         if (!updateDisplayNumbers()) return;
         hideLoading();
         
+        if (routeComparison.failed) {
+            alert(`카카오 도로 비교 ${routeComparison.clusters}개 구간 중 ${routeComparison.failed}개는 비교를 완료하지 못해 기본 경로를 유지했습니다.`);
+        }
         if (pendingDestinations.length) {
             alert(`위치 확인이 필요한 배송지 ${pendingDestinations.length}건은 최적화에서 제외하고 목록 끝에 유지했습니다. 주소를 수정해 주세요.`);
         }

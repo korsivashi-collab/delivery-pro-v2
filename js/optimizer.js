@@ -2,7 +2,7 @@
 import { apiFetch } from './native-platform.js';
 
 // =================================================================
-// [배송 동선 PRO] 하버사인 + 2-opt 기반 뼈대 경로 및 LLM '제한적' 밀집구간 정밀 교정 엔진
+// [배송 동선 PRO] 기본 경로 + 카카오 실제 도로 기반 밀집 구간 순서 비교
 // =================================================================
 
 // 두 지점 간의 거리 계산 (하버사인 공식, 단위: km)
@@ -16,138 +16,51 @@ export function getDistance(lat1, lon1, lat2, lon2) {
     return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-// 🌟 [LLM 개입을 위한 파라미터 설정 - 영점 조절(1차 완화) 반영]
-const MIN_CLUSTER_SIZE = 3;        // 최소 3곳 이상이 밀집되어 있을 때 개입
-const ZIGZAG_WINDOW_SIZE = 6;      // 한 번에 검사할 최대 노드 수
-const ZIGZAG_SCORE_THRESHOLD = 2;  // 지그재그 의심 점수 2점 이상 시 발동 (꼬임 감지 예민하게 완화)
-const MAX_LOCAL_SPAN_KM = 0.9;     // 반경 900m 이내의 구역에서 발동 (동네 골목길 커버하도록 확장)
+// 첨부 27건의 밀집도 기준: 배송지 간 최대 직선거리 900m, 최소 3곳.
+const MIN_CLUSTER_SIZE = 3;
+const MAX_CLUSTER_SIZE = 6;
+const MAX_LOCAL_SPAN_KM = 0.9;
 
-// 지그재그 및 꼬임 현상 점수화 함수
-function scoreZigzag(nodes) {
-    const reasons = { directionReversals: 0, progressRecovery: 0, crossings: 0, consecutiveSharpTurns: 0 };
-    const vectors = [];
-    let previousProgressSign = 0, previousSharpTurn = false;
-
-    for (let i = 1; i < nodes.length; i++) {
-        const a = nodes[i - 1], b = nodes[i];
-        const vector = { x: (b.lng - a.lng) * Math.cos((a.lat + b.lat) * Math.PI / 360), y: b.lat - a.lat };
-        const length = Math.hypot(vector.x, vector.y);
-        if (length > 0) vectors.push({ ...vector, length });
-
-        if (Number.isFinite(a.progress) && Number.isFinite(b.progress)) {
-            const delta = b.progress - a.progress;
-            const sign = Math.abs(delta) > 0.000001 ? Math.sign(delta) : 0;
-            if (previousProgressSign < 0 && sign > 0) reasons.progressRecovery++;
-            if (sign) previousProgressSign = sign;
-        }
-    }
-
-    for (let i = 1; i < vectors.length; i++) {
-        const a = vectors[i - 1], b = vectors[i];
-        const dot = a.x * b.x + a.y * b.y;
-        if (dot < 0) reasons.directionReversals++;
-        const sharp = dot < -Math.SQRT1_2 * a.length * b.length; // 135도 초과 급회전
-        if (previousSharpTurn && sharp) reasons.consecutiveSharpTurns++;
-        previousSharpTurn = sharp;
-    }
-
-    const side = (a, b, c) => (b.lng - a.lng) * (c.lat - a.lat) - (b.lat - a.lat) * (c.lng - a.lng);
-    for (let i = 0; i < nodes.length - 1; i++) {
-        for (let j = i + 2; j < nodes.length - 1; j++) {
-            const a = nodes[i], b = nodes[i + 1], c = nodes[j], d = nodes[j + 1];
-            if (side(a, b, c) * side(a, b, d) < 0 && side(c, d, a) * side(c, d, b) < 0) {
-                reasons.crossings++;
-            }
-        }
-    }
-
-    const score = reasons.directionReversals + reasons.progressRecovery + reasons.crossings * 2 + reasons.consecutiveSharpTurns;
-    return { score, reasons };
-}
-
-// 구간 이동 거리 합산 계산 보조 함수
-function calculateSectionDistance(points) {
-    let sum = 0;
-    for (let i = 0; i < points.length - 1; i++) {
-        sum += getDistance(points[i].lat, points[i].lng, points[i + 1].lat, points[i + 1].lng);
-    }
-    return sum;
-}
-
-// 진입점(prevAnchor)과 진출점(nextAnchor)을 함께 고려하여 LLM을 호출하는 비동기 함수
-async function optimizeClusterWithLLM(clusterNodes, prevAnchor = null, nextAnchor = null, diagnostic = {}) {
-    diagnostic.fallback = true;
+// 앞뒤 앵커를 포함한 실제 도로 경로를 서버에서 비교한다. LLM은 호출하지 않는다.
+async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle) {
     const controller = new AbortController();
     let timer;
-
+    const coordinate = point => point ? { lat: point.lat, lng: point.lng } : null;
     try {
-        const requestPayload = {
-            destinations: clusterNodes.map(({ id, address, storeName, lat, lng }) => ({ id, address, storeName, lat, lng })),
-            prevAnchor: prevAnchor ? { address: prevAnchor.address, storeName: prevAnchor.storeName, lat: prevAnchor.lat, lng: prevAnchor.lng } : null,
-            nextAnchor: nextAnchor ? { address: nextAnchor.address, storeName: nextAnchor.storeName, lat: nextAnchor.lat, lng: nextAnchor.lng } : null
-        };
-
         const data = await Promise.race([
             Promise.resolve().then(async () => {
+                // 기존 배포 주소를 유지하며 서버 구현은 카카오 경로 비교로 교체했다.
                 const response = await apiFetch('/api/optimize-llm', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestPayload),
-                    signal: controller.signal
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        destinations: nodes.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
+                        context: context.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
+                        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle
+                    }), signal: controller.signal
                 });
-                if (!response.ok) return null;
+                if (!response.ok) throw new Error('KAKAO_ROUTE_UNAVAILABLE');
                 return response.json();
             }),
             new Promise((_, reject) => {
-                timer = setTimeout(() => {
-                    reject(new Error('LLM_TIMEOUT'));
-                    controller.abort();
-                }, 18000);
+                timer = setTimeout(() => { controller.abort(); reject(new Error('KAKAO_ROUTE_TIMEOUT')); }, 43000);
             })
         ]);
-
-        const ids = new Set(clusterNodes.map(node => String(node.id)));
-        if (Array.isArray(data?.optimized) && ids.size === clusterNodes.length &&
-            data.optimized.length === clusterNodes.length &&
-            new Set(data.optimized).size === clusterNodes.length &&
-            data.optimized.every(id => typeof id === 'string' && ids.has(id))) {
-            
-            diagnostic.fallback = false;
-            const orderMap = new Map(data.optimized.map((id, index) => [String(id), index]));
-            let orderedNodes = [...clusterNodes].sort((a, b) => {
-                const idxA = orderMap.has(String(a.id)) ? orderMap.get(String(a.id)) : 999;
-                const idxB = orderMap.has(String(b.id)) ? orderMap.get(String(b.id)) : 999;
-                return idxA - idxB;
-            });
-
-            // 방향 역전 방어 로직: LLM 정렬 순서와 그 역순(Reverse)을 비교하여
-            // 진입점(prevAnchor) -> 진출점(nextAnchor) 흐름에 더 자연스러운 방향을 자동 선택
-            if (prevAnchor || nextAnchor) {
-                const forwardPath = [prevAnchor, ...orderedNodes, nextAnchor].filter(Boolean);
-                const reversedPath = [prevAnchor, ...[...orderedNodes].reverse(), nextAnchor].filter(Boolean);
-                
-                const forwardDist = calculateSectionDistance(forwardPath);
-                const reverseDist = calculateSectionDistance(reversedPath);
-
-                if (reverseDist < forwardDist * 0.92) {
-                    orderedNodes = orderedNodes.reverse();
-                }
-            }
-
-            return orderedNodes;
-        }
-
-        return clusterNodes;
-    } catch (error) {
-        console.warn('LLM 동선 최적화 API 호출 실패(기존 동선 유지):', error);
-        return clusterNodes;
-    } finally {
-        clearTimeout(timer);
-    }
+        const expected = new Set(context.map(point => String(point.id)));
+        if (data?.source !== 'kakao' || !Array.isArray(data.optimized) ||
+            expected.size !== context.length || data.optimized.length !== context.length ||
+            new Set(data.optimized).size !== context.length ||
+            !data.optimized.every(id => typeof id === 'string' && expected.has(id)) ||
+            !Number.isFinite(data.duration) || data.duration < 0 ||
+            !Number.isFinite(data.distance) || data.distance < 0) throw new Error('KAKAO_ROUTE_INVALID');
+        const byId = new Map(context.map(point => [String(point.id), point]));
+        return data.optimized.map(id => byId.get(id));
+    } catch (_) {
+        return null;
+    } finally { clearTimeout(timer); }
 }
 
 // 동선 최적화 메인 오케스트레이터 알고리즘
-export async function calculateOptimizedRoute(destinations, startLocation, endLocation) {
+export async function calculateOptimizedRoute(destinations, startLocation, endLocation, options = {}) {
     if (destinations.length < 2) {
         throw new Error("출발지를 포함하여 최소 2곳의 배송지가 필요합니다.");
     }
@@ -308,79 +221,68 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         if (cost < bestCost - 0.0001) { fullRoute = candidate; bestCost = cost; }
     }
 
-    // 2단계: 반경 900m 이내, 점수 2점 이상, 3곳 이상인 '골목 지그재그' 추출 및 LLM 제한적 교정
-    const candidates = [];
-    const windowSize = Math.min(ZIGZAG_WINDOW_SIZE, fullRoute.length);
-    const mutableEnd = hasEnd ? fullRoute.length - 1 : fullRoute.length;
-    
-    const inspectPoint = point => ({
-        ...point,
-        progress: point === startPoint || (hasEnd && point === endLocation)
-            ? (axisLenSq > 0.000001 ? ((point.lat - axisStart.lat) * axisLat + (point.lng - axisStart.lng) * axisLng) / axisLenSq : 0)
-            : point.progress
-    });
-    
-    const inspectedRoute = fullRoute.map(inspectPoint);
-
-    for (let offset = 0; offset <= fullRoute.length - windowSize; offset++) {
-        const from = Math.max(1, offset);
-        const to = Math.min(mutableEnd, offset + windowSize);
-        
-        // 제한조건 1: 최소 노드 개수 검사 (3곳 이상)
-        if (to - from < MIN_CLUSTER_SIZE) continue;
-
-        const window = inspectedRoute.slice(offset, offset + windowSize);
-        const { score, reasons } = scoreZigzag(window);
-        
-        // 제한조건 2: 심각성 검사 (2점 이상으로 완화)
-        if (score < ZIGZAG_SCORE_THRESHOLD) continue;
-
-        let spanKm = 0;
-        for (let i = offset; i < offset + windowSize; i++) {
-            for (let j = i + 1; j < offset + windowSize; j++) {
-                spanKm = Math.max(spanKm, getCachedDistance(fullRoute[i], fullRoute[j]));
-            }
-        }
-
-        // 제한조건 3: 동네 밀집 구역 검사 (반경 900m 이하로 완화)
-        const local = Number.isFinite(spanKm) && spanKm <= MAX_LOCAL_SPAN_KM;
-        if (local) {
-            candidates.push({ from, to, windowFrom: offset, windowTo: offset + windowSize, score, reasons, spanKm });
-        }
-    }
-
-    // 겹치지 않게 최우선 점수의 밀집 후보 선별
-    const selected = [];
-    candidates.sort((a, b) => b.score - a.score || a.from - b.from);
-    for (const candidate of candidates) {
-        if (!selected.some(other => candidate.from < other.to && other.from < candidate.to)) {
-            selected.push(candidate);
-        }
-    }
-
+    // 경로상 떨어져 있어도 좌표가 가까우면 같은 묶음으로 찾는다.
+    // 긴 연결 사슬은 만들지 않고 모든 배송지 쌍이 900m 이내인 묶음만 허용한다.
     const finalRoute = fullRoute.slice();
-    selected.sort((a, b) => a.from - b.from);
-
-    for (const candidate of selected) {
-        const clusterNodes = finalRoute.slice(candidate.from, candidate.to);
-        const prevAnchor = candidate.from > 0 ? finalRoute[candidate.from - 1] : null;
-        const nextAnchor = candidate.to < finalRoute.length ? finalRoute[candidate.to] : null;
-
-        const diagnostic = {};
-        const optimized = await optimizeClusterWithLLM(clusterNodes, prevAnchor, nextAnchor, diagnostic);
-
-        if (!diagnostic.fallback && optimized && optimized.length === clusterNodes.length) {
-            // 진입/진출을 포함해 길어지는 AI 제안은 원래 구간으로 복원한다.
-            const origPath = [prevAnchor, ...clusterNodes, nextAnchor].filter(Boolean);
-            const optPath = [prevAnchor, ...optimized, nextAnchor].filter(Boolean);
-            const origDist = calculateSectionDistance(origPath);
-            const optDist = calculateSectionDistance(optPath);
-
-            if (optDist <= origDist + 0.0001) {
-                finalRoute.splice(candidate.from, clusterNodes.length, ...optimized);
+    const mutableEnd = hasEnd ? fullRoute.length - 1 : fullRoute.length;
+    let pool = fullRoute.slice(1, mutableEnd);
+    const clusters = [];
+    while (pool.length >= MIN_CLUSTER_SIZE) {
+        let best = [];
+        for (const seed of pool) {
+            const neighbors = pool.filter(point => point !== seed)
+                .sort((a, b) => getCachedDistance(seed, a) - getCachedDistance(seed, b));
+            const group = [seed];
+            for (const point of neighbors) {
+                if (group.every(other => getCachedDistance(other, point) <= MAX_LOCAL_SPAN_KM)) group.push(point);
             }
+            const size = group.length === 7 ? 4 : group.length === 8 ? 5 : Math.min(MAX_CLUSTER_SIZE, group.length);
+            const candidate = group.slice(0, size);
+            const positions = candidate.map(point => fullRoute.indexOf(point));
+            const context = fullRoute.slice(Math.min(...positions), Math.max(...positions) + 1);
+            if (context.length <= MAX_CLUSTER_SIZE && context.every((point, i) => context.slice(i + 1)
+                .every(other => getCachedDistance(point, other) <= MAX_LOCAL_SPAN_KM)) && candidate.length > best.length) best = candidate;
         }
+        if (best.length < MIN_CLUSTER_SIZE) break;
+        const size = best.length === 7 ? 4 : best.length === 8 ? 5 : Math.min(MAX_CLUSTER_SIZE, best.length);
+        const group = best.slice(0, size).sort((a, b) => fullRoute.indexOf(a) - fullRoute.indexOf(b));
+        clusters.push(group);
+        const members = new Set(group);
+        pool = pool.filter(point => !members.has(point));
     }
+    clusters.sort((a, b) => fullRoute.indexOf(a[0]) - fullRoute.indexOf(b[0]));
+    const bearing = (a, b) => {
+        if (!a || (a.lat === b.lat && a.lng === b.lng)) return null;
+        const rad = Math.PI / 180, dl = (b.lng - a.lng) * rad;
+        const angle = Math.atan2(Math.sin(dl) * Math.cos(b.lat * rad),
+            Math.cos(a.lat * rad) * Math.sin(b.lat * rad) - Math.sin(a.lat * rad) * Math.cos(b.lat * rad) * Math.cos(dl));
+        return Math.round((angle * 180 / Math.PI + 360) % 360) % 360;
+    };
+    let failed = 0;
+    for (let index = 0; index < clusters.length; index++) {
+        const nodes = clusters[index];
+        const positions = nodes.map(point => finalRoute.indexOf(point));
+        // 큰 권역 흐름은 고정한다. 묶음 사이에 먼 배송지가 끼어 있으면 이동시키지 않는다.
+        let from = Math.min(...positions), to = Math.max(...positions) + 1;
+        const local = points => points.every((point, i) => points.slice(i + 1)
+            .every(other => getCachedDistance(point, other) <= MAX_LOCAL_SPAN_KM));
+        if (to - from > MAX_CLUSTER_SIZE || !local(finalRoute.slice(from, to))) { failed++; continue; }
+        // 앞/뒤 붙이기는 같은 900m 구간 안에서만 비교한다. 최대 6곳, 앵커는 고정.
+        for (let step = 0; step < 2; step++) {
+            if (from > 1 && to - from < MAX_CLUSTER_SIZE && local(finalRoute.slice(from - 1, to))) from--;
+            if (to < mutableEnd && to - from < MAX_CLUSTER_SIZE && local(finalRoute.slice(from, to + 1))) to++;
+        }
+        const context = finalRoute.slice(from, to);
+        options.onProgress?.({ current: index + 1, total: clusters.length });
+        const prevAnchor = finalRoute[from - 1], nextAnchor = finalRoute[to] || null;
+        const optimized = await optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor,
+            bearing(finalRoute[from - 2], prevAnchor));
+        if (optimized) {
+            // 가까운 배송지를 모아 앞뒤로 이동한다. 다른 배송지끼리의 상대 순서는 유지한다.
+            finalRoute.splice(from, context.length, ...optimized);
+        } else failed++;
+    }
+    options.onComplete?.({ clusters: clusters.length, failed });
 
     // 종료 지점(endLocation)은 계산용 앵커이므로 배송 목록에서 제외하고 반환
     return hasEnd ? finalRoute.slice(0, -1) : finalRoute;
