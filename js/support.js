@@ -240,6 +240,42 @@ export function cleanOldHistory() {
     // 계정별/미분류 이력 원본을 보존합니다. 보관 기간 정책은 별도로 결정합니다.
 }
 
+let photoViewerFocus = null;
+let photoViewerOverflow = null;
+function photoViewerKeydown(event) {
+    if (event.key === 'Escape') { event.preventDefault(); closeDeliveryPhoto(); }
+    else if (event.key === 'Tab') {
+        event.preventDefault();
+        document.getElementById('delivery-photo-close')?.focus();
+    }
+}
+
+export function openDeliveryPhoto(value) {
+    const url = state.safePhotoUrl(value);
+    const modal = document.getElementById('delivery-photo-modal');
+    const image = document.getElementById('delivery-photo-image');
+    if (!url || !modal || !image) return;
+    if (photoViewerOverflow === null) {
+        photoViewerFocus = document.activeElement;
+        photoViewerOverflow = document.body.style.overflow;
+    }
+    image.src = url;
+    document.body.style.overflow = 'hidden';
+    modal.classList.remove('hidden');
+    document.addEventListener('keydown', photoViewerKeydown);
+    document.getElementById('delivery-photo-close')?.focus();
+}
+
+export function closeDeliveryPhoto() {
+    document.getElementById('delivery-photo-modal')?.classList.add('hidden');
+    document.getElementById('delivery-photo-image')?.removeAttribute('src');
+    document.removeEventListener('keydown', photoViewerKeydown);
+    if (photoViewerOverflow !== null) document.body.style.overflow = photoViewerOverflow;
+    photoViewerOverflow = null;
+    if (photoViewerFocus?.isConnected) photoViewerFocus.focus();
+    photoViewerFocus = null;
+}
+
 export function getHistoryOwnershipContext() {
     return {
         routeOwnerId: state.getRouteOwnerId(),
@@ -300,7 +336,7 @@ export function openHistoryModal() {
                 let photoBadge = "";
                 const photoUrl = state.safePhotoUrl(h.photoUrl);
                 if (photoUrl) {
-                    photoBadge = `<a href="${state.escapeHtml(photoUrl)}" target="_blank" rel="noopener noreferrer" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs active:bg-blue-200 transition"><i class="fa-solid fa-camera"></i> 사진보기</a>`;
+                    photoBadge = `<button type="button" onclick="window.openDeliveryPhoto(${state.inlineArgument(photoUrl)})" class="bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs active:bg-blue-200 transition"><i class="fa-solid fa-camera"></i> 사진보기</button>`;
                 } else if (h.hasPhoto) {
                     photoBadge = `<span class="bg-blue-50 border border-blue-200 text-blue-700 text-[10px] font-black px-2 py-0.5 rounded-md shrink-0 flex items-center gap-1 shadow-2xs"><i class="fa-solid fa-camera"></i> 사진</span>`;
                 }
@@ -597,3 +633,5 @@ window.openHistoryModal = openHistoryModal;
 window.closeHistoryModal = closeHistoryModal;
 window.clearAllHistory = clearAllHistory;
 window.restoreHistoryItem = restoreHistoryItem;
+window.openDeliveryPhoto = openDeliveryPhoto;
+window.closeDeliveryPhoto = closeDeliveryPhoto;
