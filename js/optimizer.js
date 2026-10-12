@@ -22,7 +22,7 @@ const MAX_CLUSTER_SIZE = 6;
 const MAX_LOCAL_SPAN_KM = 0.9;
 
 // 앞뒤 앵커를 포함한 실제 도로 경로를 서버에서 비교한다. LLM은 호출하지 않는다.
-async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle, mode = 'dense') {
+async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle, mode = 'dense', fixedLastId = null) {
     const controller = new AbortController();
     let timer;
     const coordinate = point => point ? { lat: point.lat, lng: point.lng } : null;
@@ -35,7 +35,7 @@ async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, 
                     body: JSON.stringify({
                         destinations: nodes.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
                         context: context.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
-                        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle, mode
+                        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle, mode, fixedLastId
                     }), signal: controller.signal
                 });
                 if (!response.ok) throw new Error('KAKAO_ROUTE_UNAVAILABLE');
@@ -51,7 +51,8 @@ async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, 
             new Set(data.optimized).size !== context.length ||
             !data.optimized.every(id => typeof id === 'string' && expected.has(id)) ||
             !Number.isFinite(data.duration) || data.duration < 0 ||
-            !Number.isFinite(data.distance) || data.distance < 0) throw new Error('KAKAO_ROUTE_INVALID');
+            !Number.isFinite(data.distance) || data.distance < 0 ||
+            (fixedLastId != null && data.optimized.at(-1) !== fixedLastId)) throw new Error('KAKAO_ROUTE_INVALID');
         const byId = new Map(context.map(point => [String(point.id), point]));
         return data.optimized.map(id => byId.get(id));
     } catch (_) {
@@ -156,8 +157,8 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
 
     // 출발/도착을 고정한 2-opt 및 단일 배송지 이동. 지역 최솟값을 피하기 위해
     // 첫 배송지를 달리한 후보도 비교하며, 기존 후보보다 짧은 결과만 채택한다.
-    function improvePath(path) {
-        const last = hasEnd ? path.length - 2 : path.length - 1;
+    function improvePath(path, mutableLast = hasEnd ? path.length - 2 : path.length - 1) {
+        const last = mutableLast;
         for (let pass = 0; pass < 100; pass++) {
             let changed = false;
             for (let i = 1; i < last; i++) {
@@ -221,9 +222,45 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         if (cost < bestCost - 0.0001) { fullRoute = candidate; bestCost = cost; }
     }
 
+    // 집까지의 귀환을 합산해 마지막 배송지 후보를 비교한다.
+    // 작은 경로는 모든 마지막 후보, 큰 경로는 집 인근 및 분산 후보 최대 12곳.
+    let terminalCandidates = 0;
+    if (hasEnd && stops.length > 1) {
+        const nearHome = [...stops].sort((a, b) => getCachedDistance(a, endLocation) - getCachedDistance(b, endLocation));
+        const finals = stops.length <= 32 ? stops : [...new Set([
+            ...nearHome.slice(0, 6),
+            ...Array.from({ length: 6 }, (_, i) => nearHome[Math.round(i * (nearHome.length - 1) / 5)])
+        ])];
+        terminalCandidates = finals.length;
+        for (const terminal of finals) {
+            const inner = stops.filter(point => point !== terminal);
+            const firsts = [...inner].sort((a, b) => getCachedDistance(startPoint, a) - getCachedDistance(startPoint, b));
+            const firstCandidates = inner.length <= 32 ? firsts :
+                [firsts[0], firsts[Math.floor(firsts.length / 2)], firsts.at(-1)];
+            for (const first of firstCandidates) {
+                const remaining = inner.filter(point => point !== first);
+                const candidate = [startPoint, first];
+                while (remaining.length) {
+                    let next = 0;
+                    for (let i = 1; i < remaining.length; i++) {
+                        if (getCachedDistance(candidate.at(-1), remaining[i]) <
+                            getCachedDistance(candidate.at(-1), remaining[next])) next = i;
+                    }
+                    candidate.push(remaining.splice(next, 1)[0]);
+                }
+                candidate.push(terminal, endLocation);
+                improvePath(candidate, candidate.length - 3);
+                const cost = pathCost(candidate); // 마지막 배송지 → 집까지 포함.
+                if (cost < bestCost - 0.0001) { fullRoute = candidate; bestCost = cost; }
+            }
+        }
+    }
+
     // 경로상 떨어져 있어도 좌표가 가까우면 같은 묶음으로 찾는다.
     // 긴 연결 사슬은 만들지 않고 모든 배송지 쌍이 900m 이내인 묶음만 허용한다.
     const finalRoute = fullRoute.slice();
+    // 마지막 배송지를 포함한 밀집 구간도 비교하되, 선택한 마지막 위치는 고정한다.
+    const fixedTerminal = hasEnd ? fullRoute.at(-2) : null;
     const mutableEnd = hasEnd ? fullRoute.length - 1 : fullRoute.length;
     let pool = fullRoute.slice(1, mutableEnd);
     const clusters = [];
@@ -276,7 +313,8 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         options.onProgress?.({ current: index + 1, total: clusters.length });
         const prevAnchor = finalRoute[from - 1], nextAnchor = finalRoute[to] || null;
         const optimized = await optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor,
-            bearing(finalRoute[from - 2], prevAnchor));
+            bearing(finalRoute[from - 2], prevAnchor), 'dense',
+            fixedTerminal && context.includes(fixedTerminal) ? String(fixedTerminal.id) : null);
         if (optimized) {
             // 가까운 배송지를 모아 앞뒤로 이동한다. 다른 배송지끼리의 상대 순서는 유지한다.
             finalRoute.splice(from, context.length, ...optimized);
@@ -305,10 +343,11 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         const context = finalRoute.slice(from, to), prev = finalRoute[from - 1];
         options.onProgress?.({ current: clusters.length + index + 1, total: clusters.length + selected.length });
         const optimized = await optimizeClusterWithKakao([context[0], context.at(-1)], context, prev,
-            finalRoute[to] || null, bearing(finalRoute[from - 2], prev), 'excursion');
+            finalRoute[to] || null, bearing(finalRoute[from - 2], prev), 'excursion',
+            fixedTerminal && context.includes(fixedTerminal) ? String(fixedTerminal.id) : null);
         if (optimized) finalRoute.splice(from, context.length, ...optimized); else failed++;
     }
-    options.onComplete?.({ clusters: clusters.length + selected.length, failed, excursions: selected.length });
+    options.onComplete?.({ clusters: clusters.length + selected.length, failed, excursions: selected.length, terminalCandidates });
 
 
 
