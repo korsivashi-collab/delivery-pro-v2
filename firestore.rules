@@ -1,0 +1,161 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // 기존 웹 로그인에서 발급하는 MASTER/DISPATCH 권한만 사용합니다.
+    function isWebAdmin() {
+      return request.auth != null &&
+        request.auth.token.get('role', '') in ['MASTER', 'DISPATCH'];
+    }
+
+    function validCompletion(data) {
+      return data.keys().hasAll(['routeOwnerId', 'deviceId', 'completedAt']) &&
+        data.routeOwnerId is string && data.routeOwnerId.size() > 0 &&
+        data.deviceId is string && data.deviceId.size() > 0 &&
+        data.completedAt is int && data.completedAt >= 0 &&
+        (!('expireAt' in data) ||
+          (data.expireAt is timestamp &&
+            data.expireAt.toMillis() == data.completedAt + 1209600000)) &&
+        !data.keys().hasAny(['dispatchKey']);
+    }
+
+    function completionOperationMatches(completionId, ownerId, action) {
+      let operationPath = /databases/$(database)/documents/completion_operations/$(completionId);
+      return existsAfter(operationPath) &&
+        getAfter(operationPath).data.routeOwnerId == ownerId &&
+        getAfter(operationPath).data.action == action;
+    }
+
+    function validCompletionOperation(data) {
+      return data.keys().hasAll(['routeOwnerId', 'action']) &&
+        data.keys().hasOnly(['routeOwnerId', 'action']) &&
+        data.routeOwnerId is string && data.routeOwnerId.size() > 0 &&
+        data.action in ['complete', 'delete'];
+    }
+
+    function completionDeletionMatches(completionId) {
+      let operationPath = /databases/$(database)/documents/completion_operations/$(completionId);
+      let completionPath = /databases/$(database)/documents/completions/$(completionId);
+      return existsAfter(operationPath) &&
+        validCompletionOperation(getAfter(operationPath).data) &&
+        getAfter(operationPath).data.action == 'delete' &&
+        (!exists(completionPath) ||
+          get(completionPath).data.routeOwnerId == getAfter(operationPath).data.routeOwnerId);
+    }
+
+    function operationResultMatches(operationId, data) {
+      let completionPath = /databases/$(database)/documents/completions/$(operationId);
+      return (data.action == 'delete' && !existsAfter(completionPath)) ||
+        (data.action == 'complete' && existsAfter(completionPath) &&
+          getAfter(completionPath).data.routeOwnerId == data.routeOwnerId &&
+          validCompletion(getAfter(completionPath).data));
+    }
+
+    // 1. 관리자 및 관제 로그인 계정 (읽기 허용)
+    match /admin/{docId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+    match /admins/{docId} {
+      allow get: if true;
+      allow list: if false;
+      allow create, update, delete: if false;
+    }
+
+    // 2. 라이선스: 조회, 기기 연결, 관제 세션 발급 및 관리 허용
+    match /licenses/{licenseKey} {
+      allow read, delete: if true;
+      // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
+      allow create: if request.auth != null && request.auth.token.get('role', '') == 'MASTER';
+      allow update: if resource.data.get('type', '') == 'trial' ||
+        request.resource.data.get('type', '') != 'trial' ||
+        (request.auth != null && request.auth.token.get('role', '') == 'MASTER');
+    }
+
+    match /driver_profiles/{profileId} {
+      allow read: if true;
+      allow create: if exists(/databases/$(database)/documents/licenses/$(profileId));
+      allow update: if request.resource.data.diff(resource.data)
+        .affectedKeys().hasOnly(['deviceId', 'phone', 'allowTms']);
+      allow delete: if false;
+    }
+
+    // 3. 차단 기기 목록: 관리자의 차단 등록/해제 및 기기 체크 허용
+    match /blocked_devices/{deviceId} {
+      allow read, write: if true;
+    }
+
+    // 4. 배송 경로, GPS 보고, 위치 요청: 기사와 관제 실시간 통신
+    match /routes/{docId} {
+      allow read: if true;
+      allow create, update: if request.resource.data.keys().hasAll(['deviceId']) &&
+        request.resource.data.deviceId is string &&
+        request.resource.data.deviceId == docId;
+      allow delete: if isWebAdmin();
+    }
+    match /gps_reports/{docId} {
+      allow read, write: if true;
+    }
+    match /gps_requests/{docId} {
+      allow read, write: if true;
+    }
+
+    // 5. 관제 메시지 및 알림 템플릿: 관제소 발송 및 기사 수신
+    match /dispatch_messages/{msgId} {
+      allow read, write: if true;
+    }
+    match /dispatch_templates/{docId} {
+      allow read, write: if true;
+    }
+
+    // 6. 관제 엑셀/주문 데이터: 자동 저장 및 조회
+    match /dispatch_orders/{docId} {
+      allow get: if true;
+      // 서버가 발급한 관제/마스터 세션만 목록 조회 가능.
+      allow list: if isWebAdmin();
+      allow write: if true;
+    }
+
+    // 7. 배송 완료 내역 및 주차 메모
+    match /completions/{completionId} {
+      allow get: if true;
+      allow list: if isWebAdmin();
+      // addDoc 경로는 operation 없음, 큐 경로는 동일 소유자의 complete 확인.
+      allow create: if validCompletion(request.resource.data) &&
+        (!existsAfter(/databases/$(database)/documents/completion_operations/$(completionId)) ||
+          completionOperationMatches(completionId, request.resource.data.routeOwnerId, 'complete'));
+      // 식별정보/배송 내용은 고정하고 사진 후처리와 동일 payload 재전송만 허용.
+      allow update: if validCompletion(request.resource.data) &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['photoUrl', 'hasPhoto', 'timeString', 'dispatchKey', 'expireAt']) &&
+        (!('expireAt' in resource.data) ||
+          request.resource.data.expireAt == resource.data.expireAt) &&
+        completionOperationMatches(completionId, request.resource.data.routeOwnerId, 'complete');
+      // 기존 관제 직접 삭제 또는 기사 큐의 동일 소유자 delete 마커만 허용.
+      allow delete: if isWebAdmin() ||
+        completionDeletionMatches(completionId);
+    }
+    match /memos/{memoId} {
+      allow read, write: if true;
+    }
+
+    // 8. 기기변경 임시 백업 금고
+    match /temp_memo_backups/{key} {
+      allow read, write: if true;
+    }
+    // Completion queue compatibility: single-document access only.
+    match /completion_operations/{operationId} {
+      allow get: if true;
+      allow create: if validCompletionOperation(request.resource.data) &&
+        operationResultMatches(operationId, request.resource.data);
+      allow update: if validCompletionOperation(request.resource.data) &&
+        request.resource.data.routeOwnerId == resource.data.routeOwnerId &&
+        (resource.data.action != 'delete' || request.resource.data.action == 'delete') &&
+        operationResultMatches(operationId, request.resource.data);
+      allow list, delete: if false;
+    }
+
+  }
+}
