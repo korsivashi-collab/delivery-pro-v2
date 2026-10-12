@@ -22,7 +22,7 @@ const MAX_CLUSTER_SIZE = 6;
 const MAX_LOCAL_SPAN_KM = 0.9;
 
 // 앞뒤 앵커를 포함한 실제 도로 경로를 서버에서 비교한다. LLM은 호출하지 않는다.
-async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle) {
+async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle, mode = 'dense') {
     const controller = new AbortController();
     let timer;
     const coordinate = point => point ? { lat: point.lat, lng: point.lng } : null;
@@ -35,7 +35,7 @@ async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, 
                     body: JSON.stringify({
                         destinations: nodes.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
                         context: context.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
-                        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle
+                        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle, mode
                     }), signal: controller.signal
                 });
                 if (!response.ok) throw new Error('KAKAO_ROUTE_UNAVAILABLE');
@@ -282,7 +282,35 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
             finalRoute.splice(from, context.length, ...optimized);
         } else failed++;
     }
-    options.onComplete?.({ clusters: clusters.length, failed });
+    // 가까운 두 배송지 사이의 먼 왕복: 앞/뒤 묶음 배치를 별도로 비교한다.
+    const excursions = [];
+    for (let from = 1; from < mutableEnd - 2; from++) {
+        for (let to = from + 3; to <= Math.min(mutableEnd, from + 6); to++) {
+            const context = finalRoute.slice(from, to);
+            const close = getCachedDistance(context[0], context.at(-1));
+            const travel = pathCost(context);
+            const span = Math.max(...context.flatMap((point, i) => context.slice(i + 1).map(other => getCachedDistance(point, other))));
+            if (close <= MAX_LOCAL_SPAN_KM && travel - close >= 1.2 && travel >= close * 2 && span <= 6) {
+                excursions.push({ from, to, excess: travel - close });
+            }
+        }
+    }
+    const selected = [];
+    for (const candidate of excursions.sort((a, b) => b.excess - a.excess || a.from - b.from)) {
+        if (!selected.some(other => candidate.from < other.to && other.from < candidate.to)) selected.push(candidate);
+    }
+    selected.sort((a, b) => a.from - b.from);
+    for (let index = 0; index < selected.length; index++) {
+        const { from, to } = selected[index];
+        const context = finalRoute.slice(from, to), prev = finalRoute[from - 1];
+        options.onProgress?.({ current: clusters.length + index + 1, total: clusters.length + selected.length });
+        const optimized = await optimizeClusterWithKakao([context[0], context.at(-1)], context, prev,
+            finalRoute[to] || null, bearing(finalRoute[from - 2], prev), 'excursion');
+        if (optimized) finalRoute.splice(from, context.length, ...optimized); else failed++;
+    }
+    options.onComplete?.({ clusters: clusters.length + selected.length, failed, excursions: selected.length });
+
+
 
     // 종료 지점(endLocation)은 계산용 앵커이므로 배송 목록에서 제외하고 반환
     return hasEnd ? finalRoute.slice(0, -1) : finalRoute;
