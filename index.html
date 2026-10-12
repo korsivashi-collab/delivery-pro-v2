@@ -722,6 +722,16 @@
     </div>
 
     <!-- 로딩 오버레이 -->
+    <div id="delivery-photo-modal" role="dialog" aria-modal="true" aria-labelledby="delivery-photo-title" class="hidden fixed inset-0 bg-slate-950 z-[310] flex flex-col">
+        <div class="shrink-0 flex items-center justify-between gap-4 px-4 pb-3 border-b border-white/15" style="padding-top: max(12px, env(safe-area-inset-top));">
+            <h3 id="delivery-photo-title" class="text-white font-bold text-base">배송 완료 사진</h3>
+            <button id="delivery-photo-close" type="button" onclick="window.closeDeliveryPhoto()" aria-label="사진 닫기" class="min-w-12 min-h-12 px-3 rounded-xl bg-white/15 text-white text-2xl font-bold active:bg-white/25 focus-visible:outline focus-visible:outline-2 focus-visible:outline-white">×</button>
+        </div>
+        <div class="flex-1 min-h-0 flex items-center justify-center overflow-auto p-3" style="padding-bottom: max(12px, env(safe-area-inset-bottom));">
+            <img id="delivery-photo-image" alt="배송 완료 증빙 사진" class="max-w-full max-h-full object-contain" referrerpolicy="no-referrer">
+        </div>
+    </div>
+
     <div id="loading-overlay" class="hidden fixed inset-0 bg-black/50 z-[120] flex items-center justify-center backdrop-blur-xs">
         <div class="bg-white p-6 rounded-2xl flex flex-col items-center shadow-xl min-w-[150px] border border-slate-100">
             <i class="fa-solid fa-circle-notch fa-spin text-4xl text-blue-600 mb-4"></i>
