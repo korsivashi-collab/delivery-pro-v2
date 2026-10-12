@@ -443,9 +443,9 @@ export function drawDriverOnMap(devId) {
     const driverRoute = getDriverRouteData(licObj, selectedDate);
     const summary = getDriverDeliverySummary(licObj, driverRoute, selectedDate);
     const { remainingDests: rawDests, processed: doneMap } = summary;
-    // 활성 지도에는 주문 식별값으로 연결된 완료만 표시합니다. 당일 전체 완료 이력은 완료 경로 모드에서 확인합니다.
-    const completions = summary.done.filter(c => state.currentMapPolylineMode === 'completed' ||
-        summary.rawDests.some(d => doneMap.get(d) === c));
+    // 완료 배송지는 활성 동선에서 제거된다. 날짜/소유권이 확인된 완료 이력은
+    // 모두 구성하고, 지도 모드는 표시 여부만 제어한다.
+    const completions = summary.done;
     const currentTarget = rawDests[0];
 
     const bounds = new kakao.maps.LatLngBounds();
