@@ -11,7 +11,7 @@
       "providers": ["phone"]
     },
     "CapacitorHttp": {
-      "enabled": true
+      "enabled": false
     }
   }
 }
