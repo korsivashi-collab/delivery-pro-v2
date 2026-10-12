@@ -4,5 +4,14 @@
   "webDir": "www",
   "server": {
     "androidScheme": "https"
+  },
+  "plugins": {
+    "FirebaseAuthentication": {
+      "skipNativeAuth": false,
+      "providers": ["phone"]
+    },
+    "CapacitorHttp": {
+      "enabled": true
+    }
   }
 }

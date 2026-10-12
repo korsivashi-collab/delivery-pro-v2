@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "scripts": {
+    "firebase:check": "node scripts/check-native-firebase.cjs",
     "postinstall": "node scripts/prepare-capacitor.cjs",
     "build:native": "node scripts/build-native.cjs",
     "cap:add:android": "npm run build:native && cap add android",
@@ -14,6 +15,7 @@
     "cap:ios": "cap open ios"
   },
   "dependencies": {
+    "@capacitor-firebase/authentication": "^6.3.1",
     "@capacitor/android": "^6.0.0",
     "@capacitor/core": "^6.0.0",
     "@capacitor/ios": "^6.0.0",
