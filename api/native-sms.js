@@ -12,6 +12,13 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
     }
     return async function handler(req, res) {
         res.setHeader('Cache-Control', 'no-store');
+        const supportDigits = String(env.NCP_SENS_SENDER || '').trim();
+        const contact = /^0\d{8,10}$/.test(supportDigits) ? (supportDigits.startsWith('02') ?
+            supportDigits.replace(/^(02)(\d{3,4})(\d{4})$/, '$1-$2-$3') :
+            supportDigits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3')) :
+            /^\d{8}$/.test(supportDigits) ? supportDigits.replace(/^(\d{4})(\d{4})$/, '$1-$2') : '010-7650-7542';
+        const supportNotice = `고객센터 ${contact}로 문의해 주세요.`;
+
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
         try {
             const [access, secret, serviceId, sender] = config();
@@ -64,7 +71,7 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                         headers: { 'Content-Type': 'application/json', 'x-ncp-apigw-timestamp': timestamp,
                             'x-ncp-iam-access-key': access, 'x-ncp-apigw-signature-v2': signature },
                         body: JSON.stringify({ type: 'SMS', contentType: 'COMM', countryCode: '82', from: sender,
-                            content: `[배송경로PRO] 인증번호 ${code} (3분 이내 입력)`, messages: [{ to: digits }] })
+                            content: `[배송경로PRO 전화번호 인증]\n인증번호 ${code}\n3분 이내에 입력해 주세요.`, messages: [{ to: digits }] })
                     });
                     upstreamStatus = response.status || null;
                     stage = 'response';
@@ -98,7 +105,7 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                         upstreamStatus === 400 ? 'SENS 발신번호 등록과 문자 요청 설정을 확인해 주세요.' :
                         upstreamStatus === 429 ? 'SENS 발송 한도를 확인해 주세요.' :
                         diagnostic === 'SENS_TIMEOUT' ? 'SENS 서버 응답 시간이 초과되었습니다.' : 'SENS 문자 발송 요청에 실패했습니다.';
-                    return res.status(502).json({ error: `${reason} (${diagnostic}) 60초 후 다시 요청해 주세요.`, code: diagnostic });
+                    return res.status(502).json({ error: `${reason} (${diagnostic})\n문제가 계속되면 ${supportNotice}`, code: diagnostic });
                 }
                 return res.status(200).json({ requestId, expiresIn: 180, resendAfter: 60 });
             }
@@ -127,7 +134,7 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
             const token = await auth.createCustomToken(user.uid, { nativePhoneVerified: true });
             return res.status(200).json({ token });
         } catch (error) {
-            return res.status(error.status || 500).json({ error: error.status ? error.message : '문자 인증 처리에 실패했습니다. 다시 요청해 주세요.' });
+            return res.status(error.status || 500).json({ error: (error.status ? error.message : '문자 인증 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.') + '\n문제가 계속되면 ' + supportNotice });
         }
     };
 }
