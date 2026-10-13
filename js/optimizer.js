@@ -2,7 +2,7 @@
 import { apiFetch } from './native-platform.js';
 
 // =================================================================
-// [배송 동선 PRO] 기본 경로 + 카카오 실제 도로 기반 밀집 구간 순서 비교
+// [배송 동선 PRO] 하버사인 기본 경로 + 종료지점 포함 총 도로 거리 비교
 // =================================================================
 
 // 두 지점 간의 거리 계산 (하버사인 공식, 단위: km)
@@ -22,21 +22,24 @@ const MAX_CLUSTER_SIZE = 6;
 const MAX_LOCAL_SPAN_KM = 0.9;
 
 // 앞뒤 앵커를 포함한 실제 도로 경로를 서버에서 비교한다. LLM은 호출하지 않는다.
-async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle, mode = 'dense', fixedLastId = null) {
+async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, originAngle, mode = 'dense', fixedLastId = null, collector = null) {
     const controller = new AbortController();
     let timer;
     const coordinate = point => point ? { lat: point.lat, lng: point.lng } : null;
+    const body = {
+        destinations: nodes.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
+        context: context.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
+        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle, mode, fixedLastId
+    };
+    if (collector) { collector.push(body); return context; }
+    body.comparisonMode = 'exhaustive';
     try {
         const data = await Promise.race([
             Promise.resolve().then(async () => {
                 // 기존 배포 주소를 유지하며 서버 구현은 카카오 경로 비교로 교체했다.
                 const response = await apiFetch('/api/optimize-llm', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        destinations: nodes.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
-                        context: context.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
-                        prevAnchor: coordinate(prevAnchor), nextAnchor: coordinate(nextAnchor), originAngle, mode, fixedLastId
-                    }), signal: controller.signal
+                    body: JSON.stringify(body), signal: controller.signal
                 });
                 if (!response.ok) throw new Error('KAKAO_ROUTE_UNAVAILABLE');
                 return response.json();
@@ -62,6 +65,10 @@ async function optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor, 
 
 // 동선 최적화 메인 오케스트레이터 알고리즘
 export async function calculateOptimizedRoute(destinations, startLocation, endLocation, options = {}) {
+    // The legacy exhaustive policy is explicitly available for comparison only.
+    // Normal optimization measures two full routes within four calls (up to 62 stops).
+    // Larger inputs use bounded local distance correction.
+    const budgetWindows = options.roadCorrection === 'full' ? null : [];
     if (destinations.length < 2) {
         throw new Error("출발지를 포함하여 최소 2곳의 배송지가 필요합니다.");
     }
@@ -314,7 +321,7 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         const prevAnchor = finalRoute[from - 1], nextAnchor = finalRoute[to] || null;
         const optimized = await optimizeClusterWithKakao(nodes, context, prevAnchor, nextAnchor,
             bearing(finalRoute[from - 2], prevAnchor), 'dense',
-            fixedTerminal && context.includes(fixedTerminal) ? String(fixedTerminal.id) : null);
+            fixedTerminal && context.includes(fixedTerminal) ? String(fixedTerminal.id) : null, budgetWindows);
         if (optimized) {
             // 가까운 배송지를 모아 앞뒤로 이동한다. 다른 배송지끼리의 상대 순서는 유지한다.
             finalRoute.splice(from, context.length, ...optimized);
@@ -344,8 +351,48 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         options.onProgress?.({ current: clusters.length + index + 1, total: clusters.length + selected.length });
         const optimized = await optimizeClusterWithKakao([context[0], context.at(-1)], context, prev,
             finalRoute[to] || null, bearing(finalRoute[from - 2], prev), 'excursion',
-            fixedTerminal && context.includes(fixedTerminal) ? String(fixedTerminal.id) : null);
+            fixedTerminal && context.includes(fixedTerminal) ? String(fixedTerminal.id) : null, budgetWindows);
         if (optimized) finalRoute.splice(from, context.length, ...optimized); else failed++;
+    }
+    if (budgetWindows) {
+        const base = hasEnd ? finalRoute.slice(0, -1) : finalRoute;
+        let result = base, kakaoCalls = 0, callCountKnown = true, correctionPolicy = 'total-distance-4';
+        if (base.length <= 62 || budgetWindows.length) {
+            const controller = new AbortController();
+            let timer;
+            try {
+                const response = await Promise.race([
+                    apiFetch('/api/optimize-llm', {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+                        body: JSON.stringify({ mode: 'budget-four', strategy: 'total-distance', route: base.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
+                            endLocation: hasEnd ? { lat: endLocation.lat, lng: endLocation.lng } : null, windows: budgetWindows })
+                    }),
+                    new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(new Error('BUDGET_TIMEOUT')); }, 43000); })
+                ]);
+                if (!response.ok) throw new Error('BUDGET_UNAVAILABLE');
+                const data = await response.json(), ids = data.optimized, byId = new Map(base.map(p => [String(p.id), p]));
+                if (data.source !== 'kakao' || !['total-distance-4', 'packed-reverse-4'].includes(data.selectionPolicy) ||
+                    !Number.isInteger(data.calls) || data.calls < 0 || data.calls > 4 ||
+                    !Array.isArray(ids) || ids.length !== base.length || new Set(ids).size !== base.length ||
+                    !ids.every(id => byId.has(id)) || ids[0] !== String(base[0].id) ||
+                    (hasEnd && data.selectionPolicy !== 'total-distance-4' && ids.at(-1) !== String(base.at(-1).id))) throw new Error('BUDGET_RESULT_INVALID');
+                if (data.selectionPolicy === 'total-distance-4' && data.baselineMeters != null &&
+                    (!Number.isFinite(data.baselineMeters) || data.baselineMeters < 0 || !Number.isFinite(data.selectedMeters) ||
+                    data.selectedMeters < 0 || data.selectedMeters > data.baselineMeters)) throw new Error('BUDGET_DISTANCE_INVALID');
+                if (data.selectionPolicy === 'total-distance-4' && (data.objective !== 'DISTANCE' || data.includesEnd !== hasEnd ||
+                    (data.baselineMeters == null && (data.selectedMeters !== null || !data.failedCalls ||
+                    ids.some((id, i) => id !== String(base[i].id)))))) throw new Error('BUDGET_DISTANCE_INVALID');
+                result = ids.map(id => byId.get(id)); kakaoCalls = data.calls;
+                correctionPolicy = data.selectionPolicy;
+                failed += Number.isInteger(data.failedWindows) ? data.failedWindows : 0;
+            } catch (_) {
+                // Keep the Haversine backbone. Never retry through the costly policy.
+                failed++; callCountKnown = false;
+            } finally { clearTimeout(timer); }
+        }
+        options.onComplete?.({ clusters: budgetWindows.length, failed, excursions: selected.length, terminalCandidates,
+            correctionPolicy, kakaoCalls: callCountKnown ? kakaoCalls : null, kakaoCallLimit: 4 });
+        return result;
     }
     options.onComplete?.({ clusters: clusters.length + selected.length, failed, excursions: selected.length, terminalCandidates });
 
