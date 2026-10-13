@@ -361,9 +361,10 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
             const controller = new AbortController();
             let timer;
             try {
+                const token = options.getAuthToken ? await options.getAuthToken() : null;
                 const response = await Promise.race([
                     apiFetch('/api/optimize-llm', {
-                        method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: controller.signal,
+                        method: 'POST', headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: 'Bearer ' + token } : {}) }, signal: controller.signal,
                         body: JSON.stringify({ mode: 'budget-four', strategy: 'total-distance', route: base.map(({ id, lat, lng }) => ({ id: String(id), lat, lng })),
                             endLocation: hasEnd ? { lat: endLocation.lat, lng: endLocation.lng } : null, windows: budgetWindows })
                     }),
@@ -371,6 +372,12 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
                 ]);
                 if (!response.ok) throw new Error('BUDGET_UNAVAILABLE');
                 const data = await response.json(), ids = data.optimized, byId = new Map(base.map(p => [String(p.id), p]));
+                if (data.source === 'haversine' && data.selectionPolicy === 'daily-haversine' && data.calls === 0 &&
+                    Array.isArray(ids) && ids.length === base.length && ids.every((id, i) => id === String(base[i].id))) {
+                    options.onComplete?.({ clusters: budgetWindows.length, failed: 0, excursions: selected.length, terminalCandidates,
+                        correctionPolicy: 'daily-haversine', kakaoCalls: 0, kakaoCallLimit: 4, quota: data.quota, quotaReason: data.reason });
+                    return base;
+                }
                 if (data.source !== 'kakao' || !['total-distance-4', 'packed-reverse-4'].includes(data.selectionPolicy) ||
                     !Number.isInteger(data.calls) || data.calls < 0 || data.calls > 4 ||
                     !Array.isArray(ids) || ids.length !== base.length || new Set(ids).size !== base.length ||

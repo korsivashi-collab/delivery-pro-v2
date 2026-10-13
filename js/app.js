@@ -7,7 +7,7 @@ import { openSubscriptionModal } from './subscriptions.js';
 
 import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 import { calculateOptimizedRoute } from './optimizer.js';
-import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
+import { saveRouteToFirestore, fetchActiveRouteOnce, getRouteAuthToken } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
@@ -390,8 +390,9 @@ export async function optimizeRouteAction() {
             { ...startLocation },
             hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null,
             {
+                getAuthToken: getRouteAuthToken,
                 onProgress: ({ current, total }) => {
-                    if (isCurrent()) showLoading(`도로 경로 비교 중...\n(${current}/${total} 구간)`);
+                    if (isCurrent()) showLoading(`최적화 후보 준비 중...\n(${current}/${total} 구간)`);
                 },
                 onComplete: result => { routeComparison = result; }
             }
@@ -406,6 +407,11 @@ export async function optimizeRouteAction() {
         if (!updateDisplayNumbers()) return;
         hideLoading();
         
+        if (routeComparison.correctionPolicy === 'daily-haversine') {
+            alert(routeComparison.quotaReason === 'in-progress'
+                ? '카카오 보정이 이미 진행 중이어서 이번에는 기본 동선 최적화를 적용했습니다.'
+                : '오늘 카카오 보정 2회를 모두 사용했습니다. 하버사인 기반 동선 최적화를 적용했습니다.');
+        }
         if (routeComparison.failed) {
             alert(`카카오 도로 비교 ${routeComparison.clusters}개 구간 중 ${routeComparison.failed}개는 비교를 완료하지 못해 기본 경로를 유지했습니다.`);
         }
