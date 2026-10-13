@@ -244,14 +244,64 @@ async function compareTotalDistance(body,fetchImpl,env,timeoutMs) {
  }catch(error){failures.push(error.code||'KAKAO_NETWORK_ERROR');}finally{clearTimeout(timer);}
  return {source:'kakao',selectionPolicy:'total-distance-4',objective:'DISTANCE',optimized:selected.map(i=>route[i].id),calls,callLimit:4,failedCalls:failures.length,failedWindows:failures.length,failures,baselineMeters:baseline?.meters??null,selectedMeters:chosen?.meters??null,includesEnd:end!=null};
 }
-function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,timeoutMs=TIMEOUT_MS}={}) {
+// One atomic reservation consumes one of two daily attempts and reserves all
+// four upstream slots. Failed attempts are not refunded, so retries cannot
+// exceed eight paid requests per account/day, even across concurrent servers.
+function createDailyQuota({db,verifyToken,now=Date.now}) {
+ return async(req,body)=>{
+  const token=/^Bearer (.+)$/.exec(req.headers?.authorization||req.headers?.Authorization||'')?.[1];
+  if(!token)throw failure('ROUTE_AUTH_REQUIRED',401);
+  let identity;try{identity=await verifyToken(token);}catch(_){throw failure('ROUTE_AUTH_INVALID',401);}
+  if(!identity.uid||!['DRIVER','DISPATCH','MASTER'].includes(identity.role))throw failure('ROUTE_AUTH_INVALID',403);
+  const crypto=require('node:crypto'),account=crypto.createHash('sha256').update(identity.uid).digest('hex');
+  const fingerprint=crypto.createHash('sha256').update(JSON.stringify(body)).digest('hex');
+  const day=new Date(now()+9*3600000).toISOString().slice(0,10),ref=db.collection('route_optimization_usage').doc(account);
+  const reservation=await db.runTransaction(async tx=>{
+   const snap=await tx.get(ref),stored=snap.exists?snap.data():{},data=stored.day===day?stored:{attempts:0};
+   const usage={day,used:data.attempts||0,limit:2,remaining:Math.max(0,2-(data.attempts||0)),maxDailyCalls:8};
+   if(data.fingerprint===fingerprint&&data.result)return {cached:data.result,usage};
+   if(data.fingerprint===fingerprint&&data.pending)return {fallback:'in-progress',usage};
+   if((data.attempts||0)>=2)return {fallback:'daily-limit',usage};
+   const attempts=(data.attempts||0)+1;
+   tx.set(ref,{day,attempts,reservedCalls:attempts*4,fingerprint,pending:true,updatedAt:now()});
+   return {usage:{...usage,used:attempts,remaining:2-attempts}};
+  });
+  reservation.complete=async result=>db.runTransaction(async tx=>{
+   const snap=await tx.get(ref),data=snap.data();
+   if(data?.day!==day||data.fingerprint!==fingerprint)return;
+   const cacheable=result?.source==='kakao'&&Number.isFinite(result.baselineMeters)&&result.failedCalls===0;
+   tx.set(ref,{...data,pending:false,result:cacheable?result:null,updatedAt:now()});
+  });
+  return reservation;
+ };
+}
+async function reserveDailyQuota(req,body,env) {
+ if(!/^Bearer .+/.test(req.headers?.authorization||req.headers?.Authorization||''))throw failure('ROUTE_AUTH_REQUIRED',401);
+ const admin=require('firebase-admin');
+ if(!admin.apps.length)admin.initializeApp({credential:admin.credential.cert({projectId:env.FIREBASE_PROJECT_ID,clientEmail:env.FIREBASE_CLIENT_EMAIL,privateKey:env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')})});
+ return createDailyQuota({db:admin.firestore(),verifyToken:token=>admin.auth().verifyIdToken(token,true)})(req,body);
+}
+function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,timeoutMs=TIMEOUT_MS,quotaLimiter=reserveDailyQuota}={}) {
  return async function handler(req,res) {
   res.setHeader('Cache-Control','no-store');let timer,controller;
   try {
    if(req.method!=='POST'){res.setHeader('Allow','POST');throw failure('METHOD_NOT_ALLOWED',405);}
    let body;try{body=typeof req.body==='string'?JSON.parse(req.body):req.body;}catch(_){throw failure('DESTINATIONS_INVALID',400);}
+   if(body?.mode==='budget-four'){
+    const route=body.route;
+    if(!Array.isArray(route)||route.length<2||route.length>200||!route.every(p=>validPoint(p)&&typeof p.id==='string'&&p.id.trim()&&p.id.length<=160)||new Set(route.map(p=>p.id)).size!==route.length||(body.endLocation!=null&&!validPoint(body.endLocation)))throw failure('BUDGET_INPUT_INVALID',400);
+    const quota=quotaLimiter?await quotaLimiter(req,body,env):null;
+    if(quota?.cached)return res.status(200).json({...quota.cached,calls:0,cached:true,quota:quota.usage});
+    if(quota?.fallback)return res.status(200).json({source:'haversine',selectionPolicy:'daily-haversine',optimized:route.map(p=>p.id),calls:0,callLimit:4,quota:quota.usage,reason:quota.fallback});
+    let result;
+    try{result=await (body.strategy==='total-distance'?compareTotalDistance:comparePackedRoute)(body,fetchImpl,env,timeoutMs);}
+    finally{if(quota)await quota.complete(result);}
+    return res.status(200).json({...result,...(quota?{quota:quota.usage}:{})});
+   }
+   // Comparison-only factories can bypass quota in local tests. Public requests
+   // cannot select the former unbounded API or LLM path.
+   if(quotaLimiter)throw failure('COMPARISON_DISABLED',403);
    if(body?.mode==='llm-comparison')return res.status(200).json(await compareWithGemini(body,fetchImpl,env));
-   if(body?.mode==='budget-four')return res.status(200).json(await (body.strategy==='total-distance'?compareTotalDistance:comparePackedRoute)(body,fetchImpl,env,timeoutMs));
    // Older clients must fall back locally instead of silently spending the
    // former per-cluster budget. Exhaustive evaluation requires explicit opt-in.
    if(body?.comparisonMode!=='exhaustive')throw failure('BUDGET_CLIENT_UPDATE_REQUIRED',400);
@@ -302,4 +352,4 @@ function createHandler({fetchImpl=(...args)=>fetch(...args),env=process.env,time
   finally{clearTimeout(timer);}
  };
 }
-module.exports=createHandler();module.exports.createHandler=createHandler;
+module.exports=createHandler();module.exports.createHandler=createHandler;module.exports.createDailyQuota=createDailyQuota;
