@@ -8,10 +8,6 @@
     "api/scan.js": { 
       "maxDuration": 60,
       "memory": 1024
-    },
-    "api/optimize-llm.js": { 
-      "maxDuration": 60,
-      "memory": 1024
     }
   },
   "rewrites": [
