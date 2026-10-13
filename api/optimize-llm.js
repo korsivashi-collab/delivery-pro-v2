@@ -121,6 +121,24 @@ function roadRouteCost(route,matrix,end){let sum=0;for(let i=1;i<route.length;i+
 function improveRoadOrder(input,matrix,end){let route=input.slice(),score=roadRouteCost(route,matrix,end);for(let pass=0;pass<12;pass++){let best=score,next=null;for(let i=1;i<route.length-1;i++)for(let j=i+1;j<route.length;j++){const trial=[...route.slice(0,i),...route.slice(i,j+1).reverse(),...route.slice(j+1)],cost=roadRouteCost(trial,matrix,end);if(cost<best-.01){best=cost;next=trial;}}for(let i=1;i<route.length;i++)for(let j=1;j<route.length;j++){if(i===j)continue;const trial=route.slice(),[x]=trial.splice(i,1);trial.splice(j,0,x);const cost=roadRouteCost(trial,matrix,end);if(cost<best-.01){best=cost;next=trial;}}if(!next)break;route=next;score=best;}return {route,score};}
 function roadOrderCandidates(nodes,start,end,matrix,seeds){const n=end==null?nodes.length:nodes.length-1,results=[];for(const seed of seeds)results.push(improveRoadOrder(seed,matrix,end));for(let first=0;first<n;first++){if(first===start)continue;const route=[start,first],left=new Set(Array.from({length:n},(_,i)=>i).filter(i=>!route.includes(i)));while(left.size){const last=route.at(-1),next=[...left].sort((a,b)=>matrix[last][a]-matrix[last][b]||a-b)[0];route.push(next);left.delete(next);}results.push(improveRoadOrder(route,matrix,end));}return [...new Map(results.sort((a,b)=>a.score-b.score).map(r=>[r.route.join(','),r])).values()];}
 
+// Preserve the middle excursion while joining its nearby endpoints on either leg.
+// Geographic proximity proposes an order; only a complete road measurement accepts it.
+function groupedExcursionCandidate(nodes,base,end,matrix,general) {
+ const trials=[];
+ for(let i=1;i<base.length-2;i++)for(let j=i+2;j<base.length;j++){
+  const a=base[i],b=base[j],close=distance(nodes[a],nodes[b]);
+  if(close>.9)continue;
+  let travel=0;for(let k=i;k<j;k++)travel+=distance(nodes[base[k]],nodes[base[k+1]]);
+  if(travel-close<1.2||travel<2*close)continue;
+  const middle=base.slice(i+1,j),prefix=base.slice(0,i),suffix=base.slice(j+1);
+  for(const local of [[a,b,...middle],[b,a,...middle],[...middle,a,b],[...middle,b,a]]){
+   const route=[...prefix,...local,...suffix],score=roadRouteCost(route,matrix,end);
+   trials.push({route,score});
+  }
+ }
+ return trials.sort((a,b)=>a.score-b.score)[0]?.route||general;
+}
+
 async function comparePackedRoute(body,fetchImpl,env,timeoutMs) {
  const route=body.route,inputs=body.windows,end=body.endLocation,byDistance=body.objective==='distance';
  if(!Array.isArray(route)||route.length<2||route.length>200||!route.every(p=>validPoint(p)&&typeof p.id==='string'&&p.id.length<=160&&p.id.trim())||new Set(route.map(p=>p.id)).size!==route.length||!Array.isArray(inputs)||inputs.length>100||(end!=null&&!validPoint(end)))throw failure('BUDGET_INPUT_INVALID',400);
@@ -181,7 +199,7 @@ async function comparePackedRoute(body,fetchImpl,env,timeoutMs) {
  const failedWindows=windows.filter(w=>![...w.tested.values()].some(Boolean)).length;
  return {source:'kakao',selectionPolicy:'packed-reverse-4',optimized,calls,callLimit:4,failedCalls:failures.length,failedWindows,failures};
 }
-// Two complete route measurements (at most two calls each), including the home leg.
+// Complete route measurements, including home, within four upstream calls.
 // The expensive benchmark matrix is never read by this runtime policy.
 async function compareTotalDistance(body,fetchImpl,env,timeoutMs) {
  const route=body.route,endPoint=body.endLocation;
@@ -211,8 +229,18 @@ async function compareTotalDistance(body,fetchImpl,env,timeoutMs) {
   baseline=await measure(base);chosen=baseline;
   const factor=Math.max(1,Math.min(4,baseline.edges.reduce((s,e)=>s+e.meters,0)/Math.max(1,baseline.edges.reduce((s,e)=>s+distance(nodes[e.a],nodes[e.b])*1000,0))));
   const matrix=nodes.map(a=>nodes.map(b=>distance(a,b)*1000*factor));for(const e of baseline.edges)matrix[e.a][e.b]=e.meters;
-  const proposed=roadOrderCandidates(nodes,0,end,matrix,[base])[0].route;
-  if(proposed.some((id,i)=>id!==base[i])){const alternative=await measure(proposed);if(alternative.meters<baseline.meters){selected=proposed;chosen=alternative;}}
+  const general=roadOrderCandidates(nodes,0,end,matrix,[base])[0].route;
+  const grouped=groupedExcursionCandidate(nodes,base,end,matrix,general);
+  const callsPerRoute=Math.ceil((base.length-1+(end==null?0:1))/31);
+  // Short routes can compare both ideas. Longer routes must choose one before
+  // spending their remaining two calls; do not prefer grouping at any cost.
+  const proposals=callsPerRoute===1?[general,grouped]:[
+   roadRouteCost(grouped,matrix,end)<roadRouteCost(general,matrix,end)?grouped:general
+  ];
+  const seen=new Set([base.join(',')]);
+  for(const proposed of proposals){const signature=proposed.join(',');if(seen.has(signature)||calls+callsPerRoute>4)continue;seen.add(signature);
+   const alternative=await measure(proposed);if(alternative.meters<chosen.meters){selected=proposed;chosen=alternative;}
+  }
  }catch(error){failures.push(error.code||'KAKAO_NETWORK_ERROR');}finally{clearTimeout(timer);}
  return {source:'kakao',selectionPolicy:'total-distance-4',objective:'DISTANCE',optimized:selected.map(i=>route[i].id),calls,callLimit:4,failedCalls:failures.length,failedWindows:failures.length,failures,baselineMeters:baseline?.meters??null,selectedMeters:chosen?.meters??null,includesEnd:end!=null};
 }
