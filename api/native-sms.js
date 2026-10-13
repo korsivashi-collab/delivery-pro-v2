@@ -3,10 +3,11 @@ const { randomInt, randomUUID, createHmac, timingSafeEqual } = require('node:cry
 const { normalizePhone, phoneDigits, problem } = require('../server/license-integrity.cjs');
 
 // OTP and counters are server-only Firestore collections (default-denied by existing rules).
-function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) => fetch(...args), now = Date.now } = {}) {
+function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) => fetch(...args), now = Date.now, log = record => console.warn('[SENS SMS]', JSON.stringify(record)) } = {}) {
     function config() {
         const values = ['NCP_ACCESS_KEY', 'NCP_SECRET_KEY', 'NCP_SENS_SERVICE_ID', 'NCP_SENS_SENDER'].map(key => env[key]?.trim());
         if (values.some(value => !value) || !/^\d{8,12}$/.test(values[3])) throw problem('문자 인증 서버 설정을 확인해 주세요.', 503);
+        if (!/^ncp:sms:[a-z]{2}:\d+:[A-Za-z0-9_-]+$/.test(values[2])) throw problem('NCP_SENS_SERVICE_ID 설정을 확인해 주세요. SMS 서비스 ID 전체를 입력해야 합니다.', 503);
         return values;
     }
     return async function handler(req, res) {
@@ -54,8 +55,9 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                     tx.set(challengeRef, { requestId, codeHash: hash(requestId + ':' + digits + ':' + code),
                         sentAt: stamp, expiresAt: stamp + 180000, attempts: 0, status: 'pending' });
                 });
-                const uri = `/sms/v2/services/${encodeURIComponent(serviceId)}/messages`, timestamp = String(now());
+                const uri = `/sms/v2/services/${serviceId}/messages`, timestamp = String(now());
                 const signature = createHmac('sha256', secret).update(`POST ${uri}\n${timestamp}\n${access}`).digest('base64');
+                let stage = 'request', upstreamStatus = null, providerStatus = null, providerErrorCode = null;
                 try {
                     const response = await fetchImpl('https://sens.apigw.ntruss.com' + uri, {
                         method: 'POST', signal: AbortSignal.timeout(15000),
@@ -64,20 +66,39 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                         body: JSON.stringify({ type: 'SMS', contentType: 'COMM', countryCode: '82', from: sender,
                             content: `[배송경로PRO] 인증번호 ${code} (3분 이내 입력)`, messages: [{ to: digits }] })
                     });
+                    upstreamStatus = response.status || null;
+                    stage = 'response';
                     const result = await response.json();
+                    const safeCode = value => /^[A-Za-z0-9_-]{1,40}$/.test(String(value ?? '')) ? String(value) : null;
+                    providerStatus = safeCode(result.statusCode);
+                    providerErrorCode = safeCode(result.error?.errorCode ?? result.errorCode ?? result.error?.code);
                     if (!response.ok || String(result.statusCode) !== '202') throw new Error('provider refused');
+                    stage = 'save';
                     const ready = await db.runTransaction(async tx => {
                         const doc = await tx.get(challengeRef);
                         if (doc.data()?.requestId !== requestId || doc.data()?.status !== 'pending') return false;
                         tx.update(challengeRef, { status: 'ready', expiresAt: now() + 180000 }); return true;
                     });
                     if (!ready) throw new Error('request superseded');
-                } catch (_) {
-                    await db.runTransaction(async tx => {
-                        const doc = await tx.get(challengeRef);
-                        if (doc.data()?.requestId === requestId) tx.update(challengeRef, { status: 'failed', codeHash: '' });
-                    });
-                    throw problem('문자 발송을 완료하지 못했습니다. 60초 후 다시 요청하거나 고객센터에 문의해 주세요.', 502);
+                } catch (error) {
+                    const diagnostic = stage === 'save' ? 'SMS_SESSION_SAVE_FAILED' :
+                        error.name === 'TimeoutError' || error.name === 'AbortError' ? 'SENS_TIMEOUT' :
+                        upstreamStatus ? 'SENS_HTTP_' + upstreamStatus : 'SENS_NETWORK_ERROR';
+                    // Never log request body, OTP, phone, authorization, raw provider message or credentials.
+                    log({ code: diagnostic, stage, httpStatus: upstreamStatus, providerStatus, providerErrorCode });
+                    try {
+                        await db.runTransaction(async tx => {
+                            const doc = await tx.get(challengeRef);
+                            if (doc.data()?.requestId === requestId) tx.update(challengeRef, { status: 'failed', codeHash: '' });
+                        });
+                    } catch (_) { log({ code: 'SMS_FAILURE_STATE_SAVE_FAILED' }); }
+                    const reason = stage === 'save' ? '문자 요청은 접수됐지만 인증 상태 저장에 실패했습니다.' :
+                        [401, 403].includes(upstreamStatus) ? 'SENS API 인증 또는 접근 권한을 확인해 주세요.' :
+                        upstreamStatus === 404 ? 'SENS 서비스 ID와 API 경로를 확인해 주세요.' :
+                        upstreamStatus === 400 ? 'SENS 발신번호 등록과 문자 요청 설정을 확인해 주세요.' :
+                        upstreamStatus === 429 ? 'SENS 발송 한도를 확인해 주세요.' :
+                        diagnostic === 'SENS_TIMEOUT' ? 'SENS 서버 응답 시간이 초과되었습니다.' : 'SENS 문자 발송 요청에 실패했습니다.';
+                    return res.status(502).json({ error: `${reason} (${diagnostic}) 60초 후 다시 요청해 주세요.`, code: diagnostic });
                 }
                 return res.status(200).json({ requestId, expiresIn: 180, resendAfter: 60 });
             }
