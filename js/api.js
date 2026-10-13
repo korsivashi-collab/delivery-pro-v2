@@ -51,11 +51,6 @@ auth.languageCode = 'ko';
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-export async function getRouteAuthToken() {
-    if (!auth.currentUser) throw new Error('로그인 후 경로를 최적화해 주세요.');
-    return auth.currentUser.getIdToken();
-}
-
 // Firebase 전화번호 인증: confirmationResult는 호출 측 메모리에 보관합니다.
 let appRecaptchaVerifier = null;
 

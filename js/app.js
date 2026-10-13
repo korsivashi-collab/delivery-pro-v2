@@ -7,7 +7,7 @@ import { openSubscriptionModal } from './subscriptions.js';
 
 import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 import { calculateOptimizedRoute } from './optimizer.js';
-import { saveRouteToFirestore, fetchActiveRouteOnce, getRouteAuthToken } from './api.js';
+import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
@@ -338,7 +338,7 @@ export function handleStartSelectTab(mode) {
 }
 
 // ==========================================
-// 5. 기본 경로 및 카카오 밀집 구간 최적화
+// 5. 종료지점과 근접 배송지를 고려한 로컬 경로 최적화
 // ==========================================
 let activeOptimization = null;
 
@@ -364,8 +364,8 @@ export async function optimizeRouteAction() {
     const isCurrent = () => activeOptimization === task && snapshotKey() === task.snapshot;
     
     try {
-        // 가까운 배송지 묶음은 카카오 실제 도로 경로로 비교
-        showLoading("동선 최적화 중...\n(하버사인 · 근접 배송지 묶음 테스트)");
+        // 종료지점까지의 거리와 근접 배송지 묶음을 함께 비교
+        showLoading("동선 최적화 중...");
         
         // UI 렌더링이 블로킹되지 않도록 짧은 지연시간 부여
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -383,22 +383,12 @@ export async function optimizeRouteAction() {
         }
         if (routeDestinations.length < 2) throw new Error('위치가 확인된 배송지가 최소 2곳 필요합니다.');
         
-        // 카카오 비교가 실패하면 해당 구간은 기본 순서를 유지하고 안내한다.
-        let routeComparison = { clusters: 0, failed: 0 };
         const optimizedSection = await calculateOptimizedRoute(
-            routeDestinations, 
+            routeDestinations,
             { ...startLocation },
-            hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null,
-            {
-                roadCorrection: 'none', // Temporary test: keep local improvements, no Kakao route requests.
-                getAuthToken: getRouteAuthToken,
-                onProgress: ({ current, total }) => {
-                    if (isCurrent()) showLoading(`최적화 후보 준비 중...\n(${current}/${total} 구간)`);
-                },
-                onComplete: result => { routeComparison = result; }
-            }
+            hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null
         );
-        
+
         if (!isCurrent()) return;
         
         destinations = optimizedSection.concat(pendingDestinations);
@@ -408,14 +398,6 @@ export async function optimizeRouteAction() {
         if (!updateDisplayNumbers()) return;
         hideLoading();
         
-        if (routeComparison.correctionPolicy === 'daily-haversine') {
-            alert(routeComparison.quotaReason === 'in-progress'
-                ? '카카오 보정이 이미 진행 중이어서 이번에는 기본 동선 최적화를 적용했습니다.'
-                : '오늘 카카오 보정 2회를 모두 사용했습니다. 하버사인 기반 동선 최적화를 적용했습니다.');
-        }
-        if (routeComparison.failed) {
-            alert(`카카오 도로 비교 ${routeComparison.clusters}개 구간 중 ${routeComparison.failed}개는 비교를 완료하지 못해 기본 경로를 유지했습니다.`);
-        }
         if (pendingDestinations.length) {
             alert(`위치 확인이 필요한 배송지 ${pendingDestinations.length}건은 최적화에서 제외하고 목록 끝에 유지했습니다. 주소를 수정해 주세요.`);
         }
