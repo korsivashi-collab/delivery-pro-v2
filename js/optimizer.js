@@ -263,6 +263,33 @@ export async function calculateOptimizedRoute(destinations, startLocation, endLo
         }
     }
 
+    if (options.roadCorrection === 'none') {
+        // Temporary offline comparison: keep the nearby-stop excursion idea,
+        // evaluate its front/back attachments without contacting the server.
+        let grouped = 0;
+        for (let pass = 0; pass < 4; pass++) {
+            let best = pathCost(fullRoute), chosen = null;
+            const stopCount = fullRoute.length - (hasEnd ? 1 : 0);
+            for (let i = 1; i < stopCount - 2; i++) for (let j = i + 2; j < stopCount; j++) {
+                const a = fullRoute[i], b = fullRoute[j], close = getCachedDistance(a, b);
+                if (close > MAX_LOCAL_SPAN_KM) continue;
+                const middle = fullRoute.slice(i + 1, j);
+                const travel = pathCost(fullRoute.slice(i, j + 1));
+                if (travel - close < 1.2 || travel < close * 2) continue;
+                for (const local of [[a, b, ...middle], [b, a, ...middle], [...middle, a, b], [...middle, b, a]]) {
+                    const trial = [...fullRoute.slice(0, i), ...local, ...fullRoute.slice(j + 1)];
+                    const cost = pathCost(trial); // Includes the final delivery → home.
+                    if (cost < best - 0.0001) { best = cost; chosen = trial; }
+                }
+            }
+            if (!chosen) break;
+            fullRoute = chosen; grouped++;
+        }
+        options.onComplete?.({ clusters: 0, failed: 0, excursions: grouped, terminalCandidates,
+            correctionPolicy: 'haversine-test', kakaoCalls: 0, kakaoCallLimit: 0 });
+        return hasEnd ? fullRoute.slice(0, -1) : fullRoute;
+    }
+
     // 경로상 떨어져 있어도 좌표가 가까우면 같은 묶음으로 찾는다.
     // 긴 연결 사슬은 만들지 않고 모든 배송지 쌍이 900m 이내인 묶음만 허용한다.
     const finalRoute = fullRoute.slice();

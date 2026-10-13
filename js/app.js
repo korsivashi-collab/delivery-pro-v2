@@ -365,7 +365,7 @@ export async function optimizeRouteAction() {
     
     try {
         // 가까운 배송지 묶음은 카카오 실제 도로 경로로 비교
-        showLoading("동선 최적화 중...\n(가까운 배송지의 도로 경로 비교)");
+        showLoading("동선 최적화 중...\n(하버사인 · 근접 배송지 묶음 테스트)");
         
         // UI 렌더링이 블로킹되지 않도록 짧은 지연시간 부여
         await new Promise(resolve => setTimeout(resolve, 100));
@@ -390,6 +390,7 @@ export async function optimizeRouteAction() {
             { ...startLocation },
             hasValidDeliveryCoordinates(endLocation) ? { ...endLocation } : null,
             {
+                roadCorrection: 'none', // Temporary test: keep local improvements, no Kakao route requests.
                 getAuthToken: getRouteAuthToken,
                 onProgress: ({ current, total }) => {
                     if (isCurrent()) showLoading(`최적화 후보 준비 중...\n(${current}/${total} 구간)`);
