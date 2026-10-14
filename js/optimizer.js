@@ -20,14 +20,19 @@ const MAX_LOCAL_SPAN_KM = 0.9;
 
 // 동선 최적화 메인 오케스트레이터 알고리즘
 export async function calculateOptimizedRoute(destinations, startLocation, endLocation, options = {}) {
+    return calculateOptimizedRouteSync(destinations, startLocation, endLocation, options);
+}
+
+// 관제와 기사 앱이 동일한 엔진을 사용한다. 기존 비동기 API는 유지한다.
+export function calculateOptimizedRouteSync(destinations, startLocation, endLocation, options = {}) {
     if (destinations.length < 2) {
         throw new Error("출발지를 포함하여 최소 2곳의 배송지가 필요합니다.");
     }
-    if (!startLocation || !startLocation.lat) {
+    if (!startLocation || !Number.isFinite(startLocation.lat) || !Number.isFinite(startLocation.lng)) {
         throw new Error("시작 지점이 먼저 선택되어야 합니다.");
     }
 
-    let hasEnd = Boolean(endLocation && endLocation.lat && endLocation.lat !== 0);
+    let hasEnd = Boolean(endLocation && Number.isFinite(endLocation.lat) && Number.isFinite(endLocation.lng) && (endLocation.lat !== 0 || endLocation.lng !== 0));
     let startPoint = destinations[0];
     let unassigned = destinations.slice(1).sort((a, b) => a.id - b.id);
     let allPoints = [startPoint, ...unassigned];

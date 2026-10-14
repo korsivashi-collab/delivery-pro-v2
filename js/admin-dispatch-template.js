@@ -3,6 +3,9 @@
 import { state, getLocalDateString } from "./admin-state.js";
 import { formatNumber } from "./admin-dispatch-core.js";
 
+const escapeTemplateText = value => String(value ?? '').replace(/[&<>"']/g,
+    char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+
 // 현재 편집 중인 서식 상태
 export const templateBuilderState = {
     activeTemplateId: null,
@@ -10,6 +13,23 @@ export const templateBuilderState = {
     currentDocHtml: '',
     detectedColumns: ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액']
 };
+
+// 기본 식봄형 서식은 기존 빌더를 사용하며 회사/고객 실데이터를 포함하지 않는다.
+export function ensureBuiltInForm() {
+    let forms;
+    try { forms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]'); }
+    catch { throw new Error('저장된 양식을 읽을 수 없습니다. 기존 데이터를 보존합니다.'); }
+    if (!Array.isArray(forms)) throw new Error('저장된 양식 데이터 형식을 확인해 주세요.');
+    if (!forms.some(f => f.id === 'BUILTIN-SIKBOM-V1')) {
+        forms.push({ id: 'BUILTIN-SIKBOM-V1', title: '식봄형 기본 거래명세표', builtIn: true,
+            isDefault: forms.length === 0, templateHtml: buildCleanTemplatedHtml({
+                docTitle:'거래명세표', isTwoPart:true, provName:'{{공급자}}',
+                columns:['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액']
+            }) });
+        localStorage.setItem('deliveryPro_savedForms',JSON.stringify(forms));
+    }
+    return forms;
+}
 
 // ==========================================
 // 0. [핵심] 컬럼 감지 기반 동적 비율 계산 엔진 (오직 상품 테이블 전용)
@@ -30,7 +50,7 @@ export function buildDynamicColgroup(cols) {
     const columnWidthMap = {};
 
     cols.forEach(col => {
-        if (col === '상품명' || /상품|품목|품명/i.test(col)) return;
+        if (col === '상품명' || /^(상품|상품명|품목|품목명|품명|제품명)$/i.test(col)) return;
 
         let w = 8.0;
         if (fixedWidths[col] !== undefined) {
@@ -63,7 +83,7 @@ export function buildDynamicColgroup(cols) {
 
     const totalCalculated = nonProductTotalWidth + productWidth;
     const colsHtml = cols.map(col => {
-        const key = (col === '상품명' || /상품|품목|품명/i.test(col)) ? '상품명' : col;
+        const key = (col === '상품명' || /^(상품|상품명|품목|품목명|품명|제품명)$/i.test(col)) ? '상품명' : col;
         const targetW = columnWidthMap[key] !== undefined ? columnWidthMap[key] : (columnWidthMap[col] || 8.0);
         const actualPercent = ((targetW / totalCalculated) * 100).toFixed(1);
         return `<col style="width: ${actualPercent}%;">`;
@@ -76,6 +96,7 @@ export function buildDynamicColgroup(cols) {
 // 1. PDF 분석 및 [양식 보존 + 내용 자동 소거/템플릿화] 알고리즘
 // ==========================================
 export async function parsePdfToEditableDocument(file) {
+    if (!/\.pdf$/i.test(file.name)) { alert("기본 양식은 PDF 파일로 업로드해 주세요."); return; }
     if (!window.pdfjsLib) {
         alert("PDF 처리 라이브러리가 로드되지 않았습니다. 새로고침 후 다시 시도해 주세요.");
         return;
@@ -167,6 +188,9 @@ function extractItemTableColumns(rawText) {
     const cols = ['No.', '상품명'];
     if (/규격/i.test(rawText)) cols.push('규격(단위)');
     if (/제조사|원산지/i.test(rawText)) cols.push('제조사(원산지)');
+    for (const label of ['품목코드', '제품코드', '제조번호', '로트번호', '유효기간', '사용기한', '보관조건']) {
+        if (rawText.includes(label)) cols.push(label);
+    }
     cols.push('수량', '단가');
     if (/공급가액|공급가/i.test(rawText)) cols.push('공급가액');
     if (/세액|부가세/i.test(rawText)) cols.push('세액');
@@ -207,12 +231,12 @@ function generateSingleInvoiceBlock(cfg, partName) {
     cols.forEach(col => {
         if (col === 'No.' || /No|순번/i.test(col)) {
             sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;">1</td>`;
-        } else if (col === '상품명' || /상품|품목|품명/i.test(col)) {
+        } else if (col === '상품명' || /^(상품|상품명|품목|품목명|품명|제품명)$/i.test(col)) {
             sampleTds += `<td style="border: 1px solid #000; font-weight: bold; padding: 2px 4px; word-break: break-all; white-space: normal; line-height: 1.2; text-align: left;" contenteditable="true">{{상품명}}</td>`;
         } else if (/규격|단위/i.test(col)) {
             sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">{{단위}}</td>`;
         } else if (/제조사|원산지/i.test(col)) {
-            sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">국내산</td>`;
+            sampleTds += `<td style="border: 1px solid #000; text-align: center; padding: 2px;" contenteditable="true">-</td>`;
         } else if (/수량/i.test(col)) {
             sampleTds += `<td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2px;" contenteditable="true">{{수량}}</td>`;
         } else if (/단가/i.test(col)) {
@@ -280,32 +304,32 @@ function generateSingleInvoiceBlock(cfg, partName) {
                 <tr>
                     <td rowspan="5" style="border: 1px solid #000; text-align: center; font-weight: bold; line-height: 1.2; background: #f8fafc; padding: 2px;" contenteditable="true">공<br>급<br>자</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">사업자등록번호</td>
-                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true" spellcheck="false">${cfg.provRegno || ''}</td>
+                    <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true" spellcheck="false">${escapeTemplateText(cfg.provRegno || '')}</td>
                     <td rowspan="5" style="border: 1px solid #000; text-align: center; font-weight: bold; line-height: 1.2; background: #f8fafc; padding: 2px;" contenteditable="true">공<br>급<br>받<br>는<br>자</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">사업자등록번호</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px; background: #f0fdf4;" contenteditable="true">{{사업자번호}}</td>
                 </tr>
                 <tr>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">상호(법인명)</td>
-                    <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: bold;" contenteditable="true" spellcheck="false">${cfg.provName || ''}</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: bold;" contenteditable="true" spellcheck="false">${escapeTemplateText(cfg.provName || '')}</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">구 매 자 명</td>
                     <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: bold; background: #f0fdf4;" contenteditable="true">{{구매자명}}</td>
                 </tr>
                 <tr style="height: 31px;">
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">주 소</td>
-                    <td style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; line-height: 1.15;" contenteditable="true" spellcheck="false">${cfg.provAddr || ''}</td>
+                    <td style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; line-height: 1.15;" contenteditable="true" spellcheck="false">${escapeTemplateText(cfg.provAddr || '')}</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">주 소</td>
                     <td style="border: 1px solid #000; padding: 2px 4px; font-size: 9px; line-height: 1.15; background: #eff6ff;" contenteditable="true">{{배송지주소}}</td>
                 </tr>
                 <tr>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">연락처/FAX</td>
-                    <td style="border: 1px solid #000; padding: 2.5px 4px;" contenteditable="true" spellcheck="false">${cfg.provTel || ''}</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px;" contenteditable="true" spellcheck="false">${escapeTemplateText(cfg.provTel || '')}</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">배송지명(간판명)</td>
                     <td style="border: 1px solid #000; padding: 2.5px 4px; font-weight: 900; background: #eff6ff;" contenteditable="true">{{상호명}}</td>
                 </tr>
                 <tr>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">추 가 연 락 처</td>
-                    <td style="border: 1px solid #000; padding: 2.5px 4px;" contenteditable="true" spellcheck="false">${cfg.provAddTel || ''}</td>
+                    <td style="border: 1px solid #000; padding: 2.5px 4px;" contenteditable="true" spellcheck="false">${escapeTemplateText(cfg.provAddTel || '')}</td>
                     <td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: 2.5px;" contenteditable="true">연 락 처</td>
                     <td style="border: 1px solid #000; padding: 2.5px 4px; background: #eff6ff;" contenteditable="true">{{고객연락처}}</td>
                 </tr>
@@ -363,7 +387,8 @@ function generateSingleInvoiceBlock(cfg, partName) {
 // ==========================================
 // 3. 에디터 렌더링 및 [양식 저장] 툴바
 // ==========================================
-export function renderEditableDocument(htmlContent) {
+export function renderEditableDocument(htmlContent, filledPreview = false) {
+    templateBuilderState.filledPreview = filledPreview;
     const previewContainer = document.getElementById('inv-view-preview');
     const placeholder = document.getElementById('preview-placeholder');
 
@@ -393,6 +418,7 @@ export function renderEditableDocument(htmlContent) {
                 <button type="button" onclick="window.insertDocTag('{{고객연락처}}')" class="px-2 py-0.5 bg-purple-50 hover:bg-purple-100 text-purple-800 border border-purple-200 rounded text-[11px] font-black transition active:scale-95">+ 전화번호</button>
             </div>
             <div class="flex items-center gap-2">
+                <button type="button" onclick="window.editOriginalDocumentTemplate()" class="px-3 py-1.5 border rounded-lg text-xs">원본 양식 편집</button>
                 <button type="button" onclick="window.saveCurrentDocumentTemplate()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-black rounded-lg shadow-sm transition active:scale-95 flex items-center gap-1.5">
                     <i class="fa-solid fa-floppy-disk"></i> 양식 저장
                 </button>
@@ -406,7 +432,7 @@ export function renderEditableDocument(htmlContent) {
     const docCanvas = document.getElementById('editable-doc-canvas');
     if (docCanvas) {
         docCanvas.addEventListener('input', () => {
-            templateBuilderState.currentDocHtml = docCanvas.innerHTML;
+            if (!templateBuilderState.filledPreview) templateBuilderState.currentDocHtml = docCanvas.innerHTML;
         });
     }
 }
@@ -458,25 +484,25 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     else if (memo.includes('무통장') || memo.includes('계좌')) payMethod = '무통장입금';
     else if (memo.includes('현금')) payMethod = '현금결제';
 
-    const totalQty = order.qty ? `${formatNumber(order.qty)}개` : (order.items && order.items.length > 0 ? `${formatNumber(order.items.reduce((s, it) => s + (parseInt(it.qty, 10) || 1), 0))}개` : '1개');
+    const totalQty = order.qty ? `${formatNumber(order.qty)}개` : (order.items && order.items.length > 0 ? `${formatNumber(order.items.reduce((s, it) => s + ((Number.isFinite(Number(it.qty)) && it.qty !== '' && it.qty != null ? Number(it.qty) : 1)), 0))}개` : '1개');
     const grandTotal = order.total ? `${formatNumber(order.total)}원` : '';
 
     // 1. 단일 필드 태그 치환 (담당기사 포함)
-    html = html.replace(/\{\{\s*담당기사\s*\}\}/g, driverName)
-               .replace(/\{\{\s*기사명\s*\}\}/g, driverName)
-               .replace(/\{\{\s*주문일자\s*\}\}/g, today)
-               .replace(/\{\{\s*주문번호\s*\}\}/g, orderNo)
-               .replace(/\{\{\s*사업자번호\s*\}\}/g, bizNo)
-               .replace(/\{\{\s*상호명\s*\}\}/g, storeName)
-               .replace(/\{\{\s*구매자명\s*\}\}/g, buyerName) 
-               .replace(/\{\{\s*공급자\s*\}\}/g, senderName) 
-               .replace(/\{\{\s*발송자\s*\}\}/g, senderName) 
-               .replace(/\{\{\s*배송지주소\s*\}\}/g, address)
-               .replace(/\{\{\s*고객연락처\s*\}\}/g, phone)
-               .replace(/\{\{\s*결제수단\s*\}\}/g, payMethod)
-               .replace(/\{\{\s*배송요청사항\s*\}\}/g, memo)
-               .replace(/\{\{\s*총수량\s*\}\}/g, totalQty)
-               .replace(/\{\{\s*총금액\s*\}\}/g, grandTotal);
+    html = html.replace(/\{\{\s*담당기사\s*\}\}/g, () => escapeTemplateText(driverName))
+               .replace(/\{\{\s*기사명\s*\}\}/g, () => escapeTemplateText(driverName))
+               .replace(/\{\{\s*주문일자\s*\}\}/g, () => escapeTemplateText(today))
+               .replace(/\{\{\s*주문번호\s*\}\}/g, () => escapeTemplateText(orderNo))
+               .replace(/\{\{\s*사업자번호\s*\}\}/g, () => escapeTemplateText(bizNo))
+               .replace(/\{\{\s*상호명\s*\}\}/g, () => escapeTemplateText(storeName))
+               .replace(/\{\{\s*구매자명\s*\}\}/g, () => escapeTemplateText(buyerName)) 
+               .replace(/\{\{\s*공급자\s*\}\}/g, () => escapeTemplateText(senderName)) 
+               .replace(/\{\{\s*발송자\s*\}\}/g, () => escapeTemplateText(senderName)) 
+               .replace(/\{\{\s*배송지주소\s*\}\}/g, () => escapeTemplateText(address))
+               .replace(/\{\{\s*고객연락처\s*\}\}/g, () => escapeTemplateText(phone))
+               .replace(/\{\{\s*결제수단\s*\}\}/g, () => escapeTemplateText(payMethod))
+               .replace(/\{\{\s*배송요청사항\s*\}\}/g, () => escapeTemplateText(memo))
+               .replace(/\{\{\s*총수량\s*\}\}/g, () => escapeTemplateText(totalQty))
+               .replace(/\{\{\s*총금액\s*\}\}/g, () => escapeTemplateText(grandTotal));
 
     // 2. 현재 서식의 상품 테이블 thead 컬럼 구조 정밀 추출
     let cols = templateBuilderState.detectedColumns || ['No.', '상품명', '규격(단위)', '제조사(원산지)', '수량', '단가', '공급가액', '세액', '총액'];
@@ -519,22 +545,25 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
 
     let itemsRowsHtml = '';
     items.forEach((it, i) => {
-        const itemQty = parseInt(it.qty, 10) || 1;
+        const itemQty = (Number.isFinite(Number(it.qty)) && it.qty !== '' && it.qty != null ? Number(it.qty) : 1);
         const itemPrice = parseInt(String(it.price).replace(/[^0-9]/g, ''), 10) || 0;
         const itemTotal = parseInt(String(it.total).replace(/[^0-9]/g, ''), 10) || (itemPrice * itemQty);
-        const supplyAmt = Math.round(itemTotal / 1.1) || itemTotal;
-        const taxAmt = (itemTotal - supplyAmt) || 0;
+        const explicitSupply = it.supplyAmount != null && Number.isFinite(Number(it.supplyAmount));
+        const explicitTax = it.taxAmount != null && Number.isFinite(Number(it.taxAmount));
+        const exempt = /면세|비과세/.test(String(it.taxType || ''));
+        const supplyAmt = explicitSupply ? Number(it.supplyAmount) : exempt ? itemTotal : (Math.round(itemTotal / 1.1) || itemTotal);
+        const taxAmt = explicitTax ? Number(it.taxAmount) : exempt ? 0 : ((itemTotal - supplyAmt) || 0);
 
         let tdsHtml = '';
         cols.forEach(col => {
             if (col === 'No.' || /No|순번/i.test(col)) {
                 tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${i + 1}</td>`;
-            } else if (col === '상품명' || /상품|품목|품명/i.test(col)) {
-                tdsHtml += `<td style="border: 1px solid #000; font-weight: bold; padding: ${cellPadding}; text-align: left; vertical-align: middle; word-break: break-all; white-space: normal; line-height: 1.18;">${it.name || '-'}</td>`;
+            } else if (col === '상품명' || /^(상품|상품명|품목|품목명|품명|제품명)$/i.test(col)) {
+                tdsHtml += `<td style="border: 1px solid #000; font-weight: bold; padding: ${cellPadding}; text-align: left; vertical-align: middle; word-break: break-all; white-space: normal; line-height: 1.18;">${escapeTemplateText(it.name || '-')}</td>`;
             } else if (/규격|단위/i.test(col)) {
-                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${it.unit || '개'}</td>`;
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${escapeTemplateText(it.unit || '개')}</td>`;
             } else if (/제조사|원산지/i.test(col)) {
-                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">국내산</td>`;
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${escapeTemplateText(it.origin || it.manufacturer || '-')}</td>`;
             } else if (/수량/i.test(col)) {
                 tdsHtml += `<td style="border: 1px solid #000; text-align: center; font-weight: bold; padding: ${cellPadding}; vertical-align: middle;">${formatNumber(itemQty)}</td>`;
             } else if (/단가/i.test(col)) {
@@ -546,7 +575,8 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
             } else if (/총액|합계/i.test(col)) {
                 tdsHtml += `<td style="border: 1px solid #000; text-align: right; font-weight: bold; padding: ${cellPadding}; vertical-align: middle;">${itemTotal ? formatNumber(itemTotal) : '-'}</td>`;
             } else {
-                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">-</td>`;
+                const extraValue = it.extra?.[col] ?? it[col] ?? '-';
+                tdsHtml += `<td style="border: 1px solid #000; text-align: center; padding: ${cellPadding}; vertical-align: middle;">${escapeTemplateText(extraValue)}</td>`;
             }
         });
 
@@ -589,7 +619,7 @@ export function saveCurrentDocumentTemplate() {
     if (!title || !title.trim()) return;
 
     const trimmedTitle = title.trim();
-    const templateHtml = docCanvas.innerHTML;
+    const templateHtml = templateBuilderState.filledPreview ? templateBuilderState.currentDocHtml : docCanvas.innerHTML;
     const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
 
     const newTemplate = {
@@ -601,6 +631,7 @@ export function saveCurrentDocumentTemplate() {
     };
 
     const existingIdx = savedForms.findIndex(f => f.title === trimmedTitle);
+    if (existingIdx >= 0 && savedForms[existingIdx].builtIn) { alert('기본 원본은 덮어쓸 수 없습니다. 다른 이름으로 저장해 주세요.'); return; }
     if (existingIdx >= 0) {
         if (!confirm(`'${trimmedTitle}'(으)로 이미 저장된 서식이 있습니다. 덮어쓰시겠습니까?`)) return;
         newTemplate.isDefault = savedForms[existingIdx].isDefault;
@@ -624,3 +655,6 @@ window.insertDocTag = insertDocTag;
 window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 window.fillTemplateWithOrderData = fillTemplateWithOrderData;
 window.buildDynamicColgroup = buildDynamicColgroup;
+window.editOriginalDocumentTemplate = () => {
+    if (templateBuilderState.currentDocHtml) renderEditableDocument(templateBuilderState.currentDocHtml, false);
+};

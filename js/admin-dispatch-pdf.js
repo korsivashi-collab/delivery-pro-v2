@@ -85,7 +85,7 @@ export async function processSinglePdfFile(file) {
         const totalPages = pdf.numPages;
 
         const extractedOrders = [];
-        const seenOrderKeys = new Set();
+        const seenOrderKeys = new Map();
 
         for (let pageNum = 1; pageNum <= totalPages; pageNum++) {
             if (dropZone) {
@@ -109,8 +109,17 @@ export async function processSinglePdfFile(file) {
                     : `${ord.address}___${ord.storeName}`;
 
                 if (!seenOrderKeys.has(uniqueKey) && (ord.address || ord.storeName)) {
-                    seenOrderKeys.add(uniqueKey);
+                    seenOrderKeys.set(uniqueKey, ord);
                     extractedOrders.push(ord);
+                } else if (seenOrderKeys.has(uniqueKey)) {
+                    const previous = seenOrderKeys.get(uniqueKey);
+                    // 동일 주문의 다음 페이지 품목을 보존한다. 완전히 같은 보관용 사본만 제외한다.
+                    if (JSON.stringify(previous.items) !== JSON.stringify(ord.items)) {
+                        previous.items.push(...ord.items);
+                        previous.qty = previous.items.reduce((sum,item)=>sum+item.qty,0);
+                        previous.total = previous.items.reduce((sum,item)=>sum+item.total,0);
+                        previous.itemName = `${previous.items[0]?.name || ''} 외 ${previous.items.length-1}건`;
+                    }
                 }
             });
         }
@@ -289,7 +298,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
             if (tokens.length >= 3 && /^\d+$/.test(tokens[0])) {
                 let numCount = 0;
                 for (let i = tokens.length - 1; i >= 1; i--) {
-                    if (/^[\d,]+$/.test(tokens[i])) numCount++;
+                    if (/^[\d,]+(?:\.\d+)?$/.test(tokens[i])) numCount++;
                     else break;
                 }
                 
@@ -300,17 +309,17 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
                     let qty = 1, price = 0;
                     
                     if (numCount === 2) {
-                        qty = parseInt(tokens[tokens.length - 2].replace(/,/g, ''), 10);
+                        qty = Number(tokens[tokens.length - 2].replace(/,/g, ''));
                         price = total;
                     } else {
-                        qty = parseInt(tokens[tokens.length - numCount].replace(/,/g, ''), 10);
+                        qty = Number(tokens[tokens.length - numCount].replace(/,/g, ''));
                         price = parseInt(tokens[tokens.length - numCount + 1].replace(/,/g, ''), 10);
                     }
                     
                     const nameTokens = tokens.slice(1, tokens.length - numCount);
                     let pName = nameTokens.join(' ').replace(/^\s+|\s+$/g, '');
                     
-                    rawOrderItems.push({ name: pName, qty: qty, unit: '개', price: price, total: total });
+                    rawOrderItems.push({ sourceRow: tokens[0], ...(numCount === 5 ? {supplyAmount:Number(tokens[tokens.length-3].replace(/,/g,'')),taxAmount:Number(tokens[tokens.length-2].replace(/,/g,''))} : {}), name: pName, qty: qty, unit: '개', price: price, total: total });
                 }
             }
         }
@@ -319,10 +328,11 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     const orderItems = [];
     const seenItems = new Set();
     rawOrderItems.forEach(it => {
-        const key = `${it.name}_${it.qty}_${it.total}`;
+        const key = `${it.sourceRow}_${it.name}_${it.qty}_${it.total}`;
         if (!seenItems.has(key)) {
             seenItems.add(key);
-            orderItems.push(it);
+            const { sourceRow, ...item } = it;
+            orderItems.push(item);
         }
     });
 

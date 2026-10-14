@@ -610,13 +610,23 @@ window.initMasterDataSync = function() {
     });
 
     // 6. 메시지 실시간 동기화
-    onSnapshot(query(collection(db, "dispatch_messages"), orderBy("createdAt", "desc"), limit(50)), (snapshot) => {
-        state.allDispatchMessages = [];
-        snapshot.forEach(docSnap => { state.allDispatchMessages.push({ id: docSnap.id, ...docSnap.data() }); });
-        if (typeof renderMessageFeed === 'function') renderMessageFeed(); 
-        if (typeof checkDispatchInboxNotifications === 'function') checkDispatchInboxNotifications(); 
+    const messageBuckets = new Map();
+    const messageSource = collection(db, 'dispatch_messages');
+    const messageQueries = isMaster ? [messageSource] : currentKey ? [
+        query(messageSource, where('senderKey', '==', currentKey)),
+        query(messageSource, where('targetDispatchKey', '==', currentKey)),
+        query(messageSource, where('senderKey', '==', 'MASTER'))
+    ] : [];
+    messageQueries.forEach((q, index) => onSnapshot(q, snapshot => {
+        const bucket = []; snapshot.forEach(d => bucket.push({id:d.id,...d.data()}));
+        messageBuckets.set(index,bucket);
+        const merged = new Map();
+        messageBuckets.forEach(rows => rows.forEach(row => merged.set(row.id,row)));
+        state.allDispatchMessages = [...merged.values()].sort((a,b)=>b.createdAt-a.createdAt);
+        if (typeof renderMessageFeed === 'function') renderMessageFeed();
+        if (typeof checkDispatchInboxNotifications === 'function') checkDispatchInboxNotifications();
         if (typeof renderMasterNoticeHistoryList === 'function') renderMasterNoticeHistoryList();
-    });
+    }));
 
     // 🌟 7. 템플릿 실시간 동기화 (권한별 제한 쿼리 및 공용 템플릿 일치)
     const templatesQuery = isMaster 

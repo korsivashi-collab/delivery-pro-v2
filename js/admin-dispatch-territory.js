@@ -1,3 +1,5 @@
+import { classifyCompletionOwnership, getDriverRouteData } from './admin-dispatch-core.js';
+import { getLocalDateString } from './admin-state.js';
 // js/admin-dispatch-territory.js
 
 import { db } from "./admin-api.js";
@@ -14,7 +16,8 @@ let otherTerritoryOverlays = [];
 let allTerritoriesMap = null;
 let allTerritoriesOverlays = [];
 let currentTerritorySize = 100; // 현재 모달에서 조작 중인 권역 크기(%)
-let lastCenterUpdateTime = 0;   // 🌟 렉 방지용 이벤트 중복 실행 가드
+let territoryRequestVersion = 0;
+let territoryModalVersion = 0;
 
 // 핀 근처만 가도 손 모양 커서가 뜨며 넓은 영역에서 드래그 가능하도록 반경이 넓은 커스텀 마커 이미지 생성
 const pinSvg = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(`
@@ -32,9 +35,9 @@ function getTerritoryMarkerImage() {
 
 // 🌟 과학적 배송 지리 기반 기본 정적 반경 (단위: 미터)
 function getDefaultRadius(scale) {
-    if (scale === 'gu') return 4500;   // 구/군: 반경 4.5km (지름 9km, 1개 자치구 완벽 커버)
-    if (scale === 'si') return 13000;  // 시/도: 반경 13km (지름 26km, 특별시/광역시 전역 커버)
-    return 1500;                      // 동/읍/면: 반경 1.5km (지름 3km, 배송동+인접생활권 밀착)
+    if (scale === 'gu') return 4500;   // 중권역: 반경 4.5km (행정구역 경계가 아닌 참고 원)
+    if (scale === 'si') return 13000;  // 대권역: 반경 13km
+    return 1500;                      // 소권역: 반경 1.5km
 }
 
 // 🌟 권역 원이 지도 화면 위아래에 알맞게 차도록 시원하게 줌 레벨 맞춤
@@ -69,7 +72,7 @@ export function renderLocationSidebar() {
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-tower-broadcast text-blue-600"></i> 실시간 위치 관제 (<span class="text-blue-600">${visibleLicenses.length}</span>대)</h2>
-        <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span> GPS 수신중</span>
+        <span class="bg-emerald-50 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded text-[10px] font-black flex items-center gap-1"><span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span> 위치 요청 가능</span>
     `;
 
     if (visibleLicenses.length === 0) {
@@ -81,13 +84,13 @@ export function renderLocationSidebar() {
     visibleLicenses.forEach(lic => {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
-        const driver = state.activeRoutes[devId];
-        const driverComps = state.allCompletions.filter(c => c.deviceId === devId || (c.phone && c.phone === lic.phone)).sort((a,b) => b.completedAt - a.completedAt);
+        const driver = getDriverRouteData(lic, getLocalDateString());
+        const driverComps = state.allCompletions.filter(c => classifyCompletionOwnership(c, lic) === 'owned').sort((a,b) => b.completedAt - a.completedAt);
         
         let previewAddress = "최근 위치 데이터 대기중";
         let previewTime = "";
         if (driverComps.length > 0 && driverComps[0].address) {
-            previewAddress = driverComps[0].address;
+            previewAddress = '마지막 배송 기록: ' + driverComps[0].address;
             previewTime = driverComps[0].timeString ? driverComps[0].timeString.split(' ')[1] : '';
         } else if (driver && Array.isArray(driver.destinations) && driver.destinations.length > 0 && driver.destinations[0].address) {
             // 🌟 목적지가 실제 1건 이상 존재할 때만 목적지 주소 표출
@@ -273,10 +276,11 @@ export async function focusDriverLocationOnMap(devId) {
 
 export async function showFallbackLocation(devId) {
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
-    const driver = state.activeRoutes[devId];
+    if (!matchedLic) return;
+    const driver = getDriverRouteData(matchedLic, getLocalDateString());
     let lat = null, lng = null, timeStr = '', knownAddress = null, locationLabel = '마지막 배송 기록 위치';
 
-    const driverComps = state.allCompletions.filter(c => c.deviceId === devId || (c.phone && c.phone === matchedLic?.phone)).sort((a,b) => b.completedAt - a.completedAt);
+    const driverComps = state.allCompletions.filter(c => classifyCompletionOwnership(c, matchedLic) === 'owned').sort((a,b) => b.completedAt - a.completedAt);
     if (driverComps.length > 0 && driverComps[0].lat) {
         lat = driverComps[0].lat; lng = driverComps[0].lng; knownAddress = driverComps[0].address;
         timeStr = driverComps[0].timeString || (new Date(driverComps[0].completedAt).toLocaleString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -341,9 +345,9 @@ export function drawAllDriversOnMap() {
     
     visibleLicenses.forEach(lic => {
         const devId = lic.deviceId || lic.key; 
-        const driver = state.activeRoutes[devId];
+        const driver = getDriverRouteData(lic, getLocalDateString());
         let pos = null;
-        const driverComps = state.allCompletions.filter(c => c.deviceId === devId || (c.phone && c.phone === lic.phone)).sort((a,b) => b.completedAt - a.completedAt);
+        const driverComps = state.allCompletions.filter(c => classifyCompletionOwnership(c, lic) === 'owned').sort((a,b) => b.completedAt - a.completedAt);
         
         if (driverComps.length > 0 && driverComps[0].lat) {
             pos = new kakao.maps.LatLng(driverComps[0].lat, driverComps[0].lng);
@@ -420,6 +424,8 @@ export function adjustModalTerritorySize(delta) {
 }
 
 export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
+    const modalVersion = ++territoryModalVersion;
+    territoryRequestVersion++;
     try { if (window.event) window.event.stopPropagation(); } catch(e) {}
     document.getElementById('territory-target-devid').value = devId;
     document.getElementById('territory-target-phone').innerText = phone;
@@ -436,7 +442,8 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     if(!modal) return; 
     modal.classList.remove('hidden');
     
-    state.currentTerritoryScale = (scale && scale !== 'undefined' && scale !== '') ? scale : 'dong';
+    state.currentTerritoryScale = ['dong', 'gu', 'si'].includes(targetLic?.territoryScale || scale) ? (targetLic?.territoryScale || scale) : 'dong';
+    document.getElementById('input-territory-scale').value = state.currentTerritoryScale;
     
     ['dong', 'gu', 'si'].forEach(s => {
         const btn = document.getElementById(`btn-scale-${s}`);
@@ -446,6 +453,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     });
 
     setTimeout(() => {
+        if (modalVersion !== territoryModalVersion) return;
         const container = document.getElementById('territory-map-container');
         if (!territoryMap) {
             territoryMap = new kakao.maps.Map(container, { center: new kakao.maps.LatLng(37.566826, 126.978656), level: 6 });
@@ -524,6 +532,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         setTerritoryCenter(centerPos);
 
         setTimeout(() => { 
+            if (modalVersion !== territoryModalVersion) return;
             if (territoryMap) {
                 territoryMap.relayout(); 
                 fitMapToTerritory(centerPos, state.currentTerritoryScale, currentTerritorySize);
@@ -532,7 +541,8 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     }, 200);
 }
 
-export function closeDriverTerritoryModal() { 
+export function closeDriverTerritoryModal() {
+    territoryModalVersion++; territoryRequestVersion++;
     document.getElementById('driver-territory-modal')?.classList.add('hidden'); 
 }
 
@@ -557,15 +567,15 @@ export function setTerritoryScale(scale, skipRedraw = false) {
 export function setTerritoryCenter(latLng) {
     if (!latLng) return;
 
-    const now = Date.now();
-    if (now - lastCenterUpdateTime < 60) return;
-    lastCenterUpdateTime = now;
+    const requestVersion = ++territoryRequestVersion;
+    const targetDriver = document.getElementById('territory-target-devid').value;
 
     document.getElementById('input-territory-lat').value = latLng.getLat();
     document.getElementById('input-territory-lng').value = latLng.getLng();
 
     const geocoder = new kakao.maps.services.Geocoder();
     geocoder.coord2Address(latLng.getLng(), latLng.getLat(), function(result, status) {
+        if (requestVersion !== territoryRequestVersion || targetDriver !== document.getElementById('territory-target-devid').value) return;
         let displayAddr = "주소를 찾을 수 없는 지역입니다";
         if (status === kakao.maps.services.Status.OK) {
             let fullAddress = result[0].address.address_name;
@@ -639,6 +649,10 @@ export async function saveDriverTerritory() {
             territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
             territoryScale: scale, territory1: t1, territory2: t2,
             territorySize: currentTerritorySize
+        });
+        Object.assign(targetLic, {
+            territoryLat: parseFloat(lat), territoryLng: parseFloat(lng),
+            territoryScale: scale, territory1: t1, territory2: t2, territorySize: currentTerritorySize
         });
         alert("기사 권역이 저장되었습니다.");
         closeDriverTerritoryModal();

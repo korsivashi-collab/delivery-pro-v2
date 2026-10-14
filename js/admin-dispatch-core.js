@@ -40,7 +40,8 @@ export function getFilteredVisibleDrivers() {
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
     let visibleLicenses = state.allLicenses.filter(l => l.type !== 'dispatch');
-    if (!isMaster && dispatchKey) {
+    if (!isMaster) {
+        if (!dispatchKey) return [];
         visibleLicenses = visibleLicenses.filter(l => l.dispatchKey === dispatchKey);
     }
     return visibleLicenses;
@@ -110,7 +111,7 @@ export function getDriverRouteData(lic, selectedDate) {
         );
         if (ownedRoute) {
             const routeDate = getLocalDateString(new Date(ownedRoute.updatedAt));
-            return selectedDate === todayStr || routeDate === selectedDate ? ownedRoute : null;
+            return selectedDate === getLocalDateString(new Date()) || routeDate === selectedDate ? ownedRoute : null;
         }
     }
 
@@ -218,7 +219,7 @@ export function renderDriverListView() {
     }
 
     const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
-    const isToday = (selectedDate === todayStr);
+    const isToday = (selectedDate === getLocalDateString(new Date()));
 
     let html = '';
     visibleLicenses.forEach(lic => {
@@ -279,7 +280,7 @@ export function renderDriverDetailView(devId) {
     `;
 
     const selectedDate = document.getElementById('dispatch-date-picker')?.value || todayStr;
-    const isToday = (selectedDate === todayStr);
+    const isToday = (selectedDate === getLocalDateString(new Date()));
 
     const driverRoute = getDriverRouteData(licObj, selectedDate);
     const summary = getDriverDeliverySummary(licObj, driverRoute, selectedDate);

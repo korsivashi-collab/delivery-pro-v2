@@ -316,9 +316,14 @@ export function renderExcelTable() {
 export function processExcelData(jsonData, fileName = '') {
     if (!jsonData || jsonData.length === 0) return [];
 
-    const orderMap = {};
+    const orderMap = Object.create(null);
 
     jsonData.forEach((row, rowIdx) => {
+        const aliases = {address:'배송지',shippingaddress:'배송지',deliveryaddress:'배송지',recipient:'받는사람',
+            customername:'구매자명',storename:'배송지명',shopname:'배송지명',phone:'배송지연락처',telephone:'배송지연락처',
+            orderid:'주문번호',orderno:'주문번호',ordernumber:'주문번호',productname:'상품명',itemname:'상품명',
+            quantity:'수량',qty:'수량',unit:'단위',unitprice:'단가',amount:'총액',total:'총액',supplier:'공급자',memo:'배송메모'};
+        row = Object.fromEntries(Object.entries(row).map(([key,value])=>[aliases[key.replace(/[\s_-]/g,'').toLowerCase()] || key,value]));
         const keys = Object.keys(row);
 
         // 1. 전화번호 추출
@@ -512,7 +517,7 @@ export function processExcelData(jsonData, fileName = '') {
             const ck = k.replace(/\s+/g, '');
             if (/수량|개수|주문수량|박스수/i.test(ck)) {
                 if (row[k]) {
-                    const parsedQty = parseInt(String(row[k]).replace(/[^0-9]/g, ''), 10);
+                    const parsedQty = Number(String(row[k]).replace(/,/g, '').trim());
                     if (!isNaN(parsedQty) && parsedQty > 0) qty = parsedQty;
                     break;
                 }
@@ -545,9 +550,13 @@ export function processExcelData(jsonData, fileName = '') {
             numTotal = numPrice * qty;
         }
 
-        const orderKey = orderNo || `${address}___${storeName}`;
+        const orderKey = `${senderName}___${orderNo || address}___${address}___${storeName}`;
+        const taxKey = keys.find(k => /^(과세구분|과세여부|세금구분)$/.test(k.replace(/\s+/g,'')));
+        const taxType = taxKey ? String(row[taxKey] || '').trim() : '';
         const itemObj = { 
-            name: itemName || '상품명 미지정', 
+            name: itemName || '상품명 미지정',
+            taxType,
+            extra: Object.fromEntries(keys.filter(k => /^(품목코드|제품코드|제조번호|로트번호|유효기간|사용기한|보관조건)$/.test(k.replace(/\s+/g,''))).map(k => [k.replace(/\s+/g,''), String(row[k] ?? '')])), 
             qty: qty, 
             unit: unit || '개',
             price: numPrice || price, 
@@ -642,6 +651,7 @@ export function initExcelDropZone() {
 }
 
 export async function handleExcelUpload(e) {
+    if (window.isDispatchRouteBusy?.()) { alert("동선 전송이나 초기화가 끝난 후 업로드해 주세요."); return; }
     const files = e.target.files; 
     if (!files || files.length === 0) return;
 
@@ -692,8 +702,19 @@ export function processSingleExcelFile(file) {
             try {
                 const data = new Uint8Array(evt.target.result);
                 const workbook = XLSX.read(data, { type: 'array' });
-                const json = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "", raw: false });
-                resolve(processExcelData(json, file.name));
+                const orders = [];
+                for (const name of workbook.SheetNames) {
+                    const sheet = workbook.Sheets[name];
+                    const rows = XLSX.utils.sheet_to_json(sheet, {header:1, defval:'', raw:false});
+                    const header = rows.slice(0,30).findIndex(row =>
+                        row.some(cell => /배송지|주소|수령지|address/i.test(String(cell))) &&
+                        row.some(cell => /상품|품명|품목|제품|수량|주문|product|item|quantity|qty|order/i.test(String(cell))));
+                    if (header < 0) continue;
+                    const json = XLSX.utils.sheet_to_json(sheet, {range:header, defval:'', raw:false});
+                    orders.push(...processExcelData(json, file.name));
+                }
+                if (!orders.length) alert('배송지와 상품/수량 열을 찾지 못했습니다. 원본 헤더를 확인해 주세요.');
+                resolve(orders);
             } catch(err) { 
                 resolve([]); 
             }
@@ -845,43 +866,12 @@ export async function deleteSelectedExcelRows() {
 }
 
 export async function clearAllExcelRows() {
-    if(state.parsedExcelList.length === 0) return;
-    if(!confirm("업로드된 모든 주문 리스트와 기사 앱으로 전송된 배송 동선을 모두 완전히 초기화하시겠습니까?")) return;
-    
-    state.parsedExcelList = []; 
-    state.printReadyList = [];
-    renderExcelTable(); 
-    if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
-    if (window.renderDispatchDriverList) window.renderDispatchDriverList();
-    await autoSaveExcelToFirebase();
-
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-    const isMaster = (sessionStorage.getItem('deliveryProRole') === 'MASTER');
-    
-    let visibleLicenses = state.allLicenses.filter(l => l.type !== 'dispatch');
-    if (!isMaster && dispatchKey) {
-        visibleLicenses = visibleLicenses.filter(l => l.dispatchKey === dispatchKey);
+    // 동일한 취소 기록을 남겨 오프라인 기사 단말기의 이전 경로 복원을 방지한다.
+    if (typeof window.revertAutoDispatch !== 'function') {
+        alert('동선 초기화 기능을 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');
+        return;
     }
-
-    let clearCount = 0;
-    for (const lic of visibleLicenses) {
-        const devId = lic.deviceId || lic.key;
-        if (state.activeRoutes && state.activeRoutes[devId]) {
-            try {
-                await deleteDoc(doc(db, "routes", devId));
-                delete state.activeRoutes[devId]; // 🌟 로컬 메모리에서도 즉시 동선 삭제
-                clearCount++;
-            } catch (e) {
-                console.error(`동선 삭제 실패 (${devId}):`, e);
-            }
-        }
-    }
-    
-    // 🌟 지도 및 사이드바 뷰 잔상 즉시 소거
-    if (window.forceClearMap) window.forceClearMap();
-    if (window.renderSidebar) window.renderSidebar();
-
-    alert(`전체 초기화가 완료되었습니다.\n(기사 스마트폰 동선 삭제 완료: ${clearCount}명)`);
+    await window.revertAutoDispatch({ clearOrders: true });
 }
 
 // ==========================================

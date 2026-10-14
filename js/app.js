@@ -7,7 +7,7 @@ import { openSubscriptionModal } from './subscriptions.js';
 
 import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 import { calculateOptimizedRoute } from './optimizer.js';
-import { saveRouteToFirestore, fetchActiveRouteOnce } from './api.js';
+import { saveRouteToFirestore, fetchActiveRouteOnce, sendOfficeMessage } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
@@ -554,3 +554,5 @@ window.toggleEtcTag = toggleEtcTag;
 window.moveDestinationUp = moveDestinationUp;
 window.moveDestinationDown = moveDestinationDown;
 
+
+window.sendOfficeMessage = () => sendOfficeMessage();

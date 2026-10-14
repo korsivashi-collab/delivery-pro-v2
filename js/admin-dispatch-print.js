@@ -431,6 +431,7 @@ export function previewInvoiceRow(idx) {
         filledHtml = filledHtml.replace(/white-space:\s*nowrap;?/gi, '')
                                .replace(/text-overflow:\s*ellipsis;?/gi, '');
 
+        templateBuilderState.filledPreview = true;
         docCanvas.innerHTML = filledHtml;
         if (placeholder) placeholder.classList.add('hidden');
     }

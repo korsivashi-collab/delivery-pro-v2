@@ -3,6 +3,7 @@
 import { state } from "./admin-state.js";
 import {
     templateBuilderState,
+    ensureBuiltInForm,
     renderEditableDocument,
     fillTemplateWithOrderData
 } from "./admin-dispatch-template.js";
@@ -14,7 +15,7 @@ import {
 export function loadSavedForms() {
     const listEl = document.getElementById('saved-forms-list');
     if (!listEl) return;
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const savedForms = ensureBuiltInForm();
     
     // 🌟 저장된 양식이 없을 때 에디터 및 템플릿 상태 잔상 완전 소거
     if (savedForms.length === 0) { 
@@ -65,7 +66,7 @@ export function loadSavedForms() {
 }
 
 export function setAsDefaultForm(idx) {
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const savedForms = ensureBuiltInForm();
     if (!savedForms[idx]) return;
 
     savedForms.forEach((f, i) => { f.isDefault = (i === idx); });
@@ -88,7 +89,7 @@ export function previewSavedForm(idx) {
 }
 
 export function applySavedForm(idx) {
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const savedForms = ensureBuiltInForm();
     const form = savedForms[idx];  
     if (!form) return;
     state.currentSelectedFormIndex = idx;
@@ -109,7 +110,7 @@ export function applySavedForm(idx) {
         const curOrder = hasOrders ? state.printReadyList[curIdx] : null;
 
         if (curOrder && typeof fillTemplateWithOrderData === 'function') {
-            renderEditableDocument(fillTemplateWithOrderData(sanitizedHtml, curOrder, curIdx));
+            renderEditableDocument(fillTemplateWithOrderData(sanitizedHtml, curOrder, curIdx), true);
         } else {
             renderEditableDocument(sanitizedHtml);
         }
@@ -125,13 +126,16 @@ export function saveProviderForm() {
 }
 
 export function deleteSavedForm(idx) {
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
+    const savedForms = ensureBuiltInForm();
+    if (!savedForms[idx]) return;
+    if (savedForms[idx].builtIn) { alert('기본 양식 원본은 삭제할 수 없습니다.'); return; }
     if (!confirm(`[${savedForms[idx].title}] 폼을 삭제하시겠습니까?`)) return;
     
     savedForms.splice(idx, 1);
     localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
     
     if (state.currentSelectedFormIndex === idx) cancelProviderFormEdit();
+    else if (state.currentSelectedFormIndex > idx) state.currentSelectedFormIndex--;
     loadSavedForms();
 }
 

@@ -515,13 +515,13 @@ export function executePickingListPrint() {
         const driverOrders = getDriverAssignedOrders(driverName);
         if (driverOrders.length === 0) return;
 
-        const aggregationMap = {};
+        const aggregationMap = Object.create(null);
         driverOrders.forEach(order => {
             if (order.items && order.items.length > 0) {
                 order.items.forEach(it => {
                     const name = it.name ? it.name.trim() : '기타 품목';
                     const unit = it.unit ? it.unit.trim() : '개';
-                    const qty = parseInt(it.qty, 10) || 1;
+                    const qty = (Number.isFinite(Number(it.qty)) && it.qty !== '' && it.qty != null ? Number(it.qty) : 1);
                     const key = `${name}___${unit}`;
 
                     if (!aggregationMap[key]) {
@@ -533,7 +533,7 @@ export function executePickingListPrint() {
             } else {
                 const name = order.itemName ? order.itemName.trim() : '상품명 미지정';
                 const unit = order.unit ? order.unit.trim() : '개';
-                const qty = parseInt(order.qty, 10) || 1;
+                const qty = (Number.isFinite(Number(order.qty)) && order.qty !== '' && order.qty != null ? Number(order.qty) : 1);
                 const key = `${name}___${unit}`;
 
                 if (!aggregationMap[key]) {
@@ -556,7 +556,22 @@ export function executePickingListPrint() {
         const isOverflow = actualMeasuredHeight > A4_PAGE_SAFE_HEIGHT_PX;
 
         if (isOverflow) {
-            allDriversPagesHtml += buildPickingPageHtml(driverName, driverOrders.length, aggregatedList, true, dateStr);
+            // 2단으로도 한 장을 넘으면 실제 높이를 재며 다음 장으로 넘긴다.
+            let offset = 0, pageNumber = 1;
+            while (offset < aggregatedList.length) {
+                let low = 1, high = aggregatedList.length - offset, fit = 1;
+                while (low <= high) {
+                    const count = Math.floor((low + high) / 2);
+                    measureTarget.innerHTML = buildPickingPageHtml(driverName, driverOrders.length,
+                        aggregatedList.slice(offset, offset + count), true, dateStr);
+                    if (measureTarget.firstElementChild.scrollHeight <= A4_PAGE_SAFE_HEIGHT_PX) {
+                        fit = count; low = count + 1;
+                    } else high = count - 1;
+                }
+                allDriversPagesHtml += buildPickingPageHtml(`${driverName} · ${pageNumber}페이지`, driverOrders.length,
+                    aggregatedList.slice(offset, offset + fit), true, dateStr);
+                offset += fit; pageNumber++;
+            }
         } else {
             allDriversPagesHtml += singleColHtml;
         }

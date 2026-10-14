@@ -1,3 +1,4 @@
+import { classifyCompletionOwnership, getDriverRouteData, getDriverDeliverySummary } from './admin-dispatch-core.js';
 // js/admin-dispatch-export.js
 
 import { state, getLocalDateString } from "./admin-state.js";
@@ -31,7 +32,7 @@ export function executeExcelExport() {
     if (!isPending && !isCompleted && !isCanceled) { alert("출력할 데이터를 하나 이상 선택해주세요."); return; }
 
     const startTs = new Date(`${startDateStr}T00:00:00`).getTime();
-    const endTs = new Date(`${endDateStr}T23:59:59`).getTime();
+    const endTs = new Date(`${endDateStr}T23:59:59.999`).getTime();
 
     // 🌟 core 모듈에서 전역 바인딩된 필터링 함수 호출 및 고유 식별자 Set 생성
     const visibleLicenses = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : state.allLicenses;
@@ -51,7 +52,7 @@ export function executeExcelExport() {
     if (isCompleted) {
         const targetCompletions = state.allCompletions.filter(c => {
             if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.has(c.deviceId) || (c.phone && visiblePhones.has(c.phone));
+            const matchesDev = visibleLicenses.some(lic => classifyCompletionOwnership(c, lic) === 'owned');
             const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
             const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
             return matchesDev && inRange && !isCancelTag;
@@ -77,36 +78,13 @@ export function executeExcelExport() {
     // (2) 미처리 대기 동선 데이터 추출 (🌟 초기화/삭제된 빈 동선 잔상 완전 배제)
     if (isPending) {
         let pendingList = [];
-        for (const devId in state.activeRoutes) {
-            const driver = state.activeRoutes[devId];
-            if (!driver || !driver.updatedAt) continue;
-            
-            const isDriverVisible = visibleDeviceIds.has(devId) || 
-                                    visibleDeviceIds.has(driver.deviceId) || 
-                                    (driver.phone && visiblePhones.has(driver.phone));
-            if (!isDriverVisible) continue;
-
-            if (driver.updatedAt >= startTs && driver.updatedAt <= endTs) {
-                const dests = Array.isArray(driver.destinations) ? driver.destinations : [];
-                // 🌟 동선이 비워졌거나(0건) 삭제된 경우 대기동선에 추가되지 않도록 차단
-                if (dests.length === 0) continue;
-
-                dests.forEach(d => {
-                    if (!d || !d.address) return;
-                    const isDone = state.allCompletions.some(c => 
-                        (c.deviceId === devId || c.deviceId === driver.deviceId || (driver.phone && c.phone === driver.phone)) &&
-                        c.address === d.address && 
-                        c.completedAt >= startTs && 
-                        c.completedAt <= endTs
-                    );
-                    if (!isDone) {
-                        pendingList.push({ 
-                            ...d, 
-                            driverPhone: driver.phone || devId, 
-                            updatedAt: driver.updatedAt 
-                        });
-                    }
-                });
+        for (const lic of visibleLicenses) {
+            const driver = getDriverRouteData(lic, getLocalDateString());
+            if (!driver || driver.updatedAt < startTs || driver.updatedAt > endTs) continue;
+            const date = getLocalDateString(new Date(driver.updatedAt));
+            const summary = getDriverDeliverySummary(lic, driver, date);
+            for (const d of summary.remainingDests) {
+                pendingList.push({ ...d, driverPhone: lic.phone || lic.key, updatedAt: driver.updatedAt });
             }
         }
 
@@ -130,7 +108,7 @@ export function executeExcelExport() {
     if (isCanceled) {
         const targetCanceled = state.allCompletions.filter(c => {
             if (!c.completedAt) return false;
-            const matchesDev = visibleDeviceIds.has(c.deviceId) || (c.phone && visiblePhones.has(c.phone));
+            const matchesDev = visibleLicenses.some(lic => classifyCompletionOwnership(c, lic) === 'owned');
             const inRange = c.completedAt >= startTs && c.completedAt <= endTs;
             const isCancelTag = c.tag && (c.tag.includes('취소') || c.tag.includes('반품') || c.tag.includes('거부'));
             return matchesDev && inRange && isCancelTag;

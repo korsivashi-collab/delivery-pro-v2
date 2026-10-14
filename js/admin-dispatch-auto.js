@@ -4,7 +4,7 @@ import { ensureRouteOwner } from './route-owner.js';
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
-import { doc, setDoc, deleteDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, setDoc, deleteDoc, getDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
 import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
 
@@ -208,7 +208,7 @@ export function renderDispatchDriverList() {
 
         let territoryBadge = '';
         if (tLat && tLng) {
-            let scaleLabel = tScale === 'gu' ? '구/군' : (tScale === 'si' ? '시/도' : '동/읍/면');
+            let scaleLabel = `반경 ${((tScale === 'gu' ? 4.5 : tScale === 'si' ? 13 : 1.5) * (d.territorySize || 100) / 100).toFixed(2)}km`;
             territoryBadge = `
                 <div class="flex flex-col items-end gap-1" onclick="event.stopPropagation()">
                     <button type="button" onclick="window.openDriverTerritoryModal('${devId}', '${phoneDisplay}', '${tLat}', '${tLng}', '${tScale}')" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-1.5 rounded-xl font-black shadow-xs transition active:scale-95 whitespace-nowrap flex items-center gap-1.5">
@@ -426,7 +426,10 @@ export function changeOrderDriver(itemId, newDriverPhone) {
 // ==========================================
 let resettingAssignments = false;
 let sendingRoutes = false;
-export async function revertAutoDispatch() {
+window.isDispatchRouteBusy = () => resettingAssignments || sendingRoutes;
+export async function revertAutoDispatch(options = {}) {
+    const clearOrders = options.clearOrders === true;
+    const selectedDate = document.getElementById('dispatch-assign-date')?.value || getLocalDateString();
     if (resettingAssignments) return;
     if (sendingRoutes) { alert('동선 전송이 끝난 후 초기화해 주세요.'); return; }
     const hasExcelOrders = state.parsedExcelList && state.parsedExcelList.length > 0;
@@ -437,14 +440,18 @@ export async function revertAutoDispatch() {
         return;
     }
 
-    if (!confirm("기사들에게 배정된 모든 할당 내역을 초기화하시겠습니까?\n\n* 관제 엑셀 데이터는 유지되며, 기사 스마트폰(앱)에 전송된 배송 동선도 함께 완전 초기화됩니다.")) {
+    if (!confirm(clearOrders ? "주문서와 연결된 기사에게 전송한 동선을 모두 삭제하시겠습니까? 완료 내역은 유지됩니다." : "기사들에게 배정된 모든 할당 내역을 초기화하시겠습니까?\n\n* 관제 엑셀 데이터는 유지되며, 기사 스마트폰(앱)에 전송된 배송 동선도 함께 완전 초기화됩니다.")) {
         return;
     }
 
     resettingAssignments = true;
     const resetButton = document.getElementById('btn-revert-auto-dispatch');
+    const datePicker = document.getElementById('dispatch-assign-date');
+    const dateWasDisabled = datePicker?.disabled;
+    if (datePicker) datePicker.disabled = true;
     if (resetButton) resetButton.disabled = true;
     let clearedDriverCount = 0;
+    let removedOrders = null, removedPrintOrders = null;
     try {
         // Keep an owned empty route so offline/restarted clients receive the reset,
         // rather than interpreting a missing document as an unsynced local route.
@@ -454,14 +461,20 @@ export async function revertAutoDispatch() {
             const owned = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
             const documents = new Map();
             let revision = Date.now();
+            let latestRoute = null;
             owned.forEach(snapshot => {
                 documents.set(snapshot.id, snapshot.ref);
                 const data = snapshot.data();
+                if (!latestRoute || data.updatedAt > latestRoute.updatedAt) latestRoute = data;
                 if (Number.isFinite(data.updatedAt)) revision = Math.max(revision, data.updatedAt + 1);
             });
+            if (latestRoute && (latestRoute.dispatchDate || getLocalDateString(new Date(latestRoute.updatedAt))) !== selectedDate) continue;
             // Include old key/phone document IDs as well as the current device.
             for (const id of new Set([driver.deviceId, driver.key, driver.phone].filter(Boolean))) {
-                documents.set(id, doc(db, 'routes', id));
+                const ref = doc(db, 'routes', id);
+                const existing = await getDoc(ref);
+                if (existing.exists() && existing.data().routeOwnerId && existing.data().routeOwnerId !== routeOwnerId) continue;
+                documents.set(id, ref);
             }
             if (documents.size > 500) throw new Error('기사 동선 문서 수가 한 번에 처리 가능한 범위를 초과했습니다.');
             const batch = writeBatch(db);
@@ -469,6 +482,7 @@ export async function revertAutoDispatch() {
             for (const [id, ref] of documents) {
                 const emptyRoute = {
                     routeOwnerId, resetId, deviceId: id, phone: driver.phone || '',
+                    dispatchDate: selectedDate,
                     dispatchKey: driver.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                     destinations: [], routePlan: null, startSelected: false, startLocation: null,
                     endLocation: { lat: 0, lng: 0, address: '' }, updatedAt: revision, cleared: true
@@ -488,6 +502,11 @@ export async function revertAutoDispatch() {
         });
     }
 
+    if (clearOrders) {
+        removedOrders = state.parsedExcelList; removedPrintOrders = state.printReadyList;
+        state.parsedExcelList = [];
+        state.printReadyList = [];
+    }
     state.selectedDispatchDriverId = null;
 
     // 2. 모달 내 화면들 즉시 리셋
@@ -502,12 +521,17 @@ export async function revertAutoDispatch() {
     if (typeof forceClearMap === 'function') forceClearMap();
     if (typeof renderSidebar === 'function') renderSidebar();
 
-    alert(`[할당 초기화 완료]\n관제 엑셀 배정이 미배정으로 초기화되었습니다.\n기사 ${clearedDriverCount}명의 동선 취소를 저장했습니다. 연결된 단말기는 즉시, 오프라인 단말기는 재연결 시 반영됩니다.`);
+    alert(`[${clearOrders ? "주문서·전송 동선 삭제 완료" : "배정·전송 동선 취소 완료"}]\n${clearOrders ? "주문서가 삭제되었습니다." : "주문서는 유지되며 미배정으로 변경되었습니다."}\n기사 ${clearedDriverCount}명의 동선 취소를 저장했습니다. 연결된 단말기는 즉시, 오프라인 단말기는 재연결 시 반영됩니다.`);
     } catch (error) {
+        if (removedOrders) {
+            state.parsedExcelList = removedOrders; state.printReadyList = removedPrintOrders;
+            window.renderExcelTable?.(); window.renderDispatchDriverList?.(); window.renderDispatchDriverDetail?.();
+        }
         console.error('할당 초기화 실패:', error);
         alert(`할당 초기화를 완료하지 못했습니다.\n${clearedDriverCount}명의 동선 취소는 저장되었습니다. 다시 시도해 주세요.\n${error.message}`);
     } finally {
         resettingAssignments = false;
+        if (datePicker) datePicker.disabled = dateWasDisabled;
         if (resetButton) resetButton.disabled = false;
     }
 }
@@ -515,7 +539,8 @@ export async function revertAutoDispatch() {
 // ==========================================
 // 6. 자동할당 알고리즘 실행
 // ==========================================
-export function runAutoDispatchAlgorithm() { 
+export function runAutoDispatchAlgorithm() {
+    if (resettingAssignments || sendingRoutes) { alert('현재 동선 작업이 끝난 후 다시 시도해 주세요.'); return; }
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀/주문 데이터가 없습니다."); 
         return;
@@ -544,8 +569,11 @@ export function runAutoDispatchAlgorithm() {
         return;
     }
 
-    const companyBaseStr = localStorage.getItem('deliveryProCompanyBase');
-    const companyBase = companyBaseStr ? JSON.parse(companyBaseStr) : null;
+    let companyBase;
+    try { companyBase = JSON.parse(localStorage.getItem('deliveryProCompanyBase') || 'null'); }
+    catch { alert('회사 거점 저장값을 읽지 못했습니다. 거점을 다시 저장해 주세요.'); return; }
+
+    if (!companyBase?.lat || !companyBase?.lng) { alert('회사 거점을 먼저 저장해 주세요. 회사에서 가까운 배송지부터 시작하고 회사로 복귀합니다.'); return; }
 
     const result = executeAutoDispatch({
         targetOrders,
@@ -577,6 +605,9 @@ export async function sendRoutesToDrivers() {
         return;
     }
 
+    let companyBase;
+    try { companyBase = JSON.parse(localStorage.getItem('deliveryProCompanyBase') || 'null'); } catch {}
+    if (!companyBase?.lat || !companyBase?.lng) { alert('동선 전송 전에 회사 거점을 저장해 주세요.'); return; }
     const visibleDrivers = getFilteredVisibleDrivers();
 
     const selectedDriverList = visibleDrivers.filter(d => 
@@ -631,6 +662,7 @@ export async function sendRoutesToDrivers() {
             const { driver: matchedLic, orders } = driverMap[devId];
 
             const destinations = orders.map((ord, idx) => ({
+                id: ord.id ?? crypto.randomUUID(),
                 displayNumber: ord.displayNumber || (idx + 1),
                 address: ord.address || '',
                 fullAddress: ord.fullAddress || ord.address || '',
@@ -662,6 +694,10 @@ export async function sendRoutesToDrivers() {
                 phone: matchedLic.phone || devId,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                 destinations: destinations,
+                startSelected: true, startLocation: destinations[0],
+                endLocation: { lat: Number(companyBase.lat), lng: Number(companyBase.lng), address: companyBase.address || '' },
+                routePlan: null,
+                dispatchDate: document.getElementById('dispatch-assign-date')?.value || getLocalDateString(),
                 updatedAt: routeRevision
             };
 
@@ -671,7 +707,10 @@ export async function sendRoutesToDrivers() {
             const otherKeys = [matchedLic.key, matchedLic.phone].filter(k => k && k !== devId);
             for (const ok of otherKeys) {
                 try {
-                    await deleteDoc(doc(db, "routes", ok));
+                    const legacyRef = doc(db, "routes", ok);
+                    const legacy = await getDoc(legacyRef);
+                    if (!legacy.exists() || legacy.data().routeOwnerId !== routeOwnerId) continue;
+                    await deleteDoc(legacyRef);
                     if (state.activeRoutes) delete state.activeRoutes[ok];
                 } catch(e) {}
             }
@@ -716,19 +755,19 @@ export function printSelectedDriverItemList() {
         return;
     }
 
-    const aggregationMap = {};
+    const aggregationMap = Object.create(null);
 
     assignedItems.forEach(order => {
         if (order.items && order.items.length > 0) {
             order.items.forEach(it => {
                 const name = it.name ? it.name.trim() : '기타 품목';
-                const qty = parseInt(it.qty, 10) || 1;
+                const qty = (Number.isFinite(Number(it.qty)) && it.qty !== '' && it.qty != null ? Number(it.qty) : 1);
                 if (!aggregationMap[name]) aggregationMap[name] = 0;
                 aggregationMap[name] += qty;
             });
         } else {
             const name = order.itemName ? order.itemName.trim() : '상품명 미지정';
-            const qty = parseInt(order.qty, 10) || 1;
+            const qty = (Number.isFinite(Number(order.qty)) && order.qty !== '' && order.qty != null ? Number(order.qty) : 1);
             if (!aggregationMap[name]) aggregationMap[name] = 0;
             aggregationMap[name] += qty;
         }

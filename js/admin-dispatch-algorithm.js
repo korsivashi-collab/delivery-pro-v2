@@ -1,3 +1,4 @@
+import { calculateOptimizedRouteSync } from './optimizer.js';
 // js/admin-dispatch-algorithm.js
 
 // ==========================================
@@ -46,7 +47,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 
         // 가중치에 따른 물량 Cap 조정
         let exactCap = (totalOrders / numDrivers) + w - (totalWeights / numDrivers);
-        if (exactCap < 1) exactCap = 1;
+        if (exactCap < 0) exactCap = 0;
 
         // 기사의 반고정 권역 중심 좌표 (미설정 시 거점 좌표 참조)
         const centerLat = d.territoryLat || (companyBase ? companyBase.lat : null);
@@ -65,6 +66,14 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
             tLng: centerLng ? parseFloat(centerLng) : null,
             tAddr: centerAddr
         };
+    });
+
+    // 음수 가중치 보정 후에도 목표 합계가 실제 주문 수를 초과하지 않게 한다.
+    const capSum = driverStats.reduce((sum,d)=>sum+d.exactCap,0);
+    if (capSum > totalOrders && capSum > 0) driverStats.forEach(d => {
+        d.exactCap *= totalOrders / capSum;
+        d.targetCap = Math.floor(d.exactCap);
+        d.remainder = d.exactCap - d.targetCap;
     });
 
     // 소수점 잔여 물량을 나머지가 큰 기사부터 공정하게 1건씩 추가 배분
@@ -87,90 +96,26 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
  * 기사에게 배정된 배송지들을 거점에서 출발하여 순차적으로 이어지도록 정렬하고 번호 부여
  */
 export function optimizeRoute2Opt(orderList, basePos = null) {
-    if (!orderList || orderList.length === 0) return orderList;
-
-    // 유효한 좌표가 있는 주문과 없는 주문 분리
-    const validOrders = orderList.filter(o => o.lat && o.lng && !isNaN(o.lat) && !isNaN(o.lng));
-    const noCoordOrders = orderList.filter(o => !o.lat || !o.lng || isNaN(o.lat) || isNaN(o.lng));
-
-    if (validOrders.length <= 1) {
-        orderList.forEach((ord, idx) => { ord.displayNumber = idx + 1; });
-        return orderList;
-    }
-
-    // 1단계: 거점(또는 첫 배송지)에서 가장 가까운 주문을 1번으로 시작
-    const unvisited = [...validOrders];
-    let firstOrder = null;
-
-    if (basePos && basePos.lat && basePos.lng) {
-        let minDist = Infinity;
-        let minIdx = 0;
-        unvisited.forEach((ord, i) => {
-            const d = getBaseDist(basePos.lat, basePos.lng, ord.lat, ord.lng);
-            if (d < minDist) { minDist = d; minIdx = i; }
+    if (!orderList?.length) return orderList;
+    const valid = p => p && p.lat !== null && p.lng !== null && p.lat !== '' && p.lng !== '' &&
+        Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)) &&
+        Math.abs(Number(p.lat)) <= 90 && Math.abs(Number(p.lng)) <= 180;
+    const located = orderList.filter(valid);
+    const missing = orderList.filter(p => !valid(p));
+    if (valid(basePos) && located.length) {
+        let nearest = 0;
+        located.forEach((point, i) => {
+            if (getBaseDist(basePos.lat, basePos.lng, point.lat, point.lng) <
+                getBaseDist(basePos.lat, basePos.lng, located[nearest].lat, located[nearest].lng)) nearest = i;
         });
-        firstOrder = unvisited.splice(minIdx, 1)[0];
-    } else {
-        firstOrder = unvisited.shift();
+        located.unshift(located.splice(nearest, 1)[0]);
     }
-
-    // 최근접 이웃(Nearest Neighbor) 기본 연결
-    const route = [firstOrder];
-    while (unvisited.length > 0) {
-        const curr = route[route.length - 1];
-        let bestIdx = 0;
-        let minDist = Infinity;
-
-        for (let i = 0; i < unvisited.length; i++) {
-            const d = getBaseDist(curr.lat, curr.lng, unvisited[i].lat, unvisited[i].lng);
-            if (d < minDist) {
-                minDist = d;
-                bestIdx = i;
-            }
-        }
-        route.push(unvisited.splice(bestIdx, 1)[0]);
-    }
-
-    // 2단계: 2-opt 교차 선분 풀기 알고리즘
-    const n = route.length;
-    let improved = true;
-    let iterations = 0;
-    const maxIterations = 50;
-
-    while (improved && iterations < maxIterations) {
-        improved = false;
-        iterations++;
-
-        // 거점은 고정하고 첫 배송지도 교환 대상에 포함한다.
-        for (let i = basePos && basePos.lat && basePos.lng ? -1 : 0; i < n - 1; i++) {
-            for (let j = i + 2; j < n; j++) {
-                const pA = i < 0 ? basePos : route[i];
-                const pB = route[i + 1];
-                const pC = route[j];
-                const pD = (j + 1 < n) ? route[j + 1] : null;
-
-                const currentDist = getBaseDist(pA.lat, pA.lng, pB.lat, pB.lng) +
-                                    (pD ? getBaseDist(pC.lat, pC.lng, pD.lat, pD.lng) : 0);
-
-                const newDist = getBaseDist(pA.lat, pA.lng, pC.lat, pC.lng) +
-                                (pD ? getBaseDist(pB.lat, pB.lng, pD.lat, pD.lng) : 0);
-
-                if (newDist < currentDist - 0.001) {
-                    const reversedSegment = route.slice(i + 1, j + 1).reverse();
-                    route.splice(i + 1, reversedSegment.length, ...reversedSegment);
-                    improved = true;
-                }
-            }
-        }
-    }
-
-    // 좌표가 없는 주문은 맨 뒤로 배치
-    const finalRoute = [...route, ...noCoordOrders];
-    finalRoute.forEach((ord, idx) => {
-        ord.displayNumber = idx + 1;
-    });
-
-    return finalRoute;
+    const points = located.map((order, i) => ({ id: i, lat: Number(order.lat), lng: Number(order.lng), order }));
+    const end = valid(basePos) ? { lat: Number(basePos.lat), lng: Number(basePos.lng) } : null;
+    const ordered = points.length > 1 ? calculateOptimizedRouteSync(points, points[0], end) : points;
+    const result = [...ordered.map(point => point.order), ...missing];
+    result.forEach((order, i) => { order.displayNumber = i + 1; });
+    return result;
 }
 
 // ==========================================

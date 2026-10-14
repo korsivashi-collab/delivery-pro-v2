@@ -232,6 +232,14 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     const { snapshot: docSnap, isProfile } = found;
     const data = docSnap.data();
 
+    if (data.billingManaged === true) {
+        try {
+            const result = await billingRequest('sync', { deviceId, licenseKey: docSnap.id });
+            if (result.valid) localStorage.setItem('deliveryProBillingManaged', 'true');
+            return result.valid ? result : { valid: false, msg: result.msg || '구독을 확인해 주세요.' };
+        } catch (error) { return { valid: false, msg: error.message }; }
+    }
+
     if (data.status === 'suspended') {
         return { valid: false, msg: "사용이 일시 정지된 계정입니다.\n관리자에게 문의하세요." };
     }
@@ -372,6 +380,15 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
         }
         const { snapshot: docSnap, isProfile } = found;
         const data = docSnap.data();
+        if (data.billingManaged === true) {
+            try {
+                const access = await billingRequest('sync', { deviceId: deviceId || data.deviceId, licenseKey: docSnap.id });
+                return access.valid ? { valid: true, data: { ...data, phone: access.phone, expireDate: access.expireDate,
+                    expiresAt: access.expiresAt, status: 'active' }, actualKey: docSnap.id } :
+                    { valid: false, msg: access.msg || '구독 이용기간을 확인해 주세요.' };
+            } catch (error) { return { valid: false, msg: error.message }; }
+        }
+
 
         if (data.status === 'suspended') {
             return { valid: false, msg: "사용이 일시 정지된 계정입니다." };
@@ -477,38 +494,62 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
     const cleanPhone = (myPhone || '').replace(/[^0-9]/g, '');
     const cleanKeyOnly = (myKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
     
-    const q = query(
-        collection(db, "dispatch_messages"), 
-        orderBy("createdAt", "desc"), 
-        limit(5)
-    );
-
-    return onSnapshot(q, (snapshot) => {
-        snapshot.docChanges().forEach((change) => {
-            if (change.type === "added") {
-                const msg = change.doc.data();
-                const msgId = change.doc.id;
-
-                const isDevMatch = msg.targetDeviceIds && msg.targetDeviceIds.includes(myDeviceId);
-                const isPhoneMatch = cleanPhone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === cleanPhone);
-                const isKeyMatch = myKey && (
-                    (msg.targetDeviceIds && (msg.targetDeviceIds.includes(myKey) || msg.targetDeviceIds.includes(cleanKeyOnly))) ||
-                    (msg.targetPhones && msg.targetPhones.some(p => p.toUpperCase().includes(cleanKeyOnly)))
-                );
-
-                if (isDevMatch || isPhoneMatch || isKeyMatch) {
-                    const isMaster = (msg.senderKey === 'MASTER' || msg.senderType === 'MASTER' || msg.senderTitle === '운영사 알림');
-                    const senderTitle = msg.senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
-                    const senderType = msg.senderType || (isMaster ? 'MASTER' : 'DISPATCH');
-                    
-                    if (onMessageReceived) {
-                        onMessageReceived({ msgId, content: msg.content, dateStr: msg.dateStr, timeStr: msg.timeStr, senderTitle, senderType });
-                    }
-                }
-            }
-        });
+    const seen = new Set();
+    const subscriptions = [];
+    const targets = new Set([myDeviceId, myKey, cleanKeyOnly].filter(Boolean));
+    const phones = new Set([myPhone, cleanPhone].filter(Boolean));
+    const receive = snapshot => snapshot.docChanges().forEach(change => {
+        if (change.type !== 'added' || seen.has(change.doc.id)) return;
+        const msg = change.doc.data();
+        if (msg.senderType === 'DRIVER') return;
+        const linkedKey = localStorage.getItem('deliveryProDispatchKey');
+        const isMaster = msg.senderKey === 'MASTER' || msg.senderType === 'MASTER';
+        if (!isMaster && (!linkedKey || msg.senderKey !== linkedKey)) return;
+        if (Array.isArray(msg.targetLicenseKeys) && !msg.targetLicenseKeys.includes(myKey)) return;
+        seen.add(change.doc.id);
+        onMessageReceived?.({ msgId: change.doc.id, content: msg.content, dateStr: msg.dateStr,
+            timeStr: msg.timeStr, senderTitle: msg.senderTitle || (isMaster ? '운영사 알림' : '회사 알림'),
+            senderType: msg.senderType || (isMaster ? 'MASTER' : 'DISPATCH') });
     });
+    for (const value of targets) subscriptions.push(onSnapshot(query(collection(db, 'dispatch_messages'),
+        where('targetDeviceIds', 'array-contains', value)), receive));
+    for (const value of phones) subscriptions.push(onSnapshot(query(collection(db, 'dispatch_messages'),
+        where('targetPhones', 'array-contains', value)), receive));
+    return () => subscriptions.forEach(stop => stop());
 }
+
+let sendingOfficeMessage = false;
+export async function sendOfficeMessage() {
+    if (sendingOfficeMessage) return;
+    const input = document.getElementById('office-message-input');
+    const content = input?.value.trim();
+    if (!content || content.length > 300) { alert('메시지를 1~300자로 입력해 주세요.'); return; }
+    const key = localStorage.getItem('deliveryProKey');
+    if (!key || !state.getRouteOwnerId()) { alert('기사 계정으로 로그인해 주세요.'); return; }
+    sendingOfficeMessage = true;
+    const button = document.getElementById('btn-send-office-message');
+    if (button) button.disabled = true;
+    try {
+        const snapshot = await getDoc(doc(db, 'licenses', key));
+        const license = snapshot.exists() ? snapshot.data() : null;
+        if (!license?.dispatchKey || license.routeOwnerId !== state.getRouteOwnerId()) {
+            throw new Error('연결된 사무실과 기사 계정을 확인할 수 없습니다.');
+        }
+        const now = new Date();
+        const dateStr = [now.getFullYear(), String(now.getMonth()+1).padStart(2,'0'), String(now.getDate()).padStart(2,'0')].join('-');
+        await addDoc(collection(db, 'dispatch_messages'), {
+            senderType: 'DRIVER', senderKey: key, senderPhone: license.phone || '',
+            senderTitle: '기사 메시지', targetDispatchKey: license.dispatchKey,
+            targetDeviceIds: [license.dispatchKey], targetPhones: [], content,
+            createdAt: now.getTime(), dateStr,
+            timeStr: now.toLocaleTimeString('ko-KR', {hour12:false, hour:'2-digit',minute:'2-digit'}), acknowledged: []
+        });
+        input.value = '';
+        alert('사무실로 메시지를 전송했습니다.');
+    } catch (error) { alert('사무실 전송 실패: ' + error.message); }
+    finally { sendingOfficeMessage = false; if (button) button.disabled = false; }
+}
+
 
 // 6. 7일 무료 체험 시작
 export async function firebaseStartTrial(phone, deviceId) {
@@ -931,4 +972,25 @@ export async function firebaseDeleteTempMemoBackup(cleanKey) {
     } catch (e) {
         console.error("임시 백업 파기 오류:", e);
     }
+}
+
+
+// Billing identity is the SMS-verified Firebase user, never a caller-supplied phone or key.
+export async function getBillingIdentity() {
+    await auth.authStateReady();
+    const user = auth.currentUser;
+    return user ? { uid: user.uid, phone: user.phoneNumber } : null;
+}
+export async function billingRequest(action, input = {}, expectedUid = null) {
+    const headers = { 'Content-Type': 'application/json' };
+    if (action !== 'config') {
+        await auth.authStateReady();
+        const user = auth.currentUser;
+        if (!user || expectedUid && user.uid !== expectedUid) throw new Error('휴대폰 인증을 다시 진행해 주세요.');
+        headers.Authorization = 'Bearer ' + await user.getIdToken();
+    }
+    const response = await apiFetch('/api/billing', { method: 'POST', headers, body: JSON.stringify({ ...input, action }) });
+    let result; try { result = await response.json(); } catch (_) { result = {}; }
+    if (!response.ok) throw new Error(result.error || '구독 확인에 실패했습니다. 잠시 후 다시 확인해 주세요.');
+    return result;
 }

@@ -3,7 +3,9 @@
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { playBeepSound } from "./admin-utils.js";
-import { collection, doc, addDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { collection, doc, addDoc, deleteDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+
+const escapeMessage = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]));
 
 // ==========================================
 // 1. 발송할 기사 선택 목록 (메시지 사이드바)
@@ -73,7 +75,10 @@ export async function sendDispatchMessage() {
     if (!text) { alert("전송할 회사 알림 내용을 입력해 주세요."); textarea.focus(); return; }
 
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-    const targets = Array.from(state.selectedMessageDrivers);
+    const selected = window.getFilteredVisibleDrivers().filter(lic => state.selectedMessageDrivers.has(lic.deviceId || lic.key));
+    const targets = selected.map(lic => lic.deviceId || lic.key);
+    if (!targets.length) { alert('현재 연결된 기사를 다시 선택해 주세요.'); return; }
+    if (text.length > 300) { alert('메시지는 300자까지 전송할 수 있습니다.'); return; }
     btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 전송 중...';
 
     try {
@@ -90,11 +95,11 @@ export async function sendDispatchMessage() {
 
         await addDoc(collection(db, "dispatch_messages"), {
             senderKey: dispatchKey, senderType: "DISPATCH", senderTitle: "회사 알림", 
-            targetDeviceIds: targets, targetPhones: targetPhones, content: text,
+            targetLicenseKeys: selected.map(lic => lic.key), targetDeviceIds: targets, targetPhones: targetPhones, content: text,
             createdAt: now.getTime(), dateStr: dateStr, timeStr: timeStr, acknowledged: []
         });
         
-        alert(`[회사 알림 발송 완료]\n${targets.length}명의 기사 스마트폰으로 알림이 실시간 전송되었습니다.`);
+        alert(`[회사 알림 발송 완료]\n${targets.length}명에게 보낼 알림을 저장했습니다. 연결된 기사 화면에서 수신합니다.`);
         textarea.value = ''; updateMessageCharCount();
     } catch (e) { 
         alert("알림 전송 오류: " + e.message); 
@@ -114,7 +119,7 @@ export function renderMessageFeed() {
     const currentDispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const mySentMessages = state.allDispatchMessages.filter(msg => {
         if (msg.senderKey === 'MASTER' || msg.senderType === 'MASTER') return false;
-        if (state.currentUserRole === 'DISPATCH') return msg.senderKey === currentDispatchKey;
+        if (state.currentUserRole === 'DISPATCH') return msg.senderKey === currentDispatchKey || msg.targetDispatchKey === currentDispatchKey;
         return true;
     });
 
@@ -130,15 +135,15 @@ export function renderMessageFeed() {
         <div class="bg-white border border-gray-200 rounded-2xl p-4 shadow-xs flex flex-col gap-2 hover:border-blue-300 transition">
             <div class="flex justify-between items-center text-xs">
                 <div class="flex items-center gap-2">
-                    <span class="bg-blue-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md shadow-xs">${msg.senderTitle || '회사 알림'}</span>
-                    <span class="font-bold text-gray-800"><i class="fa-solid fa-user-check text-blue-500 mr-1"></i>수신: ${targetPreview}</span>
+                    <span class="bg-blue-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md shadow-xs">${escapeMessage(msg.senderType === 'DRIVER' ? '기사 → 사무실' : (msg.senderTitle || '회사 알림'))}</span>
+                    <span class="font-bold text-gray-800"><i class="fa-solid fa-user-check text-blue-500 mr-1"></i>${msg.senderType === 'DRIVER' ? '발신: ' + escapeMessage(msg.senderPhone || msg.senderKey) : '수신: ' + escapeMessage(targetPreview)}</span>
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-[11px] font-mono text-gray-400">${msg.dateStr || ''} ${msg.timeStr || ''}</span>
                     <button type="button" onclick="window.deleteDispatchMessage('${msg.id}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
                 </div>
             </div>
-            <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${msg.content}</div>
+            <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${escapeMessage(msg.content)}</div>
         </div>`;
     });
     feedEl.innerHTML = html;
@@ -186,10 +191,10 @@ export function renderCustomTemplates() {
         html += `
         <div class="group p-3 bg-white border border-gray-200 rounded-2xl hover:border-blue-400 hover:shadow-xs transition flex flex-col gap-1.5 relative">
             <div class="flex justify-between items-start gap-2">
-                <span onclick="window.insertCustomTemplate('${escapedContent}')" class="font-black text-xs text-gray-900 cursor-pointer hover:text-blue-600 flex items-center gap-1.5 truncate flex-1"><i class="fa-solid fa-file-lines text-blue-500 text-[11px] shrink-0"></i><span class="truncate">${tpl.title || '제목 없음'}</span></span>
+                <span onclick="window.insertCustomTemplateById('${tpl.id}')" class="font-black text-xs text-gray-900 cursor-pointer hover:text-blue-600 flex items-center gap-1.5 truncate flex-1"><i class="fa-solid fa-file-lines text-blue-500 text-[11px] shrink-0"></i><span class="truncate">${escapeMessage(tpl.title || '제목 없음')}</span></span>
                 <button onclick="window.deleteCustomTemplate('${tpl.id}')" class="text-gray-300 hover:text-red-500 p-1 text-xs transition" title="틀 삭제"><i class="fa-solid fa-trash-can text-[11px]"></i></button>
             </div>
-            <p onclick="window.insertCustomTemplate('${escapedContent}')" class="text-[11px] text-gray-600 font-medium line-clamp-2 leading-relaxed cursor-pointer hover:text-gray-800">${tpl.content || ''}</p>
+            <p onclick="window.insertCustomTemplateById('${tpl.id}')" class="text-[11px] text-gray-600 font-medium line-clamp-2 leading-relaxed cursor-pointer hover:text-gray-800">${escapeMessage(tpl.content || '')}</p>
         </div>`;
     });
     listEl.innerHTML = html;
@@ -230,6 +235,7 @@ export function checkDispatchInboxNotifications() {
     const normalizedDispatchKey = normalizeKey(dispatchKey);
 
     const myReceivedMasterNotices = state.allDispatchMessages.filter(msg => {
+        if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === dispatchKey && !localStorage.getItem(`deleted_disp_msg_${msg.id}`);
         if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
         if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
 
@@ -277,6 +283,7 @@ export function openDispatchInboxModal() {
     const normalizedDispatchKey = normalizeKey(dispatchKey);
 
     const myReceivedMasterNotices = state.allDispatchMessages.filter(msg => {
+        if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === dispatchKey && !localStorage.getItem(`deleted_disp_msg_${msg.id}`);
         if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
         if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
 
@@ -298,10 +305,10 @@ export function openDispatchInboxModal() {
             html += `
             <div class="bg-amber-50/40 border border-amber-200 rounded-2xl p-4 shadow-2xs flex flex-col gap-1.5 hover:border-amber-300 transition">
                 <div class="flex justify-between items-center text-xs">
-                    <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">${m.senderTitle || '운영사 알림'}</span>
+                    <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">${escapeMessage(m.senderType === 'DRIVER' ? '기사 ' + (m.senderPhone || m.senderKey) : (m.senderTitle || '운영사 알림'))}</span>
                     <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="window.deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
                 </div>
-                <p class="text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed mt-1">${m.content}</p>
+                <p class="text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed mt-1">${escapeMessage(m.content)}</p>
             </div>`;
         });
         container.innerHTML = html;
@@ -332,6 +339,7 @@ export async function clearAllDispatchInbox() {
     const normalizedDispatchKey = normalizeKey(dispatchKey);
 
     const myNotices = state.allDispatchMessages.filter(msg => {
+        if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === dispatchKey && !localStorage.getItem(`deleted_disp_msg_${msg.id}`);
         if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
         if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
         const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
@@ -347,3 +355,32 @@ export async function clearAllDispatchInbox() {
     openDispatchInboxModal();
     checkDispatchInboxNotifications();
 }
+export async function exportDispatchMessages() {
+    const start = document.getElementById('message-export-start').value;
+    const end = document.getElementById('message-export-end').value;
+    if (!start || !end || start > end) { alert('올바른 시작일과 종료일을 선택해 주세요.'); return; }
+    const key = sessionStorage.getItem('deliveryProDispatchKey');
+    const master = sessionStorage.getItem('deliveryProRole') === 'MASTER';
+    if (!master && !key) return;
+    try {
+        const source = collection(db, 'dispatch_messages');
+        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key))];
+        const records = new Map();
+        for (const q of queries) (await getDocs(q)).forEach(d => records.set(d.id,d.data()));
+        const from = new Date(start+'T00:00:00').getTime();
+        const until = new Date(end+'T00:00:00'); until.setDate(until.getDate()+1);
+        const messages = [...records.values()].filter(m => m.createdAt >= from && m.createdAt < until.getTime()).sort((a,b)=>a.createdAt-b.createdAt);
+        if (!messages.length) { alert('해당 기간의 메시지가 없습니다.'); return; }
+        const rows = [['날짜','시간','구분','발신 전화번호/계정','수신 전화번호/계정','내용']];
+        messages.forEach(m => rows.push([m.dateStr || '',m.timeStr || '',m.senderType === 'DRIVER' ? '기사 → 사무실':'사무실 → 기사',m.senderPhone || m.senderKey || '',m.targetDispatchKey || (m.targetPhones || []).join(', '),m.content || '']));
+        const wb = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'메시지');
+        XLSX.writeFile(wb,`메시지_${start}_${end}.xlsx`);
+    } catch(error) { alert('메시지 내보내기 실패: '+error.message); }
+}
+window.exportDispatchMessages = exportDispatchMessages;
+
+window.insertCustomTemplateById = id => {
+    const template = state.allDispatchTemplates.find(t => t.id === id);
+    if (template) insertCustomTemplate(template.content || '');
+};
