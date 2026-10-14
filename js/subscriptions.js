@@ -36,7 +36,7 @@ function renderPrices(){
         const saving=regular!=null&&Number.isFinite(total)?Math.max(0,regular-total):0;
         const percent=saving>0?Math.floor(saving/regular*100+0.000001):0;
         el('plan-price-'+plan.months).textContent=preview?won(total):product?.priceString||'준비 중';
-        el('plan-monthly-'+plan.months).textContent=Number.isFinite(total)&&(preview||product?.currencyCode)?'월 '+money(total/plan.months)+'꼴':'가격 확인 대기';
+        el('plan-monthly-'+plan.months).textContent=Number.isFinite(total)&&(preview||product?.currencyCode)?'월 '+money(total/plan.months):'가격 확인 대기';
         el('plan-original-'+plan.months).textContent=saving>0?money(regular):'';
         el('plan-saving-'+plan.months).textContent=saving>0?money(saving)+' 절약':'한 달씩 가볍게 시작';
         el('plan-badge-'+plan.months).textContent=percent>0?percent+'% 할인':'기본 요금';
@@ -49,7 +49,7 @@ function renderPrices(){
 }
 const el=id=>subscriptionDialog.querySelector('#'+id);
 const normalized=phone=>String(phone||'').replace(/^\+82/,'0').replace(/\D/g,'');
-function message(text){el('subscription-status').textContent=text;}
+function message(text){el('subscription-status').textContent=text;el('subscription-status').hidden=!text;}
 function stopTimer(){clearInterval(timer);timer=null;}
 function refreshButtons(){
     el('billing-send').disabled=busy||!config?.enabled;
@@ -135,7 +135,7 @@ function buildDialog(){
     #subscription-modal [hidden]{display:none!important}
     @media(max-width:390px){#subscription-modal{padding:18px}#subscription-modal .billing-monthly{font-size:19px}#subscription-modal .billing-card-body{padding-right:10px;gap:6px}#subscription-modal .billing-total strong{font-size:15px}}
     </style>
-    <div class="billing-hero"><p id="billing-channel"></p><h3>배송 준비는 간편하게,<br>이용 요금은 합리적으로.</h3><p>매일의 배송을 함께하는 배송경로PRO.<br>오래 이용할수록 더 알뜰하게 시작하세요.</p><div class="billing-benefits"><span>주문서 스캔</span><span>배송 경로 최적화</span><span>배송 목록 관리</span></div></div>
+    <div class="billing-hero"><h3>배송 준비는 간편하게,<br>이용 요금은 합리적으로.</h3><p>매일의 배송을 함께하는 배송경로PRO.<br>오래 이용할수록 더 알뜰하게 시작하세요.</p><div class="billing-benefits"><span>주문서 스캔</span><span>배송 경로 최적화</span><span>배송 목록 관리</span></div></div>
     <section id="billing-auth" class="mt-4"><label class="block text-sm font-bold">휴대폰 번호<input id="billing-phone" type="tel" autocomplete="tel" maxlength="20" class="mt-2 w-full rounded-xl border p-3" placeholder="010-1234-5678"></label><button id="billing-send" type="button" class="mt-2 rounded-xl border px-4 py-2">인증번호 받기</button>
     <div id="billing-code-group" class="hidden mt-3"><label>인증번호 <span id="billing-timer"></span><input id="billing-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="mt-2 w-full rounded-xl border p-3"></label><button id="billing-confirm" type="button" class="mt-2 rounded-xl bg-blue-600 px-4 py-2 text-white">전화번호 인증</button></div></section>
     <button id="billing-continue" type="button" class="mt-3 rounded-xl border px-4 py-2 hidden">인증된 번호로 상품 확인</button>
@@ -186,10 +186,9 @@ export async function openSubscriptionModal(){
     previousFocus=document.activeElement;subscriptionDialog.showModal();version++;const operation=version;
     config=null;identity=null;confirmation=null;packages.clear();canPurchase=false;stopTimer();
     el('billing-code-group').classList.add('hidden');el('billing-continue').classList.add('hidden');refreshButtons();
-    el('billing-channel').textContent=isAndroid()?'ANDROID · Google Play 구독':'WEB · 아이폰과 PC에서도 이용';
     for(const id of ['billing-auth','billing-restore','billing-manage','billing-renewal'])el(id).hidden=!isAndroid();
-    el('billing-buy').textContent=isAndroid()?'Google Play로 구독하기':'웹 결제 준비 중';
-    if(!isAndroid()){message('웹 전용 요금 안내입니다. 결제 서비스 준비가 완료되면 이곳에서 신청하실 수 있습니다.');return;}
+    el('billing-buy').textContent=isAndroid()?'Google Play로 구독하기':'결제 준비 중';
+    if(!isAndroid()){message('');return;}
     await work(async()=>{
         if([billingRequest,getBillingIdentity,getOrCreateDeviceId,activatePurchasedLicense].some(fn=>typeof fn!=='function')){
             message('결제 기능 업데이트가 필요합니다. 앱을 최신 버전으로 업데이트해 주세요.');return;
