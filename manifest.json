@@ -9,16 +9,10 @@
   "theme_color": "#ffffff",
   "icons": [
     {
-      "src": "icons/icon-pro-192.png",
-      "sizes": "192x192",
+      "src": "icons/site-icon.png?v=20261014-2",
+      "sizes": "900x900",
       "type": "image/png",
-      "purpose": "any maskable"
-    },
-    {
-      "src": "icons/icon-pro-512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "purpose": "any"
     }
   ]
 }

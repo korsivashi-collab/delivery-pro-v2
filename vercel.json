@@ -1,5 +1,6 @@
 {
   "functions": {
+    "api/billing.js": { "maxDuration": 60, "memory": 1024 },
     "api/native-sms.js": { "maxDuration": 60, "memory": 1024 },
     "api/start-trial.js": { "maxDuration": 60, "memory": 1024 },
     "api/admin-license-save.js": {
@@ -12,6 +13,18 @@
     }
   },
   "rewrites": [
+    {
+      "source": "/favicon.ico",
+      "destination": "/icons/site-icon.png"
+    },
+    {
+      "source": "/apple-touch-icon.png",
+      "destination": "/icons/site-icon.png"
+    },
+    {
+      "source": "/apple-touch-icon-precomposed.png",
+      "destination": "/icons/site-icon.png"
+    },
     {
       "source": "/",
       "has": [
