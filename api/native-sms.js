@@ -2,6 +2,48 @@ const admin = require('firebase-admin');
 const { randomInt, randomUUID, createHmac, timingSafeEqual } = require('node:crypto');
 const { normalizePhone, phoneDigits, problem } = require('../server/license-integrity.cjs');
 
+// A new device may replace the old binding only after recent SENS verification.
+async function claimDevice(sdk, req, input, stamp) {
+    const bearer = /^Bearer (.+)$/.exec(req.headers?.authorization || '')?.[1];
+    if (!bearer) throw problem('휴대폰 인증을 다시 진행해 주세요.', 401);
+    let identity;
+    try { identity = await sdk.auth().verifyIdToken(bearer, true); }
+    catch (_) { throw problem('휴대폰 인증이 만료되었습니다.', 401); }
+    const age = Math.floor(stamp / 1000) - identity.auth_time;
+    if (identity.firebase?.sign_in_provider !== 'custom' || identity.nativePhoneVerified !== true ||
+        !Number.isFinite(age) || age < -30 || age > 300 || !identity.phone_number || identity.uid === 'admin_master' || identity.role === 'MASTER') {
+        throw problem('새 기기 로그인은 최근 SENS 휴대폰 인증이 필요합니다.', 403);
+    }
+    const key = input.key, deviceId = input.deviceId;
+    if (typeof key !== 'string' || !key || key.length > 200 || key.includes('/') ||
+        typeof deviceId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(deviceId)) throw problem('로그인 정보가 올바르지 않습니다.');
+    const verified = phoneDigits(normalizePhone(identity.phone_number));
+    const db = sdk.firestore();
+    return db.runTransaction(async tx => {
+        const licenseRef = db.collection('licenses').doc(key), profileRef = db.collection('driver_profiles').doc(key);
+        const [license, profile, blocked] = await Promise.all([tx.get(licenseRef), tx.get(profileRef), tx.get(db.collection('blocked_devices').doc(deviceId))]);
+        if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
+        const records = [license, profile].filter(s => s.exists);
+        if (!records.length) throw problem('등록되지 않은 라이선스입니다.', 404);
+        const today = new Date(stamp + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, '');
+        let owner = '';
+        for (const snapshot of records) {
+            const data = snapshot.data();
+            if (data.type === 'dispatch' || ['suspended','revoked','expired','upgraded'].includes(data.status)) throw problem('사용할 수 없는 계정입니다.', 403);
+            const expiry = String(data.expireDate || '').replace(/\D/g, '');
+            if (expiry && expiry < today || data.expiresAt && data.expiresAt <= stamp) throw problem('이용기간이 만료되었습니다.', 403);
+            if (data.phone && phoneDigits(normalizePhone(data.phone)) !== verified) throw problem('등록된 본인 전화번호로 인증해 주세요.', 403);
+            if (data.routeOwnerId && owner && owner !== data.routeOwnerId) throw problem('계정 소유자 정보 확인이 필요합니다.', 409);
+            owner = data.routeOwnerId || owner;
+        }
+        if (!records.some(s => s.data().phone)) throw problem('등록된 전화번호가 없어 관리자 확인이 필요합니다.', 403);
+        for (const [snapshot, ref] of [[license, licenseRef], [profile, profileRef]]) {
+            if (snapshot.exists) tx.update(ref, { deviceId, deviceChangedAt: stamp });
+        }
+        return { success: true };
+    });
+}
+
 // OTP and counters are server-only Firestore collections (default-denied by existing rules).
 function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) => fetch(...args), now = Date.now, log = record => console.warn('[SENS SMS]', JSON.stringify(record)) } = {}) {
     function config() {
@@ -25,6 +67,11 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
             let input;
             try { input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
             catch (_) { throw problem('인증 요청이 올바르지 않습니다.'); }
+            if (input?.action === 'claim-device') {
+                if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({ projectId: env.FIREBASE_PROJECT_ID,
+                    clientEmail: env.FIREBASE_CLIENT_EMAIL, privateKey: env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') }) });
+                return res.status(200).json(await claimDevice(sdk, req, input, now()));
+            }
             if (!input || !['send', 'confirm'].includes(input.action)) throw problem('인증 요청이 올바르지 않습니다.');
             const digits = phoneDigits(normalizePhone(input.phone)), phone = '+82' + digits.slice(1);
             const hash = value => createHmac('sha256', secret).update(value).digest('hex');
@@ -140,3 +187,4 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
 }
 module.exports = createHandler();
 module.exports.createHandler = createHandler;
+module.exports.claimDevice = claimDevice;
