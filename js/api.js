@@ -31,8 +31,6 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstati
 
 import {
     getAuth,
-    RecaptchaVerifier,
-    signInWithPhoneNumber,
     signInWithCustomToken
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 
@@ -51,25 +49,7 @@ auth.languageCode = 'ko';
 const db = getFirestore(app);
 const storage = getStorage(app);
 
-// Firebase 전화번호 인증: confirmationResult는 호출 측 메모리에 보관합니다.
-let appRecaptchaVerifier = null;
-
-function setupRecaptchaVerifier(containerId = 'recaptcha-container') {
-    if (!appRecaptchaVerifier) {
-        appRecaptchaVerifier = new RecaptchaVerifier(auth, containerId, {
-            'size': 'invisible',
-            'callback': () => {},
-            'expired-callback': () => {
-                if (appRecaptchaVerifier) {
-                    try { appRecaptchaVerifier.clear(); } catch (_) {}
-                    appRecaptchaVerifier = null;
-                }
-            }
-        });
-    }
-    return appRecaptchaVerifier;
-}
-
+// 기사 웹·앱 SMS는 SENS로 검증하고 기존 Firebase 계정 세션을 연결합니다.
 export async function firebaseSendSmsVerification(phoneNumber, containerId = 'recaptcha-container') {
     try {
         const input = String(phoneNumber ?? '').trim();
@@ -90,17 +70,8 @@ export async function firebaseSendSmsVerification(phoneNumber, containerId = 're
             error.code = 'auth/invalid-phone-number';
             throw error;
         }
-        if (isNativeApp()) {
-            return await sendNativePhoneVerification(formattedPhone, token => signInWithCustomToken(auth, token));
-        }
-        const verifier = setupRecaptchaVerifier(containerId);
-        const confirmationResult = await signInWithPhoneNumber(auth, formattedPhone, verifier);
-        return confirmationResult;
+        return await sendNativePhoneVerification(formattedPhone, token => signInWithCustomToken(auth, token));
     } catch (error) {
-        if (appRecaptchaVerifier) {
-            try { appRecaptchaVerifier.clear(); } catch (_) {}
-            appRecaptchaVerifier = null;
-        }
         throw error;
     }
 }

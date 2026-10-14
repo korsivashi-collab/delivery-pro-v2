@@ -1,4 +1,4 @@
-import { isNativeApp, apiFetch } from './native-platform.js';
+import { apiFetch } from './native-platform.js';
 
 let requestInProgress = false;
 async function smsRequest(payload) {
@@ -10,7 +10,6 @@ async function smsRequest(payload) {
     return data;
 }
 export async function sendNativePhoneVerification(phoneNumber, signInWebSession) {
-    if (!isNativeApp()) throw new Error('Native phone verification requires a native app');
     if (requestInProgress) throw new Error('휴대폰 인증 요청을 처리 중입니다. 잠시 기다려 주세요.');
     requestInProgress = true;
     try {
