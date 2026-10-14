@@ -43,8 +43,8 @@ function copy(relative) {
             copy(path.relative(root, path.resolve(path.dirname(source), match[1])));
         }
     }
-    for (const match of text.matchAll(/(?:src|href)=["'](\.?\/?(?:js|css|icons)\/[^"']+)["']/g)) copy(match[1].replace(/^\.?\//, ''));
+    for (const match of text.matchAll(/(?:src|href)=["'](\.?\/?(?:js|css|icons)\/[^"']+)["']/g)) copy(match[1].split(/[?#]/, 1)[0].replace(/^\.?\//, ''));
     for (const match of text.matchAll(/["'](icons\/[^"']+\.(?:png|svg|webp|ico))["']/g)) copy(match[1]);
 }
-for (const file of ['index.html', 'terms.html', 'privacy.html', 'policy.html', 'manifest.json', 'error.html', 'js/app.js', 'js/vendor/capacitor.LICENSE']) copy(file);
+for (const file of ['index.html', 'terms.html', 'privacy.html', 'policy.html', 'manifest.json', 'error.html', 'js/app.js', 'js/vendor/capacitor.LICENSE', 'js/vendor/purchases.LICENSE']) copy(file);
 console.log(`Native web root ready: www (${copied.size} assets, no web checkout or server code)`);
