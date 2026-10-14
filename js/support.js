@@ -517,6 +517,10 @@ export async function restoreHistoryItem(timestamp) {
 // 5. 연결 설정 모달 및 TMS/GPS 제어 기능
 // ==========================================
 export async function openSettingsModal() {
+    for (const [id, key] of [['settings-license-key','deliveryProKey'], ['settings-login-phone','deliveryProUserPhone'], ['settings-license-expiry','deliveryProExpireDate']]) {
+        const element = document.getElementById(id);
+        if (element) element.textContent = localStorage.getItem(key) || '등록 정보 없음';
+    }
     updateContributionStats();
     document.getElementById('settings-modal')?.classList.remove('hidden');
 

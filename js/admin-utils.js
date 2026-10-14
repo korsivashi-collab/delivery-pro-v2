@@ -1,7 +1,23 @@
 // js/admin-utils.js
 export const KAKAO_REST_API_KEY = "625c74c7254b3dbf7eea75ba0cac4c5f";
 
+const dispatchSoundKey = 'deliveryProDispatchSoundEnabled';
+let dispatchSoundEnabled = true;
+try { dispatchSoundEnabled = localStorage.getItem(dispatchSoundKey) !== 'false'; } catch (_) {}
+export function refreshDispatchSoundButton() {
+    document.querySelectorAll('[data-dispatch-sound]').forEach(button => {
+        button.textContent = dispatchSoundEnabled ? '알림음 켜짐' : '알림음 꺼짐';
+        button.setAttribute('aria-pressed', String(dispatchSoundEnabled));
+    });
+}
+window.toggleDispatchSound = () => {
+    dispatchSoundEnabled = !dispatchSoundEnabled;
+    try { localStorage.setItem(dispatchSoundKey, String(dispatchSoundEnabled)); } catch (_) {}
+    refreshDispatchSoundButton();
+    if (dispatchSoundEnabled) playBeepSound();
+};
 export function playBeepSound() {
+    if (!dispatchSoundEnabled) return;
     try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const osc = ctx.createOscillator();
@@ -9,7 +25,7 @@ export function playBeepSound() {
         osc.connect(gain); gain.connect(ctx.destination);
         osc.frequency.value = 880; gain.gain.value = 0.3;
         osc.start();
-        setTimeout(() => { osc.stop(); }, 250);
+        setTimeout(() => { osc.stop(); ctx.close().catch(() => {}); }, 250);
     } catch(e) {}
 }
 

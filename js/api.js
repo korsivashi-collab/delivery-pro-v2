@@ -189,7 +189,7 @@ async function findDriverLicense(key) {
 }
 
 // 2. 라이선스 검증
-export async function firebaseVerifyLicense(key, phone, deviceId) {
+export async function firebaseVerifyLicense(key, phone, deviceId, options = {}) {
     const cleanDigits = (phone || "").replace(/[^0-9]/g, '');
     if (!cleanDigits || cleanDigits.length < 9) {
         return { valid: false, msg: "휴대폰 번호를 정확하게 입력해야 로그인이 완료됩니다." };
@@ -203,6 +203,16 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
     const { snapshot: docSnap, isProfile } = found;
     const data = docSnap.data();
 
+    if (data.deviceId && data.deviceId !== deviceId && options.allowDeviceTransfer === true) {
+        const user = auth.currentUser;
+        if (!user) return { valid: false, msg: '새 기기 로그인은 휴대폰 인증이 필요합니다.' };
+        const response = await apiFetch('/api/native-sms', { method: 'POST',
+            headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + await user.getIdToken(true) },
+            body: JSON.stringify({ action: 'claim-device', key: docSnap.id, deviceId }) });
+        const result = await response.json();
+        if (!response.ok) return { valid: false, msg: result.error || '기기 변경에 실패했습니다.' };
+        return firebaseVerifyLicense(docSnap.id, phone, deviceId);
+    }
     if (data.billingManaged === true) {
         try {
             const result = await billingRequest('sync', { deviceId, licenseKey: docSnap.id });
@@ -302,19 +312,20 @@ export async function firebaseVerifyLicense(key, phone, deviceId) {
 
 // 3. 라이선스 상태 감시
 export function watchLicenseStatus(key, callback, onUpdateCallback) {
+    let stopped = false, unsubscribe = null;
+    const expectedDevice = localStorage.getItem('deliveryProDeviceId');
     (async () => {
         try {
             const found = await findDriverLicense(key);
-            if (found?.isOffline) {
-                console.warn(found.msg);
-                return;
-            }
-            if (!found) {
-                if (callback) callback('DELETED', '관리자에 의해 라이선스가 삭제되었습니다.');
-                return;
-            }
-
-            const data = found.snapshot.data();
+            if (stopped || found?.isOffline) return;
+            if (!found) { callback?.('DELETED', '관리자에 의해 라이선스가 삭제되었습니다.'); return; }
+            unsubscribe = onSnapshot(found.snapshot.ref, { includeMetadataChanges: true }, snapshot => {
+                if (stopped || snapshot.metadata?.hasPendingWrites || snapshot.metadata?.fromCache) return;
+                if (!snapshot.exists()) { callback?.('DELETED', '라이선스가 삭제되었습니다.'); return; }
+                const data = snapshot.data();
+                if (expectedDevice && data.deviceId && data.deviceId !== expectedDevice) {
+                    callback?.('DEVICE_CHANGED', '다른 기기에서 로그인하여 이 기기의 접속이 해제되었습니다.'); return;
+                }
             if (data.status === 'suspended') {
                 if (callback) callback('SUSPENDED', '관리자에 의해 라이선스가 일시 정지되었습니다.');
                 return;
@@ -332,12 +343,12 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
             if (onUpdateCallback) {
                 onUpdateCallback(data);
             }
-        } catch (e) {
-            console.warn("라이선스 검증 통신 오류:", e);
-        }
-    })();
 
-    return () => {};
+            }, error => console.warn('라이선스 상태 연결 오류:', error));
+            if (stopped) unsubscribe();
+        } catch (error) { console.warn('라이선스 검증 통신 오류:', error); }
+    })();
+    return () => { stopped = true; unsubscribe?.(); };
 }
 
 // 3-1. 주요 액션 1회 라이선스 검증

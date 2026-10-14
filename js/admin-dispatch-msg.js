@@ -2,7 +2,7 @@
 
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
-import { playBeepSound } from "./admin-utils.js";
+import { playBeepSound, refreshDispatchSoundButton } from "./admin-utils.js";
 import { collection, doc, addDoc, deleteDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 const escapeMessage = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]));
@@ -273,6 +273,11 @@ export function checkDispatchInboxNotifications() {
 }
 
 export function openDispatchInboxModal() {
+    refreshDispatchSoundButton();
+    for (const id of ['inbox-export-start', 'inbox-export-end']) {
+        const input = document.getElementById(id);
+        if (input && !input.value) input.value = getLocalDateString(new Date());
+    }
     const container = document.getElementById('dispatch-inbox-container');
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
     const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
@@ -355,24 +360,32 @@ export async function clearAllDispatchInbox() {
     openDispatchInboxModal();
     checkDispatchInboxNotifications();
 }
-export async function exportDispatchMessages() {
-    const start = document.getElementById('message-export-start').value;
-    const end = document.getElementById('message-export-end').value;
+export async function exportDispatchMessages(scope = 'messages') {
+    const start = document.getElementById(scope === 'inbox' ? 'inbox-export-start' : 'message-export-start').value;
+    const end = document.getElementById(scope === 'inbox' ? 'inbox-export-end' : 'message-export-end').value;
     if (!start || !end || start > end) { alert('올바른 시작일과 종료일을 선택해 주세요.'); return; }
     const key = sessionStorage.getItem('deliveryProDispatchKey');
     const master = sessionStorage.getItem('deliveryProRole') === 'MASTER';
     if (!master && !key) return;
     try {
         const source = collection(db, 'dispatch_messages');
-        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key))];
+        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key)), query(source,where('senderKey','==','MASTER'))];
         const records = new Map();
         for (const q of queries) (await getDocs(q)).forEach(d => records.set(d.id,d.data()));
         const from = new Date(start+'T00:00:00').getTime();
         const until = new Date(end+'T00:00:00'); until.setDate(until.getDate()+1);
-        const messages = [...records.values()].filter(m => m.createdAt >= from && m.createdAt < until.getTime()).sort((a,b)=>a.createdAt-b.createdAt);
+        const targetPhone = String((state.allLicenses || []).find(l => l.key === key)?.phone || '').replace(/\D/g, '');
+        const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
+        const normalize = value => String(value || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+        const incoming = m => m.senderType === 'DRIVER' ? m.targetDispatchKey === key :
+            (m.senderKey === 'MASTER' || m.senderType === 'MASTER') &&
+            ((m.targetDeviceIds || []).some(v => normalize(v) === normalize(key) || v === sessionToken) ||
+             targetPhone && (m.targetPhones || []).some(p => String(p).replace(/\D/g, '') === targetPhone));
+        const messages = [...records.values()].filter(m => (master || m.senderKey === key || incoming(m)) &&
+            (scope !== 'inbox' || incoming(m)) && m.createdAt >= from && m.createdAt < until.getTime()).sort((a,b)=>a.createdAt-b.createdAt);
         if (!messages.length) { alert('해당 기간의 메시지가 없습니다.'); return; }
         const rows = [['날짜','시간','구분','발신 전화번호/계정','수신 전화번호/계정','내용']];
-        messages.forEach(m => rows.push([m.dateStr || '',m.timeStr || '',m.senderType === 'DRIVER' ? '기사 → 사무실':'사무실 → 기사',m.senderPhone || m.senderKey || '',m.targetDispatchKey || (m.targetPhones || []).join(', '),m.content || '']));
+        messages.forEach(m => rows.push([m.dateStr || '',m.timeStr || '',m.senderType === 'DRIVER' ? '기사 → 사무실' : m.senderKey === 'MASTER' || m.senderType === 'MASTER' ? '운영사 → 관제' : '사무실 → 기사',m.senderPhone || m.senderKey || '',m.targetDispatchKey || (m.targetPhones || []).join(', '),m.content || '']));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'메시지');
         XLSX.writeFile(wb,`메시지_${start}_${end}.xlsx`);
