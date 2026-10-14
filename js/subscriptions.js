@@ -1,11 +1,20 @@
 import { Capacitor } from './vendor/capacitor.js';
-import { Purchases } from './vendor/purchases.js';
-import { billingRequest, getBillingIdentity, firebaseSendSmsVerification, firebaseConfirmSmsCode } from './api.js';
-import { getOrCreateDeviceId, activatePurchasedLicense } from './auth.js';
+import * as billingApi from './api.js';
+import * as billingAuth from './auth.js';
+// Older web deployments do not export the Android billing helpers yet.
+// Optional billing must never prevent the main application from starting.
+const { billingRequest, getBillingIdentity, firebaseSendSmsVerification, firebaseConfirmSmsCode } = billingApi;
+const { getOrCreateDeviceId, activatePurchasedLicense } = billingAuth;
 
 let subscriptionDialog, previousFocus, version=0, busy=false, purchasing=false;
 let config, identity, confirmation, requestedPhone='', deadline=0, timer=null, sdkUser=null;
 let packages=new Map(), selectedMonths=1, canPurchase=false;
+let Purchases;
+async function loadPurchases(){
+    if(Purchases)return;
+    try{({Purchases}=await import('./vendor/purchases.js'));}
+    catch{throw new Error('결제 기능을 불러오지 못했습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.');}
+}
 const plans=[{months:1,id:'monthly',label:'1개월',discount:0},
     {months:6,id:'halfyearly',label:'6개월',discount:5},{months:12,id:'yearly',label:'12개월',discount:10}];
 const webPlans=[{months:1,label:'1개월',discount:0},{months:3,label:'3개월',discount:5},
@@ -63,6 +72,7 @@ async function checkIdentity(){const current=await getBillingIdentity();
 }
 async function connectPurchases(){
     await checkIdentity();
+    await loadPurchases();
     const session=await billingRequest('session',{deviceId:getOrCreateDeviceId()},identity.uid);
     if(!sdkUser){await Purchases.configure({apiKey:config.publicKey,appUserID:session.appUserId});sdkUser=session.appUserId;}
     else if(sdkUser!==session.appUserId){await Purchases.logIn({appUserID:session.appUserId});sdkUser=session.appUserId;}
@@ -181,6 +191,9 @@ export async function openSubscriptionModal(){
     el('billing-buy').textContent=isAndroid()?'Google Play로 구독하기':'웹 결제 준비 중';
     if(!isAndroid()){message('웹 전용 요금 안내입니다. 결제 서비스 준비가 완료되면 이곳에서 신청하실 수 있습니다.');return;}
     await work(async()=>{
+        if([billingRequest,getBillingIdentity,getOrCreateDeviceId,activatePurchasedLicense].some(fn=>typeof fn!=='function')){
+            message('결제 기능 업데이트가 필요합니다. 앱을 최신 버전으로 업데이트해 주세요.');return;
+        }
         message('구독 서비스를 확인하고 있습니다.');const loaded=await billingRequest('config');if(operation!==version)return;config=loaded;
         if(!config.enabled){message('구독 서비스를 준비하고 있습니다. 현재 결제는 진행되지 않습니다.');return;}
         identity=await getBillingIdentity();
