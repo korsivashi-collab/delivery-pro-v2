@@ -596,9 +596,15 @@
             <div class="flex justify-between items-center pb-3 border-b border-gray-100">
                 <div class="flex items-center gap-2">
                     <span class="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center text-sm shadow-inner"><i class="fa-solid fa-envelope-open-text"></i></span>
-                    <div><h3 class="font-black text-gray-900 text-sm">알림함</h3><p class="text-[10px] text-gray-400 font-bold">운영사로부터 수신된 알림 목록입니다.</p></div>
+                    <div><h3 class="font-black text-gray-900 text-sm">알림함</h3><p class="text-[10px] text-gray-400 font-bold">기사와 운영사로부터 수신된 알림 목록입니다.</p></div>
                 </div>
                 <button onclick="window.closeDispatchInboxModal()" class="text-gray-400 hover:text-gray-700 text-lg p-1"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 py-3 text-xs border-b">
+                <label>시작일 <input type="date" id="inbox-export-start" class="border rounded p-1"></label>
+                <label>종료일 <input type="date" id="inbox-export-end" class="border rounded p-1"></label>
+                <button type="button" onclick="window.exportDispatchMessages('inbox')" class="bg-green-700 text-white rounded px-3 py-2">알림 엑셀 내보내기</button>
+                <button type="button" data-dispatch-sound onclick="window.toggleDispatchSound()" class="border rounded px-3 py-2" aria-pressed="true">알림음 켜짐</button>
             </div>
             <div id="dispatch-inbox-container" class="flex-1 overflow-y-auto p-2 space-y-2.5 hide-scrollbar my-2"></div>
             <div class="pt-3 border-t border-gray-100 flex justify-between items-center">
