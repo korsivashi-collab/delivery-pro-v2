@@ -194,6 +194,11 @@
                 <h3 class="font-bold text-slate-900 text-base flex items-center gap-2"><i class="fa-solid fa-bell text-blue-600"></i> 알림 보관함</h3>
                 <button onclick="window.closeNoticeHistoryModal()" class="text-slate-400 hover:text-slate-700 text-xl p-1"><i class="fa-solid fa-xmark"></i></button>
             </div>
+            <div class="p-3 border-b border-slate-200 space-y-2">
+                <label for="office-message-input" class="text-xs font-bold">사무실 전송</label>
+                <textarea id="office-message-input" maxlength="300" rows="2" class="w-full border rounded-xl p-2 text-sm" placeholder="연결된 사무실에 보낼 메시지 (최대 300자)"></textarea>
+                <button id="btn-send-office-message" onclick="window.sendOfficeMessage()" class="bg-blue-600 text-white text-xs rounded-xl px-4 py-2">사무실로 보내기</button>
+            </div>
             <div id="notice-history-container" class="flex-1 overflow-y-auto p-4 space-y-3 hide-scrollbar bg-slate-50 overscroll-contain"></div>
             <div class="p-3 bg-white border-t border-slate-200 flex justify-between items-center shrink-0">
                 <button onclick="window.clearLocalNotices()" class="text-xs text-rose-600 font-bold px-2 py-1">알림함 비우기</button>
