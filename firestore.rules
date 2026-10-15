@@ -161,7 +161,10 @@ service cloud.firestore {
         completionDeletionMatches(completionId);
     }
     match /memos/{memoId} {
-      allow read, write: if true;
+      allow read: if true;
+      // Driver writes use the SMS-verified server endpoint. Master deletion remains available.
+      allow create, update: if false;
+      allow delete: if isVerifiedMaster();
     }
 
     // 8. 기기변경 임시 백업 금고
