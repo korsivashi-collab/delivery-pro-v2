@@ -1031,4 +1031,4 @@ export async function billingRequest(action, input = {}, expectedUid = null) {
     let result; try { result = await response.json(); } catch (_) { result = {}; }
     if (!response.ok) throw new Error(result.error || '구독 확인에 실패했습니다. 잠시 후 다시 확인해 주세요.');
     return result;
-}
+}

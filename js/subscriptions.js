@@ -56,6 +56,7 @@ function refreshButtons(){
     el('billing-confirm').disabled=busy||!confirmation;
     el('billing-continue').disabled=busy||!identity||!config?.enabled;
     el('billing-buy').disabled=busy||!identity||!canPurchase||!packages.has(selectedMonths);
+    if(!isAndroid())el('billing-buy').disabled=busy||!window.deliveryProPeriodCheckout;
     el('billing-restore').disabled=busy||!identity||!config?.enabled;
     subscriptionDialog.querySelector('[data-close]').disabled=busy;
     subscriptionDialog.querySelectorAll('input').forEach(input=>input.disabled=busy);
@@ -170,6 +171,7 @@ function buildDialog(){
     });
     el('billing-continue').onclick=()=>work(prepareAccount);
     el('billing-buy').onclick=()=>work(async()=>{
+        if(!isAndroid()){document.dispatchEvent(new CustomEvent('deliverypro:period-checkout',{detail:{months:selectedMonths}}));return;}
         if(!canPurchase||!packages.has(selectedMonths))throw new Error('구독 상품을 먼저 확인해 주세요.');
         await checkIdentity();const session=await billingRequest('session',{deviceId:getOrCreateDeviceId()},identity.uid);
         if(!session.canPurchase||session.appUserId!==sdkUser)throw new Error(session.reason||'구독 계정을 다시 확인해 주세요.');
@@ -187,7 +189,7 @@ export async function openSubscriptionModal(){
     config=null;identity=null;confirmation=null;packages.clear();canPurchase=false;stopTimer();
     el('billing-code-group').classList.add('hidden');el('billing-continue').classList.add('hidden');refreshButtons();
     for(const id of ['billing-auth','billing-restore','billing-manage','billing-renewal'])el(id).hidden=!isAndroid();
-    el('billing-buy').textContent=isAndroid()?'Google Play로 구독하기':'결제 준비 중';
+    el('billing-buy').textContent=isAndroid()?'Google Play로 구독하기':window.deliveryProPeriodCheckout?'이용권 구매하기':'결제 준비 중';
     if(!isAndroid()){message('');return;}
     await work(async()=>{
         if([billingRequest,getBillingIdentity,getOrCreateDeviceId,activatePurchasedLicense].some(fn=>typeof fn!=='function')){
