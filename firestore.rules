@@ -87,7 +87,8 @@ service cloud.firestore {
     // 2. 라이선스: 조회, 기기 연결, 관제 세션 발급 및 관리 허용
     match /licenses/{licenseKey} {
       allow read: if true;
-      allow delete: if !isStoreLicense(licenseKey);
+      // Account deletion must remove its profile in the master server transaction.
+      allow delete: if false;
       // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
       allow create: if isVerifiedMaster();
       allow update: if !isStoreLicense(licenseKey) &&
