@@ -37,7 +37,19 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   return result(updated,{...license,...profile,...data},now());
  });}
  async function syncWeb(db,uid,device=null){const account=(await db.collection('billing_accounts').doc(uid).get()).data();if(account?.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);if(!account?.webManaged)return null;if(!ready())throw problem('이용권 확인 서비스 설정을 확인해 주세요.',503);
-  const payments=[];for(const entry of account.webHistory||[]){if(entry.cancelled)continue;const saved=(await db.collection('payment_orders').doc(entry.orderId).get()).data();if(!saved?.paymentKey)throw problem('결제 이력을 확인해 주세요.',409);const r=await provider('/'+encodeURIComponent(saved.paymentKey));if(!r.ok)throw problem('결제 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',502);validate(r.data,saved);payments.push(r.data);}
+  const entries=(account.webHistory||[]).filter(entry=>!entry.cancelled),payments=[];
+  // Bounded concurrency; validate every response before changing access.
+  for(let i=0;i<entries.length;i+=4){
+   const batch=await Promise.allSettled(entries.slice(i,i+4).map(async entry=>{
+    const saved=(await db.collection('payment_orders').doc(entry.orderId).get()).data();
+    if(!saved?.paymentKey)throw problem('결제 이력을 확인해 주세요.',409);
+    const r=await provider('/'+encodeURIComponent(saved.paymentKey));
+    if(!r.ok)throw problem('결제 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',502);
+    validate(r.data,saved);return r.data;
+   }));
+   const failure=batch.find(item=>item.status==='rejected');if(failure)throw failure.reason;
+   payments.push(...batch.map(item=>item.value));
+  }
   return reconcile(db,uid,payments,device,null,account.rcUserId);
  }
  // Only the SMS-authenticated master endpoint calls this helper; never a customer action.
