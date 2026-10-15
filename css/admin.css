@@ -390,3 +390,28 @@
         print-color-adjust: exact; 
     }
 }
+/* 메시지 센터: 기능과 선택 상태를 유지하는 전용 레이아웃 */
+#message-section { background: #f2f5fa; gap: 18px; padding: 22px; }
+#message-section .message-main { border-color: #dfe6ef; box-shadow: 0 8px 30px #16335808; }
+#message-section .message-toolbar { padding: 14px 20px; border-color: #edf0f5; }
+#message-section .message-toolbar:first-of-type { background: #fff; }
+#message-section [role="group"] { background: #edf2f8; padding: 4px; border-radius: 14px; gap: 4px; }
+#message-section [role="group"] button { padding: 10px 16px; border-radius: 10px; font-size: 13px; font-weight: 800; transition: background .15s; }
+#message-section [role="group"] button span { font-size: 11px; font-weight: 500; }
+#message-section [role="group"] button[aria-pressed="true"] { background: #245fe8; color: #fff; box-shadow: 0 3px 8px #245fe82b; }
+#message-section [data-dispatch-sound] { margin-left: auto; border-radius: 10px; color: #475569; background: #fff; }
+#message-section [data-dispatch-sound][aria-pressed="false"] { background: #f1f5f9; color: #64748b; }
+#message-section .message-toolbar label { display: flex; align-items: center; gap: 5px; color: #64748b; }
+#message-section input[type="date"] { padding: 7px; border: 1px solid #dce3ed; border-radius: 8px; background: #fff; color: #334155; }
+#message-section .message-clear { margin-left: auto; padding: 8px 11px; border: 1px solid #fecdd3; border-radius: 9px; color: #be123c; background: #fff7f8; font-weight: 700; }
+#message-section #dispatch-message-feed { min-height: 140px; background: #f7f9fc; padding: 22px; }
+#message-section #dispatch-message-feed > div { border-radius: 16px; }
+#message-section #message-input { min-height: 78px; font-size: 13px; line-height: 1.7; }
+#message-section #btn-send-message { border-radius: 11px; }
+#message-section .message-templates { width: 290px; border-color: #dfe6ef; box-shadow: none; }
+#message-section button:focus-visible { outline: 3px solid #93b4ff; outline-offset: 2px; }
+@media (max-width: 1400px) {
+    #message-section { flex-wrap: wrap; overflow-y: auto; padding: 14px; }
+    #message-section .message-main { flex: 1 0 100%; height: min(780px, 90vh); }
+    #message-section .message-templates { width: 100%; height: auto; min-height: 260px; }
+}
