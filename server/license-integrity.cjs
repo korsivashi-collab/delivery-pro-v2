@@ -91,9 +91,22 @@ async function saveLicenses(db, request, now = Date.now()) {
         if (billing.length > 1) throw problem('결제 계정 연결이 중복되어 있습니다. 계정을 덮어쓸 수 없습니다.', 409);
         const bound = billing[0], account = bound?.data();
         const renaming = !create && payloads[0].key !== origKey;
+        const releasedKeys = [];
         for (const payload of payloads) {
             const binding = await tx.get(db.collection('billing_license_bindings').doc(payload.key));
-            if ((create || payload.key !== origKey) && (binding.exists || billingSnap.docs.some(d => d.data().licenseKey === payload.key))) throw problem('결제 이력이 예약한 키입니다. 다른 키를 사용해 주세요.', 409);
+            if ((create || payload.key !== origKey) && (binding.exists || billingSnap.docs.some(d => d.data().licenseKey === payload.key))) {
+                const deleted = await tx.get(db.collection('admin_license_controls').doc('deleted-'+payload.key));
+                const pastOrders = await tx.get(db.collection('payment_orders').where('licenseKey','==',payload.key));
+                // Only the same verified billing owner may reclaim a deleted key after re-registration.
+                // Move historical order references aside so refunds and callbacks cannot affect the new account.
+                if (!bound || !renaming || !binding.exists || binding.data().uid !== bound.id ||
+                    !deleted.data()?.deletedAt || licenses.has(payload.key) || profiles.has(payload.key) ||
+                    billingSnap.docs.some(d => d.data().licenseKey === payload.key) ||
+                    pastOrders.docs.some(d => d.data().uid !== bound.id)) {
+                    throw problem('결제 이력이 예약한 키입니다. 다른 키를 사용해 주세요.', 409);
+                }
+                releasedKeys.push({key:payload.key, historicalKey:'ARCHIVED-'+randomUUID(), binding:binding.data(), orders:pastOrders.docs});
+            }
         }
         if (bound) {
             const originalBinding = await tx.get(db.collection('billing_license_bindings').doc(origKey));
@@ -163,6 +176,10 @@ async function saveLicenses(db, request, now = Date.now()) {
         let writes = 1;
         const set = (ref, data, options) => { if (++writes > 450) throw problem('연결된 이력이 많아 한 번에 저장할 수 없습니다. 관리자에게 문의해 주세요.'); tx.set(ref, data, options); };
         const remove = ref => { if (++writes > 450) throw problem('연결된 이력이 많아 한 번에 저장할 수 없습니다.'); tx.delete(ref); };
+        for (const retired of releasedKeys) {
+            set(db.collection('billing_license_bindings').doc(retired.historicalKey), {...retired.binding, originalLicenseKey:retired.key});
+            for (const order of retired.orders) set(order.ref, {licenseKey:retired.historicalKey, originalLicenseKey:retired.key}, {merge:true});
+        }
         for (const [key, profile] of orphanProfiles) {
             set(db.collection('admin_license_controls').doc('deleted-'+key),{key,deletedAt:now,license:null,profile});
             if(!changed.some(item=>item.payload.key===key && item.hasProfile)) remove(db.collection('driver_profiles').doc(key));
