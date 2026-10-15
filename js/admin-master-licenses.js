@@ -587,6 +587,28 @@ export function openEditLicenseModal(key) {
         if (dispatchSec) { dispatchSec.classList.add('hidden'); dispatchSec.classList.remove('flex'); }
     }
     document.getElementById('edit-license-modal').classList.remove('hidden');
+    showAccountPayments(key);
+}
+
+
+async function showAccountPayments(key) {
+    let box=document.getElementById('account-payment-info');
+    if(!box){box=document.createElement('section');box.id='account-payment-info';box.style.cssText='margin:16px 0;padding:16px;border:1px solid #cbd5e1;border-radius:12px;white-space:pre-line;font-size:13px;line-height:1.8';document.getElementById('edit-status-select').parentElement.after(box);}
+    box.textContent='결제 정보를 확인하고 있습니다…';
+    try {
+        const data=await saveMasterLicenses({action:'paymentInfo',key});
+        if(document.getElementById('edit-orig-key').value!==key)return;
+        if(!data.managed){box.textContent='결제 연결 정보 없음';return;}
+        const rows=data.payments.map(p=>`${p.test?'[테스트]':'[실결제]'} ${p.months}개월 · ${Number(p.amount).toLocaleString('ko-KR')}원
+${p.cancelled?'취소/환불 반영':p.status==='completed'?'승인 완료 (저장 기록)':'미완료'} · ${p.method||'결제수단 미기록'}
+${p.approvedAt?new Date(p.approvedAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'승인 일시 없음'}
+주문번호: ${p.orderId}`);
+        box.textContent=`결제 정보 · ${data.provider}
+결제 계정은 영구 삭제가 제한됩니다. 이용 중단은 계정 상태를 정지로 변경하세요. 정지는 환불이나 자동결제 해지가 아닙니다.
+환불 상태는 최근 동기화 기준이며 최종 상태는 결제사에서 확인해 주세요.
+
+`+ (rows.join('\n\n')||'웹 결제 이력 없음 · 스토어 결제내역은 Google Play/RevenueCat에서 확인');
+    }catch(e){if(document.getElementById('edit-orig-key').value===key)box.textContent='결제 정보 조회 실패: '+e.message;}
 }
 
 export function onSessionsInputChange(val) {
@@ -742,6 +764,7 @@ export async function saveLicenseEdit() {
 
 export async function deleteLicense(key) {
     const target = state.allLicenses.find(l => l.key === key);
+    if(target?.billingManaged){alert('결제 이력이 연결된 계정은 영구 삭제할 수 없습니다. 계정 수정에서 결제 정보를 확인하고, 이용 중단은 상태를 정지로 변경해 주세요. 환불·자동결제 해지는 결제사에서 별도로 처리해야 합니다.');return;}
     if (!confirm(`정말 [${key}] 계정을 영구 삭제하시겠습니까?`)) return;
     try {
         await deleteDoc(doc(db, "licenses", key));
