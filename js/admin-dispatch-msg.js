@@ -7,6 +7,29 @@ import { collection, doc, addDoc, deleteDoc, getDocs, query, where } from "https
 
 const escapeMessage = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]));
 
+let messageBox = 'inbox';
+function isReceivedMessage(msg) {
+    const key = sessionStorage.getItem('deliveryProDispatchKey');
+    if (!key) return false;
+    if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === key;
+    if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
+    const normalize = value => String(value || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
+    const token = sessionStorage.getItem('deliveryProSessionToken');
+    const phone = String((state.allLicenses || []).find(l => l.key === key)?.phone || '').replace(/\D/g,'');
+    return (msg.targetDeviceIds || []).some(v => normalize(v) === normalize(key) || token && v === token) ||
+        !!phone && (msg.targetPhones || []).some(v => String(v).replace(/\D/g,'') === phone);
+}
+function isSentMessage(msg) {
+    const key = sessionStorage.getItem('deliveryProDispatchKey') || (state.currentUserRole === 'MASTER' ? 'MASTER' : '');
+    return !!key && msg.senderKey === key && msg.senderType !== 'DRIVER';
+}
+export function setMessageBox(box) {
+    messageBox = box === 'sent' ? 'sent' : 'inbox';
+    renderMessageFeed();
+}
+window.setMessageBox = setMessageBox;
+window.exportCurrentMessageBox = () => exportDispatchMessages(messageBox);
+
 // ==========================================
 // 1. 발송할 기사 선택 목록 (메시지 사이드바)
 // ==========================================
@@ -16,7 +39,7 @@ export function renderMessageSidebar() {
     const visibleLicenses = window.getFilteredVisibleDrivers();
 
     headerEl.innerHTML = `
-        <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-comments text-blue-600"></i> 수신 기사 선택</h2>
+        <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-comments text-blue-600"></i> 발송 대상 기사 선택</h2>
         <button onclick="window.toggleAllMessageSelection()" class="text-[11px] font-black text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md border border-blue-200 hover:bg-blue-100 transition">
             ${state.selectedMessageDrivers.size === visibleLicenses.length && visibleLicenses.length > 0 ? '선택 해제' : '전체 선택'}
         </button>`;
@@ -100,7 +123,7 @@ export async function sendDispatchMessage() {
         });
         
         alert(`[회사 알림 발송 완료]\n${targets.length}명에게 보낼 알림을 저장했습니다. 연결된 기사 화면에서 수신합니다.`);
-        textarea.value = ''; updateMessageCharCount();
+        textarea.value = ''; updateMessageCharCount(); setMessageBox('sent');
     } catch (e) { 
         alert("알림 전송 오류: " + e.message); 
     } finally { 
@@ -109,6 +132,7 @@ export async function sendDispatchMessage() {
 }
 
 export async function deleteDispatchMessage(msgId) {
+    if (!state.allDispatchMessages.some(msg => msg.id === msgId && isSentMessage(msg))) return;
     if (!confirm("이 발송 알림 기록을 삭제하시겠습니까?")) return;
     try { await deleteDoc(doc(db, "dispatch_messages", msgId)); } catch (e) { alert("삭제 오류: " + e.message); }
 }
@@ -116,15 +140,28 @@ export async function deleteDispatchMessage(msgId) {
 export function renderMessageFeed() {
     const feedEl = document.getElementById('dispatch-message-feed');
     if (!feedEl) return;
-    const currentDispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const mySentMessages = state.allDispatchMessages.filter(msg => {
-        if (msg.senderKey === 'MASTER' || msg.senderType === 'MASTER') return false;
-        if (state.currentUserRole === 'DISPATCH') return msg.senderKey === currentDispatchKey || msg.targetDispatchKey === currentDispatchKey;
-        return true;
-    });
+    if (typeof refreshDispatchSoundButton === 'function') refreshDispatchSoundButton();
+    for (const box of ['inbox','sent']) {
+        const button = document.getElementById('message-tab-' + box);
+        if (button) {
+            button.className = 'rounded px-3 py-2 ' + (box === messageBox ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700');
+            button.setAttribute('aria-pressed', String(box === messageBox));
+        }
+    }
+    for (const id of ['message-export-start','message-export-end']) {
+        const input = document.getElementById(id);
+        if (input && !input.value) input.value = getLocalDateString(new Date());
+    }
+    const mySentMessages = state.allDispatchMessages.filter(msg => messageBox === 'sent' ? isSentMessage(msg) :
+        isReceivedMessage(msg) && !localStorage.getItem(`deleted_disp_msg_${msg.id}`));
+    checkDispatchInboxNotifications();
+    if (state.dispatchNavState === 'MESSAGE' && messageBox === 'inbox') {
+        mySentMessages.forEach(msg => localStorage.setItem(`acked_disp_inbox_${msg.id}`, 'true'));
+    }
+    checkDispatchInboxNotifications();
 
     if (mySentMessages.length === 0) {
-        feedEl.innerHTML = `<div class="text-center text-gray-400 py-20 text-xs font-bold space-y-2"><div class="w-14 h-14 bg-white border border-gray-200 rounded-2xl flex items-center justify-center mx-auto text-xl text-gray-300 shadow-xs"><i class="fa-regular fa-bell"></i></div><p>발송된 회사 알림 내역이 없습니다.</p></div>`;
+        feedEl.innerHTML = `<div class="text-center text-gray-400 py-20 text-xs font-bold space-y-2"><div class="w-14 h-14 bg-white border border-gray-200 rounded-2xl flex items-center justify-center mx-auto text-xl text-gray-300 shadow-xs"><i class="fa-regular fa-bell"></i></div><p>${messageBox === 'inbox' ? '수신된 메시지' : '발송한 메시지'}가 없습니다.</p></div>`;
         return;
     }
 
@@ -136,11 +173,11 @@ export function renderMessageFeed() {
             <div class="flex justify-between items-center text-xs">
                 <div class="flex items-center gap-2">
                     <span class="bg-blue-600 text-white font-black text-[10px] px-2 py-0.5 rounded-md shadow-xs">${escapeMessage(msg.senderType === 'DRIVER' ? '기사 → 사무실' : (msg.senderTitle || '회사 알림'))}</span>
-                    <span class="font-bold text-gray-800"><i class="fa-solid fa-user-check text-blue-500 mr-1"></i>${msg.senderType === 'DRIVER' ? '발신: ' + escapeMessage(msg.senderPhone || msg.senderKey) : '수신: ' + escapeMessage(targetPreview)}</span>
+                    <span class="font-bold text-gray-800"><i class="fa-solid fa-user-check text-blue-500 mr-1"></i>${msg.senderType === 'DRIVER' ? '발신: ' + escapeMessage(msg.senderPhone || msg.senderKey) : messageBox === 'inbox' ? '발신: 운영사' : '수신: ' + escapeMessage(targetPreview)}</span>
                 </div>
                 <div class="flex items-center gap-2">
-                    <span class="text-[11px] font-mono text-gray-400">${msg.dateStr || ''} ${msg.timeStr || ''}</span>
-                    <button type="button" onclick="window.deleteDispatchMessage('${msg.id}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
+                    <span class="text-[11px] font-mono text-gray-400">${escapeMessage(msg.dateStr || '')} ${escapeMessage(msg.timeStr || '')}</span>
+                    <button type="button" onclick="window.${messageBox === 'inbox' ? 'deleteNoticeFromDispatchInbox' : 'deleteDispatchMessage'}('${escapeMessage(msg.id)}')" class="text-gray-400 hover:text-red-500 p-1 transition" title="이 기록 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button>
                 </div>
             </div>
             <div class="p-3 bg-slate-50 border border-slate-200/80 rounded-xl text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${escapeMessage(msg.content)}</div>
@@ -201,168 +238,47 @@ export function renderCustomTemplates() {
 }
 
 // ==========================================
-// 4. 운영사 알림 (Inbox 수신 및 팝업)
-// ==========================================
-export function showDispatchPopupAlert(msg) {
-    state.activeDispatchPopupMsgId = msg.id;
-    const contentEl = document.getElementById('dispatch-popup-alert-content');
-    const timeEl = document.getElementById('dispatch-popup-alert-time');
-    const modal = document.getElementById('dispatch-popup-alert-modal');
-    if (!contentEl || !modal) return;
-    contentEl.innerText = msg.content || '';
-    timeEl.innerText = `${msg.timeStr || '방금'} 수신`;
-    modal.classList.remove('hidden');
-    playBeepSound();
-    if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-}
-
-export function closeDispatchPopupAlertModal() {
-    if (state.activeDispatchPopupMsgId) localStorage.setItem(`acked_disp_inbox_${state.activeDispatchPopupMsgId}`, 'true');
-    const modal = document.getElementById('dispatch-popup-alert-modal');
-    if (modal) modal.classList.add('hidden');
-    state.activeDispatchPopupMsgId = null;
-    checkDispatchInboxNotifications();
-}
-
+// 4. 수신 상태는 메시지 메뉴의 읽지 않은 건수와 알림음으로 안내합니다.
+export function showDispatchPopupAlert() { playBeepSound(); }
+export function closeDispatchPopupAlertModal() { checkDispatchInboxNotifications(); }
 export function checkDispatchInboxNotifications() {
     if (state.currentUserRole !== 'DISPATCH') return;
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
-    const matchedLic = state.allLicenses.find(l => l.key === dispatchKey);
-    const phone = (matchedLic?.phone || '').replace(/[^0-9]/g, '');
-
-    const normalizeKey = (k) => k ? k.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '') : '';
-    const normalizedDispatchKey = normalizeKey(dispatchKey);
-
-    const myReceivedMasterNotices = state.allDispatchMessages.filter(msg => {
-        if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === dispatchKey && !localStorage.getItem(`deleted_disp_msg_${msg.id}`);
-        if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
-        if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
-
-        const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
-        let keyMatch = false;
-        if (hasTargets) {
-            keyMatch = msg.targetDeviceIds.some(targetKey => normalizeKey(targetKey) === normalizedDispatchKey || targetKey === sessionToken);
-        }
-        const phoneMatch = phone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === phone);
-        return keyMatch || phoneMatch;
-    });
-
-    const unreadMessages = myReceivedMasterNotices.filter(m => !localStorage.getItem(`acked_disp_inbox_${m.id}`));
-    const unreadCount = unreadMessages.length;
-
+    const unread = state.allDispatchMessages.filter(msg => isReceivedMessage(msg) &&
+        !localStorage.getItem(`deleted_disp_msg_${msg.id}`) && !localStorage.getItem(`acked_disp_inbox_${msg.id}`));
     const badge = document.getElementById('dispatch-inbox-badge');
-    const btn = document.getElementById('btn-dispatch-inbox');
     if (badge) {
-        if (unreadCount > 0) { badge.innerText = unreadCount; badge.classList.remove('hidden'); badge.classList.add('animate-pulse'); }
-        else { badge.classList.add('hidden'); badge.classList.remove('animate-pulse'); }
+        badge.innerText = unread.length;
+        if (unread.length) badge.classList.remove('hidden'); else badge.classList.add('hidden');
     }
-    if (btn) {
-        if (unreadCount > 0) { btn.classList.add('ring-2', 'ring-red-500', 'animate-pulse', 'bg-amber-100'); btn.classList.remove('bg-amber-50'); }
-        else { btn.classList.remove('ring-2', 'ring-red-500', 'animate-pulse', 'bg-amber-100'); btn.classList.add('bg-amber-50'); }
-    }
-
-    if (unreadMessages.length > 0) {
-        const latest = unreadMessages[0];
-        const alreadyPopped = sessionStorage.getItem(`popped_disp_alert_${latest.id}`);
-        if (!alreadyPopped) {
-            sessionStorage.setItem(`popped_disp_alert_${latest.id}`, 'true');
-            showDispatchPopupAlert(latest);
-        }
+    // 읽고 있는 수신함에도 새 메시지 소리는 한 번 재생합니다.
+    const fresh = state.allDispatchMessages.filter(msg => isReceivedMessage(msg) &&
+        !localStorage.getItem(`deleted_disp_msg_${msg.id}`) && !sessionStorage.getItem(`popped_disp_alert_${msg.id}`) &&
+        !localStorage.getItem(`acked_disp_inbox_${msg.id}`));
+    if (fresh.length) {
+        fresh.forEach(msg => sessionStorage.setItem(`popped_disp_alert_${msg.id}`, 'true'));
+        playBeepSound();
     }
 }
-
+// 이전 호출부와의 호환: 별도 알림함 대신 통합 메시지 화면으로 이동합니다.
 export function openDispatchInboxModal() {
-    refreshDispatchSoundButton();
-    for (const id of ['inbox-export-start', 'inbox-export-end']) {
-        const input = document.getElementById(id);
-        if (input && !input.value) input.value = getLocalDateString(new Date());
-    }
-    const container = document.getElementById('dispatch-inbox-container');
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
-    const matchedLic = state.allLicenses.find(l => l.key === dispatchKey);
-    const phone = (matchedLic?.phone || '').replace(/[^0-9]/g, '');
-
-    const normalizeKey = (k) => k ? k.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '') : '';
-    const normalizedDispatchKey = normalizeKey(dispatchKey);
-
-    const myReceivedMasterNotices = state.allDispatchMessages.filter(msg => {
-        if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === dispatchKey && !localStorage.getItem(`deleted_disp_msg_${msg.id}`);
-        if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
-        if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
-
-        const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
-        let keyMatch = false;
-        if (hasTargets) {
-            keyMatch = msg.targetDeviceIds.some(targetKey => normalizeKey(targetKey) === normalizedDispatchKey || targetKey === sessionToken);
-        }
-        const phoneMatch = phone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === phone);
-        return keyMatch || phoneMatch;
-    });
-
-    if (myReceivedMasterNotices.length === 0) {
-        container.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">수신된 알림이 없습니다.</div>`;
-    } else {
-        let html = '';
-        myReceivedMasterNotices.forEach(m => {
-            localStorage.setItem(`acked_disp_inbox_${m.id}`, 'true');
-            html += `
-            <div class="bg-amber-50/40 border border-amber-200 rounded-2xl p-4 shadow-2xs flex flex-col gap-1.5 hover:border-amber-300 transition">
-                <div class="flex justify-between items-center text-xs">
-                    <span class="bg-amber-500 text-white font-black text-[10px] px-2 py-0.5 rounded-md">${escapeMessage(m.senderType === 'DRIVER' ? '기사 ' + (m.senderPhone || m.senderKey) : (m.senderTitle || '운영사 알림'))}</span>
-                    <div class="flex items-center gap-2"><span class="text-[11px] font-mono text-gray-400">${m.dateStr || ''} ${m.timeStr || ''}</span><button type="button" onclick="window.deleteNoticeFromDispatchInbox('${m.id}')" class="text-gray-400 hover:text-red-500 p-1 transition active:scale-95" title="알림 삭제"><i class="fa-solid fa-trash-can text-xs"></i></button></div>
-                </div>
-                <p class="text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed mt-1">${escapeMessage(m.content)}</p>
-            </div>`;
-        });
-        container.innerHTML = html;
-    }
-    checkDispatchInboxNotifications();
-    document.getElementById('dispatch-inbox-modal').classList.remove('hidden');
+    messageBox = 'inbox';
+    window.setDispatchMode('MESSAGE');
 }
-
-export function closeDispatchInboxModal() { document.getElementById('dispatch-inbox-modal').classList.add('hidden'); }
-
+export function closeDispatchInboxModal() {}
 export async function deleteNoticeFromDispatchInbox(msgId) {
-    if (!confirm("이 알림을 삭제하시겠습니까?")) return;
-    try {
-        localStorage.setItem(`deleted_disp_msg_${msgId}`, 'true');
-        openDispatchInboxModal();
-        checkDispatchInboxNotifications();
-    } catch(e) { alert("삭제 오류: " + e.message); }
+    if (!state.allDispatchMessages.some(m => m.id === msgId && isReceivedMessage(m))) return;
+    if (!confirm('이 수신 메시지를 목록에서 숨기시겠습니까?')) return;
+    localStorage.setItem(`deleted_disp_msg_${msgId}`, 'true');
+    renderMessageFeed();
 }
-
 export async function clearAllDispatchInbox() {
-    if (!confirm("알림함의 모든 알림을 삭제하시겠습니까?")) return;
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
-    const sessionToken = sessionStorage.getItem('deliveryProSessionToken');
-    const matchedLic = state.allLicenses.find(l => l.key === dispatchKey);
-    const phone = (matchedLic?.phone || '').replace(/[^0-9]/g, '');
-
-    const normalizeKey = (k) => k ? k.toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '') : '';
-    const normalizedDispatchKey = normalizeKey(dispatchKey);
-
-    const myNotices = state.allDispatchMessages.filter(msg => {
-        if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === dispatchKey && !localStorage.getItem(`deleted_disp_msg_${msg.id}`);
-        if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
-        if (localStorage.getItem(`deleted_disp_msg_${msg.id}`)) return false;
-        const hasTargets = msg.targetDeviceIds && msg.targetDeviceIds.length > 0;
-        let keyMatch = false;
-        if (hasTargets) {
-            keyMatch = msg.targetDeviceIds.some(targetKey => normalizeKey(targetKey) === normalizedDispatchKey || targetKey === sessionToken);
-        }
-        const phoneMatch = phone && msg.targetPhones && msg.targetPhones.some(p => p.replace(/[^0-9]/g, '') === phone);
-        return keyMatch || phoneMatch;
-    });
-
-    for (const m of myNotices) localStorage.setItem(`deleted_disp_msg_${m.id}`, 'true');
-    openDispatchInboxModal();
-    checkDispatchInboxNotifications();
+    if (!confirm('수신 메시지를 목록에서 모두 숨기시겠습니까?')) return;
+    state.allDispatchMessages.filter(isReceivedMessage).forEach(m => localStorage.setItem(`deleted_disp_msg_${m.id}`, 'true'));
+    renderMessageFeed();
 }
 export async function exportDispatchMessages(scope = 'messages') {
-    const start = document.getElementById(scope === 'inbox' ? 'inbox-export-start' : 'message-export-start').value;
-    const end = document.getElementById(scope === 'inbox' ? 'inbox-export-end' : 'message-export-end').value;
+    const start = document.getElementById('message-export-start').value;
+    const end = document.getElementById('message-export-end').value;
     if (!start || !end || start > end) { alert('올바른 시작일과 종료일을 선택해 주세요.'); return; }
     const key = sessionStorage.getItem('deliveryProDispatchKey');
     const master = sessionStorage.getItem('deliveryProRole') === 'MASTER';
@@ -382,13 +298,13 @@ export async function exportDispatchMessages(scope = 'messages') {
             ((m.targetDeviceIds || []).some(v => normalize(v) === normalize(key) || v === sessionToken) ||
              targetPhone && (m.targetPhones || []).some(p => String(p).replace(/\D/g, '') === targetPhone));
         const messages = [...records.values()].filter(m => (master || m.senderKey === key || incoming(m)) &&
-            (scope !== 'inbox' || incoming(m)) && m.createdAt >= from && m.createdAt < until.getTime()).sort((a,b)=>a.createdAt-b.createdAt);
+            (scope !== 'inbox' || incoming(m)) && (scope !== 'sent' || isSentMessage(m)) && m.createdAt >= from && m.createdAt < until.getTime()).sort((a,b)=>a.createdAt-b.createdAt);
         if (!messages.length) { alert('해당 기간의 메시지가 없습니다.'); return; }
         const rows = [['날짜','시간','구분','발신 전화번호/계정','수신 전화번호/계정','내용']];
         messages.forEach(m => rows.push([m.dateStr || '',m.timeStr || '',m.senderType === 'DRIVER' ? '기사 → 사무실' : m.senderKey === 'MASTER' || m.senderType === 'MASTER' ? '운영사 → 관제' : '사무실 → 기사',m.senderPhone || m.senderKey || '',m.targetDispatchKey || (m.targetPhones || []).join(', '),m.content || '']));
         const wb = XLSX.utils.book_new();
         XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(rows),'메시지');
-        XLSX.writeFile(wb,`메시지_${start}_${end}.xlsx`);
+        XLSX.writeFile(wb,`메시지_${scope === 'inbox' ? '수신' : scope === 'sent' ? '발신' : '전체'}_${start}_${end}.xlsx`);
     } catch(error) { alert('메시지 내보내기 실패: '+error.message); }
 }
 window.exportDispatchMessages = exportDispatchMessages;

@@ -166,6 +166,7 @@ export function setDispatchMode(mode, keepSelected = false) {
     if (mode === 'MESSAGE') {
         if (mapSec) mapSec.classList.add('hidden');
         if (msgSec) msgSec.classList.remove('hidden');
+        if (window.renderMessageFeed) window.renderMessageFeed();
         if (dateBar) dateBar.classList.add('hidden');
     } else {
         if (msgSec) msgSec.classList.add('hidden');
