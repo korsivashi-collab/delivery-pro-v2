@@ -108,7 +108,7 @@ function buildDialog(){
     subscriptionDialog=document.createElement('dialog');subscriptionDialog.id='subscription-modal';
     subscriptionDialog.className='w-[calc(100%_-_2rem)] max-h-[90dvh] overflow-y-auto rounded-3xl p-6 bg-white text-slate-900 shadow-2xl backdrop:bg-black/60';
     subscriptionDialog.setAttribute('aria-labelledby','subscription-title');
-    subscriptionDialog.innerHTML=`<div class="flex items-center justify-between gap-3"><h2 id="subscription-title" class="text-xl font-black">배송경로PRO 구독</h2><button type="button" data-close aria-label="닫기" class="px-3 py-2">✕</button></div>
+    subscriptionDialog.innerHTML=`<div class="flex items-center justify-between gap-3"><h2 id="subscription-title" class="text-xl font-black">배송경로PRO 구독</h2><button type="button" data-close aria-label="닫기" style="display:inline-flex;align-items:center;justify-content:center;width:48px;height:48px;min-width:48px;border:2px solid #94a3b8;border-radius:10px;background:#e2e8f0;color:#0f172a;font-size:26px;font-weight:800;line-height:1;cursor:pointer">✕</button></div>
     <style>
     #subscription-modal{width:calc(100% - 24px);max-width:600px;padding:24px;border:0;border-radius:24px;color:#142540;background:white;font-family:inherit;box-sizing:border-box}
     #subscription-modal::backdrop{background:#14254099}#subscription-modal *{box-sizing:border-box}
