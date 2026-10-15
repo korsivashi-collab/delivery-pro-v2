@@ -471,33 +471,47 @@ export async function fetchActiveRouteOnce(deviceId, phone, ownerId = state.getR
     }
 }
 
-// 5. 관제 메시지 리스너 (최신 5건 한정 구독)
+// 5. 관제 메시지: 라이선스 연결과 대상별 실시간 구독
 export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessageReceived) {
-    const cleanPhone = (myPhone || '').replace(/[^0-9]/g, '');
+    const digits = String(myPhone || '').replace(/\D/g, '');
+    const cleanPhone = String(myPhone || '').startsWith('+82') ? '0' + digits.slice(2) : digits;
     const cleanKeyOnly = (myKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-    
-    const seen = new Set();
-    const subscriptions = [];
-    const targets = new Set([myDeviceId, myKey, cleanKeyOnly].filter(Boolean));
-    const phones = new Set([myPhone, cleanPhone].filter(Boolean));
-    const receive = snapshot => snapshot.docChanges().forEach(change => {
-        if (change.type !== 'added' || seen.has(change.doc.id)) return;
-        const msg = change.doc.data();
-        if (msg.senderType === 'DRIVER') return;
-        const linkedKey = localStorage.getItem('deliveryProDispatchKey');
-        const isMaster = msg.senderKey === 'MASTER' || msg.senderType === 'MASTER';
-        if (!isMaster && (!linkedKey || msg.senderKey !== linkedKey)) return;
-        if (Array.isArray(msg.targetLicenseKeys) && !msg.targetLicenseKeys.includes(myKey)) return;
-        seen.add(change.doc.id);
-        onMessageReceived?.({ msgId: change.doc.id, content: msg.content, dateStr: msg.dateStr,
-            timeStr: msg.timeStr, senderTitle: msg.senderTitle || (isMaster ? '운영사 알림' : '회사 알림'),
-            senderType: msg.senderType || (isMaster ? 'MASTER' : 'DISPATCH') });
-    });
-    for (const value of targets) subscriptions.push(onSnapshot(query(collection(db, 'dispatch_messages'),
-        where('targetDeviceIds', 'array-contains', value)), receive));
-    for (const value of phones) subscriptions.push(onSnapshot(query(collection(db, 'dispatch_messages'),
-        where('targetPhones', 'array-contains', value)), receive));
-    return () => subscriptions.forEach(stop => stop());
+    const seen = new Set(), pending = new Map(), subscriptions = [];
+    let stopped = false, linkedKey = null;
+    const drain = () => {
+        if (stopped) return;
+        pending.forEach((msg, id) => {
+            if (seen.has(id) || msg.senderType === 'DRIVER') return;
+            const master = msg.senderKey === 'MASTER' || msg.senderType === 'MASTER';
+            if (!master && (!linkedKey || msg.senderKey !== linkedKey)) return;
+            if (Array.isArray(msg.targetLicenseKeys) && !msg.targetLicenseKeys.includes(myKey)) return;
+            seen.add(id);
+            onMessageReceived?.({ msgId: id, content: msg.content, dateStr: msg.dateStr, timeStr: msg.timeStr,
+                senderTitle: msg.senderTitle || (master ? '운영사 알림' : '회사 알림'),
+                senderType: msg.senderType || (master ? 'MASTER' : 'DISPATCH') });
+        });
+    };
+    // 프로필/로컬 캐시에는 회사 키가 없을 수 있어 실제 라이선스 연결을 구독합니다.
+    if (myKey) subscriptions.push(onSnapshot(doc(db, 'licenses', myKey), snapshot => {
+        if (stopped) return;
+        linkedKey = snapshot.exists() ? snapshot.data().dispatchKey || '' : '';
+        drain();
+    }, error => console.warn('회사 메시지 연결 확인 실패:', error)));
+    const receive = snapshot => {
+        if (stopped) return;
+        snapshot.docChanges().forEach(change => {
+            if (change.type === 'removed') pending.delete(change.doc.id);
+            else pending.set(change.doc.id, change.doc.data());
+        });
+        drain();
+    };
+    const subscribe = (field, value) => subscriptions.push(onSnapshot(query(collection(db, 'dispatch_messages'),
+        where(field, 'array-contains', value)), receive, error => console.warn('메시지 수신 연결 실패:', error)));
+    if (myKey) subscribe('targetLicenseKeys', myKey);
+    for (const value of new Set([myDeviceId, myKey, cleanKeyOnly].filter(Boolean))) subscribe('targetDeviceIds', value);
+    const formatted = cleanPhone.replace(/^(010)(\d{4})(\d{4})$/, '$1-$2-$3');
+    for (const value of new Set([myPhone, cleanPhone, formatted].filter(Boolean))) subscribe('targetPhones', value);
+    return () => { stopped = true; subscriptions.forEach(stop => stop()); pending.clear(); };
 }
 
 let sendingOfficeMessage = false;

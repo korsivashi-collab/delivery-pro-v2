@@ -118,7 +118,7 @@ export async function sendDispatchMessage() {
 
         await addDoc(collection(db, "dispatch_messages"), {
             senderKey: dispatchKey, senderType: "DISPATCH", senderTitle: "회사 알림", 
-            targetLicenseKeys: selected.map(lic => lic.key), targetDeviceIds: targets, targetPhones: targetPhones, content: text,
+            targetLicenseKeys: selected.map(lic => lic.key), targetDeviceIds: [...new Set([...targets, ...selected.map(lic => lic.key)])], targetPhones: targetPhones, content: text,
             createdAt: now.getTime(), dateStr: dateStr, timeStr: timeStr, acknowledged: []
         });
         
