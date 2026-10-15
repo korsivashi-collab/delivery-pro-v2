@@ -29,6 +29,48 @@ service cloud.firestore {
         (request.auth != null && request.auth.token.get('role', '') == 'DISPATCH');
     }
 
+    // Paid licenses keep billing fields server-only; operational changes are scoped below.
+    function ownsPaidLicense(key) {
+      return request.auth != null &&
+        get(/databases/$(database)/documents/billing_license_bindings/$(key)).data.uid == request.auth.uid &&
+        (request.auth.token.firebase.sign_in_provider == 'phone' ||
+          (request.auth.token.firebase.sign_in_provider == 'custom' &&
+            request.auth.token.get('nativePhoneVerified', false) == true));
+    }
+
+    function isCurrentDispatcher() {
+      let dispatcher = get(/databases/$(database)/documents/licenses/$(request.auth.uid)).data;
+      return request.auth.token.get('role', '') == 'DISPATCH' &&
+        dispatcher.get('type', '') == 'dispatch' &&
+        !(dispatcher.get('status', '') in ['suspended', 'revoked', 'expired']) &&
+        (!('expiresAt' in dispatcher) || dispatcher.expiresAt == null ||
+          (dispatcher.expiresAt is int && dispatcher.expiresAt > request.time.toMillis()) ||
+          (dispatcher.expiresAt is timestamp && dispatcher.expiresAt > request.time)) &&
+        (!('expireDate' in dispatcher) || dispatcher.expireDate == '' ||
+          int(dispatcher.expireDate.replace('[^0-9]', '')) >=
+            (request.time + duration.value(9, 'h')).year() * 10000 +
+            (request.time + duration.value(9, 'h')).month() * 100 +
+            (request.time + duration.value(9, 'h')).day());
+    }
+
+    function paidOperationalUpdate(key) {
+      let changed = request.resource.data.diff(resource.data).affectedKeys();
+      let before = resource.data.get('dispatchKey', '');
+      let after = request.resource.data.get('dispatchKey', '');
+      return (ownsPaidLicense(key) && changed.hasOnly(['allowTms', 'dispatchKey']) &&
+          request.resource.data.allowTms is bool &&
+          (after == before || (request.resource.data.allowTms == false && after == ''))) ||
+        (resource.data.get('type', '') != 'dispatch' &&
+          (isVerifiedMaster() || (request.auth != null && isCurrentDispatcher())) &&
+          ((changed.hasOnly(['dispatchKey']) && after is string &&
+            (after == '' || !(resource.data.get('allowTms', true) in [false, 'false'])) &&
+            (isVerifiedMaster() || ((before == '' || before == request.auth.uid) &&
+              (after == '' || after == request.auth.uid)))) ||
+           (changed.hasOnly(['territoryLat', 'territoryLng', 'territoryScale',
+             'territory1', 'territory2', 'territorySize']) &&
+             (isVerifiedMaster() || before == request.auth.uid))));
+    }
+
     function validCompletion(data) {
       return data.keys().hasAll(['routeOwnerId', 'deviceId', 'completedAt']) &&
         data.routeOwnerId is string && data.routeOwnerId.size() > 0 &&
@@ -91,17 +133,22 @@ service cloud.firestore {
       allow delete: if false;
       // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
       allow create: if isVerifiedMaster();
-      allow update: if !isStoreLicense(licenseKey) &&
+      allow update: if (isStoreLicense(licenseKey) && paidOperationalUpdate(licenseKey)) ||
+        (!isStoreLicense(licenseKey) &&
         (resource.data.get('type', '') == 'trial' ||
         request.resource.data.get('type', '') != 'trial' ||
-        isVerifiedMaster());
+        isVerifiedMaster()));
     }
 
     match /driver_profiles/{profileId} {
       allow read: if true;
       allow create: if !isStoreLicense(profileId) && exists(/databases/$(database)/documents/licenses/$(profileId));
-      allow update: if !isStoreLicense(profileId) && request.resource.data.diff(resource.data)
-        .affectedKeys().hasOnly(['deviceId', 'phone', 'allowTms']);
+      allow update: if (!isStoreLicense(profileId) && request.resource.data.diff(resource.data)
+        .affectedKeys().hasOnly(['deviceId', 'phone', 'allowTms'])) ||
+        (isStoreLicense(profileId) && ownsPaidLicense(profileId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly(['allowTms']) &&
+          request.resource.data.allowTms is bool &&
+          getAfter(/databases/$(database)/documents/licenses/$(profileId)).data.allowTms == request.resource.data.allowTms);
       allow delete: if false;
     }
 
