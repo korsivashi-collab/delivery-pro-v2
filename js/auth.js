@@ -367,7 +367,8 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     // 관제/운영사 메시지 실시간 감시 (최신 5건 한정 구독)
     if (dispatchMsgWatcherUnsub) dispatchMsgWatcherUnsub();
     dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phone, key, (msg) => {
-        saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType);
+        try { saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType); }
+        catch (error) { console.warn('메시지 보관 실패:', error); }
         const alreadyAcked = localStorage.getItem(`acked_msg_${msg.msgId}`);
         if (!alreadyAcked) {
             showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);

@@ -5,6 +5,7 @@
 
 import { stageCompletionDeletion, wakeCompletionQueue } from './completion-queue.js';
 import {
+    refreshDispatchMessages,
     firebaseSetTmsPermission, 
     syncMyParkingMemosFromServer, 
     saveRouteToFirestore 
@@ -122,8 +123,17 @@ export function playBeepSound() {
     }
 }
 
+let volatileNotices = [];
+function readNotices() {
+    try {
+        const saved = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
+        if (!Array.isArray(saved)) throw new Error('알림 기록 형식 오류');
+        const merged = new Map([...volatileNotices, ...saved].filter(n => n && n.msgId).map(n => [n.msgId,n]));
+        return [...merged.values()].sort((a,b) => b.timestamp-a.timestamp).slice(0,50);
+    } catch (error) { console.warn('알림 기록 읽기 실패:', error); return [...volatileNotices]; }
+}
 export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, senderTitle, senderType) {
-    let notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
+    let notices = readNotices();
     const isMaster = (senderType === 'MASTER' || senderTitle === '운영사 알림');
     const finalTitle = senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
 
@@ -138,7 +148,8 @@ export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, send
             timestamp: Date.now()
         });
         if (notices.length > 50) notices = notices.slice(0, 50);
-        localStorage.setItem('deliveryPro_notices', JSON.stringify(notices));
+        volatileNotices = notices;
+        try { localStorage.setItem('deliveryPro_notices', JSON.stringify(notices)); } catch (error) { console.warn('알림 기록 저장 실패:', error); }
         checkUnreadNotices();
     }
 }
@@ -146,7 +157,7 @@ export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, send
 export function checkUnreadNotices() {
     const dot = document.getElementById('notice-unread-dot');
     if (!dot) return;
-    const notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
+    const notices = readNotices();
     const unread = notices.some(n => !localStorage.getItem(`acked_msg_${n.msgId}`));
     if (unread) dot.classList.remove('hidden');
     else dot.classList.add('hidden');
@@ -192,9 +203,16 @@ export function closeDispatchAlertModal() {
     checkUnreadNotices();
 }
 
-export function openNoticeHistoryModal() {
+export async function openNoticeHistoryModal(refresh = true) {
+    if (refresh) {
+        openNoticeHistoryModal(false);
+        try { await refreshDispatchMessages(); }
+        catch (error) { alert('메시지 새로고침 실패: ' + error.message); }
+        if (!document.getElementById('notice-history-modal')?.classList.contains('hidden')) return openNoticeHistoryModal(false);
+        return;
+    }
     const container = document.getElementById('notice-history-container');
-    const notices = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
+    const notices = readNotices();
     if (!container) return;
 
     if (notices.length === 0) {
@@ -229,7 +247,8 @@ export function closeNoticeHistoryModal() {
 export function clearLocalNotices() {
     if (!confirm("알림 보관함을 모두 비우시겠습니까?")) return;
     localStorage.removeItem('deliveryPro_notices');
-    openNoticeHistoryModal();
+    volatileNotices = [];
+    openNoticeHistoryModal(false);
     checkUnreadNotices();
 }
 

@@ -476,7 +476,7 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
     const digits = String(myPhone || '').replace(/\D/g, '');
     const cleanPhone = String(myPhone || '').startsWith('+82') ? '0' + digits.slice(2) : digits;
     const cleanKeyOnly = (myKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
-    const seen = new Set(), pending = new Map(), subscriptions = [];
+    const seen = new Set(), pending = new Map(), subscriptions = [], messageQueries = [];
     let stopped = false, linkedKey = null;
     const drain = () => {
         if (stopped) return;
@@ -485,10 +485,12 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
             const master = msg.senderKey === 'MASTER' || msg.senderType === 'MASTER';
             if (!master && (!linkedKey || msg.senderKey !== linkedKey)) return;
             if (Array.isArray(msg.targetLicenseKeys) && !msg.targetLicenseKeys.includes(myKey)) return;
-            seen.add(id);
+            try {
             onMessageReceived?.({ msgId: id, content: msg.content, dateStr: msg.dateStr, timeStr: msg.timeStr,
                 senderTitle: msg.senderTitle || (master ? '운영사 알림' : '회사 알림'),
                 senderType: msg.senderType || (master ? 'MASTER' : 'DISPATCH') });
+            seen.add(id);
+            } catch (error) { console.warn('메시지 화면 처리 실패:', error); }
         });
     };
     // 프로필/로컬 캐시에는 회사 키가 없을 수 있어 실제 라이선스 연결을 구독합니다.
@@ -505,13 +507,53 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
         });
         drain();
     };
-    const subscribe = (field, value) => subscriptions.push(onSnapshot(query(collection(db, 'dispatch_messages'),
-        where(field, 'array-contains', value)), receive, error => console.warn('메시지 수신 연결 실패:', error)));
+    const subscribe = (field, value) => {
+        const q = query(collection(db, 'dispatch_messages'), where(field, 'array-contains', value));
+        messageQueries.push(q);
+        subscriptions.push(onSnapshot(q, receive, error => console.warn('메시지 수신 연결 실패:', error)));
+    };
     if (myKey) subscribe('targetLicenseKeys', myKey);
     for (const value of new Set([myDeviceId, myKey, cleanKeyOnly].filter(Boolean))) subscribe('targetDeviceIds', value);
     const formatted = cleanPhone.replace(/^(010)(\d{4})(\d{4})$/, '$1-$2-$3');
     for (const value of new Set([myPhone, cleanPhone, formatted].filter(Boolean))) subscribe('targetPhones', value);
-    return () => { stopped = true; subscriptions.forEach(stop => stop()); pending.clear(); };
+    let refreshing = null;
+    const refresh = () => {
+        if (stopped) return Promise.resolve();
+        if (refreshing) return refreshing;
+        refreshing = (async () => {
+            const license = await getDoc(doc(db, 'licenses', myKey));
+            if (stopped) return;
+            linkedKey = license.exists() ? license.data().dispatchKey || '' : '';
+            for (const q of messageQueries) {
+                const snapshot = await getDocs(q);
+                if (stopped) return;
+                snapshot.forEach(d => pending.set(d.id, d.data()));
+            }
+            drain();
+        })().finally(() => { refreshing = null; });
+        return refreshing;
+    };
+    currentMessageRefresh = refresh;
+    const resume = () => {
+        if (typeof document === 'undefined' || document.visibilityState === 'visible') refresh().catch(error => console.warn('메시지 재조회 실패:', error));
+    };
+    if (typeof document !== 'undefined') document.addEventListener('visibilitychange', resume);
+    if (typeof window !== 'undefined') window.addEventListener?.('online', resume);
+    const timer = typeof setInterval === 'function' ? setInterval(resume, 60000) : null;
+    if (typeof getDoc === 'function' && typeof getDocs === 'function') resume();
+    return () => {
+        stopped = true; subscriptions.forEach(stop => stop()); pending.clear();
+        if (currentMessageRefresh === refresh) currentMessageRefresh = null;
+        if (timer !== null) clearInterval(timer);
+        if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', resume);
+        if (typeof window !== 'undefined') window.removeEventListener?.('online', resume);
+    };
+}
+
+let currentMessageRefresh = null;
+export async function refreshDispatchMessages() {
+    if (!currentMessageRefresh) throw new Error('메시지 수신 연결이 시작되지 않았습니다. 페이지를 새로고침해 주세요.');
+    return currentMessageRefresh();
 }
 
 let sendingOfficeMessage = false;
