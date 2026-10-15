@@ -656,118 +656,34 @@ export async function getBatchMemosFromFirestore(addresses) {
     return allMemosMap;
 }
 
+async function memoRequest(action,input={}) {
+    await auth.authStateReady();
+    const user=auth.currentUser;
+    if(!user)throw new Error('휴대폰 인증 후 메모를 이용해 주세요.');
+    const response=await apiFetch('/api/memos',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await user.getIdToken()},body:JSON.stringify({...input,action})});
+    const result=await response.json();
+    if(!response.ok)throw new Error(result.error||'메모 처리에 실패했습니다.');
+    return result;
+}
 export async function saveMemoToFirestore(address, deviceId, memoText, phone = "") {
-    const now = new Date();
-    const timeStr = `${now.getFullYear()}.${String(now.getMonth()+1).padStart(2,'0')}.${String(now.getDate()).padStart(2,'0')} ${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}`;
-    const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
-
-    const q = query(collection(db, "memos"), where("address", "==", address));
-    const querySnapshot = await getDocs(q);
-
-    let existingDocs = [];
-    querySnapshot.forEach(docSnap => {
-        const data = docSnap.data();
-        const dataPhone = (data.phone || "").replace(/[^0-9]/g, '');
-        if (data.deviceId === deviceId || (cleanPhone && dataPhone && dataPhone === cleanPhone)) {
-            existingDocs.push({ id: docSnap.id, ...data });
-        }
-    });
-
-    if (existingDocs.length > 0) {
-        const primaryDocId = existingDocs[0].id;
-        await updateDoc(doc(db, "memos", primaryDocId), {
-            memo: memoText,
-            time: timeStr,
-            phone: phone || "",
-            deviceId: deviceId,
-            updatedAt: now.getTime(),
-            reported: false
-        });
-        
-        for (let i = 1; i < existingDocs.length; i++) {
-            await deleteDoc(doc(db, "memos", existingDocs[i].id));
-        }
-    } else {
-        await addDoc(collection(db, "memos"), {
-            address,
-            memo: memoText,
-            deviceId,
-            phone: phone || "",
-            time: timeStr,
-            likes: 0,
-            reported: false,
-            createdAt: now.getTime()
-        });
-    }
+    // The server derives the author and phone from the verified token, never these legacy arguments.
+    return memoRequest('save',{address,memo:memoText});
 }
 
 export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) {
-    const cleanPhone = (phone || "").replace(/[^0-9]/g, '');
-    const myAddresses = new Set();
-
-    try {
-        const localList = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
-        localList.forEach(addr => { if (addr) myAddresses.add(addr); });
-    } catch (e) {}
-
-    try {
-        if (deviceId) {
-            const qDev = query(collection(db, "memos"), where("deviceId", "==", deviceId));
-            const snapDev = await getDocs(qDev);
-            snapDev.forEach(docSnap => {
-                const d = docSnap.data();
-                if (d.address) myAddresses.add(d.address);
-            });
-        }
-
-        if (phone) {
-            const qPhone = query(collection(db, "memos"), where("phone", "==", phone));
-            const snapPhone = await getDocs(qPhone);
-            snapPhone.forEach(docSnap => {
-                const d = docSnap.data();
-                if (d.address) myAddresses.add(d.address);
-            });
-        }
-
-        if (cleanPhone) {
-            const profileQ = query(collection(db, "driver_profiles"), where("phone", "==", phone));
-            let licSnap = await getDocs(profileQ);
-            if (licSnap.empty) {
-                const licQ = query(collection(db, "licenses"), where("phone", "==", phone));
-                licSnap = await getDocs(licQ);
-            }
-            const userDevIds = new Set();
-            licSnap.forEach(ld => {
-                const dId = ld.data().deviceId;
-                if (dId) userDevIds.add(dId);
-            });
-
-            for (const dId of userDevIds) {
-                if (dId !== deviceId) {
-                    const qOther = query(collection(db, "memos"), where("deviceId", "==", dId));
-                    const snapOther = await getDocs(qOther);
-                    snapOther.forEach(docSnap => {
-                        const d = docSnap.data();
-                        if (d.address) myAddresses.add(d.address);
-                    });
-                }
-            }
-        }
-    } catch (err) {
-        console.error("서버 메모 동기화 오류:", err);
-    }
-
-    const finalArray = Array.from(myAddresses);
-    localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(finalArray));
-    return finalArray.length;
+    let result;
+    try { result=await memoRequest('mine'); } catch(error) { console.warn('공용 메모 동기화 실패:',error.message); return 0; }
+    const addresses=result.addresses||[];
+    localStorage.setItem('deliveryPro_my_parking_memos',JSON.stringify(addresses));
+    return addresses.length;
 }
 
 export async function likeMemoInFirestore(docId) { 
-    await updateDoc(doc(db, "memos", docId), { likes: increment(1) }); 
+    await memoRequest('like',{id:docId}); 
 }
 
 export async function reportMemoInFirestore(docId) { 
-    await updateDoc(doc(db, "memos", docId), { reported: true }); 
+    await memoRequest('report',{id:docId}); 
 }
 
 // 8. 배송 경로 및 완료 내역 동기화
@@ -1031,4 +947,5 @@ export async function billingRequest(action, input = {}, expectedUid = null) {
     let result; try { result = await response.json(); } catch (_) { result = {}; }
     if (!response.ok) throw new Error(result.error || '구독 확인에 실패했습니다. 잠시 후 다시 확인해 주세요.');
     return result;
-}
+}
+

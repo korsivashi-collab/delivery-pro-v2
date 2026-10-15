@@ -7,7 +7,8 @@
 import { 
     getMemosFromFirestore, 
     getBatchMemosFromFirestore, 
-    saveMemoToFirestore, 
+    saveMemoToFirestore,
+    getBillingIdentity, 
     likeMemoInFirestore, 
     reportMemoInFirestore,
     firebaseUploadTempMemoBackup,
@@ -273,7 +274,8 @@ export async function openMemoModal(id) {
         const myDeviceId = getOrCreateDeviceId();
         const myPhone = localStorage.getItem('deliveryProUserPhone') || "";
         
-        const myMemo = memos.find(m => m.deviceId === myDeviceId || (myPhone && m.phone === myPhone));
+        const memoIdentity = await getBillingIdentity();
+        const myMemo = memos.find(m => m.ownerUid && m.ownerUid === memoIdentity?.uid);
         if (myMemo) {
             const rawMemo = myMemo.memo || "";
             
@@ -323,7 +325,7 @@ export async function openMemoModal(id) {
         if (memos.length > 0) {
             let html = "";
             memos.forEach((m, idx) => {
-                let isMyMemo = (m.deviceId === myDeviceId || (myPhone && m.phone === myPhone));
+                let isMyMemo = (m.ownerUid && m.ownerUid === memoIdentity?.uid);
                 let crownHtml = (idx === 0) ? `<i class="fa-solid fa-crown text-yellow-400 mr-1 text-sm drop-shadow-sm"></i> ` : '';
                 let myBadge = isMyMemo ? `<span class="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded ml-1">내가 쓴 정보</span>` : '';
                 
@@ -417,7 +419,7 @@ export async function saveCurrentMemo() {
         }
     } catch (e) { 
         hideLoading(); 
-        alert("통신 오류가 발생했습니다."); 
+        alert(e.message || "통신 오류가 발생했습니다."); 
     }
 }
 
@@ -433,7 +435,7 @@ export async function likeMemo(docId) {
             openMemoModal(dest.id); 
         }
     } catch (e) { 
-        alert("통신 오류가 발생했습니다."); 
+        alert(e.message || "통신 오류가 발생했습니다."); 
     }
 }
 
@@ -456,7 +458,7 @@ export async function reportMemo(docId) {
         }
     } catch (e) { 
         hideLoading(); 
-        alert("통신 오류가 발생했습니다."); 
+        alert(e.message || "통신 오류가 발생했습니다."); 
     }
 }
 
