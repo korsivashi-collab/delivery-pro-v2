@@ -29,6 +29,22 @@ export function setMessageBox(box) {
 }
 window.setMessageBox = setMessageBox;
 window.exportCurrentMessageBox = () => exportDispatchMessages(messageBox);
+function sentHiddenKey(id) {
+    return 'hidden_disp_sent_' + encodeURIComponent(sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER') + '_' + id;
+}
+export function clearCurrentMessageBox() {
+    const incoming = messageBox === 'inbox';
+    const messages = state.allDispatchMessages.filter(incoming ? isReceivedMessage : isSentMessage);
+    const storageKey = id => incoming ? 'deleted_disp_msg_' + id : sentHiddenKey(id);
+    const visible = messages.filter(m => !localStorage.getItem(storageKey(m.id)));
+    if (!visible.length) { alert('비울 메시지가 없습니다.'); return; }
+    if (!confirm((incoming ? '받은내용' : '보내는내용') + ' ' + visible.length + '건을 이 브라우저의 목록에서 모두 지울까요?\n상대방의 기록과 엑셀 내보내기용 서버 기록은 유지됩니다.')) return;
+    try {
+        visible.forEach(m => localStorage.setItem(storageKey(m.id), 'true'));
+    } catch (error) { alert('메시지함 비우기 중 저장 오류가 발생했습니다: ' + error.message); }
+    renderMessageFeed();
+}
+window.clearCurrentMessageBox = clearCurrentMessageBox;
 
 // ==========================================
 // 1. 발송할 기사 선택 목록 (메시지 사이드바)
@@ -127,7 +143,7 @@ export async function sendDispatchMessage() {
     } catch (e) { 
         alert("알림 전송 오류: " + e.message); 
     } finally { 
-        btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i><span>회사 알림 발송</span>'; 
+        btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-paper-plane text-xs"></i><span>선택한 기사에게 보내기</span>'; 
     }
 }
 
@@ -152,7 +168,9 @@ export function renderMessageFeed() {
         const input = document.getElementById(id);
         if (input && !input.value) input.value = getLocalDateString(new Date());
     }
-    const mySentMessages = state.allDispatchMessages.filter(msg => messageBox === 'sent' ? isSentMessage(msg) :
+    const clearButton = document.getElementById('message-clear-button');
+    if (clearButton) clearButton.textContent = messageBox === 'inbox' ? '받은내용 비우기' : '보내는내용 비우기';
+    const mySentMessages = state.allDispatchMessages.filter(msg => messageBox === 'sent' ? isSentMessage(msg) && !localStorage.getItem(sentHiddenKey(msg.id)) :
         isReceivedMessage(msg) && !localStorage.getItem(`deleted_disp_msg_${msg.id}`));
     checkDispatchInboxNotifications();
     if (state.dispatchNavState === 'MESSAGE' && messageBox === 'inbox') {
