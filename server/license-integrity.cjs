@@ -113,6 +113,7 @@ async function saveLicenses(db, request, now = Date.now()) {
             }
             const previous = create ? {} : licenses.get(origKey);
             const previousProfile = create ? {} : profiles.get(origKey) || {};
+            if (previous.billingManaged && payload.key !== origKey) throw problem('스토어 구독 계정의 키는 변경할 수 없습니다.', 409);
             if (previous.routeOwnerId && previousProfile.routeOwnerId && previous.routeOwnerId !== previousProfile.routeOwnerId) {
                 throw problem('라이선스와 기사 신분증의 소유자 정보가 다릅니다. 기존 소유권을 확인한 뒤 다시 저장해 주세요.', 409);
             }
@@ -211,4 +212,4 @@ async function repairLicensePhones(db, now = Date.now()) {
     });
 }
 
-module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, problem };
+module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, problem, isActive };
