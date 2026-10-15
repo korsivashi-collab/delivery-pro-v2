@@ -86,10 +86,31 @@ async function saveLicenses(db, request, now = Date.now()) {
         const licenses = new Map(licensesSnap.docs.map(d => [d.id, { ...d.data() }]));
         const profiles = new Map(profilesSnap.docs.map(d => [d.id, { ...d.data() }]));
         if (!create && !licenses.has(origKey)) throw problem('수정할 라이선스가 존재하지 않습니다.', 404);
+        const billingSnap = await tx.get(db.collection('billing_accounts'));
+        const billing = billingSnap.docs.filter(d => d.data().licenseKey === origKey);
+        if (billing.length > 1) throw problem('결제 계정 연결이 중복되어 있습니다. 계정을 덮어쓸 수 없습니다.', 409);
+        const bound = billing[0], account = bound?.data();
+        const renaming = !create && payloads[0].key !== origKey;
+        for (const payload of payloads) {
+            const binding = await tx.get(db.collection('billing_license_bindings').doc(payload.key));
+            if ((create || payload.key !== origKey) && (binding.exists || billingSnap.docs.some(d => d.data().licenseKey === payload.key))) throw problem('결제 이력이 예약한 키입니다. 다른 키를 사용해 주세요.', 409);
+        }
+        if (bound) {
+            const originalBinding = await tx.get(db.collection('billing_license_bindings').doc(origKey));
+            if (originalBinding.exists && originalBinding.data().uid !== bound.id) throw problem('결제 소유자 연결이 일치하지 않습니다.',409);
+        }
+        const orderSnap = renaming && bound ? await tx.get(db.collection('payment_orders').where('uid', '==', bound.id)) : {docs:[]};
         const retired = new Map(), changed = [], memoPhones = new Set();
         for (const payload of payloads) {
             if ((create || payload.key !== origKey) && (licenses.has(payload.key) || profiles.has(payload.key))) {
+                if (!licenses.has(payload.key)) throw Object.assign(problem(`삭제된 계정의 프로필이 남아 있습니다. (${payload.key})`, 409), {code:'ORPHAN_PROFILE'});
                 throw problem(`이미 존재하는 라이선스 키입니다. (${payload.key})`, 409);
+            }
+            if (account) {
+                if (payload.phone && phoneDigits(payload.phone) !== phoneDigits(account.phone)) throw problem('결제 계정의 인증된 휴대폰 번호는 변경할 수 없습니다.', 409);
+                payload.phone = normalizePhone(account.phone);
+                if (payload.type !== (licenses.get(origKey).type || 'regular') || payload.expireDate !== licenses.get(origKey).expireDate) throw problem('결제 계정의 유형·만료일은 결제/취소 결과로 관리됩니다.', 409);
+                if (renaming && payload.key.length > 8) throw problem('새 라이선스 키는 8자리 이하로 입력해 주세요.');
             }
             const digits = phoneDigits(payload.phone);
             if (digits) {
@@ -113,12 +134,12 @@ async function saveLicenses(db, request, now = Date.now()) {
             }
             const previous = create ? {} : licenses.get(origKey);
             const previousProfile = create ? {} : profiles.get(origKey) || {};
-            if (previous.billingManaged && payload.key !== origKey) throw problem('스토어 구독 계정의 키는 변경할 수 없습니다.', 409);
+            if (previous.billingManaged && !account) throw problem('결제 연결 정보를 찾을 수 없습니다. 저장하지 않았습니다.', 409);
             if (previous.routeOwnerId && previousProfile.routeOwnerId && previous.routeOwnerId !== previousProfile.routeOwnerId) {
                 throw problem('라이선스와 기사 신분증의 소유자 정보가 다릅니다. 기존 소유권을 확인한 뒤 다시 저장해 주세요.', 409);
             }
             const routeOwnerId = previous.routeOwnerId || previousProfile.routeOwnerId || randomUUID();
-            const license = { ...previous, ...payload, routeOwnerId,
+            const license = { ...previous, ...payload, ...(account?{isPro:previous.isPro??true}:{}), routeOwnerId,
                 dispatchKey: previous.dispatchKey || '', createdAt: previous.createdAt ?? now + changed.length };
             // licenses에 없던 TMS 허용 설정은 기존 신분증의 설정을 우선 보존합니다.
             const profile = { ...previousProfile, key: payload.key, phone: payload.phone,
@@ -148,6 +169,12 @@ async function saveLicenses(db, request, now = Date.now()) {
                     if (data.dispatchKey === origKey) set(db.collection('licenses').doc(id), { dispatchKey: payload.key }, { merge: true });
                 }
             }
+        }
+        if (renaming && bound) {
+            set(bound.ref, {...account, licenseKey:payloads[0].key});
+            set(db.collection('billing_license_bindings').doc(payloads[0].key), {uid:bound.id,provider:account.webManaged?'toss':'google_play'});
+            remove(db.collection('billing_license_bindings').doc(origKey));
+            for (const order of orderSnap.docs) set(order.ref, {licenseKey:payloads[0].key}, {merge:true});
         }
         for (const [id, upgradedTo] of retired) {
             const phone = changed.find(item => item.payload.key === upgradedTo).payload.phone;
@@ -212,4 +239,28 @@ async function repairLicensePhones(db, now = Date.now()) {
     });
 }
 
-module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, problem, isActive };
+async function deleteLicenseAccount(db, request, now = Date.now()) {
+    const key = validateKey(request.key), lockRef = db.collection('admin_license_controls').doc('phone_integrity');
+    return db.runTransaction(async tx => {
+        const lock = await tx.get(lockRef);
+        const lRef=db.collection('licenses').doc(key), pRef=db.collection('driver_profiles').doc(key);
+        const [l,p,binding,accounts,orders,licenses] = await Promise.all([
+            tx.get(lRef), tx.get(pRef), tx.get(db.collection('billing_license_bindings').doc(key)),
+            tx.get(db.collection('billing_accounts')), tx.get(db.collection('payment_orders').where('licenseKey','==',key)), tx.get(db.collection('licenses'))
+        ]);
+        if(request.orphanOnly && l.exists) throw problem('계정이 현재 존재합니다. 삭제된 프로필 정리를 중단했습니다.',409);
+        if(l.data()?.billingManaged || p.data()?.billingManaged || binding.exists || accounts.docs.some(d=>d.data().licenseKey===key) || orders.docs.length) throw problem('결제 이력이 있는 계정은 삭제하지 않습니다. 결제 취소 후에도 이력은 보존되며, 이용 중단은 정지로 처리해 주세요.',409);
+        if(!l.exists && !p.exists) return {deleted:true,key};
+        const linked=licenses.docs.filter(d=>d.data().dispatchKey===key);
+        if(linked.length>440)throw problem('연결 계정이 많아 개별 해제 후 삭제해 주세요.',409);
+        tx.set(db.collection('admin_license_controls').doc('deleted-'+key),{key,deletedAt:now,license:l.data()||null,profile:p.data()||null});
+        if(l.exists)tx.delete(lRef);
+        if(p.exists)tx.delete(pRef);
+        for(const d of linked)tx.set(d.ref,{dispatchKey:''},{merge:true});
+        // Route/completion history is retained with its old routeOwnerId; reusing the key does not transfer ownership.
+        tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now});
+        return {deleted:true,key};
+    });
+}
+
+module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, problem, isActive };
