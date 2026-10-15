@@ -44,6 +44,11 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   const token=/^Bearer (.+)$/.exec(req.headers.authorization||'')?.[1];if(!token)throw problem('휴대폰 인증이 필요합니다.',401);let identity;try{identity=await sdk.auth().verifyIdToken(token,true);}catch{throw problem('휴대폰 인증을 다시 진행해 주세요.',401);}verifiedPhone(identity);
   const device=deviceId(input.deviceId),account=await ensureAccount(db,identity,{deviceId:device},now());
   if(input.action==='sync')return res.status(200).json(await syncWeb(db,identity.uid,device)||{valid:false});
+  if(input.action==='pending-order'){
+   const a=(await db.collection('billing_accounts').doc(identity.uid).get()).data();
+   const pending=a?.pendingWebOrder&&a.pendingWebUntil>now()?(await db.collection('payment_orders').doc(a.pendingWebOrder).get()).data():null;
+   return res.status(200).json({months:pending?.uid===identity.uid&&pending.licenseKey===account.licenseKey&&pending.status==='created'?pending.months:null});
+  }
   if(input.action==='create-order'){
    const months=Number(input.months);if(!Object.hasOwn(PRICES,months))throw problem('이용기간을 확인해 주세요.');
    const orderId='WEB_'+randomUUID(),ref=db.collection('payment_orders').doc(orderId),aRef=db.collection('billing_accounts').doc(identity.uid);
