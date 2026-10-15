@@ -249,11 +249,27 @@ async function deleteLicenseAccount(db, request, now = Date.now()) {
             tx.get(db.collection('billing_accounts')), tx.get(db.collection('payment_orders').where('licenseKey','==',key)), tx.get(db.collection('licenses'))
         ]);
         if(request.orphanOnly && l.exists) throw problem('계정이 현재 존재합니다. 삭제된 프로필 정리를 중단했습니다.',409);
-        if(l.data()?.billingManaged || p.data()?.billingManaged || binding.exists || accounts.docs.some(d=>d.data().licenseKey===key) || orders.docs.length) throw problem('결제 이력이 있는 계정은 삭제하지 않습니다. 결제 취소 후에도 이력은 보존되며, 이용 중단은 정지로 처리해 주세요.',409);
+        const linkedAccounts=accounts.docs.filter(d=>d.data().licenseKey===key);
+        const paid=l.data()?.billingManaged || p.data()?.billingManaged || binding.exists || linkedAccounts.length || orders.docs.length;
+        if(paid){
+            if(request.orphanOnly || linkedAccounts.length!==1 || (binding.exists && binding.data().uid!==linkedAccounts[0].id)) throw problem('결제 연결 정보를 확인할 수 없어 삭제하지 않았습니다.',409);
+            const account=linkedAccounts[0].data();
+            if(account.pendingWebUntil>now)throw problem('진행 중인 결제 요청이 있습니다. 결제 결과 확인 후 삭제해 주세요.',409);
+            const expiry=value=>{
+                if(Number.isFinite(value?.expiresAt))return value.expiresAt;
+                if(value?.expiresAt?.toMillis)return value.expiresAt.toMillis();
+                const m=/^(\d{4})[.-](\d{2})[.-](\d{2})$/.exec(value?.expireDate||'');
+                return m?Date.UTC(+m[1],+m[2]-1,+m[3]+1)-9*3600000-1:NaN;
+            };
+            const paidExpiry=account.webManaged?account.webExpiresAt:account.access?.expiresAt;
+            if(!Number.isFinite(paidExpiry))throw problem('결제 이용기간 확인이 필요합니다. 이용권 상태를 동기화한 뒤 삭제해 주세요.',409);
+            if(paidExpiry>now || [l.data(),p.data()].some(x=>x && expiry(x)>now))throw problem('남은 이용기간이 있습니다. 만료되거나 결제 취소가 반영된 후 삭제할 수 있습니다.',409);
+        }
         if(!l.exists && !p.exists) return {deleted:true,key};
         const linked=licenses.docs.filter(d=>d.data().dispatchKey===key);
         if(linked.length>440)throw problem('연결 계정이 많아 개별 해제 후 삭제해 주세요.',409);
         tx.set(db.collection('admin_license_controls').doc('deleted-'+key),{key,deletedAt:now,license:l.data()||null,profile:p.data()||null});
+        for(const a of linkedAccounts)tx.set(a.ref,{...a.data(),deletedAt:now});
         if(l.exists)tx.delete(lRef);
         if(p.exists)tx.delete(pRef);
         for(const d of linked)tx.set(d.ref,{dispatchKey:''},{merge:true});

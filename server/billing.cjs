@@ -36,6 +36,7 @@ async function ensureAccount(db, identity, input, now) {
             tx.get(db.collection('blocked_devices').doc(device)), tx.get(db.collection('licenses')), tx.get(db.collection('driver_profiles'))]);
         if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
         const account = saved.data();
+        if(account?.deletedAt!=null)throw problem('삭제된 결제 계정입니다. 다시 이용하려면 고객센터에 문의해 주세요.',410);
         if (account && phoneDigits(account.phone) !== phoneDigits(phone)) throw problem('구독 계정의 인증 번호가 변경되었습니다. 고객센터에 문의해 주세요.', 409);
         const matched = licenses.docs.filter(doc => phoneDigits(doc.data().phone) === phoneDigits(phone));
         const current = account ? licenses.docs.find(doc => doc.id === account.licenseKey) :
@@ -88,6 +89,7 @@ async function applyPurchase(db, uid, entitlement, now, device = null) {
     return db.runTransaction(async tx => {
         const accountSnap = await tx.get(ref), account = accountSnap.data();
         if (!account) throw problem('구독 계정을 찾을 수 없습니다.',404);
+        if(account.deletedAt!=null)return {active:false,valid:false,msg:'삭제된 계정입니다.'};
         // A web period must never be overwritten by an unrelated Play webhook.
         if (account.webManaged) return {active:false,valid:false,msg:'웹 이용권을 다시 확인해 주세요.'};
         const licenseRef = db.collection('licenses').doc(account.licenseKey), profileRef = db.collection('driver_profiles').doc(account.licenseKey);
