@@ -152,7 +152,7 @@
 
             <!-- 메시지 센터 뷰 -->
             <section id="message-section" class="hidden flex-1 relative flex gap-4 p-5 bg-slate-100 overflow-hidden">
-                <div class="flex-1 bg-white rounded-3xl shadow-sm border border-gray-200 h-full flex flex-col overflow-hidden relative min-w-[480px]">
+                <div class="message-main flex-1 bg-white rounded-3xl shadow-sm border border-gray-200 h-full flex flex-col overflow-hidden relative min-w-0">
                     <div class="px-6 py-3.5 border-b border-gray-200 bg-white flex justify-between items-center z-10 shadow-xs">
                         <div class="flex items-center gap-3">
                             <div class="w-9 h-9 bg-blue-50 text-blue-600 rounded-xl flex items-center justify-center text-base font-black shadow-inner"><i class="fa-solid fa-building-shield"></i></div>
@@ -166,10 +166,10 @@
                         </span>
                     </div>
 
-                    <div class="p-3 flex flex-wrap items-center gap-2 text-xs border-b">
+                    <div class="message-toolbar p-3 flex flex-wrap items-center gap-2 text-xs border-b">
                         <div class="flex gap-1" role="group" aria-label="메시지 구분">
-                            <button id="message-tab-inbox" onclick="window.setMessageBox('inbox')" class="rounded px-3 py-2 bg-blue-600 text-white" aria-pressed="true">수신함</button>
-                            <button id="message-tab-sent" onclick="window.setMessageBox('sent')" class="rounded px-3 py-2 bg-slate-100" aria-pressed="false">발신함</button>
+                            <button id="message-tab-inbox" onclick="window.setMessageBox('inbox')" class="rounded px-3 py-2 bg-blue-600 text-white" aria-pressed="true">수신함 <span>(받은내용)</span></button>
+                            <button id="message-tab-sent" onclick="window.setMessageBox('sent')" class="rounded px-3 py-2 bg-slate-100" aria-pressed="false">발신함 <span>(보내는내용)</span></button>
                         </div>
                         <button type="button" data-dispatch-sound onclick="window.toggleDispatchSound()" class="border rounded px-3 py-2" aria-pressed="true">알림음 켜짐</button>
                     </div>
@@ -178,35 +178,36 @@
                         <label>종료일 <input type="date" id="message-export-end" class="border rounded p-1"></label>
                         <button onclick="window.exportCurrentMessageBox()" class="bg-green-700 text-white rounded px-3 py-2">현재 함 엑셀</button>
                         <button onclick="window.exportDispatchMessages()" class="border rounded px-3 py-2">전체 송수신 엑셀</button>
+                        <button id="message-clear-button" type="button" onclick="window.clearCurrentMessageBox()" class="message-clear">받은내용 비우기</button>
                     </div>
                     <div id="dispatch-message-feed" class="flex-1 p-5 overflow-y-auto bg-slate-50/70 space-y-3 hide-scrollbar"></div>
 
                     <div class="p-4 border-t border-gray-200 bg-white flex flex-col gap-2.5">
                         <div class="bg-gray-50 border border-gray-300 rounded-2xl p-3 focus-within:bg-white focus-within:border-blue-500 focus-within:ring-2 focus-within:ring-blue-100 transition shadow-inner">
-                            <textarea id="message-input" rows="2" maxlength="300" oninput="window.updateMessageCharCount()" class="w-full bg-transparent text-xs font-bold text-gray-900 resize-none outline-none leading-relaxed placeholder-gray-400" placeholder="기사님 스마트폰 화면에 전달할 회사 알림 내용을 입력하세요..."></textarea>
+                            <textarea id="message-input" rows="2" maxlength="300" oninput="window.updateMessageCharCount()" class="w-full bg-transparent text-xs font-bold text-gray-900 resize-none outline-none leading-relaxed placeholder-gray-400" placeholder="왼쪽에서 기사를 선택하고, 보낼 내용을 입력하세요."></textarea>
                             <div class="flex justify-between items-center pt-2 border-t border-gray-200/60 mt-1">
                                 <span id="message-char-count" class="text-[11px] font-bold text-gray-400">0 / 300자</span>
                                 <button type="button" onclick="window.sendDispatchMessage()" id="btn-send-message" class="bg-blue-600 hover:bg-blue-700 text-white font-black text-xs px-5 py-2.5 rounded-xl shadow-md transition active:scale-95 flex items-center gap-1.5">
-                                    <i class="fa-solid fa-paper-plane text-xs"></i><span>회사 알림 발송</span>
+                                    <i class="fa-solid fa-paper-plane text-xs"></i><span>선택한 기사에게 보내기</span>
                                 </button>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="w-[380px] bg-white rounded-3xl shadow-sm border border-gray-200 h-full flex flex-col overflow-hidden relative shrink-0">
+                <div class="message-templates w-[300px] bg-white rounded-3xl shadow-sm border border-gray-200 h-full flex flex-col overflow-hidden relative shrink-0">
                     <div class="p-4 border-b border-gray-200 bg-gray-50/80 flex justify-between items-center">
                         <div>
-                            <h4 class="font-black text-gray-900 text-xs flex items-center gap-1.5"><i class="fa-solid fa-bookmark text-blue-600"></i> 자주 쓰는 알림 틀 관리</h4>
+                            <h4 class="font-black text-gray-900 text-xs flex items-center gap-1.5"><i class="fa-solid fa-bookmark text-blue-600"></i> 자주 쓰는 문구</h4>
                             <p class="text-[10px] text-gray-400 font-bold mt-0.5">원하는 기본 문구를 저장해두고 클릭하여 사용하세요.</p>
                         </div>
                     </div>
 
                     <div class="p-3.5 border-b border-gray-200 bg-white flex flex-col gap-2 shadow-xs">
-                        <input type="text" id="tpl-title-input" placeholder="틀 제목 (예: 우천 안전운행 공지)" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-black text-gray-900 outline-none focus:bg-white focus:border-blue-500 shadow-inner">
+                        <input type="text" id="tpl-title-input" placeholder="문구 이름 (예: 안전운행 안내)" class="w-full bg-gray-50 border border-gray-200 rounded-xl px-3 py-2 text-xs font-black text-gray-900 outline-none focus:bg-white focus:border-blue-500 shadow-inner">
                         <textarea id="tpl-content-input" rows="3" placeholder="기사님께 전송할 알림 본문 내용을 입력하세요..." class="w-full bg-gray-50 border border-gray-200 rounded-xl p-3 text-xs font-bold text-gray-800 outline-none focus:bg-white focus:border-blue-500 resize-none shadow-inner leading-relaxed"></textarea>
                         <button type="button" onclick="window.saveCustomTemplate()" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-black text-xs py-2.5 rounded-xl shadow-sm transition active:scale-95 flex items-center justify-center gap-1.5">
-                            <i class="fa-solid fa-plus text-[10px]"></i><span>새 알림 틀 저장하기</span>
+                            <i class="fa-solid fa-plus text-[10px]"></i><span>자주 쓰는 문구 저장</span>
                         </button>
                     </div>
 
