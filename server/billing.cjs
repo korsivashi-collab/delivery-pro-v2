@@ -1,4 +1,4 @@
-const { randomUUID } = require('node:crypto');
+const { randomUUID, randomBytes } = require('node:crypto');
 const { normalizePhone, phoneDigits, problem, isActive } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
@@ -47,8 +47,18 @@ async function ensureAccount(db, identity, input, now) {
         }
         if (current?.data().deviceId && current.data().deviceId !== device) throw problem('다른 기기에 연결된 계정입니다. 고객센터에 기기 변경을 요청해 주세요.', 409);
         if (['suspended','revoked'].includes(current?.data().status)) throw problem('접속이 제한된 계정입니다.', 403);
+        const reservedAccounts=await tx.get(db.collection('billing_accounts'));
+        let newKey;
+        if (!account && !current) {
+            for (let attempt=0;attempt<10;attempt++) {
+                const candidate=randomBytes(5).toString('hex').slice(0,8).toUpperCase();
+                const binding=await tx.get(db.collection('billing_license_bindings').doc(candidate));
+                if (!binding.exists && !reservedAccounts.docs.some(d=>d.data().licenseKey===candidate) && !licenses.docs.some(d=>d.id===candidate) && !profiles.docs.some(d=>d.id===candidate)) { newKey=candidate;break; }
+            }
+            if (!newKey) throw problem('이용권 번호 생성에 실패했습니다. 다시 시도해 주세요.',503);
+        }
         const result = account || { uid: identity.uid, phone, rcUserId: 'dp_android_'+randomUUID(),
-            licenseKey: current?.id || 'PLAY-'+randomUUID().replace(/-/g,'').toUpperCase(), createdAt: now };
+            licenseKey: current?.id || newKey, createdAt: now };
         const activeManual = account?.webManaged === true || account?.pendingWebUntil > now || current && current.data().type !== 'trial' && !current.data().billingManaged &&
             isActive(current.data(), new Date(now+9*3600000).toISOString().slice(0,10), now);
         if (!account) {
