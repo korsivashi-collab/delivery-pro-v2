@@ -49,12 +49,12 @@ async function ensureAccount(db, identity, input, now) {
         }
         if (current?.data().deviceId && current.data().deviceId !== device) throw problem('다른 기기에 연결된 계정입니다. 고객센터에 기기 변경을 요청해 주세요.', 409);
         if (['suspended','revoked'].includes(current?.data().status)) throw problem('접속이 제한된 계정입니다.', 403);
-        const reservedAccounts=await tx.get(db.collection('billing_accounts'));
         const migrate=account && /^PLAY-[0-9A-F]{32}$/.test(account.licenseKey);
         const oldProfile=migrate?profiles.docs.find(d=>d.id===account.licenseKey):null;
-        const orders=migrate?await tx.get(db.collection('payment_orders')):null;
+        const orders=migrate?await tx.get(db.collection('payment_orders').where('uid','==',identity.uid)):null;
         let newKey;
         if ((!account && !current) || migrate) {
+            const reservedAccounts=await tx.get(db.collection('billing_accounts'));
             for (let attempt=0;attempt<10;attempt++) {
                 const candidate=randomBytes(5).toString('hex').slice(0,8).toUpperCase();
                 const binding=await tx.get(db.collection('billing_license_bindings').doc(candidate));
