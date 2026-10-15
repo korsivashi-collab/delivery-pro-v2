@@ -100,11 +100,15 @@ async function saveLicenses(db, request, now = Date.now()) {
             if (originalBinding.exists && originalBinding.data().uid !== bound.id) throw problem('결제 소유자 연결이 일치하지 않습니다.',409);
         }
         const orderSnap = renaming && bound ? await tx.get(db.collection('payment_orders').where('uid', '==', bound.id)) : {docs:[]};
-        const retired = new Map(), changed = [], memoPhones = new Set();
+        const retired = new Map(), changed = [], memoPhones = new Set(), orphanProfiles = new Map();
         for (const payload of payloads) {
             if ((create || payload.key !== origKey) && (licenses.has(payload.key) || profiles.has(payload.key))) {
-                if (!licenses.has(payload.key)) throw Object.assign(problem(`삭제된 계정의 프로필이 남아 있습니다. (${payload.key})`, 409), {code:'ORPHAN_PROFILE'});
-                throw problem(`이미 존재하는 라이선스 키입니다. (${payload.key})`, 409);
+                if (licenses.has(payload.key)) throw problem(`이미 존재하는 라이선스 키입니다. (${payload.key})`, 409);
+                const orphan=profiles.get(payload.key);
+                const pastOrders=await tx.get(db.collection('payment_orders').where('licenseKey','==',payload.key));
+                if(orphan.billingManaged || pastOrders.docs.length) throw problem('기존 결제 이력이 연결된 키입니다. 다른 키를 사용해 주세요.',409);
+                orphanProfiles.set(payload.key,orphan);
+                profiles.delete(payload.key);
             }
             if (account) {
                 if (payload.phone && phoneDigits(payload.phone) !== phoneDigits(account.phone)) throw problem('결제 계정의 인증된 휴대폰 번호는 변경할 수 없습니다.', 409);
@@ -159,6 +163,10 @@ async function saveLicenses(db, request, now = Date.now()) {
         let writes = 1;
         const set = (ref, data, options) => { if (++writes > 450) throw problem('연결된 이력이 많아 한 번에 저장할 수 없습니다. 관리자에게 문의해 주세요.'); tx.set(ref, data, options); };
         const remove = ref => { if (++writes > 450) throw problem('연결된 이력이 많아 한 번에 저장할 수 없습니다.'); tx.delete(ref); };
+        for (const [key, profile] of orphanProfiles) {
+            set(db.collection('admin_license_controls').doc('deleted-'+key),{key,deletedAt:now,license:null,profile});
+            if(!changed.some(item=>item.payload.key===key && item.hasProfile)) remove(db.collection('driver_profiles').doc(key));
+        }
         for (const { payload, license, profile, hasProfile } of changed) {
             set(db.collection('licenses').doc(payload.key), license);
             if (hasProfile) set(db.collection('driver_profiles').doc(payload.key), profile);
