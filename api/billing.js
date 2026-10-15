@@ -13,7 +13,7 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
         if (!response.ok) throw problem('구독 확인 서버에 연결하지 못했습니다. 구매를 반복하지 말고 구매 복원을 눌러 주세요.',502);
         const payload=await response.json(),stamp=now();
         if (!Number.isFinite(payload.request_date_ms) || Math.abs(stamp-payload.request_date_ms)>120000) throw problem('구독 확인 응답이 오래되었습니다. 다시 확인해 주세요.',502);
-        return applyPurchase(db,uid,evaluatePurchase(payload,stamp,env.REVENUECAT_ALLOW_SANDBOX==='true'),stamp,device);
+        return applyPurchase(db,uid,evaluatePurchase(payload,stamp,env.REVENUECAT_ALLOW_SANDBOX==='true'),stamp,device,account.rcUserId);
     }
     return async(req,res)=>{
         res.setHeader('Cache-Control','no-store');

@@ -32,7 +32,7 @@ module.exports = async function handler(req, res) {
             if(!uid)return res.status(200).json({managed:false,payments:[]});
             const account=(await db.collection('billing_accounts').doc(uid).get()).data()||{};
             const orders=await db.collection('payment_orders').where('uid','==',uid).get();
-            const payments=orders.docs.map(d=>{const x=d.data();return {orderId:d.id,months:x.months,amount:x.amount,status:x.status,test:x.test===true,approvedAt:x.approvedAt||null,createdAt:x.createdAt,method:x.method||null,fullyCancelled:x.cancellation?.status==='CANCELED',cancelled:account.webHistory?.find(h=>h.orderId===d.id)?.cancelled===true};}).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+            const payments=orders.docs.filter(d=>d.data().licenseKey===key).map(d=>{const x=d.data();return {orderId:d.id,months:x.months,amount:x.amount,status:x.status,test:x.test===true,approvedAt:x.approvedAt||null,createdAt:x.createdAt,method:x.method||null,fullyCancelled:x.cancellation?.status==='CANCELED',cancelled:account.webHistory?.find(h=>h.orderId===d.id)?.cancelled===true};}).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
             return res.status(200).json({managed:true,provider:account.webManaged?'토스 웹 결제':'Google Play',phone:account.phone,canCancel:account.webManaged===true,payments});
         }
         const result = req.body?.action === 'repairPhones'
