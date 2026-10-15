@@ -21,6 +21,18 @@ module.exports = async function handler(req, res) {
         if (identity.masterSmsVerified !== true || !(identity.masterSessionExpiresAt > Date.now() / 1000)) {
             return res.status(403).json({ error: '마스터 SMS 인증이 필요합니다. 다시 로그인해 주세요.' });
         }
+        if(req.body?.action==='paymentInfo'){
+            const key=String(req.body.key||'');
+            if(!key||key.includes('/')||key.length>200)return res.status(400).json({error:'계정 키를 확인해 주세요.'});
+            const db=admin.firestore(),license=(await db.collection('licenses').doc(key).get()).data();
+            const binding=(await db.collection('billing_license_bindings').doc(key).get()).data();
+            const uid=binding?.uid||license?.billingUid;
+            if(!uid)return res.status(200).json({managed:false,payments:[]});
+            const account=(await db.collection('billing_accounts').doc(uid).get()).data()||{};
+            const orders=await db.collection('payment_orders').where('uid','==',uid).get();
+            const payments=orders.docs.map(d=>{const x=d.data();return {orderId:d.id,months:x.months,amount:x.amount,status:x.status,test:x.test===true,approvedAt:x.approvedAt||null,createdAt:x.createdAt,method:x.method||null,cancelled:account.webHistory?.find(h=>h.orderId===d.id)?.cancelled===true};}).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
+            return res.status(200).json({managed:true,provider:account.webManaged?'토스 웹 결제':'Google Play',payments});
+        }
         const result = req.body?.action === 'repairPhones'
             ? await repairLicensePhones(admin.firestore())
             : await saveLicenses(admin.firestore(), req.body);

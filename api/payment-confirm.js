@@ -80,7 +80,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
    if(current.status==='completed')return;
    if(a.pendingWebOrder!==order.orderId||l.billingManaged&&!l.webManaged)throw problem('계정 상태가 변경되었습니다. 재결제하지 말고 고객센터에 주문번호를 알려 주세요.',409);
    const history=[...(a.webHistory||[]),{orderId:order.orderId,amount:order.amount,months:order.months,approvedAt:Date.parse(payment.approvedAt),cancelled:false}];
-   tx.set(ref,{...current,paymentKey:input.paymentKey,status:'completed',approvedAt:payment.approvedAt});tx.set(aRef,{...a,webHistory:history,webBaseExpiresAt:a.webBaseExpiresAt??Math.max(0,legacyExpiry(l)),webManaged:true,pendingWebOrder:null,pendingWebUntil:0});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
+   tx.set(ref,{...current,paymentKey:input.paymentKey,status:'completed',method:payment.method||null,approvedAt:payment.approvedAt});tx.set(aRef,{...a,webHistory:history,webBaseExpiresAt:a.webBaseExpiresAt??Math.max(0,legacyExpiry(l)),webManaged:true,pendingWebOrder:null,pendingWebUntil:0});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
   });
   const access=await syncWeb(db,identity.uid,device);return res.status(200).json({success:true,...access});
  }catch(error){return res.status(error.status||500).json({error:error.status?error.message:'결제 확인 중 오류가 발생했습니다. 재결제하지 말고 다시 확인해 주세요.'});}}
