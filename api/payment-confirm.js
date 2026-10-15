@@ -10,24 +10,27 @@ function addMonths(stamp,months){
  return end.getTime()-9*3600000;
 }
 function legacyExpiry(data){if(Number.isFinite(data.expiresAt))return data.expiresAt;const m=/^(\d{4})[.-](\d{2})[.-](\d{2})$/.exec(data.expireDate||'');return m?Date.UTC(+m[1],+m[2]-1,+m[3]+1)-9*3600000-1:0;}
-function result(account,license,now){const expiresAt=account.webExpiresAt||0;return {active:expiresAt>now,valid:expiresAt>now,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'),routeOwnerId:license.routeOwnerId,dispatchKey:license.dispatchKey||'',allowTms:license.allowTms??true,msg:expiresAt>now?'':'이용기간이 만료되었습니다.'};}
+function result(account,license,now){const expiresAt=account.webExpiresAt||0;return {active:expiresAt>now&&!['suspended','revoked'].includes(license.status),valid:expiresAt>now&&!['suspended','revoked'].includes(license.status),status:license.status,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'),routeOwnerId:license.routeOwnerId,dispatchKey:license.dispatchKey||'',allowTms:license.allowTms??true,msg:expiresAt>now?'':'이용기간이 만료되었습니다.'};}
 function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}){
  const ready=()=>/^(test|live)_(gck|ck)_/.test(env.TOSS_CLIENT_KEY||'')&&/^(test|live)_(gsk|sk)_/.test(env.TOSS_SECRET_KEY||'')&&(env.TOSS_CLIENT_KEY.startsWith('test_')===env.TOSS_SECRET_KEY.startsWith('test_'))&&(env.WEB_PAYMENT_ENABLED==='true')&&(!env.TOSS_CLIENT_KEY.startsWith('test_')||env.WEB_PAYMENT_ALLOW_TEST==='true');
  async function provider(path,body,id){const response=await fetchImpl('https://api.tosspayments.com/v1/payments'+path,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(env.TOSS_SECRET_KEY+':').toString('base64'),'Content-Type':'application/json',...(id?{'Idempotency-Key':id}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data;try{data=await response.json();}catch{throw problem('결제 상태를 확인하지 못했습니다. 재결제하지 말고 다시 확인해 주세요.',502);}return {ok:response.ok,data};}
  function validate(payment,order){if(payment.orderId!==order.orderId||payment.totalAmount!==order.amount||payment.currency!=='KRW'||payment.paymentKey!==order.paymentKey||!Number.isFinite(Date.parse(payment.approvedAt)))throw problem('결제 금액 또는 주문 정보가 일치하지 않습니다.',409);}
- async function reconcile(db,uid,payments=[],device=null){return db.runTransaction(async tx=>{
+ async function reconcile(db,uid,payments=[],device=null,cancellation=null){return db.runTransaction(async tx=>{
   const accountRef=db.collection('billing_accounts').doc(uid),account=(await tx.get(accountRef)).data();if(!account)throw problem('계정을 찾을 수 없습니다.',404);
   const licenseRef=db.collection('licenses').doc(account.licenseKey),profileRef=db.collection('driver_profiles').doc(account.licenseKey),lockRef=db.collection('admin_license_controls').doc('phone_integrity');
   const [l,p,lock,blocked]=await Promise.all([tx.get(licenseRef),tx.get(profileRef),tx.get(lockRef),device?tx.get(db.collection('blocked_devices').doc(device)):Promise.resolve({exists:false})]);
   const license=l.data()||{},profile=p.data()||{};
-  if(blocked.exists||['suspended','revoked'].includes(license.status))throw problem('이용이 제한된 계정입니다.',403);
+  const cancelRef=cancellation?db.collection('payment_orders').doc(cancellation.orderId):null;
+  const cancelOrder=cancelRef?(await tx.get(cancelRef)).data():null;
+  if(blocked.exists||(!cancellation&&['suspended','revoked'].includes(license.status)))throw problem('이용이 제한된 계정입니다.',403);
   if(device&&(license.deviceId||profile.deviceId)&&(license.deviceId||profile.deviceId)!==device)throw problem('다른 기기에 연결된 계정입니다.',409);
   if(license.phone&&phoneDigits(license.phone)!==phoneDigits(account.phone)||profile.phone&&phoneDigits(profile.phone)!==phoneDigits(account.phone))throw problem('전화번호 정보를 확인해 주세요.',409);
   if(license.routeOwnerId&&profile.routeOwnerId&&license.routeOwnerId!==profile.routeOwnerId)throw problem('계정 소유권을 확인해 주세요.',409);
-  const history=[...(account.webHistory||[])];
-  for(const payment of payments){const old=history.find(x=>x.orderId===payment.orderId);if(!old)throw problem('결제 이력을 찾을 수 없습니다.',409);old.cancelled=payment.status!=='DONE'||payment.balanceAmount!==old.amount;}
+  const history=(account.webHistory||[]).map(x=>({...x}));
+  for(const payment of payments){const old=history.find(x=>x.orderId===payment.orderId);if(!old)throw problem('결제 이력을 찾을 수 없습니다.',409);old.cancelled=old.cancelled===true||payment.status!=='DONE'||payment.balanceAmount!==old.amount;}
   let expiresAt=account.webBaseExpiresAt||0;for(const entry of history)if(!entry.cancelled)expiresAt=addMonths(Math.max(expiresAt,entry.approvedAt),entry.months);
-  const data={phone:account.phone,key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:device||license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
+  const data={phone:account.phone,key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:device||license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:cancellation&&['suspended','revoked'].includes(license.status)?license.status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
+  if(cancellation)tx.set(cancelRef,{...cancelOrder,cancellation:cancelOrder.cancellation||{status:'CANCELED',at:now(),by:cancellation.by,reason:cancellation.reason},method:cancellation.payment.method||cancelOrder.method||null});
   tx.set(licenseRef,{...license,...data,isPro:true});tx.set(profileRef,{...profile,...data,allowTms:profile.allowTms??license.allowTms??true});
   const updated={...account,webHistory:history,webExpiresAt:expiresAt,webManaged:true};tx.set(accountRef,updated);tx.set(db.collection('billing_license_bindings').doc(account.licenseKey),{uid,provider:'toss'});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
   return result(updated,{...license,...profile,...data},now());
@@ -35,6 +38,31 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
  async function syncWeb(db,uid,device=null){const account=(await db.collection('billing_accounts').doc(uid).get()).data();if(!account?.webManaged)return null;if(!ready())throw problem('이용권 확인 서비스 설정을 확인해 주세요.',503);
   const payments=[];for(const entry of account.webHistory||[]){if(entry.cancelled)continue;const saved=(await db.collection('payment_orders').doc(entry.orderId).get()).data();if(!saved?.paymentKey)throw problem('결제 이력을 확인해 주세요.',409);const r=await provider('/'+encodeURIComponent(saved.paymentKey));if(!r.ok)throw problem('결제 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',502);validate(r.data,saved);payments.push(r.data);}
   return reconcile(db,uid,payments,device);
+ }
+ // Only the SMS-authenticated master endpoint calls this helper; never a customer action.
+ async function cancelPayment(db,{key,orderId,reason},by){
+  if(!ready())throw problem('토스 결제 설정을 확인해 주세요.',503);
+  if(typeof key!=='string'||!key||key.includes('/')||key.length>100||!/^WEB_[a-f0-9-]{36}$/.test(orderId||''))throw problem('계정과 주문번호를 확인해 주세요.');
+  reason=String(reason||'').trim();if(!reason||reason.length>200)throw problem('취소 사유를 1~200자로 입력해 주세요.');
+  const order=(await db.collection('payment_orders').doc(orderId).get()).data();
+  if(!order?.uid||!order.paymentKey||order.status!=='completed')throw problem('승인된 웹 결제만 취소할 수 있습니다.',409);
+  const account=(await db.collection('billing_accounts').doc(order.uid).get()).data();
+  if(!account?.webManaged||account.licenseKey!==key||!account.webHistory?.some(x=>x.orderId===orderId))throw problem('선택한 계정의 결제 내역이 아닙니다. 새로 조회해 주세요.',409);
+  if(typeof order.test!=='boolean'||order.test!==env.TOSS_SECRET_KEY.startsWith('test_'))throw problem('이 주문의 테스트/실결제 구분과 현재 토스 키가 다릅니다.',409);
+  let r=await provider('/'+encodeURIComponent(order.paymentKey));
+  if(!r.ok)throw problem('토스 결제 조회에 실패했습니다. 취소를 실행하지 않았습니다.',502);
+  validate(r.data,order);
+  if(r.data.status!=='CANCELED'||r.data.balanceAmount!==0){
+   if(r.data.status!=='DONE'||r.data.balanceAmount!==order.amount)throw problem('부분 취소 또는 처리 중인 결제입니다. 토스 관리자에서 확인해 주세요.',409);
+   if(r.data.method==='가상계좌')throw problem('가상계좌 환불은 환불계좌 확인이 필요합니다. 토스 관리자에서 처리해 주세요.',409);
+   r=await provider('/'+encodeURIComponent(order.paymentKey)+'/cancel',{cancelReason:reason},'cancel-'+orderId);
+   if(!r.ok)throw problem('취소 결과를 확인하지 못했습니다. 같은 내역의 취소 버튼으로 다시 확인해 주세요.',502);
+   validate(r.data,order);
+  }
+  if(r.data.status!=='CANCELED'||r.data.balanceAmount!==0)throw problem('전액 취소 완료가 확인되지 않았습니다. 토스 결제 내역을 확인해 주세요.',409);
+  // The provider call is idempotent; period and audit are committed together. Retry can recover a DB failure.
+  const access=await reconcile(db,order.uid,[r.data],null,{orderId,order,by,reason,payment:r.data});
+  return {success:true,...access};
  }
  async function handler(req,res){res.setHeader('Cache-Control','no-store');if(req.method!=='POST')return res.status(405).json({error:'POST 요청만 가능합니다.'});try{
   const input=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
@@ -84,6 +112,6 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   });
   const access=await syncWeb(db,identity.uid,device);return res.status(200).json({success:true,...access});
  }catch(error){return res.status(error.status||500).json({error:error.status?error.message:'결제 확인 중 오류가 발생했습니다. 재결제하지 말고 다시 확인해 주세요.'});}}
- return {handler,syncWeb,ready};
+ return {handler,syncWeb,ready,cancelPayment};
 }
 module.exports=createService().handler;module.exports.createService=createService;module.exports.addMonths=addMonths;module.exports.PRICES=PRICES;
