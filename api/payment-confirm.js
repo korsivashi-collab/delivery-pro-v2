@@ -16,7 +16,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
  async function provider(path,body,id){const response=await fetchImpl('https://api.tosspayments.com/v1/payments'+path,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(env.TOSS_SECRET_KEY+':').toString('base64'),'Content-Type':'application/json',...(id?{'Idempotency-Key':id}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data;try{data=await response.json();}catch{throw problem('결제 상태를 확인하지 못했습니다. 재결제하지 말고 다시 확인해 주세요.',502);}return {ok:response.ok,data};}
  function validate(payment,order){if(payment.orderId!==order.orderId||payment.totalAmount!==order.amount||payment.currency!=='KRW'||payment.paymentKey!==order.paymentKey||!Number.isFinite(Date.parse(payment.approvedAt)))throw problem('결제 금액 또는 주문 정보가 일치하지 않습니다.',409);}
  async function reconcile(db,uid,payments=[],device=null,cancellation=null){return db.runTransaction(async tx=>{
-  const accountRef=db.collection('billing_accounts').doc(uid),account=(await tx.get(accountRef)).data();if(!account)throw problem('계정을 찾을 수 없습니다.',404);
+  const accountRef=db.collection('billing_accounts').doc(uid),account=(await tx.get(accountRef)).data();if(!account)throw problem('계정을 찾을 수 없습니다.',404);if(account.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);
   const licenseRef=db.collection('licenses').doc(account.licenseKey),profileRef=db.collection('driver_profiles').doc(account.licenseKey),lockRef=db.collection('admin_license_controls').doc('phone_integrity');
   const [l,p,lock,blocked]=await Promise.all([tx.get(licenseRef),tx.get(profileRef),tx.get(lockRef),device?tx.get(db.collection('blocked_devices').doc(device)):Promise.resolve({exists:false})]);
   const license=l.data()||{},profile=p.data()||{};
@@ -35,7 +35,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   const updated={...account,webHistory:history,webExpiresAt:expiresAt,webManaged:true};tx.set(accountRef,updated);tx.set(db.collection('billing_license_bindings').doc(account.licenseKey),{uid,provider:'toss'});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
   return result(updated,{...license,...profile,...data},now());
  });}
- async function syncWeb(db,uid,device=null){const account=(await db.collection('billing_accounts').doc(uid).get()).data();if(!account?.webManaged)return null;if(!ready())throw problem('이용권 확인 서비스 설정을 확인해 주세요.',503);
+ async function syncWeb(db,uid,device=null){const account=(await db.collection('billing_accounts').doc(uid).get()).data();if(account?.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);if(!account?.webManaged)return null;if(!ready())throw problem('이용권 확인 서비스 설정을 확인해 주세요.',503);
   const payments=[];for(const entry of account.webHistory||[]){if(entry.cancelled)continue;const saved=(await db.collection('payment_orders').doc(entry.orderId).get()).data();if(!saved?.paymentKey)throw problem('결제 이력을 확인해 주세요.',409);const r=await provider('/'+encodeURIComponent(saved.paymentKey));if(!r.ok)throw problem('결제 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',502);validate(r.data,saved);payments.push(r.data);}
   return reconcile(db,uid,payments,device);
  }
@@ -81,6 +81,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
    const months=Number(input.months);if(!Object.hasOwn(PRICES,months))throw problem('이용기간을 확인해 주세요.');
    const orderId='WEB_'+randomUUID(),ref=db.collection('payment_orders').doc(orderId),aRef=db.collection('billing_accounts').doc(identity.uid);
    const order=await db.runTransaction(async tx=>{const a=(await tx.get(aRef)).data(),l=(await tx.get(db.collection('licenses').doc(a.licenseKey))).data()||{},lockRef=db.collection('admin_license_controls').doc('phone_integrity'),lock=await tx.get(lockRef);
+    if(a.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);
     if(l.billingUid&&l.billingUid!==identity.uid)throw problem('이용권 소유자 정보를 확인해 주세요.',403);
     if(l.billingManaged&&!l.webManaged||a.access?.active&&a.access.expiresAt>now())throw problem('Google Play 구독 이력이 있습니다. 중복 결제를 막기 위해 고객센터에서 전환을 확인해 주세요.',409);
     if(a.webHistory?.length>=100)throw problem('결제 이력 확인이 필요합니다. 고객센터에 문의해 주세요.',409);
@@ -105,6 +106,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   if(!r.ok)throw problem('승인 결과를 확인하지 못했습니다. 재결제하지 말고 다시 확인해 주세요.',502);
   const payment=r.data;validate(payment,{...order,paymentKey:input.paymentKey});if(payment.status!=='DONE'||payment.balanceAmount!==order.amount)throw problem('완료된 결제가 아닙니다. 결제 내역을 확인해 주세요.',409);
   await db.runTransaction(async tx=>{const aRef=db.collection('billing_accounts').doc(identity.uid),a=(await tx.get(aRef)).data(),current=(await tx.get(ref)).data(),l=(await tx.get(db.collection('licenses').doc(a.licenseKey))).data()||{},lockRef=db.collection('admin_license_controls').doc('phone_integrity'),lock=await tx.get(lockRef);
+   if(a.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);
    if(current.status==='completed')return;
    if(a.pendingWebOrder!==order.orderId||l.billingManaged&&!l.webManaged)throw problem('계정 상태가 변경되었습니다. 재결제하지 말고 고객센터에 주문번호를 알려 주세요.',409);
    const history=[...(a.webHistory||[]),{orderId:order.orderId,amount:order.amount,months:order.months,approvedAt:Date.parse(payment.approvedAt),cancelled:false}];
