@@ -1,5 +1,5 @@
 // js/app.js
-import { openSubscriptionModal } from './subscriptions.js';
+import { openSubscriptionModal, openLicenseRenewal } from './subscriptions.js';
 
 // =================================================================
 // [배송 동선 PRO] 메인 오케스트레이터 및 이벤트 컨트롤러 (네이버 내비 완벽 대응)
@@ -511,6 +511,7 @@ export async function applyHeaderCustomEnd() {
 // ==========================================
 window.logout = logout;
 window.openSubscriptionModal = openSubscriptionModal;
+window.openLicenseRenewal = openLicenseRenewal;
 window.renderList = renderList;
 window.updateDisplayNumbers = updateDisplayNumbers;
 window.verifyLicense = verifyLicense;

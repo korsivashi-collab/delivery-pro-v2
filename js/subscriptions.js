@@ -202,3 +202,11 @@ export async function openSubscriptionModal(){
         else{identity=null;el('billing-phone').value=localStorage.getItem('deliveryProUserPhone')||'';message('휴대폰 인증 후 구독 상품을 확인할 수 있습니다.');}
     });
 }
+
+export function openLicenseRenewal(){
+    if(isAndroid()){
+        window.open('https://play.google.com/store/account/subscriptions','_blank','noopener,noreferrer');
+        return;
+    }
+    return openSubscriptionModal();
+}
