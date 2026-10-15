@@ -1,5 +1,5 @@
 const admin=require('firebase-admin');
-const {randomUUID}=require('node:crypto');
+const {randomUUID,createHmac}=require('node:crypto');
 const {verifiedPhone,deviceId,ensureAccount}=require('../server/billing.cjs');
 const {problem,phoneDigits}=require('../server/license-integrity.cjs');
 const PRICES=Object.freeze({1:9900,3:28215,6:53460,12:100980});
@@ -65,6 +65,31 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   const access=await reconcile(db,order.uid,[r.data],null,{orderId,order,by,reason,payment:r.data},account.rcUserId);
   return {success:true,...access};
  }
+ async function sendLicenseSms(db,uid,orderId,customer){
+  const [access,secret,serviceId,sender]=['NCP_ACCESS_KEY','NCP_SECRET_KEY','NCP_SENS_SERVICE_ID','NCP_SENS_SENDER'].map(k=>env[k]?.trim());
+  if(!access||!secret||!/^ncp:sms:[a-z]{2}:\d+:[A-Za-z0-9_-]+$/.test(serviceId||'')||!/^\d{8,11}$/.test(sender||''))return 'unavailable';
+  const ref=db.collection('payment_orders').doc(orderId);
+  const claim=await db.runTransaction(async tx=>{
+   const saved=(await tx.get(ref)).data(),a=(await tx.get(db.collection('billing_accounts').doc(uid))).data();
+   if(!a||a.deletedAt!=null||a.rcUserId!==customer||saved?.uid!==uid||saved.licenseKey!==a.licenseKey||saved.status!=='completed'||!a.webHistory?.some(x=>x.orderId===orderId&&!x.cancelled))return {status:'unavailable'};
+   if(saved.licenseSms)return {status:saved.licenseSms.status};
+   const to=phoneDigits(a.phone);if(!/^010\d{8}$/.test(to))return {status:'unavailable'};
+   const expireDate=new Date(a.webExpiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
+   // Record before calling SENS: an ambiguous timeout must not trigger a duplicate SMS.
+   tx.set(ref,{...saved,licenseSms:{status:'sending',requestedAt:now()}});
+   return {send:true,to,key:a.licenseKey,expireDate};
+  });
+  if(!claim.send)return claim.status;
+  let status='unknown',requestId=null;
+  try{
+   const uri=`/sms/v2/services/${serviceId}/messages`,timestamp=String(now());
+   const signature=createHmac('sha256',secret).update(`POST ${uri}\n${timestamp}\n${access}`).digest('base64');
+   const response=await fetchImpl('https://sens.apigw.ntruss.com'+uri,{method:'POST',signal:AbortSignal.timeout(10000),headers:{'Content-Type':'application/json','x-ncp-apigw-timestamp':timestamp,'x-ncp-iam-access-key':access,'x-ncp-apigw-signature-v2':signature},body:JSON.stringify({type:'LMS',contentType:'COMM',countryCode:'82',from:sender,subject:'배송경로PRO 이용권 안내',content:`[배송경로PRO 이용권 안내]\n결제가 완료되었습니다.\n라이선스 키: ${claim.key}\n사용기한: ${claim.expireDate}\n위 키와 인증하신 휴대폰 번호로 로그인해 주세요.\n이용해 주셔서 감사합니다.`,messages:[{to:claim.to}]})});
+   const data=await response.json();status=response.ok&&String(data.statusCode)==='202'?'accepted':'failed';requestId=typeof data.requestId==='string'?data.requestId:null;
+  }catch{status='unknown';}
+  await db.runTransaction(async tx=>{const saved=(await tx.get(ref)).data();if(saved)tx.set(ref,{...saved,licenseSms:{...saved.licenseSms,status,requestId,updatedAt:now()}});});
+  return status;
+ }
  async function handler(req,res){res.setHeader('Cache-Control','no-store');if(req.method!=='POST')return res.status(405).json({error:'POST 요청만 가능합니다.'});try{
   const input=typeof req.body==='string'?JSON.parse(req.body):req.body||{};
   if(input.action==='config')return res.status(200).json({enabled:ready(),prices:PRICES,...(ready()?{clientKey:env.TOSS_CLIENT_KEY,test:env.TOSS_CLIENT_KEY.startsWith('test_')}:{})});
@@ -113,7 +138,9 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
    const history=[...(a.webHistory||[]),{orderId:order.orderId,amount:order.amount,months:order.months,approvedAt:Date.parse(payment.approvedAt),cancelled:false}];
    tx.set(ref,{...current,paymentKey:input.paymentKey,status:'completed',method:payment.method||null,approvedAt:payment.approvedAt});tx.set(aRef,{...a,webHistory:history,webBaseExpiresAt:a.webBaseExpiresAt??Math.max(0,legacyExpiry(l)),webManaged:true,pendingWebOrder:null,pendingWebUntil:0});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
   });
-  const access=await syncWeb(db,identity.uid,device);return res.status(200).json({success:true,...access});
+  const access=await syncWeb(db,identity.uid,device);let licenseSms='unknown';
+  try{licenseSms=await sendLicenseSms(db,identity.uid,order.orderId,account.rcUserId);}catch{}
+  return res.status(200).json({success:true,...access,licenseSms});
  }catch(error){return res.status(error.status||500).json({error:error.status?error.message:'결제 확인 중 오류가 발생했습니다. 재결제하지 말고 다시 확인해 주세요.'});}}
  return {handler,syncWeb,ready,cancelPayment};
 }
