@@ -607,7 +607,7 @@ async function showAccountPayments(key) {
         phone.readOnly=true;document.getElementById('edit-expire-input').readOnly=true;
         box.textContent='결제 정보 · '+data.provider;
         const note=document.createElement('p');
-        note.textContent='각 주문은 전액 취소할 수 있습니다. 취소한 주문의 이용기간을 제외해 만료일을 다시 계산합니다. 인증된 휴대폰·만료일은 직접 변경하지 않습니다. 계정·결제 이력은 보존되며, 계정 정지는 환불이 아닙니다. 표시 상태는 최근 확인 기준입니다.';
+        note.textContent='각 주문은 전액 취소할 수 있습니다. 취소한 주문의 이용기간을 제외해 만료일을 다시 계산합니다. 인증된 휴대폰·만료일은 직접 변경하지 않습니다. 결제 이력은 보존됩니다. 남은 이용기간이 없으면 계정을 삭제할 수 있으며, 계정 정지는 환불이 아닙니다. 표시 상태는 최근 확인 기준입니다.';
         box.append(note);
         for(const p of data.payments){
             const card=document.createElement('div');card.style.cssText='margin-top:12px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;overflow-wrap:anywhere';
@@ -802,7 +802,7 @@ export async function saveLicenseEdit() {
 
 export async function deleteLicense(key) {
     if(savingLicenseEdit)return;
-    if (!confirm(`정말 [${key}] 계정을 삭제하시겠습니까?\n로그인 프로필도 함께 삭제합니다. 배송 이력과 결제 이력은 보존합니다. 결제 연결 계정은 삭제가 제한됩니다.`)) return;
+    if (!confirm(`정말 [${key}] 계정을 삭제하시겠습니까?\n로그인 프로필도 함께 삭제합니다. 배송 이력과 결제 이력은 보존합니다. 결제 계정도 이용기간이 끝났거나 전액 취소로 남은 기간이 없으면 삭제할 수 있습니다.`)) return;
     savingLicenseEdit=true;
     try {
         await saveMasterLicenses({action:'delete',key});
