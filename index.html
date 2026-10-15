@@ -153,6 +153,13 @@
         window.addEventListener('load', requestWakeLock);
     </script>
 
+    <script type="importmap">
+    {"imports":{
+        "./js/app.js":"./js/app.js?v=20261015-expiry-date",
+        "./js/auth.js":"./js/auth.js?v=20261015-expiry-date",
+        "./js/subscriptions.js":"./js/subscriptions.js?v=20261015-expiry-date"
+    }}
+    </script>
     <script type="module">
         import { initApp } from './js/app.js';
         window.onload = () => initApp();
