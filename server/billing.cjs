@@ -48,8 +48,11 @@ async function ensureAccount(db, identity, input, now) {
         if (current?.data().deviceId && current.data().deviceId !== device) throw problem('다른 기기에 연결된 계정입니다. 고객센터에 기기 변경을 요청해 주세요.', 409);
         if (['suspended','revoked'].includes(current?.data().status)) throw problem('접속이 제한된 계정입니다.', 403);
         const reservedAccounts=await tx.get(db.collection('billing_accounts'));
+        const migrate=account && /^PLAY-[0-9A-F]{32}$/.test(account.licenseKey);
+        const oldProfile=migrate?profiles.docs.find(d=>d.id===account.licenseKey):null;
+        const orders=migrate?await tx.get(db.collection('payment_orders')):null;
         let newKey;
-        if (!account && !current) {
+        if ((!account && !current) || migrate) {
             for (let attempt=0;attempt<10;attempt++) {
                 const candidate=randomBytes(5).toString('hex').slice(0,8).toUpperCase();
                 const binding=await tx.get(db.collection('billing_license_bindings').doc(candidate));
@@ -57,10 +60,21 @@ async function ensureAccount(db, identity, input, now) {
             }
             if (!newKey) throw problem('이용권 번호 생성에 실패했습니다. 다시 시도해 주세요.',503);
         }
-        const result = account || { uid: identity.uid, phone, rcUserId: 'dp_android_'+randomUUID(),
+        const result = migrate ? {...account,licenseKey:newKey,previousLicenseKey:account.licenseKey} : account || { uid: identity.uid, phone, rcUserId: 'dp_android_'+randomUUID(),
             licenseKey: current?.id || newKey, createdAt: now };
         const activeManual = account?.webManaged === true || account?.pendingWebUntil > now || current && current.data().type !== 'trial' && !current.data().billingManaged &&
             isActive(current.data(), new Date(now+9*3600000).toISOString().slice(0,10), now);
+        if (migrate) {
+            const oldKey=account.licenseKey;
+            const owner=current?.data().routeOwnerId||oldProfile?.data().routeOwnerId||oldKey;
+            if(current)tx.set(db.collection('licenses').doc(newKey),{...current.data(),key:newKey,routeOwnerId:owner});
+            if(oldProfile)tx.set(db.collection('driver_profiles').doc(newKey),{...oldProfile.data(),key:newKey,routeOwnerId:owner});
+            for(const [name,doc] of [['licenses',current],['driver_profiles',oldProfile]])if(doc)tx.set(db.collection(name).doc(oldKey),{...doc.data(),status:'upgraded',upgradedTo:newKey,upgradedAt:now});
+            for(const doc of orders.docs)if(doc.data().uid===identity.uid&&doc.data().licenseKey===oldKey)tx.set(doc.ref,{...doc.data(),licenseKey:newKey});
+            tx.set(db.collection('billing_license_bindings').doc(newKey),{uid:identity.uid,...(account.webManaged?{provider:'toss'}:{})});
+            tx.set(ref,result);
+            tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now});
+        }
         if (!account) {
             tx.create(ref, result);
             tx.create(db.collection('billing_customer_ids').doc(result.rcUserId), { uid: identity.uid });
