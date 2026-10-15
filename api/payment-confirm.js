@@ -34,7 +34,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   if(cancellation)tx.set(cancelRef,{...cancelOrder,cancellation:cancelOrder.cancellation||{status:'CANCELED',at:now(),by:cancellation.by,reason:cancellation.reason},method:cancellation.payment.method||cancelOrder.method||null});
   tx.set(licenseRef,{...license,...data,isPro:true});tx.set(profileRef,{...profile,...data,allowTms:profile.allowTms??license.allowTms??true});
   const updated={...account,webHistory:history,webExpiresAt:expiresAt,webManaged:true};tx.set(accountRef,updated);tx.set(db.collection('billing_license_bindings').doc(account.licenseKey),{uid,provider:'toss'});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
-  return result(updated,{...license,...profile,...data},now());
+  return result(updated,{...license,...profile,...data,dispatchKey:license.dispatchKey||''},now());
  });}
  async function syncWeb(db,uid,device=null){const account=(await db.collection('billing_accounts').doc(uid).get()).data();if(account?.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);if(!account?.webManaged)return null;if(!ready())throw problem('이용권 확인 서비스 설정을 확인해 주세요.',503);
   const entries=(account.webHistory||[]).filter(entry=>!entry.cancelled),payments=[];
