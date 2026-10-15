@@ -547,6 +547,7 @@ export async function verifyLicense() {
 
     smsVerifyInProgress = true;
     let smsExemptedForThisLicense = false;
+    let verifiedPaidAccess = null;
     try {
         if (!isSmsVerified) {
             const licCheck = await firebaseCheckLicenseOnce(keyInput, deviceId);
@@ -561,6 +562,7 @@ export async function verifyLicense() {
                 isSmsVerified = true;
                 verifiedPhoneNumber = rawPhone;
                 smsExemptedForThisLicense = true;
+                if (licCheck.verifiedAccess?.valid && licCheck.verifiedAccess.billingManaged) verifiedPaidAccess = licCheck.verifiedAccess;
                 stopSmsCountdown();
                 const timer = document.getElementById('auth-sms-timer');
                 if (timer) timer.innerText = '확인 완료';
@@ -619,7 +621,8 @@ export async function verifyLicense() {
             const timer = document.getElementById('auth-sms-timer');
             if (timer) timer.innerText = '인증 완료';
         }
-        const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId, { allowDeviceTransfer: !smsExemptedForThisLicense });
+        // Reuse only the server result obtained during this click; never cache it across attempts.
+        const res = verifiedPaidAccess || await firebaseVerifyLicense(keyInput, formattedPhone, deviceId, { allowDeviceTransfer: !smsExemptedForThisLicense });
         if (smsVersion !== smsSessionVersion) return;
         if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) {
             resetSmsSession();
@@ -627,7 +630,12 @@ export async function verifyLicense() {
             return;
         }
         
+        if (keyInput !== (document.getElementById('license-input')?.value || '').trim().toUpperCase()) {
+            showSmsMessage('라이선스 키가 변경되었습니다. 다시 확인해 주세요.');
+            return;
+        }
         if (res && res.valid) {
+            if (res.billingManaged) localStorage.setItem('deliveryProBillingManaged', 'true');
             const actualKey = res.actualKey || keyInput;
             localStorage.setItem('deliveryProKey', actualKey);
             localStorage.setItem('deliveryProUserPhone', formattedPhone); 

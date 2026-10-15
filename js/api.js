@@ -366,7 +366,7 @@ export async function firebaseCheckLicenseOnce(key, deviceId) {
             try {
                 const access = await billingRequest('sync', { deviceId: deviceId || data.deviceId, licenseKey: docSnap.id });
                 return access.valid ? { valid: true, data: { ...data, phone: access.phone, expireDate: access.expireDate,
-                    expiresAt: access.expiresAt, status: 'active' }, actualKey: docSnap.id } :
+                    expiresAt: access.expiresAt, status: 'active' }, actualKey: docSnap.id, verifiedAccess: access } :
                     { valid: false, msg: access.msg || '구독 이용기간을 확인해 주세요.' };
             } catch (error) { return { valid: false, msg: error.message }; }
         }
