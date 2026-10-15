@@ -44,8 +44,8 @@ function renderPrices(){
     }
     const chosen=visiblePlans().find(plan=>plan.months===selectedMonths);
     if(!chosen)return;
-    el('billing-summary').textContent=chosen.label+' 총 '+el('plan-price-'+selectedMonths).textContent+(actual?' 결제 · '+chosen.label+'마다 자동 갱신':' · 부가세 포함 예정 요금');
-    el('billing-price-note').textContent=actual?'월 환산 금액은 비교용입니다. 선택한 기간의 총액이 한 번에 결제됩니다. 할인은 1개월 상품을 같은 기간 이용한 금액 대비입니다.':'월 9,900원(부가세 포함) 기준의 예정 요금입니다. 월 환산 금액은 비교용이며, 선택한 기간의 총액을 한 번에 결제합니다.';
+    el('billing-summary').textContent=chosen.label+' 총 '+el('plan-price-'+selectedMonths).textContent+(actual?' 결제 · '+chosen.label+'마다 자동 갱신':' · 부가세 포함 금액');
+    el('billing-price-note').textContent=actual?'월 환산 금액은 비교용입니다. 선택한 기간의 총액이 한 번에 결제됩니다. 할인은 1개월 상품을 같은 기간 이용한 금액 대비입니다.':'월 9,900원(부가세 포함) 기준입니다. 월 환산 금액은 비교용이며, 선택한 기간의 총액을 한 번에 결제합니다.';
 }
 const el=id=>subscriptionDialog.querySelector('#'+id);
 const normalized=phone=>String(phone||'').replace(/^\+82/,'0').replace(/\D/g,'');
