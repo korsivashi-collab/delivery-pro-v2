@@ -302,7 +302,7 @@ export function updateExpireBadge(serverDate) {
     const today=new Date(Date.now()+9*3600000);
     const days=match?Math.round((Date.UTC(+match[1],+match[2]-1,+match[3])-Date.UTC(today.getUTCFullYear(),today.getUTCMonth(),today.getUTCDate()))/86400000):null;
     const urgent=days!==null && days<=7;
-    badge.innerText=days===null?'사용기한: 확인 중':`${urgent?'구독연장 · ':''}${days<0?'이용기간 만료':days===0?'오늘 만료':`잔여 ${days}일`}`;
+    badge.innerText=days===null?'사용기한: 확인 중':`${urgent?'구독연장 · ':''}사용기한: ${expireDate}`;
     badge.title=expireDate?`사용기한: ${expireDate} · 눌러서 이용기간 연장 / 구독 관리`:'이용기간 연장 / 구독 관리';
     badge.style.fontWeight='800';
     badge.style.color=urgent?'#b91c1c':'';
