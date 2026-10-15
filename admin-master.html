@@ -386,7 +386,7 @@
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">만료일 (YYYY.MM.DD)</label><input type="date" id="edit-expire-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"></div>
-                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label><select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"><option value="active">정상 운행 (Active)</option><option value="suspended">사용 정지 (Suspended)</option></select></div>
+                        <div><label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label><select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"><option value="active">정상 운행 (Active)</option><option value="suspended">사용 정지 (Suspended)</option><option value="expired">이용기간 만료</option><option value="revoked">이용권 회수</option><option value="upgraded">이전된 계정</option></select></div>
                     </div>
                     <div id="edit-slots-container" class="hidden">
                         <label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 수 (0=무제한)</label>
