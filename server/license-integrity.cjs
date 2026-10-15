@@ -174,7 +174,7 @@ async function saveLicenses(db, request, now = Date.now()) {
             set(bound.ref, {...account, licenseKey:payloads[0].key});
             set(db.collection('billing_license_bindings').doc(payloads[0].key), {uid:bound.id,provider:account.webManaged?'toss':'google_play'});
             remove(db.collection('billing_license_bindings').doc(origKey));
-            for (const order of orderSnap.docs) set(order.ref, {licenseKey:payloads[0].key}, {merge:true});
+            for (const order of orderSnap.docs) if(order.data().licenseKey===origKey) set(order.ref, {licenseKey:payloads[0].key}, {merge:true});
         }
         for (const [id, upgradedTo] of retired) {
             const phone = changed.find(item => item.payload.key === upgradedTo).payload.phone;

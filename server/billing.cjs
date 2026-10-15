@@ -35,8 +35,9 @@ async function ensureAccount(db, identity, input, now) {
         const [saved, lock, blocked, licenses, profiles] = await Promise.all([tx.get(ref), tx.get(lockRef),
             tx.get(db.collection('blocked_devices').doc(device)), tx.get(db.collection('licenses')), tx.get(db.collection('driver_profiles'))]);
         if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
-        const account = saved.data();
-        if(account?.deletedAt!=null)throw problem('삭제된 결제 계정입니다. 다시 이용하려면 고객센터에 문의해 주세요.',410);
+        const previous = saved.data();
+        const restarting = previous?.deletedAt != null;
+        const account = restarting ? null : previous;
         if (account && phoneDigits(account.phone) !== phoneDigits(phone)) throw problem('구독 계정의 인증 번호가 변경되었습니다. 고객센터에 문의해 주세요.', 409);
         const matched = licenses.docs.filter(doc => phoneDigits(doc.data().phone) === phoneDigits(phone));
         const current = account ? licenses.docs.find(doc => doc.id === account.licenseKey) :
@@ -77,18 +78,23 @@ async function ensureAccount(db, identity, input, now) {
             tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now});
         }
         if (!account) {
-            tx.create(ref, result);
+            if(restarting){
+                tx.set(db.collection('admin_license_controls').doc('billing-archive-'+previous.rcUserId),previous);
+                tx.delete(db.collection('billing_customer_ids').doc(previous.rcUserId));
+                tx.set(ref,result);
+            }else tx.create(ref, result);
             tx.create(db.collection('billing_customer_ids').doc(result.rcUserId), { uid: identity.uid });
             tx.set(lockRef, { revision: (lock.data()?.revision || 0)+1, updatedAt: now });
         }
         return { ...result, canPurchase: !activeManual, reason: activeManual ? account?.webManaged ? '웹 기간권 계정입니다. Google Play 구독으로 전환하려면 고객센터에 문의해 주세요.' : '현재 이용권 또는 진행 중인 주문이 있습니다. 확인 후 다시 요청하거나 고객센터에 문의해 주세요.' : '' };
     });
 }
-async function applyPurchase(db, uid, entitlement, now, device = null) {
+async function applyPurchase(db, uid, entitlement, now, device = null, expectedCustomer = null) {
     const ref = db.collection('billing_accounts').doc(uid), lockRef = db.collection('admin_license_controls').doc('phone_integrity');
     return db.runTransaction(async tx => {
         const accountSnap = await tx.get(ref), account = accountSnap.data();
         if (!account) throw problem('구독 계정을 찾을 수 없습니다.',404);
+        if(expectedCustomer && account.rcUserId!==expectedCustomer)return {active:false,valid:false,msg:'계정이 변경되었습니다. 다시 확인해 주세요.'};
         if(account.deletedAt!=null)return {active:false,valid:false,msg:'삭제된 계정입니다.'};
         // A web period must never be overwritten by an unrelated Play webhook.
         if (account.webManaged) return {active:false,valid:false,msg:'웹 이용권을 다시 확인해 주세요.'};
