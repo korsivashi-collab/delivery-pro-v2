@@ -32,6 +32,6 @@ export async function saveMasterLicenses(request) {
         body: JSON.stringify(request)
     });
     const result = await response.json();
-    if (!response.ok) throw new Error(result.error || '계정 저장에 실패했습니다.');
+    if (!response.ok) throw Object.assign(new Error(result.error || '계정 저장에 실패했습니다.'), {code:result.code});
     return result;
 }

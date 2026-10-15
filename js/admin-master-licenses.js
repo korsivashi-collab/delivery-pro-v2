@@ -504,6 +504,8 @@ export function openEditLicenseModal(key) {
     document.getElementById('edit-orig-key').value = target.key;
     document.getElementById('edit-type').value = target.type || 'regular';
     document.getElementById('edit-key-input').value = target.key;
+    document.getElementById('edit-phone-input').readOnly = false;
+    document.getElementById('edit-expire-input').readOnly = false;
     document.getElementById('edit-phone-input').value = target.phone || '';
     document.getElementById('edit-device-input').value = target.deviceId || '';
     
@@ -593,21 +595,50 @@ export function openEditLicenseModal(key) {
 
 async function showAccountPayments(key) {
     let box=document.getElementById('account-payment-info');
-    if(!box){box=document.createElement('section');box.id='account-payment-info';box.style.cssText='margin:16px 0;padding:16px;border:1px solid #cbd5e1;border-radius:12px;white-space:pre-line;font-size:13px;line-height:1.8';document.getElementById('edit-status-select').parentElement.after(box);}
+    if(!box){box=document.createElement('section');box.id='account-payment-info';document.getElementById('edit-status-select').parentElement.after(box);}
+    box.style.cssText='grid-column:1 / -1;min-width:0;margin:16px 0;padding:16px;border:1px solid #cbd5e1;border-radius:12px;font-size:13px;line-height:1.8';
     box.textContent='결제 정보를 확인하고 있습니다…';
     try {
         const data=await saveMasterLicenses({action:'paymentInfo',key});
         if(document.getElementById('edit-orig-key').value!==key)return;
         if(!data.managed){box.textContent='결제 연결 정보 없음';return;}
-        const rows=data.payments.map(p=>`${p.test?'[테스트]':'[실결제]'} ${p.months}개월 · ${Number(p.amount).toLocaleString('ko-KR')}원
-${p.cancelled?'취소/환불 반영':p.status==='completed'?'승인 완료 (저장 기록)':'미완료'} · ${p.method||'결제수단 미기록'}
+        const phone=document.getElementById('edit-phone-input');
+        if(!phone.value && data.phone) phone.value=normalizeMasterPhone(data.phone);
+        phone.readOnly=true;document.getElementById('edit-expire-input').readOnly=true;
+        box.textContent='결제 정보 · '+data.provider;
+        const note=document.createElement('p');
+        note.textContent='각 주문은 전액 취소할 수 있습니다. 취소한 주문의 이용기간을 제외해 만료일을 다시 계산합니다. 인증된 휴대폰·만료일은 직접 변경하지 않습니다. 계정·결제 이력은 보존되며, 계정 정지는 환불이 아닙니다. 표시 상태는 최근 확인 기준입니다.';
+        box.append(note);
+        for(const p of data.payments){
+            const card=document.createElement('div');card.style.cssText='margin-top:12px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;overflow-wrap:anywhere';
+            const text=document.createElement('p');text.style.whiteSpace='pre-line';
+            text.textContent=`${p.test?'[테스트]':'[실결제]'} ${p.months}개월 · ${Number(p.amount).toLocaleString('ko-KR')}원
+${p.fullyCancelled?'전액 취소 완료':p.cancelled?'취소/환불 반영':p.status==='completed'?'승인 완료':'미완료'} · ${p.method||'결제수단 미기록'}
 ${p.approvedAt?new Date(p.approvedAt).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}):'승인 일시 없음'}
-주문번호: ${p.orderId}`);
-        box.textContent=`결제 정보 · ${data.provider}
-결제 계정은 영구 삭제가 제한됩니다. 이용 중단은 계정 상태를 정지로 변경하세요. 정지는 환불이나 자동결제 해지가 아닙니다.
-환불 상태는 최근 동기화 기준이며 최종 상태는 결제사에서 확인해 주세요.
-
-`+ (rows.join('\n\n')||'웹 결제 이력 없음 · 스토어 결제내역은 Google Play/RevenueCat에서 확인');
+주문번호: ${p.orderId}`;
+            card.append(text);
+            if(data.canCancel && p.status==='completed' && !p.fullyCancelled){
+                const button=document.createElement('button');button.type='button';button.textContent=p.cancelled?'취소 결과 확인':'이 결제 전액 취소';
+                button.style.cssText='margin-top:12px;min-height:44px;padding:8px 16px;background:#fff1f2;color:#b91c1c;border:1px solid #fda4af;border-radius:8px;font-weight:700';
+                button.onclick=async()=>{
+                    if(savingLicenseEdit)return;
+                    const reason=prompt('이 주문의 전액 취소 사유를 입력해 주세요. (최대 200자)',p.test?'테스트 결제 취소':'관리자 환불 처리');
+                    if(!reason?.trim())return;
+                    if(reason.trim().length>200){alert('취소 사유는 200자 이하로 입력해 주세요.');return;}
+                    if(!confirm(`[${p.test?'테스트':'실결제'}] ${p.months}개월 / ${Number(p.amount).toLocaleString('ko-KR')}원 전액을 취소할까요?\n주문번호: ${p.orderId}\n이 주문에 해당하는 이용기간도 제외됩니다.`))return;
+                    savingLicenseEdit=true;const save=document.getElementById('btn-save-license-edit');if(save)save.disabled=true;
+                    button.disabled=true;button.textContent='취소 결과 확인 중…';
+                    try{
+                        const result=await saveMasterLicenses({action:'cancelPayment',key,orderId:p.orderId,reason:reason.trim()});
+                        if(document.getElementById('edit-orig-key').value===key){document.getElementById('edit-expire-input').value=result.expireDate.replaceAll('.','-');document.getElementById('edit-status-select').value=result.status;await showAccountPayments(key);}
+                        alert('전액 취소가 완료되었습니다. 남은 이용기간을 다시 계산했습니다.');
+                    }catch(e){alert(e.message);button.disabled=false;button.textContent='취소 재시도 / 결과 확인';}
+                    finally{savingLicenseEdit=false;if(save)save.disabled=false;}
+                };card.append(button);
+            }
+            box.append(card);
+        }
+        if(!data.payments.length){const empty=document.createElement('p');empty.textContent='웹 결제 이력 없음 · Google Play 결제는 스토어에서 관리해 주세요.';box.append(empty);}
     }catch(e){if(document.getElementById('edit-orig-key').value===key)box.textContent='결제 정보 조회 실패: '+e.message;}
 }
 
@@ -668,7 +699,7 @@ export async function linkDriverFromModal() {
     }
 
     const cleanDigits = rawVal.replace(/[^0-9]/g, '');
-    const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
+    const rawKeyOnly = rawVal.replace(/^(PRO|TRIAL|CTRL)-/i, '');
     let targetLic = state.allLicenses.find(l => {
         if (l.type === 'dispatch') return false;
         const lKey = (l.key || '').toUpperCase();
@@ -752,7 +783,14 @@ export async function saveLicenseEdit() {
     savingLicenseEdit = true;
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i> 저장 중...'; }
     try {
-        await saveMasterLicenses({ action: 'edit', origKey, license: updatePayload });
+        try {
+            await saveMasterLicenses({ action: 'edit', origKey, license: updatePayload });
+        } catch (error) {
+            if(error.code!=='ORPHAN_PROFILE')throw error;
+            if(!confirm(`[${newKey}]는 삭제된 계정의 로그인 프로필이 남아 있습니다.\n남은 프로필을 정리하고 현재 계정의 키로 사용할까요?\n기존 배송 이력은 보존하며 현재 계정으로 합치지 않습니다.`))return;
+            await saveMasterLicenses({action:'delete',key:newKey,orphanOnly:true});
+            await saveMasterLicenses({action:'edit',origKey,license:updatePayload});
+        }
         alert(`계정 정보가 성공적으로 수정되었습니다.\n(동시 접속 허용: ${maxSessions}대)`);
         closeEditModal();
     } catch (e) { alert("오류: " + e.message); }
@@ -763,21 +801,16 @@ export async function saveLicenseEdit() {
 }
 
 export async function deleteLicense(key) {
-    const target = state.allLicenses.find(l => l.key === key);
-    if(target?.billingManaged){alert('결제 이력이 연결된 계정은 영구 삭제할 수 없습니다. 계정 수정에서 결제 정보를 확인하고, 이용 중단은 상태를 정지로 변경해 주세요. 환불·자동결제 해지는 결제사에서 별도로 처리해야 합니다.');return;}
-    if (!confirm(`정말 [${key}] 계정을 영구 삭제하시겠습니까?`)) return;
+    if(savingLicenseEdit)return;
+    if (!confirm(`정말 [${key}] 계정을 삭제하시겠습니까?\n로그인 프로필도 함께 삭제합니다. 배송 이력과 결제 이력은 보존합니다. 결제 연결 계정은 삭제가 제한됩니다.`)) return;
+    savingLicenseEdit=true;
     try {
-        await deleteDoc(doc(db, "licenses", key));
-        if (target && target.deviceId) {
-            try { await deleteDoc(doc(db, "routes", target.deviceId)); } catch(e){}
-        }
-        if (target && target.type === 'dispatch') {
-            const linked = state.allLicenses.filter(l => l.dispatchKey === key);
-            for (const l of linked) await updateDoc(doc(db, "licenses", l.key), { dispatchKey: "" });
-        }
-        alert(`[${key}] 계정이 삭제되었습니다.`);
+        await saveMasterLicenses({action:'delete',key});
+        alert(`[${key}] 계정과 로그인 프로필이 삭제되었습니다.`);
+        closeEditModal();
         if (state.currentSelectedAccountKey === key && window.backToAllAccountsView) window.backToAllAccountsView();
-    } catch (e) { alert("삭제 오류: " + e.message); }
+    } catch (e) { alert('삭제 오류: '+e.message); }
+    finally {savingLicenseEdit=false;}
 }
 
 export async function deleteLicenseFromModal() {
