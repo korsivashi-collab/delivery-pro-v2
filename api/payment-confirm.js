@@ -51,7 +51,11 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
     if(l.billingUid&&l.billingUid!==identity.uid)throw problem('이용권 소유자 정보를 확인해 주세요.',403);
     if(l.billingManaged&&!l.webManaged||a.access?.active&&a.access.expiresAt>now())throw problem('Google Play 구독 이력이 있습니다. 중복 결제를 막기 위해 고객센터에서 전환을 확인해 주세요.',409);
     if(a.webHistory?.length>=100)throw problem('결제 이력 확인이 필요합니다. 고객센터에 문의해 주세요.',409);
-    if(a.pendingWebOrder&&a.pendingWebUntil>now())throw problem('진행 중인 주문이 있습니다. 기존 결제 결과를 먼저 확인하거나 30분 뒤 다시 시도해 주세요.',409);
+    if(a.pendingWebOrder&&a.pendingWebUntil>now()){
+     const pending=(await tx.get(db.collection('payment_orders').doc(a.pendingWebOrder))).data();
+     if(pending?.uid===identity.uid&&pending.licenseKey===a.licenseKey&&pending.status==='created'&&!pending.paymentKey&&pending.months===months&&pending.amount===PRICES[months]&&pending.test===env.TOSS_CLIENT_KEY.startsWith('test_'))return pending;
+     throw problem('진행 중인 주문이 있습니다. 먼저 기존에 선택한 이용기간으로 다시 진행해 주세요. 기간을 변경하려면 기존 주문 생성 후 30분이 지나야 합니다.',409);
+    }
     const row={orderId,uid:identity.uid,phone:account.phone,licenseKey:a.licenseKey,months,amount:PRICES[months],createdAt:now(),status:'created',test:env.TOSS_CLIENT_KEY.startsWith('test_')};tx.create(ref,row);tx.set(aRef,{...a,pendingWebOrder:orderId,pendingWebUntil:now()+1800000});tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});return row;});return res.status(200).json({orderId:order.orderId,amount:order.amount,months:order.months,customerKey:account.rcUserId});
   }
   if(input.action!=='confirm')throw problem('지원하지 않는 요청입니다.');
