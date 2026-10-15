@@ -762,4 +762,11 @@
         </div>
     </div>
 </body>
+<script data-web-only>
+document.addEventListener('deliverypro:period-checkout', event => {
+    const months = Number(event.detail?.months);
+    if ([1,3,6,12].includes(months)) location.assign('/payment.html?months=' + months);
+});
+window.deliveryProPeriodCheckout = true;
+</script>
 </html>
