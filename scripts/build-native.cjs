@@ -35,7 +35,9 @@ function copy(relative) {
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.copyFileSync(source, destination);
     if (!/\.(?:html|js|json|css)$/.test(relative)) return;
-    const text = fs.readFileSync(source, 'utf8');
+    const original = fs.readFileSync(source, 'utf8');
+    const text = relative === 'index.html' ? original.replace(/<script\b[^>]*\bdata-web-only\b[^>]*>[\s\S]*?<\/script>/g, '') : original;
+    if (text !== original) fs.writeFileSync(destination, text);
     if (/payment\.html|success-payment\.html|tosspayments|payment-confirm/i.test(text)) {
         throw new Error('External billing found in native assets: ' + relative);
     }
