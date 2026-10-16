@@ -414,7 +414,19 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
 // 7. 자동 로그인 (부팅 시 기존 저장된 키 검증)
 // ==========================================
 export async function checkSavedAuth() {
+    const perf = globalThis.performance, started = perf?.now();
+    try { return await restoreSavedAuth(); }
+    finally { try { if (perf?.measure && started !== undefined) perf.measure('deliverypro-license', { start: started, end: perf.now() }); } catch {} }
+}
+async function restoreSavedAuth() {
     const deviceId = getOrCreateDeviceId();
+    const savedKey = localStorage.getItem('deliveryProKey');
+    const savedPhone = localStorage.getItem('deliveryProUserPhone');
+    const paidAccount = savedKey && localStorage.getItem('deliveryProBillingManaged') === 'true';
+    // Both checks must finish before granting access. The server also checks blocked devices.
+    // Capture rejection immediately, including when the local block check redirects first.
+    const paidCheck = paidAccount ? billingRequest('sync', { deviceId, licenseKey: savedKey })
+        .then(value => ({value}), error => ({error})) : null;
 
     // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
     try {
@@ -425,9 +437,6 @@ export async function checkSavedAuth() {
         }
     } catch (err) {}
 
-    const savedKey = localStorage.getItem('deliveryProKey');
-    const savedPhone = localStorage.getItem('deliveryProUserPhone');
-    const savedExpire = localStorage.getItem('deliveryProExpireDate');
     const bootScreen = document.getElementById('boot-screen');
 
     if (savedKey) {
@@ -440,9 +449,11 @@ export async function checkSavedAuth() {
     }
 
     // Store renewals must be checked before using an old locally cached expiry date.
-    if (savedKey && localStorage.getItem('deliveryProBillingManaged') === 'true') {
+    if (paidAccount) {
         try {
-            const result = await billingRequest('sync', { deviceId, licenseKey: savedKey });
+            const checked = await paidCheck;
+            if (checked.error) throw checked.error;
+            const result = checked.value;
             if (result.valid) {
                 activatePurchasedLicense(result);
             } else {
