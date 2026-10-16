@@ -2,6 +2,21 @@ const { randomUUID, randomBytes } = require('node:crypto');
 const { normalizePhone, phoneDigits, problem, isActive } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
+// Request-local durations only: no tokens, phone numbers, keys or payment data.
+function requestTiming(res) {
+    const started = performance.now(), spans = new Map();
+    return {
+        async measure(name, operation) {
+            const start = performance.now();
+            try { return await operation(); }
+            finally { spans.set(name, (spans.get(name) || 0) + performance.now() - start); }
+        },
+        finish() {
+            spans.set('total', performance.now() - started);
+            res.setHeader('Server-Timing', [...spans].map(([name, ms]) => `${name};dur=${ms.toFixed(1)}`).join(', '));
+        }
+    };
+}
 function verifiedPhone(identity) {
     const provider = identity?.firebase?.sign_in_provider;
     if (!(provider === 'phone' || provider === 'custom' && identity.nativePhoneVerified === true) || !identity.phone_number || identity.uid === 'admin_master') {
@@ -32,13 +47,17 @@ async function ensureAccount(db, identity, input, now) {
     const phone = verifiedPhone(identity), device = deviceId(input.deviceId), ref = db.collection('billing_accounts').doc(identity.uid);
     const lockRef = db.collection('admin_license_controls').doc('phone_integrity');
     return db.runTransaction(async tx => {
-        const [saved, lock, blocked, licenses, profiles] = await Promise.all([tx.get(ref), tx.get(lockRef),
-            tx.get(db.collection('blocked_devices').doc(device)), tx.get(db.collection('licenses')), tx.get(db.collection('driver_profiles'))]);
+        const [saved, lock, blocked, licenses] = await Promise.all([tx.get(ref), tx.get(lockRef),
+            tx.get(db.collection('blocked_devices').doc(device)), tx.get(db.collection('licenses'))]);
         if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
         const previous = saved.data();
         const restarting = previous?.deletedAt != null;
         const account = restarting ? null : previous;
         if (account && phoneDigits(account.phone) !== phoneDigits(phone)) throw problem('구독 계정의 인증 번호가 변경되었습니다. 고객센터에 문의해 주세요.', 409);
+        const migrate=account && /^PLAY-[0-9A-F]{32}$/.test(account.licenseKey);
+        // Existing accounts use their fixed key. Profiles are needed only for legacy lookup/migration.
+        // Keep the license scan: legacy phone formats and duplicate active accounts must still be checked.
+        const profiles = !account || migrate ? await tx.get(db.collection('driver_profiles')) : {docs:[]};
         const matched = licenses.docs.filter(doc => phoneDigits(doc.data().phone) === phoneDigits(phone));
         const current = account ? licenses.docs.find(doc => doc.id === account.licenseKey) :
             matched.find(doc => doc.data().type !== 'dispatch' && !['revoked','upgraded'].includes(doc.data().status)) ||
@@ -49,7 +68,6 @@ async function ensureAccount(db, identity, input, now) {
         }
         if (current?.data().deviceId && current.data().deviceId !== device) throw problem('다른 기기에 연결된 계정입니다. 고객센터에 기기 변경을 요청해 주세요.', 409);
         if (['suspended','revoked'].includes(current?.data().status)) throw problem('접속이 제한된 계정입니다.', 403);
-        const migrate=account && /^PLAY-[0-9A-F]{32}$/.test(account.licenseKey);
         const oldProfile=migrate?profiles.docs.find(d=>d.id===account.licenseKey):null;
         const orders=migrate?await tx.get(db.collection('payment_orders').where('uid','==',identity.uid)):null;
         let newKey;
@@ -138,4 +156,4 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
         return {active:false,valid:false,msg:'확인된 Google Play 구독이 없습니다.'};
     });
 }
-module.exports = { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase };
+module.exports = { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase, requestTiming };
