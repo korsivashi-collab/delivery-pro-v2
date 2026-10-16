@@ -8,16 +8,8 @@ import { normalizeDeliveryBaseAddress } from './address.js';
 import { toBase64_SafeCompress, showLoading, hideLoading, withRequestDeadline, getPureAddress } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, hasValidDeliveryCoordinates } from './state.js';
-import { 
-    isLicenseExpiredLocally, 
-    clearAuthStorage, 
-    getOrCreateDeviceId 
-} from './auth.js';
-import { 
-    firebaseCheckLicenseOnce, 
-    checkIfDeviceBlocked,
-    saveRouteToFirestore 
-} from './api.js';
+import { getOrCreateDeviceId } from './auth.js';
+import { saveRouteToFirestore } from './api.js';
 
 const MAX_MONTHLY_SCANS = 1250; 
 const SCAN_COOLDOWN_MS = 1000;
@@ -279,7 +271,7 @@ export function initCameraScan() {
         activeScanRequest?.controller.abort();
         if (activeScanRequest?.loading) hideLoading();
         const scan = { controller: new AbortController(), owner: state.getRouteOwnerId(), loading: false,
-            diagnostics: { model: GEMINI_SCAN_MODEL, stage: 'validation', geminiSuccess: false, deliveryAdded: false,
+            diagnostics: { model: GEMINI_SCAN_MODEL, stage: 'image', geminiSuccess: false, deliveryAdded: false,
                 manualAddressUsed: false, kakaoGeocodeAttemptCount: 0, kakaoRequestCount: 0, kakaoPlaceSearchCount: 0, errorCode: null } };
         activeScanRequest = scan;
         const signal = scan.controller.signal;
@@ -305,39 +297,8 @@ export function initCameraScan() {
         };
         try {
 
-        // A selected photo is already being processed while account checks are pending.
-        showScanLoading('명세서 스캔 준비 중...');
-        // 계정 유효성 검증
+        // Initial login and account monitoring handle access; scans do not repeat billing checks.
         const deviceId = getOrCreateDeviceId();
-        try {
-            const isBlocked = await checkIfDeviceBlocked(deviceId);
-            assertCurrent();
-            if (isBlocked) {
-                window.location.replace('error.html');
-                return;
-            }
-        } catch (err) {}
-        assertCurrent();
-
-        if (isLicenseExpiredLocally()) {
-            alert("⚠️ 라이선스 사용기한이 만료되었습니다.\n관리자에게 문의해 주세요.");
-            clearAuthStorage();
-            window.location.reload();
-            return;
-        }
-
-        const savedKey = localStorage.getItem('deliveryProKey');
-        if (savedKey) {
-            const licCheck = await firebaseCheckLicenseOnce(savedKey, deviceId);
-            assertCurrent();
-            if (!licCheck.valid && !licCheck.isOffline) {
-                alert(`⚠️ [라이선스 알림]\n${licCheck.msg || "라이선스가 유효하지 않습니다."}`);
-                clearAuthStorage();
-                window.location.reload();
-                return;
-            }
-        }
-
         assertCurrent();
         if (!checkScanLimit()) { e.target.value = ''; return; }
 
@@ -415,7 +376,10 @@ export function initCameraScan() {
         } catch (error) {
             scan.diagnostics.errorCode = typeof error.code === 'string' && /^[A-Z_]+$/.test(error.code) ? error.code
                 : error.name === 'AbortError' ? 'SCAN_ABORTED' : error.name === 'TimeoutError' ? 'SCAN_TIMEOUT' : 'SCAN_ERROR';
-            if (error.name !== 'AbortError') alert('명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.');
+            if (error.name !== 'AbortError') {
+                hideScanLoading();
+                alert('명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.');
+            }
         } finally {
             console.debug('[Gemini 스캔 진단]', scan.diagnostics);
             if (activeScanRequest === scan) {

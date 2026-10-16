@@ -11,6 +11,7 @@ import {
     getBillingIdentity, 
     likeMemoInFirestore, 
     reportMemoInFirestore,
+    deleteMemoInFirestore,
     firebaseUploadTempMemoBackup,
     firebaseGetTempMemoBackup,
     firebaseDeleteTempMemoBackup
@@ -32,6 +33,8 @@ function invalidatePreviewMemo(address) {
     memoRequests.delete(address);
 }
 let currentMemoAddress = "";
+let memoModalVersion = 0, deletingSharedMemo = false;
+const visibleOwnedMemos = new Map();
 let selectedHeightText = "";
 let selectedTimeText = "";
 
@@ -242,6 +245,8 @@ function resetMemoForm() {
 // 6. 주차 정보 모달 열기 / 닫기
 // ==========================================
 export async function openMemoModal(id) {
+    const version = ++memoModalVersion;
+    visibleOwnedMemos.clear();
     const destinations = state.getDestinations();
     const item = destinations.find(d => d.id === id); 
     if (!item) return; 
@@ -275,6 +280,7 @@ export async function openMemoModal(id) {
         const myPhone = localStorage.getItem('deliveryProUserPhone') || "";
         
         const memoIdentity = await getBillingIdentity();
+        if (version !== memoModalVersion) return;
         const myMemo = memos.find(m => m.ownerUid && m.ownerUid === memoIdentity?.uid);
         if (myMemo) {
             const rawMemo = myMemo.memo || "";
@@ -326,6 +332,7 @@ export async function openMemoModal(id) {
             let html = "";
             memos.forEach((m, idx) => {
                 let isMyMemo = (m.ownerUid && m.ownerUid === memoIdentity?.uid);
+                if (isMyMemo) visibleOwnedMemos.set(m.id, { address: currentMemoAddress, uid: memoIdentity.uid, owner: state.getRouteOwnerId() });
                 let crownHtml = (idx === 0) ? `<i class="fa-solid fa-crown text-yellow-400 mr-1 text-sm drop-shadow-sm"></i> ` : '';
                 let myBadge = isMyMemo ? `<span class="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded ml-1">내가 쓴 정보</span>` : '';
                 
@@ -336,6 +343,7 @@ export async function openMemoModal(id) {
                     <div class="flex justify-between items-center border-t border-gray-100 pt-2 mt-2">
                         <span class="text-[9px] text-gray-400">${m.time}</span>
                         <div class="flex items-center gap-1.5">
+                            ${isMyMemo ? `<button type="button" data-delete-memo="${encodeURIComponent(m.id)}" aria-label="내 공용메모 삭제" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg font-bold px-3" style="min-width:48px;min-height:44px">삭제</button>` : ''}
                             <button onclick="likeMemo('${m.id}')" class="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1 rounded-lg font-bold border border-blue-100 active:scale-95 transition"><i class="fa-solid fa-thumbs-up mr-0.5"></i> ${m.likes || 0}</button>
                             <button onclick="reportMemo('${m.id}')" class="text-[10px] text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-500 px-2 py-1 rounded-lg border border-gray-100 active:scale-95 transition">🚨 신고</button>
                         </div>
@@ -343,16 +351,66 @@ export async function openMemoModal(id) {
                 </div>`;
             });
             if (listContainer) listContainer.innerHTML = html;
+            listContainer?.querySelectorAll('[data-delete-memo]').forEach(button => {
+                button.addEventListener('click', () => deleteSharedMemo(decodeURIComponent(button.dataset.deleteMemo)));
+            });
         } else { 
             if (listContainer) listContainer.innerHTML = `<div class="bg-white border border-gray-200 rounded-xl p-6 text-center shadow-sm"><p class="text-gray-400 text-xs font-bold">등록된 주차정보가 없습니다.<br>첫 번째 정보를 남겨주세요!</p></div>`; 
         }
     } catch (e) { 
+        if (version !== memoModalVersion) return;
         if (listContainer) listContainer.innerHTML = `<div class="text-red-500 text-center text-xs py-4">데이터를 불러오지 못했습니다.</div>`; 
     }
 }
 
 export function closeMemoModal() { 
+    ++memoModalVersion;
+    visibleOwnedMemos.clear();
     document.getElementById('memo-modal')?.classList.add('hidden'); 
+}
+
+export async function deleteSharedMemo(docId) {
+    if (deletingSharedMemo) return;
+    const target = visibleOwnedMemos.get(docId);
+    if (!target) return;
+    if (!confirm('내가 작성한 공용 주차정보를 삭제하시겠습니까?\n개인 메모는 유지됩니다.')) return;
+    deletingSharedMemo = true;
+    showLoading('공용 주차정보 삭제 중...');
+    try {
+        const identity = await getBillingIdentity();
+        if (identity?.uid !== target.uid || state.getRouteOwnerId() !== target.owner) throw Error('계정이 변경되었습니다. 메모를 다시 열어 주세요.');
+        await deleteMemoInFirestore(docId);
+        if (state.getRouteOwnerId() !== target.owner || (await getBillingIdentity())?.uid !== target.uid) return;
+        invalidatePreviewMemo(target.address);
+        batchMemosCache[target.address] = (batchMemosCache[target.address] || []).filter(m => m.id !== docId);
+        visibleOwnedMemos.delete(docId);
+        try {
+            const mine = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');
+            localStorage.setItem('deliveryPro_my_parking_memos', JSON.stringify(mine.filter(address => address !== target.address)));
+        } catch {}
+        if (typeof updateContributionStats === 'function') updateContributionStats();
+        state.getDestinations().filter(d => getPureAddress(d.address) === target.address).forEach(d => renderMemoPreview(d));
+        if (typeof window.renderList === 'function') window.renderList();
+        if (currentMemoAddress === target.address && !document.getElementById('memo-modal')?.classList.contains('hidden')) {
+            const dest = state.getDestinations().find(d => getPureAddress(d.address) === target.address);
+            if (dest) {
+                const draft = document.getElementById('personal-memo-input')?.value;
+                const expectedVersion = memoModalVersion + 1;
+                await openMemoModal(dest.id);
+                if (memoModalVersion === expectedVersion && draft !== undefined) {
+                    const input = document.getElementById('personal-memo-input');
+                    const count = document.getElementById('personal-memo-char-count');
+                    if (input) input.value = draft;
+                    if (count) count.innerText = `${draft.length} / 30`;
+                }
+            }
+        }
+    } catch (error) {
+        alert(error.message || '메모를 삭제하지 못했습니다. 다시 시도해 주세요.');
+    } finally {
+        deletingSharedMemo = false;
+        hideLoading();
+    }
 }
 
 // ==========================================

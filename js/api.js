@@ -686,6 +686,10 @@ export async function reportMemoInFirestore(docId) {
     await memoRequest('report',{id:docId}); 
 }
 
+export async function deleteMemoInFirestore(docId) {
+    return memoRequest('delete',{id:docId});
+}
+
 // 8. 배송 경로 및 완료 내역 동기화
 const routeSaveRevisions = new Map();
 const routeSaveTasks = new Map();
