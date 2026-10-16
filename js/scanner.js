@@ -305,15 +305,19 @@ export function initCameraScan() {
         };
         try {
 
+        // A selected photo is already being processed while account checks are pending.
+        showScanLoading('명세서 스캔 준비 중...');
         // 계정 유효성 검증
         const deviceId = getOrCreateDeviceId();
         try {
             const isBlocked = await checkIfDeviceBlocked(deviceId);
+            assertCurrent();
             if (isBlocked) {
                 window.location.replace('error.html');
                 return;
             }
         } catch (err) {}
+        assertCurrent();
 
         if (isLicenseExpiredLocally()) {
             alert("⚠️ 라이선스 사용기한이 만료되었습니다.\n관리자에게 문의해 주세요.");
@@ -325,6 +329,7 @@ export function initCameraScan() {
         const savedKey = localStorage.getItem('deliveryProKey');
         if (savedKey) {
             const licCheck = await firebaseCheckLicenseOnce(savedKey, deviceId);
+            assertCurrent();
             if (!licCheck.valid && !licCheck.isOffline) {
                 alert(`⚠️ [라이선스 알림]\n${licCheck.msg || "라이선스가 유효하지 않습니다."}`);
                 clearAuthStorage();
