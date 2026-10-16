@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { timingSafeEqual } = require('node:crypto');
 const { problem } = require('../server/license-integrity.cjs');
-const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase } = require('../server/billing.cjs');
+const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
 function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
         !!env.REVENUECAT_SECRET_API_KEY?.trim() && (env.REVENUECAT_WEBHOOK_AUTH || '').length >= 32;
@@ -16,6 +16,8 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
         return applyPurchase(db,uid,evaluatePurchase(payload,stamp,env.REVENUECAT_ALLOW_SANDBOX==='true'),stamp,device,account.rcUserId);
     }
     return async(req,res)=>{
+        const timing=requestTiming(res), measure=timing.measure;
+        const reply=(status,data)=>{timing.finish();return res.status(status).json(data);};
         res.setHeader('Cache-Control','no-store');
         if(req.method!=='POST')return res.status(405).json({error:'POST 요청만 가능합니다.'});
         try {
@@ -40,18 +42,18 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
             }
             if(!['session','sync'].includes(input?.action))throw problem('지원하지 않는 요청입니다.');
             const token=/^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];if(!token)throw problem('휴대폰 인증을 완료해 주세요.',401);
-            let identity;try{identity=await sdk.auth().verifyIdToken(token,true);}catch{throw problem('인증이 만료되었습니다. 휴대폰 인증을 다시 진행해 주세요.',401);}
+            let identity;try{identity=await measure('auth',()=>sdk.auth().verifyIdToken(token,true));}catch{throw problem('인증이 만료되었습니다. 휴대폰 인증을 다시 진행해 주세요.',401);}
             verifiedPhone(identity);const device=deviceId(input.deviceId);
-            const account=await ensureAccount(db,identity,input,now());
+            const account=await measure('account',()=>ensureAccount(db,identity,input,now()));
             if(input.licenseKey&&input.licenseKey!==account.licenseKey)throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
             if(input.action==='sync'&&account.webManaged){
                 const service=require('./payment-confirm.js').createService({sdk,env,fetchImpl,now});
-                return res.status(200).json(await service.syncWeb(db,identity.uid,device));
+                return reply(200,await service.syncWeb(db,identity.uid,device,measure));
             }
             if(!ready())throw problem('구독 서비스를 준비하고 있습니다. 잠시 후 다시 확인해 주세요.',503);
-            if(input.action==='session')return res.status(200).json({appUserId:account.rcUserId,canPurchase:account.canPurchase,reason:account.reason});
-            return res.status(200).json(await sync(db,identity.uid,device));
-        }catch(error){return res.status(error.status || 500).json({error:error.status?error.message:'구독 확인 중 오류가 발생했습니다. 잠시 후 다시 확인해 주세요.'});}
+            if(input.action==='session')return reply(200,{appUserId:account.rcUserId,canPurchase:account.canPurchase,reason:account.reason});
+            return reply(200,await measure('play_sync',()=>sync(db,identity.uid,device)));
+        }catch(error){return reply(error.status || 500,{error:error.status?error.message:'구독 확인 중 오류가 발생했습니다. 잠시 후 다시 확인해 주세요.'});}
     };
 }
 module.exports=createHandler();module.exports.createHandler=createHandler;
