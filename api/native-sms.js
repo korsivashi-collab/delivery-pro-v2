@@ -1,5 +1,6 @@
 const admin = require('firebase-admin');
 const { randomInt, randomUUID, createHmac, timingSafeEqual } = require('node:crypto');
+const { assertTrialEligible } = require('../server/trial-registration.cjs');
 const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('../server/license-integrity.cjs');
 
 // Phone identity owns memos; a replaceable session owns access to a license.
@@ -116,6 +117,10 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
             const db = sdk.firestore(), auth = sdk.auth(), stamp = now();
             const challengeRef = db.collection('native_sms_challenges').doc(hash('phone:' + digits));
             if (input.action === 'send') {
+                const isTrial = input.purpose === 'trial';
+                if (isTrial && input.trialOffer === 'sales-month' && String(env.SALES_TRIAL_ENABLED || '').trim().toLowerCase() === 'false') {
+                    throw problem('30일 무료 체험 신청이 종료되었습니다.',410);
+                }
                 const requestId = randomUUID(), code = String(randomInt(0, 1000000)).padStart(6, '0');
                 // Vercel supplies x-forwarded-for. Global + phone caps remain authoritative even if IP changes.
                 const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim().slice(0, 100);
@@ -125,8 +130,10 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                     { id: hash('phone-rate:' + digits), limits: { hour: 5, day: 20 } },
                     { id: hash('ip-rate:' + ip), limits: { hour: 20, day: 100 } }
                 ];
+                if (isTrial) specs.push({id:hash('trial-device-rate:'+String(input.deviceId || '')),limits:{hour:5,day:10}});
                 const refs = specs.map(spec => db.collection('native_sms_limits').doc(spec.id));
                 await db.runTransaction(async tx => {
+                    if (isTrial) await assertTrialEligible(db, tx, digits, input.deviceId);
                     const [old, ...limits] = await Promise.all([tx.get(challengeRef), ...refs.map(ref => tx.get(ref))]);
                     if (stamp - (old.data()?.sentAt || 0) < 60000) throw problem('재전송은 60초 후 가능합니다.', 429);
                     const updates = specs.map((spec, index) => {
