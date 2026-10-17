@@ -124,7 +124,7 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
         if (blocked.exists) throw problem('접속이 제한된 기기입니다.',403);
         const license = licenseSnap.data() || {}, profile = profileSnap.data() || {};
         if (binding.exists && binding.data().uid !== uid) throw problem('이용권 소유자가 다릅니다.',403);
-        if (license.phone && phoneDigits(license.phone) !== phoneDigits(account.phone) || profile.phone && phoneDigits(profile.phone) !== phoneDigits(account.phone)) throw problem('이용권 전화번호가 변경되었습니다. 고객센터에 문의해 주세요.',409);
+        if (!license.driverSessionId && (license.phone && phoneDigits(license.phone) !== phoneDigits(account.phone) || profile.phone && phoneDigits(profile.phone) !== phoneDigits(account.phone))) throw problem('이용권 전화번호가 변경되었습니다. 고객센터에 문의해 주세요.',409);
         if (license.routeOwnerId && profile.routeOwnerId && license.routeOwnerId !== profile.routeOwnerId) throw problem('계정 소유자 정보를 확인해 주세요.',409);
         if (device && (license.deviceId || profile.deviceId) && (license.deviceId || profile.deviceId) !== device) throw problem('다른 기기에 연결된 계정입니다.',409);
         // Prevent old concurrent REST responses from rolling back newer subscription state.
@@ -140,7 +140,7 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
             const routeOwnerId = license.routeOwnerId || profile.routeOwnerId || randomUUID();
             const expiresAt = active ? latest.expiresAt : Math.min(latest.expiresAt || now,now);
             const expireDate = new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
-            const data = { phone: account.phone, routeOwnerId, deviceId: device || license.deviceId || profile.deviceId || '',
+            const data = { phone: license.driverSessionId ? license.phone : account.phone, routeOwnerId, deviceId: license.driverSessionId ? license.deviceId : device || license.deviceId || profile.deviceId || '',
                 type:'regular', status:active?'active':'expired', billingManaged:true, billingUid:uid,
                 expiresAt, expireDate, subscriptionProduct:latest.productId || '', subscriptionSandbox:latest.sandbox === true };
             tx.set(licenseRef,{...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now});

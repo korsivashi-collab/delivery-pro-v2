@@ -63,6 +63,34 @@ function isActive(data, today, now) {
     return true;
 }
 
+// Block-list failures propagate; an unavailable list must never grant access.
+async function assertNotBlocked(db, reader, key, phone, device) {
+    const collection = db.collection('blocked_devices');
+    const snapshot = await (reader === db ? collection.get() : reader.get(collection));
+    const digits = phoneDigits(phone), cleanKey = String(key || '').trim().toUpperCase();
+    for (const item of snapshot.docs) {
+        const data = item.data();
+        const keys = [data.key, data.licenseKey, data.licenseId, item.id].filter(Boolean).map(v => String(v).trim().toUpperCase());
+        const phones = [data.phone, data.phoneNumber, item.id].filter(Boolean).map(phoneDigits);
+        if ((device && (item.id === device || data.deviceId === device)) ||
+            (cleanKey && keys.includes(cleanKey)) || (digits && phones.includes(digits))) {
+            throw problem('접속이 제한된 계정입니다.', 403);
+        }
+    }
+}
+
+async function assertDriverSession(db, identity, key, device, now = Date.now()) {
+    if (!identity?.driverSessionId || identity.driverKey !== key || identity.driverDeviceId !== device) {
+        throw problem('접속이 해제되었습니다. 다시 로그인해 주세요.', 401);
+    }
+    const snapshot = await db.collection('licenses').doc(key).get(), data = snapshot.data();
+    if (!snapshot.exists || data.driverSessionId !== identity.driverSessionId || data.driverUid !== identity.uid || data.deviceId !== device) {
+        throw problem('다른 기기에서 로그인하여 접속이 해제되었습니다.', 401);
+    }
+    if (!isActive(data, new Date(now + 9 * 3600000).toISOString().slice(0, 10), now)) throw problem('사용할 수 없는 이용권입니다.', 403);
+    return data;
+}
+
 async function saveLicenses(db, request, now = Date.now()) {
     const create = request?.action === 'create';
     if (!create && request?.action !== 'edit') throw problem('지원하지 않는 저장 요청입니다.');
@@ -113,6 +141,9 @@ async function saveLicenses(db, request, now = Date.now()) {
             if (originalBinding.exists && originalBinding.data().uid !== bound.id) throw problem('결제 소유자 연결이 일치하지 않습니다.',409);
         }
         const orderSnap = renaming && bound ? await tx.get(db.collection('payment_orders').where('uid', '==', bound.id)) : {docs:[]};
+        // Pending allocations store the login key, while delivered routes keep their stable owner.
+        const allocationSnap = renaming && payloads[0].type !== 'dispatch'
+            ? await tx.get(db.collection('dispatch_orders')) : {docs:[]};
         const retired = new Map(), changed = [], memoPhones = new Set(), orphanProfiles = new Map();
         for (const payload of payloads) {
             if ((create || payload.key !== origKey) && (licenses.has(payload.key) || profiles.has(payload.key))) {
@@ -124,8 +155,9 @@ async function saveLicenses(db, request, now = Date.now()) {
                 profiles.delete(payload.key);
             }
             if (account) {
-                if (payload.phone && phoneDigits(payload.phone) !== phoneDigits(account.phone)) throw problem('결제 계정의 인증된 휴대폰 번호는 변경할 수 없습니다.', 409);
-                payload.phone = normalizePhone(account.phone);
+                const currentPhone = licenses.get(origKey).driverSessionId ? licenses.get(origKey).phone : account.phone;
+                if (payload.phone && phoneDigits(payload.phone) !== phoneDigits(currentPhone)) throw problem('결제 계정의 인증된 휴대폰 번호는 변경할 수 없습니다.', 409);
+                payload.phone = normalizePhone(currentPhone);
                 if (payload.type !== (licenses.get(origKey).type || 'regular') || payload.expireDate !== licenses.get(origKey).expireDate) throw problem('결제 계정의 유형·만료일은 결제/취소 결과로 관리됩니다.', 409);
                 if (renaming && payload.key.length > 8) throw problem('새 라이선스 키는 8자리 이하로 입력해 주세요.');
             }
@@ -200,6 +232,12 @@ async function saveLicenses(db, request, now = Date.now()) {
             set(db.collection('billing_license_bindings').doc(payloads[0].key), {uid:bound.id,provider:account.webManaged?'toss':'google_play'});
             remove(db.collection('billing_license_bindings').doc(origKey));
             for (const order of orderSnap.docs) if(order.data().licenseKey===origKey) set(order.ref, {licenseKey:payloads[0].key}, {merge:true});
+        }
+        for (const document of allocationSnap.docs) {
+            const orders = document.data().orders;
+            if (!Array.isArray(orders) || !orders.some(order => order.assignedDriver === origKey)) continue;
+            set(document.ref, {orders:orders.map(order => order.assignedDriver === origKey
+                ? {...order,assignedDriver:payloads[0].key} : order)}, {merge:true});
         }
         for (const [id, upgradedTo] of retired) {
             const phone = changed.find(item => item.payload.key === upgradedTo).payload.phone;
@@ -304,4 +342,4 @@ async function deleteLicenseAccount(db, request, now = Date.now()) {
     });
 }
 
-module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, problem, isActive };
+module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, problem, isActive, assertNotBlocked, assertDriverSession };
