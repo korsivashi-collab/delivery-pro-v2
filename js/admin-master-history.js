@@ -288,7 +288,7 @@ export function renderAccountHistoryView() {
 
         pagedItems.forEach(item => {
             let typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-blue-50 text-blue-700 border border-blue-200 shadow-xs"><i class="fa-solid fa-user text-[10px]"></i> 일반 계정</span>`;
-            if (item.type === 'trial') typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs"><i class="fa-solid fa-clock text-[10px]"></i> 7일 체험</span>`;
+            if (item.type === 'trial') typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-emerald-50 text-emerald-700 border border-emerald-200 shadow-xs"><i class="fa-solid fa-clock text-[10px]"></i> ${item.trialDays === 30 ? '영업 30일' : '7일 체험'}</span>`;
             else if (item.type === 'dispatch') typeBadge = `<span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-black whitespace-nowrap bg-purple-50 text-purple-700 border border-purple-200 shadow-xs"><i class="fa-solid fa-building-user text-[10px]"></i> 관제 계정</span>`;
 
             const isChecked = state.historySelectedAccountKeys.has(item.key);
@@ -373,7 +373,7 @@ export function renderAccountHistoryView() {
         statusBadge.className = targetLic.status === 'active' ? 'bg-emerald-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full' : 'bg-red-500 text-white text-[10px] font-black px-2 py-0.5 rounded-full';
     }
     const typeBadge = document.getElementById('acc-type-badge');
-    if (typeBadge) typeBadge.innerText = targetLic.type === 'dispatch' ? '관제 계정' : (targetLic.type === 'trial' ? '7일 무료 체험' : '일반 계정');
+    if (typeBadge) typeBadge.innerText = targetLic.type === 'dispatch' ? '관제 계정' : (targetLic.type === 'trial' ? (targetLic.trialDays === 30 ? '영업 30일 체험' : '7일 무료 체험') : '일반 계정');
 
     if (profileCardEl) { profileCardEl.classList.remove('hidden'); profileCardEl.classList.add('flex'); }
 

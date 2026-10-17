@@ -94,7 +94,7 @@ export function renderMasterTables() {
             <td class="py-3 px-3 font-black text-gray-900">${item.phone || '-'}</td>
             <td class="py-3 px-3"><span class="font-mono text-[11px] text-gray-700">${item.deviceId || '-'}</span></td>
             <td class="py-3 px-3 font-bold">${item.expireDate || '-'}</td>
-            <td class="py-3 px-3"><span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-black">7일체험</span></td>
+            <td class="py-3 px-3"><span class="bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full text-[10px] font-black">${item.trialDays === 30 ? '영업 30일' : '7일체험'}</span></td>
             <td class="py-3 px-3 text-center space-x-1 whitespace-nowrap">
                 <button onclick="window.openEditLicenseModal('${item.key}')" class="px-2.5 py-1 bg-blue-600 text-white font-black rounded-lg text-[11px]">수정</button>
                 <button onclick="window.deleteLicense('${item.key}')" class="px-2 py-1 bg-red-50 text-red-700 font-bold rounded-lg text-[11px]">삭제</button>

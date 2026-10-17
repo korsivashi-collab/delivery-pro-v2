@@ -9,7 +9,8 @@ import {
     firebaseVerifyLicense, 
     watchLicenseStatus, 
     startDispatchMessageListener, 
-    firebaseStartTrial, 
+    firebaseStartTrial,
+    isSalesTrialEntry, 
     firebaseClearDeviceData,
     checkIfDeviceBlocked,
     syncMyParkingMemosFromServer,
@@ -756,6 +757,11 @@ export async function sendTrialSmsCode() {
 }
 
 export function openTrialModal() {
+    const days = typeof isSalesTrialEntry === 'function' && isSalesTrialEntry() ? 30 : 7;
+    const title = document.getElementById('trial-title');
+    const entry = document.getElementById('trial-entry-label');
+    if (title) title.textContent = `${days}일 무료 체험 시작`;
+    if (entry) entry.textContent = days === 30 ? '영업용 30일 무료 체험' : '처음이신가요? 7일 무료 체험';
     resetTrialSmsSession();
     const input = document.getElementById('trial-phone-input');
     const msg = document.getElementById('trial-error-msg');
@@ -819,7 +825,7 @@ export async function startFreeTrial() {
             localStorage.setItem('deliveryProUserPhone', formattedPhone);
             localStorage.setItem('deliveryProExpireDate', res.expireDate);
             localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
+            alert(`${res.trialDays || (typeof isSalesTrialEntry === 'function' && isSalesTrialEntry() ? 30 : 7)}일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!`);
             closeTrialModal();
             
             const login = await firebaseVerifyLicense(res.trialKey, formattedPhone, deviceId);

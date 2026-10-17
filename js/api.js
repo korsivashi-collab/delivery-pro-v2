@@ -389,6 +389,10 @@ export async function sendOfficeMessage() {
 
 
 // 6. 7일 무료 체험 시작
+export function isSalesTrialEntry() {
+    return String(globalThis.location?.pathname || '').replace(/\/+$/, '') === '/trial-month';
+}
+
 export async function firebaseStartTrial(phone, deviceId) {
     const digits = String(phone || '').replace(/[^0-9]/g, '');
     const national = String(phone || '').trim().startsWith('+82') ? '0' + digits.slice(2).replace(/^0/, '') : digits;
@@ -407,9 +411,9 @@ export async function firebaseStartTrial(phone, deviceId) {
         return { valid: false, msg: '이미 가입 또는 무료 체험 이력이 있는 휴대폰 번호입니다. 정식 라이선스를 이용해 주세요.' };
     }
     const deviceSnapshot = await getDocs(query(collection(db, 'licenses'), where('deviceId', '==', deviceId), where('type', '==', 'trial')));
-    if (!deviceSnapshot.empty) return { valid: false, msg: '이미 7일 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.' };
+    if (!deviceSnapshot.empty) return { valid: false, msg: '이미 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.' };
     const token = await user.getIdToken();
-    const response = await apiFetch('/api/start-trial', {
+    const response = await apiFetch(isSalesTrialEntry() ? '/api/start-trial-month' : '/api/start-trial', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
         body: JSON.stringify({ phone: formattedPhone, deviceId })
     });

@@ -7,7 +7,7 @@ import { openSubscriptionModal, openLicenseRenewal } from './subscriptions.js';
 
 import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 import { calculateOptimizedRoute } from './optimizer.js';
-import { saveRouteToFirestore, fetchActiveRouteOnce, sendOfficeMessage } from './api.js';
+import { saveRouteToFirestore, fetchActiveRouteOnce, sendOfficeMessage, isSalesTrialEntry } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
@@ -191,6 +191,7 @@ export async function initApp() {
 
     renderList();
     await authReady;
+    if (isSalesTrialEntry() && !state.getRouteOwnerId()) openTrialModal();
     setTimeout(() => { cleanOldHistory(); initCompletionQueue(checkSavedAuth); }, 0);
 }
 
