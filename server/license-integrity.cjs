@@ -342,4 +342,47 @@ async function deleteLicenseAccount(db, request, now = Date.now()) {
     });
 }
 
-module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, problem, isActive, assertNotBlocked, assertDriverSession };
+async function linkDispatchDriver(db, identity, request, now = Date.now()) {
+    const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
+    if (!master && identity?.role !== 'DISPATCH') throw problem('관제 또는 마스터 로그인이 필요합니다.', 403);
+    const dispatchKey = validateKey(master ? request.dispatchKey : identity.uid);
+    if (!master && request.dispatchKey && request.dispatchKey !== dispatchKey) throw problem('다른 관제소로 연결할 수 없습니다.', 403);
+    const input = validateKey(request.driverInput);
+    const today = new Date(now + 9 * 3600000).toISOString().slice(0, 10);
+    return db.runTransaction(async tx => {
+        const lockRef = db.collection('admin_license_controls').doc('phone_integrity');
+        const lock = await tx.get(lockRef);
+        const licenses = await tx.get(db.collection('licenses'));
+        const dispatcher = licenses.docs.find(doc => doc.id === dispatchKey)?.data();
+        if (dispatcher?.type !== 'dispatch' || !isActive(dispatcher, today, now)) throw problem('관제 이용권이 만료되었거나 사용할 수 없습니다.', 403);
+        if (!master) {
+            const sessions = Array.isArray(dispatcher.activeSessions) && dispatcher.activeSessions.length ? dispatcher.activeSessions :
+                (dispatcher.currentSessionToken ? [dispatcher.currentSessionToken] : []);
+            if (sessions.length && !sessions.includes(request.sessionToken)) throw problem('관제 접속이 해제되었습니다. 다시 로그인해 주세요.', 401);
+        }
+        const keys = [input, `TRIAL-${input}`, `PRO-${input}`];
+        let target = licenses.docs.find(doc => keys.includes(doc.id) && doc.data().type !== 'dispatch');
+        if (!target && /^(010[\d\s()-]+|\+82[\d\s()-]+)$/.test(input)) {
+            const phone = phoneDigits(input);
+            const matches = licenses.docs.filter(doc => doc.data().type !== 'dispatch' && phoneDigits(doc.data().phone) === phone);
+            if (matches.length > 1) throw problem('같은 번호의 계정이 여러 개입니다. 라이선스 키로 연결해 주세요.', 409);
+            target = matches[0];
+        }
+        if (!target) throw problem('기사 계정을 찾을 수 없습니다. 키 또는 번호를 확인해 주세요.', 404);
+        const driver = target.data();
+        const profileRef = db.collection('driver_profiles').doc(target.id);
+        const profile = await tx.get(profileRef);
+        if (!isActive(driver, today, now)) throw problem('기사 이용권이 만료되었거나 사용할 수 없습니다.', 403);
+        if ([driver.allowTms, profile.data()?.allowTms].some(value => value === false || value === 'false')) throw problem('기사 앱의 연결설정에서 TMS 연결을 켜 주세요.', 403);
+        if (!master && driver.dispatchKey && driver.dispatchKey !== dispatchKey) throw problem('이미 다른 관제소에 연결된 기사입니다. 마스터 관리자에게 문의해 주세요.', 409);
+        const count = licenses.docs.filter(doc => doc.data().type !== 'dispatch' && doc.data().dispatchKey === dispatchKey).length;
+        if (driver.dispatchKey !== dispatchKey && Number(dispatcher.maxSlots) > 0 && count >= Number(dispatcher.maxSlots)) throw problem('관제 기사 연결 슬롯이 모두 사용 중입니다.', 409);
+        // Trial duration does not affect dispatch eligibility. Keep both records in sync.
+        tx.update(target.ref, { dispatchKey });
+        if (profile.exists) tx.update(profileRef, { dispatchKey });
+        tx.set(lockRef, { revision: (lock.data()?.revision || 0) + 1, updatedAt: now });
+        return { success: true, key: target.id, phone: driver.phone || '', dispatchKey };
+    });
+}
+
+module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
