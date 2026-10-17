@@ -155,17 +155,17 @@
 
     <script type="importmap">
     {"imports":{
-        "./js/app.js":"./js/app.js?v=20261016-checkout-perf",
-        "./js/auth.js":"./js/auth.js?v=20261016-checkout-perf",
-        "./js/subscriptions.js":"./js/subscriptions.js?v=20261016-checkout-perf",
-        "./js/api.js":"./js/api.js?v=20261016-scan-memo",
-        "./js/memo.js":"./js/memo.js?v=20261016-scan-memo",
-        "./js/scanner.js":"./js/scanner.js?v=20261016-scan-memo"
+        "./js/app.js":"./js/app.js?v=20261017-driver-session",
+        "./js/auth.js":"./js/auth.js?v=20261017-driver-session",
+        "./js/subscriptions.js":"./js/subscriptions.js?v=20261017-driver-session",
+        "./js/api.js":"./js/api.js?v=20261017-driver-session",
+        "./js/memo.js":"./js/memo.js?v=20261017-driver-session",
+        "./js/scanner.js":"./js/scanner.js?v=20261017-driver-session"
     }}
     </script>
     <script type="module">
         import { initApp } from './js/app.js';
-        window.onload = () => initApp();
+        initApp().catch(error => { console.error('앱 시작 실패:', error); document.querySelector('#boot-screen span').textContent = '접속 준비에 실패했습니다. 새로고침해 주세요.'; });
     </script>
 </head>
 <body class="bg-slate-100 flex flex-col overflow-hidden relative" style="height: calc(var(--vh, 1vh) * 100);">
