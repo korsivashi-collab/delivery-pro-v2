@@ -126,6 +126,12 @@ import {
 // ==========================================
 // 1. 초기화 및 페이지 라우팅 제어 (Lifecycle)
 // ==========================================
+window.addEventListener('admin-auth-required', () => {
+    sessionStorage.removeItem('deliveryProRole');
+    sessionStorage.removeItem('deliveryProAdminName');
+    window.location.replace('admin.html');
+});
+
 async function hasVerifiedMasterSession() {
     try {
         await auth.authStateReady();
@@ -844,6 +850,9 @@ window.filterDriverDropdown = filterDriverDropdown;
 window.onDriverSelectChange = onDriverSelectChange;
 window.selectAccountDirectly = selectAccountDirectly;
 window.backToAllAccountsView = backToAllAccountsView;
+window.editSelectedAccount = () => {
+    if (state.currentSelectedAccountKey) openEditLicenseModal(state.currentSelectedAccountKey);
+};
 window.changeHistoryPage = changeHistoryPage;
 window.toggleHistoryNoticeMode = toggleHistoryNoticeMode;
 window.toggleHistoryItemSelection = toggleHistoryItemSelection;

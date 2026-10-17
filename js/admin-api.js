@@ -4,7 +4,7 @@ import { getFirestore } from "https://www.gstatic.com/firebasejs/12.18.0/firebas
 import { getStorage } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-storage.js";
 
 // 👇 새롭게 추가된 부분: 인증(Auth) 모듈 불러오기
-import { getAuth, signInWithCustomToken, RecaptchaVerifier, signInWithPhoneNumber,
+import { getAuth, initializeAuth, browserSessionPersistence, signInWithCustomToken, RecaptchaVerifier, signInWithPhoneNumber,
     setPersistence, inMemoryPersistence, signOut } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -16,12 +16,14 @@ const firebaseConfig = {
     appId: "1:329406776647:web:62b32568328dd1eecab862"
 };
 
-const app = initializeApp(firebaseConfig);
+// Admin pages share a tab session across navigation, isolated from driver logins
+// and from other administrator tabs on the same origin.
+const app = initializeApp(firebaseConfig, 'deliverypro-admin');
+export const auth = initializeAuth(app, { persistence: browserSessionPersistence });
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 
-// 👇 새롭게 추가된 부분: Auth 객체 초기화 및 내보내기
-export const auth = getAuth(app);
+// 관리자 세션은 위에서 탭 단위로 초기화합니다.
 export { signInWithCustomToken };
 
 // SMS 확인용 세션은 기사/관제/마스터의 실제 로그인 세션과 분리합니다.
