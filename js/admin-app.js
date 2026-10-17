@@ -141,6 +141,18 @@ async function hasVerifiedMasterSession() {
     } catch (_) { return false; }
 }
 
+async function hasVerifiedDispatchSession() {
+    try {
+        await auth.authStateReady();
+        const result = await auth.currentUser?.getIdTokenResult();
+        if (!result) return false;
+        const monitor = (sessionStorage.getItem('deliveryProSessionToken') || '').startsWith('MONITOR-');
+        if (monitor) return result.claims.role === 'MASTER' && result.claims.masterSmsVerified === true &&
+            result.claims.masterSessionExpiresAt > Date.now() / 1000;
+        return result.claims.role === 'DISPATCH' && auth.currentUser.uid === sessionStorage.getItem('deliveryProDispatchKey');
+    } catch (_) { return false; }
+}
+
 window.onload = async () => {
     const path = window.location.pathname;
     const isMasterPage = path.includes('admin-master.html');
@@ -188,6 +200,10 @@ window.onload = async () => {
         }
     }
 
+    if ((isDispatchPage || sessionStorage.getItem('deliveryProRole') === 'DISPATCH') && !await hasVerifiedDispatchSession()) {
+        for (const key of ['deliveryProRole', 'deliveryProAdminName', 'deliveryProDispatchKey', 'deliveryProSessionToken']) sessionStorage.removeItem(key);
+        if (isDispatchPage) { window.location.replace('admin.html'); return; }
+    }
     const savedRole = sessionStorage.getItem('deliveryProRole');
     const savedName = sessionStorage.getItem('deliveryProAdminName') || '마스터';
 
