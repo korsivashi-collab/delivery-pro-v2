@@ -6,7 +6,7 @@ module.exports = async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ valid: false, msg: 'POST 요청만 가능합니다.' });
     const offer = req.query?.campaign === 'sales-month' ? 'sales-month' : 'standard';
     if (offer === 'sales-month' && String(process.env.SALES_TRIAL_ENABLED || '').trim().toLowerCase() === 'false') {
-        return res.status(410).json({valid:false,msg:'영업용 무료 체험 발급이 종료되었습니다.'});
+        return res.status(410).json({valid:false,msg:'30일 무료 체험 신청이 종료되었습니다.'});
     }
     const token = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
     if (!token) return res.status(401).json({ valid: false, msg: 'SMS 인증을 먼저 완료해 주세요.' });
