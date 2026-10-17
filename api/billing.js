@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const { timingSafeEqual } = require('node:crypto');
-const { problem } = require('../server/license-integrity.cjs');
+const { problem, assertDriverSession, assertNotBlocked } = require('../server/license-integrity.cjs');
 const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
 function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
@@ -40,10 +40,24 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
                 await eventRef.set({processedAt:now(),type:String(event.type || '').slice(0,80),matchedAccounts:known.size});
                 return res.status(200).json({ok:true});
             }
-            if(!['session','sync'].includes(input?.action))throw problem('지원하지 않는 요청입니다.');
+            if(!['session','sync','driver-sync'].includes(input?.action))throw problem('지원하지 않는 요청입니다.');
             const token=/^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];if(!token)throw problem('휴대폰 인증을 완료해 주세요.',401);
             let identity;try{identity=await measure('auth',()=>sdk.auth().verifyIdToken(token,true));}catch{throw problem('인증이 만료되었습니다. 휴대폰 인증을 다시 진행해 주세요.',401);}
             verifiedPhone(identity);const device=deviceId(input.deviceId);
+            if (input.action === 'driver-sync') {
+                await assertDriverSession(db, identity, input.licenseKey, device, now());
+                await assertNotBlocked(db, db, input.licenseKey, identity.phone_number, device);
+                const binding = (await db.collection('billing_license_bindings').doc(input.licenseKey).get()).data();
+                if (!binding?.uid) throw problem('결제 연결 정보를 확인해 주세요.',409);
+                const owner = (await db.collection('billing_accounts').doc(binding.uid).get()).data();
+                if (owner?.licenseKey !== input.licenseKey || owner.deletedAt != null) throw problem('결제 계정 연결이 변경되었습니다.',409);
+                if (owner.webManaged) {
+                    const service = require('./payment-confirm.js').createService({sdk,env,fetchImpl,now});
+                    return reply(200,await service.syncWeb(db,binding.uid,null,measure));
+                }
+                if (!ready()) throw problem('구독 서비스를 준비하고 있습니다.',503);
+                return reply(200,await sync(db,binding.uid));
+            }
             const account=await measure('account',()=>ensureAccount(db,identity,input,now()));
             if(input.licenseKey&&input.licenseKey!==account.licenseKey)throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
             if(input.action==='sync'&&account.webManaged){

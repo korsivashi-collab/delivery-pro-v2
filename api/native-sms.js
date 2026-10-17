@@ -1,47 +1,81 @@
 const admin = require('firebase-admin');
 const { randomInt, randomUUID, createHmac, timingSafeEqual } = require('node:crypto');
-const { normalizePhone, phoneDigits, problem } = require('../server/license-integrity.cjs');
+const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('../server/license-integrity.cjs');
 
-// A new device may replace the old binding only after recent SENS verification.
+// Phone identity owns memos; a replaceable session owns access to a license.
 async function claimDevice(sdk, req, input, stamp) {
     const bearer = /^Bearer (.+)$/.exec(req.headers?.authorization || '')?.[1];
     if (!bearer) throw problem('휴대폰 인증을 다시 진행해 주세요.', 401);
     let identity;
     try { identity = await sdk.auth().verifyIdToken(bearer, true); }
     catch (_) { throw problem('휴대폰 인증이 만료되었습니다.', 401); }
-    const age = Math.floor(stamp / 1000) - identity.auth_time;
-    if (identity.firebase?.sign_in_provider !== 'custom' || identity.nativePhoneVerified !== true ||
-        !Number.isFinite(age) || age < -30 || age > 300 || !identity.phone_number || identity.uid === 'admin_master' || identity.role === 'MASTER') {
-        throw problem('새 기기 로그인은 최근 SENS 휴대폰 인증이 필요합니다.', 403);
+    const provider = identity.firebase?.sign_in_provider;
+    if (!(provider === 'phone' || provider === 'custom' && identity.nativePhoneVerified === true) ||
+        !identity.phone_number || identity.uid === 'admin_master' || ['MASTER','DISPATCH'].includes(identity.role)) {
+        throw problem('휴대폰 인증을 완료해 주세요.', 403);
     }
-    const key = input.key, deviceId = input.deviceId;
-    if (typeof key !== 'string' || !key || key.length > 200 || key.includes('/') ||
+    const phone = normalizePhone(identity.phone_number), deviceId = input.deviceId;
+    const key = typeof input.key === 'string' ? input.key.trim().toUpperCase() : '';
+    if (!key || key.length > 100 || /[\/\u0000-\u001f]/.test(key) ||
         typeof deviceId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(deviceId)) throw problem('로그인 정보가 올바르지 않습니다.');
-    const verified = phoneDigits(normalizePhone(identity.phone_number));
-    const db = sdk.firestore();
-    return db.runTransaction(async tx => {
-        const licenseRef = db.collection('licenses').doc(key), profileRef = db.collection('driver_profiles').doc(key);
-        const [license, profile, blocked] = await Promise.all([tx.get(licenseRef), tx.get(profileRef), tx.get(db.collection('blocked_devices').doc(deviceId))]);
-        if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
-        const records = [license, profile].filter(s => s.exists);
-        if (!records.length) throw problem('등록되지 않은 라이선스입니다.', 404);
-        const today = new Date(stamp + 9 * 3600000).toISOString().slice(0, 10).replace(/-/g, '');
-        let owner = '';
-        for (const snapshot of records) {
-            const data = snapshot.data();
-            if (data.type === 'dispatch' || ['suspended','revoked','expired','upgraded'].includes(data.status)) throw problem('사용할 수 없는 계정입니다.', 403);
-            const expiry = String(data.expireDate || '').replace(/\D/g, '');
-            if (expiry && expiry < today || data.expiresAt && data.expiresAt <= stamp) throw problem('이용기간이 만료되었습니다.', 403);
-            if (data.phone && phoneDigits(normalizePhone(data.phone)) !== verified) throw problem('등록된 본인 전화번호로 인증해 주세요.', 403);
-            if (data.routeOwnerId && owner && owner !== data.routeOwnerId) throw problem('계정 소유자 정보 확인이 필요합니다.', 409);
-            owner = data.routeOwnerId || owner;
+    if (input.phone && phoneDigits(input.phone) !== phoneDigits(phone)) throw problem('인증된 휴대폰 번호가 다릅니다.', 403);
+    const db = sdk.firestore(), resume = input.action === 'resume-driver';
+    const result = await db.runTransaction(async tx => {
+        const [exact] = await Promise.all([
+            tx.get(db.collection('licenses').doc(key)),
+            assertNotBlocked(db, tx, key, phone, deviceId)
+        ]);
+        let license = exact;
+        if (!license.exists) {
+            const aliases=await Promise.all([`PRO-${key}`,`TRIAL-${key}`].map(k=>tx.get(db.collection('licenses').doc(k))));
+            license=aliases.find(s=>s.exists);
         }
-        if (!records.some(s => s.data().phone)) throw problem('등록된 전화번호가 없어 관리자 확인이 필요합니다.', 403);
-        for (const [snapshot, ref] of [[license, licenseRef], [profile, profileRef]]) {
-            if (snapshot.exists) tx.update(ref, { deviceId, deviceChangedAt: stamp });
+        if (!license?.exists) throw problem('등록되지 않은 라이선스 키입니다.', 404);
+        const actualKey = license.id, data = license.data();
+        if (actualKey !== key) await assertNotBlocked(db, tx, actualKey, phone, deviceId);
+        if (data.type === 'dispatch' || !isActive(data, new Date(stamp + 9 * 3600000).toISOString().slice(0,10), stamp)) {
+            throw problem('사용이 정지되었거나 이용기간이 만료된 계정입니다.', 403);
         }
-        return { success: true };
+        const sameBinding = data.deviceId === deviceId && phoneDigits(data.phone) === phoneDigits(phone) && (!data.driverUid || data.driverUid === identity.uid);
+        const sameSession = sameBinding && data.driverSessionId && identity.driverSessionId === data.driverSessionId && identity.driverKey === actualKey && identity.driverDeviceId === deviceId;
+        if (resume && !sameSession && !(sameBinding && !data.driverSessionId)) throw problem('다른 기기에서 로그인했거나 인증이 만료되었습니다. 다시 인증해 주세요.', 401);
+        if (input.action === 'release-driver') {
+            if (!sameSession) throw problem('이미 해제된 접속입니다.',401);
+            const released={deviceId:'',driverUid:'',driverSessionId:randomUUID()};
+            tx.set(db.collection('licenses').doc(actualKey),released,{merge:true});
+            tx.set(db.collection('driver_profiles').doc(actualKey),released,{merge:true});
+            return {valid:true,released:true};
+        }
+        const age = Math.floor(stamp / 1000) - identity.auth_time;
+        if (!sameSession && !(resume && sameBinding && !data.driverSessionId) && (!Number.isFinite(age) || age < -30 || age > 300)) {
+            throw problem('새 로그인은 최근 휴대폰 인증이 필요합니다.', 401);
+        }
+        let routeOwnerId = data.routeOwnerId;
+        const changed = !sameSession || !routeOwnerId;
+        let profile;
+        if (changed) {
+            profile = await tx.get(db.collection('driver_profiles').doc(actualKey));
+            if (routeOwnerId && profile.data()?.routeOwnerId && routeOwnerId !== profile.data().routeOwnerId) throw problem('배송 자료 연결 정보를 확인해 주세요.', 409);
+            routeOwnerId = routeOwnerId || profile.data()?.routeOwnerId || randomUUID();
+        }
+        const driverSessionId = sameSession ? data.driverSessionId : randomUUID();
+        if (changed) {
+            const connection = {phone, deviceId, driverUid:identity.uid, driverSessionId, routeOwnerId};
+            tx.set(db.collection('licenses').doc(actualKey), {...connection, deviceChangedAt:stamp}, {merge:true});
+            tx.set(db.collection('driver_profiles').doc(actualKey), {...connection, key:actualKey,
+                status:data.status || 'active', expireDate:data.expireDate || '',
+                allowTms:profile.data()?.allowTms ?? data.allowTms ?? true}, {merge:true});
+        }
+        return {valid:true, actualKey, phone, deviceId, driverSessionId, routeOwnerId,
+            expireDate:data.expireDate || '', expiresAt:typeof data.expiresAt?.toMillis === 'function' ? data.expiresAt.toMillis() : data.expiresAt || null,
+            billingManaged:data.billingManaged === true, dispatchKey:data.dispatchKey || '', allowTms:data.allowTms !== false,
+            needsToken:!sameSession};
     });
+    if (result.needsToken) result.token = await sdk.auth().createCustomToken(identity.uid, {
+        nativePhoneVerified:true, driverKey:result.actualKey, driverDeviceId:deviceId, driverSessionId:result.driverSessionId
+    });
+    delete result.needsToken;
+    return result;
 }
 
 // OTP and counters are server-only Firestore collections (default-denied by existing rules).
@@ -63,16 +97,16 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
 
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
         try {
-            const [access, secret, serviceId, sender] = config();
             let input;
             try { input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
             catch (_) { throw problem('인증 요청이 올바르지 않습니다.'); }
-            if (input?.action === 'claim-device') {
+            if (['claim-device', 'login-driver', 'resume-driver', 'release-driver'].includes(input?.action)) {
                 if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({ projectId: env.FIREBASE_PROJECT_ID,
                     clientEmail: env.FIREBASE_CLIENT_EMAIL, privateKey: env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') }) });
                 return res.status(200).json(await claimDevice(sdk, req, input, now()));
             }
             if (!input || !['send', 'confirm'].includes(input.action)) throw problem('인증 요청이 올바르지 않습니다.');
+            const [access, secret, serviceId, sender] = config();
             const digits = phoneDigits(normalizePhone(input.phone)), phone = '+82' + digits.slice(1);
             const hash = value => createHmac('sha256', secret).update(value).digest('hex');
             if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({

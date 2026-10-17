@@ -28,12 +28,12 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   if(binding.exists&&binding.data().uid!==uid)throw problem('이용권 소유자 정보를 확인해 주세요.',403);
   if(blocked.exists||(!cancellation&&[license.status,profile.status].some(status=>['suspended','revoked'].includes(status))))throw problem('이용이 제한된 계정입니다.',403);
   if(device&&(license.deviceId||profile.deviceId)&&(license.deviceId||profile.deviceId)!==device)throw problem('다른 기기에 연결된 계정입니다.',409);
-  if(license.phone&&phoneDigits(license.phone)!==phoneDigits(account.phone)||profile.phone&&phoneDigits(profile.phone)!==phoneDigits(account.phone))throw problem('전화번호 정보를 확인해 주세요.',409);
+  if(!license.driverSessionId&&(license.phone&&phoneDigits(license.phone)!==phoneDigits(account.phone)||profile.phone&&phoneDigits(profile.phone)!==phoneDigits(account.phone)))throw problem('전화번호 정보를 확인해 주세요.',409);
   if(license.routeOwnerId&&profile.routeOwnerId&&license.routeOwnerId!==profile.routeOwnerId)throw problem('계정 소유권을 확인해 주세요.',409);
   const history=(account.webHistory||[]).map(x=>({...x}));
   for(const payment of payments){const old=history.find(x=>x.orderId===payment.orderId);if(!old)throw problem('결제 이력을 찾을 수 없습니다.',409);old.cancelled=old.cancelled===true||payment.status!=='DONE'||payment.balanceAmount!==old.amount;}
   let expiresAt=account.webBaseExpiresAt||0;for(const entry of history)if(!entry.cancelled)expiresAt=addMonths(Math.max(expiresAt,entry.approvedAt),entry.months);
-  const data={phone:account.phone,key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:device||license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:cancellation&&['suspended','revoked'].includes(license.status)?license.status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
+  const data={phone:license.driverSessionId?license.phone:account.phone,key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:license.driverSessionId?license.deviceId:device||license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:cancellation&&['suspended','revoked'].includes(license.status)?license.status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
   let changed=false;
   const saveChanged=(ref,before,after)=>{if(!isDeepStrictEqual(before,after)){tx.set(ref,after);changed=true;}};
   if(cancellation)saveChanged(cancelRef,cancelOrder,{...cancelOrder,cancellation:cancelOrder.cancellation||{status:'CANCELED',at:now(),by:cancellation.by,reason:cancellation.reason},method:cancellation.payment.method||cancelOrder.method||null});
