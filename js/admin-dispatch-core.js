@@ -1,6 +1,6 @@
 // js/admin-dispatch-core.js
 
-import { db } from "./admin-api.js";
+import { db, connectDispatchDriver } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { selectLatestOwnedRoute } from "./route-owner.js";
 import { map } from "./admin-map.js";
@@ -671,65 +671,15 @@ export function closeLinkDriverModal() {
 }
 
 export async function confirmLinkDriver() {
-    const rawInput = document.getElementById('link-driver-key-input').value.trim().toUpperCase();
-    if (!rawInput) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
-    const currentKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-
+    const input = document.getElementById('link-driver-key-input').value.trim();
+    if (!input) { alert("기사 키 또는 전화번호를 입력하세요."); return; }
+    const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     try {
-        const cleanDigits = rawInput.replace(/[^0-9]/g, '');
-        const rawKeyOnly = rawInput.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-        
-        let targetLicKey = null;
-        let targetLic = state.allLicenses.find(l => {
-            if (l.type === 'dispatch') return false;
-            const lKey = (l.key || '').toUpperCase();
-            const lPhone = (l.phone || '').replace(/[^0-9]/g, '');
-            const lRawKey = lKey.replace(/^(PRO|TRIAL|CTRL)-/i, '');
-            return lKey === rawInput || lRawKey === rawKeyOnly || (cleanDigits.length >= 8 && lPhone === cleanDigits);
-        });
-
-        if (targetLic) {
-            targetLicKey = targetLic.key || targetLic.id;
-        } else {
-            targetLicKey = rawInput; 
-        }
-
-        let docRef = doc(db, "licenses", targetLicKey);
-        let directSnap = await getDoc(docRef);
-        
-        if (!directSnap.exists()) {
-            docRef = doc(db, "licenses", `TRIAL-${targetLicKey}`);
-            directSnap = await getDoc(docRef);
-        }
-        if (!directSnap.exists()) {
-            docRef = doc(db, "licenses", `PRO-${targetLicKey}`);
-            directSnap = await getDoc(docRef);
-        }
-
-        if (!directSnap.exists()) { 
-            alert("기사 계정을 찾을 수 없습니다. 키 또는 번호를 다시 확인해 주세요."); 
-            return; 
-        }
-
-        const freshLicData = directSnap.data();
-        const finalKey = directSnap.id;
-
-        if (freshLicData.allowTms === false || freshLicData.allowTms === "false") {
-            alert(`해당 기사님([${freshLicData.phone || finalKey}])이 앱에서 'TMS 연결'을 차단(OFF) 상태로 설정했습니다.\n기사님에게 앱의 [연결설정]에서 스위치를 켜달라고 요청해 주셔야 연결이 가능합니다.`);
-            return;
-        }
-
-        if (freshLicData.dispatchKey && freshLicData.dispatchKey !== currentKey && currentKey !== 'MASTER') {
-            alert(`이미 다른 관제소([${freshLicData.dispatchKey}])에서 관리 중인 기사입니다.\n마스터 관리자를 통해서만 소속 변경이 가능합니다.`); 
-            return;
-        }
-
-        await updateDoc(doc(db, "licenses", finalKey), { dispatchKey: currentKey });
-        
-        alert(`[등록 완료] 기사 [${freshLicData.phone || finalKey}] 님이 연결되었습니다.`);
+        const result = await connectDispatchDriver(input, currentKey);
+        alert(`[등록 완료] 기사 [${result.phone || result.key}] 님이 연결되었습니다.`);
         closeLinkDriverModal();
-    } catch (e) { 
-        alert("연결 처리 중 오류가 발생했습니다: " + e.message); 
+    } catch (e) {
+        alert("연결 처리 중 오류가 발생했습니다: " + e.message);
     }
 }
 

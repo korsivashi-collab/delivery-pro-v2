@@ -1,3 +1,4 @@
+import { connectDispatchDriver } from "./admin-api.js";
 import { normalizeMasterPhone, formatMasterPhoneInput, saveMasterLicenses } from './admin-license-save.js';
 // js/admin-master-licenses.js
 
@@ -724,7 +725,7 @@ export async function linkDriverFromModal() {
     }
 
     try {
-        await updateDoc(doc(db, "licenses", targetLic.key || targetLic.id), { dispatchKey: dispatchKey });
+        await connectDispatchDriver(targetLic.key || targetLic.id, dispatchKey);
         alert(`기사 [${targetLic.phone || targetLic.key}] 님이 성공적으로 연결되었습니다.`);
         if (inputEl) inputEl.value = '';
         renderModalConnectedDrivers(dispatchKey);

@@ -26,6 +26,20 @@ export const storage = getStorage(app);
 // 관리자 세션은 위에서 탭 단위로 초기화합니다.
 export { signInWithCustomToken };
 
+export async function connectDispatchDriver(driverInput, dispatchKey) {
+    await auth.authStateReady();
+    if (!auth.currentUser) throw new Error('관리자 로그인이 만료되었습니다. 다시 로그인해 주세요.');
+    const token = await auth.currentUser.getIdToken();
+    const response = await fetch('/api/admin-license-save', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ action: 'linkDispatchDriver', driverInput, dispatchKey,
+            sessionToken: sessionStorage.getItem('deliveryProSessionToken') || '' })
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.error || '기사 연결에 실패했습니다.');
+    return result;
+}
+
 // SMS 확인용 세션은 기사/관제/마스터의 실제 로그인 세션과 분리합니다.
 const masterSmsAuth = getAuth(initializeApp(firebaseConfig, 'master-sms-verification'));
 masterSmsAuth.languageCode = 'ko';
