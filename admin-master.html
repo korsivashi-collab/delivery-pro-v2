@@ -179,7 +179,7 @@
                                 </div>
                             </div>
                             <div class="flex items-center gap-2">
-                                <button onclick="window.openEditLicenseModal(currentSelectedAccountKey)" class="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black px-4 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 active:scale-95"><i class="fa-solid fa-pen-to-square"></i> 정보 수정</button>
+                                <button onclick="window.editSelectedAccount()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-black px-4 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 active:scale-95"><i class="fa-solid fa-pen-to-square"></i> 정보 수정</button>
                                 <button onclick="window.deleteAccountFromHistory()" class="bg-red-600 hover:bg-red-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 active:scale-95"><i class="fa-solid fa-trash-can"></i> 계정 삭제</button>
                                 <button onclick="window.backToAllAccountsView()" class="bg-slate-800 hover:bg-slate-700 text-gray-200 text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow flex items-center gap-1.5 border border-slate-700"><i class="fa-solid fa-arrow-left"></i> 목록으로</button>
                             </div>
@@ -575,6 +575,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="module" src="./js/admin-app.js"></script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-admin-auth-isolation","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261017-admin-auth-isolation"}}</script>
+    <script type="module" src="./js/admin-app.js?v=20261017-admin-auth-isolation"></script>
 </body>
 </html>
