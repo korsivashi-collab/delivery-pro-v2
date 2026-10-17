@@ -71,6 +71,35 @@ service cloud.firestore {
              (isVerifiedMaster() || before == request.auth.uid))));
     }
 
+    // Session claims cannot be recreated by an old handset after a handoff.
+    function isActiveDriver() {
+      let key = request.auth.token.get('driverKey', '');
+      let account = get(/databases/$(database)/documents/licenses/$(key)).data;
+      return request.auth != null && key != '' &&
+        account.get('driverUid', '') == request.auth.uid &&
+        account.get('driverSessionId', '') == request.auth.token.get('driverSessionId', '-') &&
+        account.get('deviceId', '') == request.auth.token.get('driverDeviceId', '-') &&
+        !(account.get('status', '') in ['suspended', 'revoked', 'expired', 'upgraded']) &&
+        (!('expiresAt' in account) || account.expiresAt == null ||
+          (account.expiresAt is int && account.expiresAt > request.time.toMillis()) ||
+          (account.expiresAt is timestamp && account.expiresAt > request.time)) &&
+        (!('expireDate' in account) || account.expireDate == '' ||
+          int(account.expireDate.replace('[^0-9]', '')) >=
+          (request.time + duration.value(9, 'h')).year() * 10000 +
+          (request.time + duration.value(9, 'h')).month() * 100 +
+          (request.time + duration.value(9, 'h')).day());
+    }
+    function driverOwns(owner) {
+      return isActiveDriver() && get(/databases/$(database)/documents/licenses/$(request.auth.token.driverKey)).data.routeOwnerId == owner;
+    }
+    function driverSettings(key) {
+      return isActiveDriver() && request.auth.token.driverKey == key &&
+        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['allowTms', 'dispatchKey']) &&
+        request.resource.data.allowTms is bool &&
+        (request.resource.data.get('dispatchKey', '') == resource.data.get('dispatchKey', '') ||
+          (request.resource.data.allowTms == false && request.resource.data.get('dispatchKey', '') == ''));
+    }
+
     function validCompletion(data) {
       return data.keys().hasAll(['routeOwnerId', 'deviceId', 'completedAt']) &&
         data.routeOwnerId is string && data.routeOwnerId.size() > 0 &&
@@ -133,28 +162,28 @@ service cloud.firestore {
       allow delete: if false;
       // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
       allow create: if isVerifiedMaster();
-      allow update: if (isStoreLicense(licenseKey) && paidOperationalUpdate(licenseKey)) ||
-        (!isStoreLicense(licenseKey) &&
-        (resource.data.get('type', '') == 'trial' ||
-        request.resource.data.get('type', '') != 'trial' ||
-        isVerifiedMaster()));
+      allow update: if paidOperationalUpdate(licenseKey) || driverSettings(licenseKey) ||
+        (!isStoreLicense(licenseKey) && isWebAdmin() &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['driverUid', 'driverSessionId']) &&
+          (!('routeOwnerId' in resource.data) || request.resource.data.routeOwnerId == resource.data.routeOwnerId));
     }
 
     match /driver_profiles/{profileId} {
       allow read: if true;
-      allow create: if !isStoreLicense(profileId) && exists(/databases/$(database)/documents/licenses/$(profileId));
-      allow update: if (!isStoreLicense(profileId) && request.resource.data.diff(resource.data)
-        .affectedKeys().hasOnly(['deviceId', 'phone', 'allowTms'])) ||
+      allow create, delete: if false;
+      allow update: if driverSettings(profileId) ||
         (isStoreLicense(profileId) && ownsPaidLicense(profileId) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['allowTms']) &&
           request.resource.data.allowTms is bool &&
-          getAfter(/databases/$(database)/documents/licenses/$(profileId)).data.allowTms == request.resource.data.allowTms);
-      allow delete: if false;
+          getAfter(/databases/$(database)/documents/licenses/$(profileId)).data.allowTms == request.resource.data.allowTms) || (isWebAdmin() &&
+        !request.resource.data.diff(resource.data).affectedKeys().hasAny(['driverUid', 'driverSessionId']) &&
+          (!('routeOwnerId' in resource.data) || request.resource.data.routeOwnerId == resource.data.routeOwnerId));
     }
 
     // 3. 차단 기기 목록: 관리자의 차단 등록/해제 및 기기 체크 허용
     match /blocked_devices/{deviceId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isVerifiedMaster();
     }
 
     // 4. 배송 경로, GPS 보고, 위치 요청: 기사와 관제 실시간 통신
@@ -162,11 +191,13 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if request.resource.data.keys().hasAll(['deviceId']) &&
         request.resource.data.deviceId is string &&
-        request.resource.data.deviceId == docId;
+        request.resource.data.deviceId == docId &&
+        (isWebAdmin() || (driverOwns(request.resource.data.routeOwnerId) && request.auth.token.driverDeviceId == docId));
       allow delete: if isWebAdmin();
     }
     match /gps_reports/{docId} {
-      allow read, write: if true;
+      allow read: if true;
+      allow write: if isWebAdmin() || (isActiveDriver() && request.auth.token.driverDeviceId == docId);
     }
     match /gps_requests/{docId} {
       allow read, write: if true;
@@ -193,11 +224,13 @@ service cloud.firestore {
       allow get: if true;
       allow list: if isWebAdmin();
       // addDoc 경로는 operation 없음, 큐 경로는 동일 소유자의 complete 확인.
-      allow create: if validCompletion(request.resource.data) &&
+      allow create: if driverOwns(request.resource.data.routeOwnerId) &&
+        request.auth.token.driverDeviceId == request.resource.data.deviceId && validCompletion(request.resource.data) &&
         (!existsAfter(/databases/$(database)/documents/completion_operations/$(completionId)) ||
           completionOperationMatches(completionId, request.resource.data.routeOwnerId, 'complete'));
       // 식별정보/배송 내용은 고정하고 사진 후처리와 동일 payload 재전송만 허용.
-      allow update: if validCompletion(request.resource.data) &&
+      allow update: if driverOwns(request.resource.data.routeOwnerId) &&
+        request.auth.token.driverDeviceId == request.resource.data.deviceId && validCompletion(request.resource.data) &&
         request.resource.data.diff(resource.data).affectedKeys()
           .hasOnly(['photoUrl', 'hasPhoto', 'timeString', 'dispatchKey', 'expireAt']) &&
         (!('expireAt' in resource.data) ||
@@ -205,7 +238,7 @@ service cloud.firestore {
         completionOperationMatches(completionId, request.resource.data.routeOwnerId, 'complete');
       // 기존 관제 직접 삭제 또는 기사 큐의 동일 소유자 delete 마커만 허용.
       allow delete: if isWebAdmin() ||
-        completionDeletionMatches(completionId);
+        (driverOwns(getAfter(/databases/$(database)/documents/completion_operations/$(completionId)).data.routeOwnerId) && completionDeletionMatches(completionId));
     }
     match /memos/{memoId} {
       allow read: if true;
@@ -216,14 +249,14 @@ service cloud.firestore {
 
     // 8. 기기변경 임시 백업 금고
     match /temp_memo_backups/{key} {
-      allow read, write: if true;
+      allow read, write: if false;
     }
     // Completion queue compatibility: single-document access only.
     match /completion_operations/{operationId} {
       allow get: if true;
-      allow create: if validCompletionOperation(request.resource.data) &&
+      allow create: if driverOwns(request.resource.data.routeOwnerId) && validCompletionOperation(request.resource.data) &&
         operationResultMatches(operationId, request.resource.data);
-      allow update: if validCompletionOperation(request.resource.data) &&
+      allow update: if driverOwns(request.resource.data.routeOwnerId) && validCompletionOperation(request.resource.data) &&
         request.resource.data.routeOwnerId == resource.data.routeOwnerId &&
         (resource.data.action != 'delete' || request.resource.data.action == 'delete') &&
         operationResultMatches(operationId, request.resource.data);
