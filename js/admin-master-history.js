@@ -388,7 +388,7 @@ export function renderAccountHistoryView() {
     const doneCount = driverDone.length;
     const totalCount = pendingCount + doneCount;
     const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-    const driverMemos = state.allMemos.filter(m => targetPhone && m.ownerPhone === String(targetPhone).replace(/\D/g,'').replace(/^82/,'0'));
+    const driverMemos = state.allMemos.filter(m => targetPhone && String(m.ownerPhone || m.phone || '').replace(/\D/g,'').replace(/^82/,'0') === String(targetPhone).replace(/\D/g,'').replace(/^82/,'0'));
 
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">

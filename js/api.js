@@ -471,9 +471,8 @@ export async function saveMemoToFirestore(address, deviceId, memoText, phone = "
 }
 
 export async function syncMyParkingMemosFromServer(phone, deviceId, licenseKey) {
-    let result;
-    try { result=await memoRequest('mine'); } catch(error) { console.warn('공용 메모 동기화 실패:',error.message); return 0; }
-    if (phoneIdentityDigits(auth.currentUser?.phoneNumber) !== phoneIdentityDigits(result.phone)) return 0;
+    const result=await memoRequest('mine');
+    if (phoneIdentityDigits(auth.currentUser?.phoneNumber) !== phoneIdentityDigits(result.phone)) throw new Error('인증된 사용자가 변경되었습니다. 다시 확인해 주세요.');
     const addresses=result.addresses||[];
     localStorage.setItem('deliveryPro_my_parking_memos',JSON.stringify(addresses));
     return addresses.length;

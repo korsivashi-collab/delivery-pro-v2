@@ -549,11 +549,14 @@ export async function openSettingsModal() {
     const key = localStorage.getItem('deliveryProKey') || '';
 
     if (phone || deviceId) {
+        const countEl=document.getElementById('stat-parking-memo-count');
+        if(countEl)countEl.innerText='확인 중…';
         try {
             await syncMyParkingMemosFromServer(phone, deviceId, key);
             updateContributionStats();
         } catch (e) {
             console.error("서버 기여도 동기화 실패:", e);
+            if(countEl)countEl.innerText='확인 실패';
         }
     }
 }

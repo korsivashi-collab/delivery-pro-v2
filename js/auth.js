@@ -423,7 +423,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
         applyGpsPreference();
         // [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
         if (typeof syncMyParkingMemosFromServer === 'function') {
-            syncMyParkingMemosFromServer(phone, deviceId, key);
+            Promise.resolve(syncMyParkingMemosFromServer(phone, deviceId, key)).catch(error => console.warn('공용 메모 동기화 실패:',error.message));
         }
 
         // 관제/운영사 메시지 실시간 감시 (라이선스 키 기준)

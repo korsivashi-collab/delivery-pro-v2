@@ -99,7 +99,8 @@ export function personalMemoStorageKey() {
 }
 function ownsMemo(memo, identity) {
     const phone = String(identity?.phone || '').replace(/\D/g,'').replace(/^82/,'0');
-    return !!phone && memo.ownerPhone === phone;
+    const owner = String(memo.ownerPhone || memo.phone || '').replace(/\D/g,'').replace(/^82/,'0');
+    return !!phone && owner === phone;
 }
 
 export function getAllPersonalMemos() {
