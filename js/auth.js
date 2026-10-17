@@ -732,7 +732,8 @@ export async function sendTrialSmsCode() {
         trialSmsSendInProgress = true;
         if (button) { button.disabled = true; button.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin mr-1"></i>발송 중...'; }
         // 로그인 카드의 invisible reCAPTCHA 인스턴스를 공유합니다.
-        const result = await firebaseSendSmsVerification(phone, 'recaptcha-container');
+        const result = await firebaseSendSmsVerification(phone, 'recaptcha-container', {purpose:'trial',deviceId:getOrCreateDeviceId(),
+            trialOffer:typeof isSalesTrialEntry === 'function' && isSalesTrialEntry() ? 'sales-month' : 'standard'});
         if (version !== trialSmsVersion) return;
         if (phoneIdentity(phone) !== phoneIdentity(document.getElementById('trial-phone-input')?.value)) {
             resetTrialSmsSession(); showTrialSmsMessage('휴대폰 번호가 변경되었습니다. 인증번호를 다시 요청해 주세요.'); return;

@@ -50,7 +50,7 @@ const db = getFirestore(app);
 const storage = getStorage(app);
 
 // 기사 웹·앱 SMS는 SENS로 검증하고 기존 Firebase 계정 세션을 연결합니다.
-export async function firebaseSendSmsVerification(phoneNumber, containerId = 'recaptcha-container') {
+export async function firebaseSendSmsVerification(phoneNumber, containerId = 'recaptcha-container', options = {}) {
     try {
         const input = String(phoneNumber ?? '').trim();
         if (!/^\+?[0-9\s()-]+$/.test(input)) {
@@ -70,7 +70,7 @@ export async function firebaseSendSmsVerification(phoneNumber, containerId = 're
             error.code = 'auth/invalid-phone-number';
             throw error;
         }
-        return await sendNativePhoneVerification(formattedPhone, token => signInWithCustomToken(auth, token));
+        return await sendNativePhoneVerification(formattedPhone, token => signInWithCustomToken(auth, token), options);
     } catch (error) {
         throw error;
     }

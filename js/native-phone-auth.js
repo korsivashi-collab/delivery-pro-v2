@@ -9,11 +9,12 @@ async function smsRequest(payload) {
     if (!response.ok) throw Object.assign(new Error(data.error || '문자 인증 서버에 연결할 수 없습니다.'), { code: 'auth/native-session-failed' });
     return data;
 }
-export async function sendNativePhoneVerification(phoneNumber, signInWebSession) {
+export async function sendNativePhoneVerification(phoneNumber, signInWebSession, options = {}) {
     if (requestInProgress) throw new Error('휴대폰 인증 요청을 처리 중입니다. 잠시 기다려 주세요.');
     requestInProgress = true;
     try {
-        const result = await smsRequest({ action: 'send', phone: phoneNumber });
+        const trial = options.purpose === 'trial' ? {purpose:'trial', deviceId:options.deviceId, trialOffer:options.trialOffer} : {};
+        const result = await smsRequest({ action: 'send', phone: phoneNumber, ...trial });
         if (!result.requestId) throw new Error('문자 인증 요청 결과를 확인해 주세요.');
         let confirming = false;
         return { confirm: async code => {
