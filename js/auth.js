@@ -7,7 +7,6 @@ import { state } from './state.js';
 
 import { 
     firebaseVerifyLicense, 
-    firebaseCheckLicenseOnce,
     watchLicenseStatus, 
     startDispatchMessageListener, 
     firebaseStartTrial, 
@@ -17,14 +16,18 @@ import {
     listenToActiveRoutes,
     firebaseSendSmsVerification,
     firebaseConfirmSmsCode,
-    billingRequest
+    refreshDriverBilling
 } from './api.js';
 import { 
     saveMessageToLocalHistory, 
-    showDispatchAlertPopup 
+    showDispatchAlertPopup,
+    checkUnreadNotices
 } from './support.js';
 import { startGpsWatcher, stopGpsWatcher } from './gps.js';
 
+let serviceVersion = 0;
+let licenseExpiryTimer = null;
+let deferredServices = null;
 let licenseWatcherUnsub = null;
 let dispatchMsgWatcherUnsub = null;  
 let activeRoutesWatcherUnsub = null;
@@ -271,6 +274,9 @@ export function getOrCreateDeviceId() {
 // 2. 인증 정보 로컬 스토리지 초기화
 // ==========================================
 export function clearAuthStorage() {
+    serviceVersion++;
+    clearTimeout(licenseExpiryTimer);
+    clearTimeout(deferredServices);
     resetSmsSession();
     resetTrialSmsSession();
     resetGpsPreferenceSession();
@@ -281,12 +287,18 @@ export function clearAuthStorage() {
     dispatchMsgWatcherUnsub = null;
     activeRoutesWatcherUnsub = null;
     cachedRemoteRoutes = null;
+    document.getElementById('dispatch-alert-modal')?.classList.add('hidden');
+    document.getElementById('memo-modal')?.classList.add('hidden');
+    document.getElementById('notice-history-modal')?.classList.add('hidden');
     state.deactivateRouteOwner();
     localStorage.removeItem('deliveryProKey');
     localStorage.removeItem('deliveryProUserPhone');
     localStorage.removeItem('deliveryProExpireDate');
     localStorage.removeItem('deliveryProDispatchKey');
     localStorage.removeItem('deliveryProBillingManaged');
+    localStorage.removeItem('deliveryProDriverSession');
+    localStorage.removeItem('deliveryProExpiresAt');
+    localStorage.removeItem('deliveryPro_my_parking_memos');
 }
 
 // ==========================================
@@ -335,11 +347,10 @@ export function unlockApp() {
         mainApp.classList.add('flex');
     }
     updateExpireBadge(); 
-    applyGpsPreference();
 }
 
 // ==========================================
-// 5. 라이선스 상태 감시 (단발성 getDoc 최적화 감시 연동)
+// 5. 라이선스 상태 감시 (서버 계정의 현재 접속 감시)
 // ==========================================
 export function startLicenseRealtimeWatcher(key) {
     if (licenseWatcherUnsub) licenseWatcherUnsub();
@@ -355,58 +366,111 @@ export function startLicenseRealtimeWatcher(key) {
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
         updatePhotoCompButtonState();
+        if (docData.expireDate) updateExpireBadge(docData.expireDate);
+        scheduleLicenseExpiry(docData);
     });
 }
 
 // ==========================================
 // 6. 인증 성공 시 백그라운드 서비스 일괄 가동
 // ==========================================
+function scheduleLicenseExpiry(data) {
+    clearTimeout(licenseExpiryTimer);
+    const exact = typeof data.expiresAt?.toMillis === 'function' ? data.expiresAt.toMillis() : Number(data.expiresAt);
+    const date = /^(\d{4})[.-](\d{2})[.-](\d{2})$/.exec(data.expireDate || '');
+    const expiry = exact > 0 ? exact : date ? Date.UTC(+date[1],+date[2]-1,+date[3]+1)-9*3600000 : 0;
+    if (!expiry) return;
+    const check = () => {
+        if (Date.now() < expiry) { licenseExpiryTimer = setTimeout(check, Math.min(expiry-Date.now(),2147483647)); return; }
+        clearAuthStorage();
+        document.getElementById('main-app')?.classList.add('hidden');
+        document.getElementById('auth-screen')?.classList.remove('hidden');
+        showSmsMessage('이용기간이 만료되었습니다.');
+    };
+    licenseExpiryTimer = setTimeout(check, Math.max(0,Math.min(expiry-Date.now(),2147483647)));
+}
+
+function applyVerifiedLogin(result) {
+    localStorage.setItem('deliveryProKey', result.actualKey);
+    localStorage.setItem('deliveryProUserPhone', result.phone);
+    localStorage.setItem('deliveryProDispatchKey', result.dispatchKey || '');
+    localStorage.setItem('deliveryProExpireDate', result.expireDate || '');
+    localStorage.setItem('deliveryProExpiresAt', String(result.expiresAt || ''));
+    localStorage.setItem('deliveryProBillingManaged', String(result.billingManaged === true));
+    localStorage.setItem('deliveryProDriverSession', result.driverSessionId);
+    startActiveServices(getOrCreateDeviceId(), result.phone, result.actualKey, result.expireDate, result.dispatchKey, result.routeOwnerId);
+    scheduleLicenseExpiry(result);
+}
+
 export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey, routeOwnerId) {
+    const version = ++serviceVersion;
+    clearTimeout(deferredServices);
+    for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
+        try { unsubscribe?.(); } catch (_) {}
+    }
     state.activateRouteOwner(routeOwnerId);
     restoreGpsPreference(key);
     cachedRemoteRoutes = null;
     if (typeof window.renderList === 'function') window.renderList();
     unlockApp();
+    if (typeof checkUnreadNotices === 'function') checkUnreadNotices();
+    document.getElementById('boot-screen')?.classList.add('hidden');
     updateExpireBadge(expireDate);
     startLicenseRealtimeWatcher(key);
-
-    // [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
-    if (typeof syncMyParkingMemosFromServer === 'function') {
-        syncMyParkingMemosFromServer(phone, deviceId, key);
-    }
-
-    // 관제/운영사 메시지 실시간 감시 (최신 5건 한정 구독)
-    if (dispatchMsgWatcherUnsub) dispatchMsgWatcherUnsub();
-    dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phone, key, (msg) => {
-        try { saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType); }
-        catch (error) { console.warn('메시지 보관 실패:', error); }
-        const alreadyAcked = localStorage.getItem(`acked_msg_${msg.msgId}`);
-        if (!alreadyAcked) {
-            showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);
+    // Yield a paint before starting independent data subscriptions and billing work.
+    deferredServices = setTimeout(() => {
+        if (version !== serviceVersion) return;
+        applyGpsPreference();
+        // [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
+        if (typeof syncMyParkingMemosFromServer === 'function') {
+            syncMyParkingMemosFromServer(phone, deviceId, key);
         }
-    });
 
-    // GPS 요청 구독과 보고는 gps.js의 단일 경로에서 관리합니다.
+        // 관제/운영사 메시지 실시간 감시 (라이선스 키 기준)
+        if (dispatchMsgWatcherUnsub) dispatchMsgWatcherUnsub();
+        dispatchMsgWatcherUnsub = startDispatchMessageListener(deviceId, phone, key, (msg) => {
+            try { saveMessageToLocalHistory(msg.msgId, msg.content, msg.dateStr, msg.timeStr, msg.senderTitle, msg.senderType); }
+            catch (error) { console.warn('메시지 보관 실패:', error); }
+            const alreadyAcked = localStorage.getItem(`acked_msg_${msg.msgId}`);
+            if (!alreadyAcked) {
+                showDispatchAlertPopup(msg.content, msg.timeStr || '', msg.msgId, msg.senderTitle, msg.senderType);
+            }
+        });
 
-    // 관제 센터 실시간 자동할당 동선 감시 (기기ID 및 휴대폰 번호 다중 감시)
-    if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
-    activeRoutesWatcherUnsub = listenToActiveRoutes(
-        deviceId, 
-        phone,
-        (destinations, data) => {
-            cachedRemoteRoutes = { destinations, data };
-            if (typeof onRemoteRoutesReceivedCallback === 'function') {
-                onRemoteRoutesReceivedCallback(destinations, data);
+        // GPS 요청 구독과 보고는 gps.js의 단일 경로에서 관리합니다.
+
+        // 관제 센터 실시간 자동할당 동선 감시 (계정 내부 번호 기준)
+        if (activeRoutesWatcherUnsub) activeRoutesWatcherUnsub();
+        activeRoutesWatcherUnsub = listenToActiveRoutes(
+            deviceId, 
+            phone,
+            (destinations, data) => {
+                cachedRemoteRoutes = { destinations, data };
+                if (typeof onRemoteRoutesReceivedCallback === 'function') {
+                    onRemoteRoutesReceivedCallback(destinations, data);
+                }
+            }, 
+            () => {
+                cachedRemoteRoutes = null;
+                if (typeof onRemoteRoutesClearedCallback === 'function') {
+                    onRemoteRoutesClearedCallback();
+                }
             }
-        }, 
-        () => {
-            cachedRemoteRoutes = null;
-            if (typeof onRemoteRoutesClearedCallback === 'function') {
-                onRemoteRoutesClearedCallback();
-            }
+        );
+
+
+        if (localStorage.getItem('deliveryProBillingManaged') === 'true') {
+            refreshDriverBilling(key, deviceId).then(result => {
+                if (version !== serviceVersion) return;
+                if (!result.valid) {
+                    clearAuthStorage();
+                    document.getElementById('main-app')?.classList.add('hidden');
+                    document.getElementById('auth-screen')?.classList.remove('hidden');
+                    showSmsMessage(result.msg || '이용권 상태를 확인해 주세요.');
+                }
+            }).catch(error => console.warn('이용권 백그라운드 확인 실패:', error.message));
         }
-    );
-
+    }, 0);
     updatePhotoCompButtonState();
 }
 
@@ -419,85 +483,27 @@ export async function checkSavedAuth() {
     finally { try { if (perf?.measure && started !== undefined) perf.measure('deliverypro-license', { start: started, end: perf.now() }); } catch {} }
 }
 async function restoreSavedAuth() {
+    const version = serviceVersion;
     const deviceId = getOrCreateDeviceId();
     const savedKey = localStorage.getItem('deliveryProKey');
     const savedPhone = localStorage.getItem('deliveryProUserPhone');
-    const paidAccount = savedKey && localStorage.getItem('deliveryProBillingManaged') === 'true';
-    // Both checks must finish before granting access. The server also checks blocked devices.
-    // Capture rejection immediately, including when the local block check redirects first.
-    const paidCheck = paidAccount ? billingRequest('sync', { deviceId, licenseKey: savedKey })
-        .then(value => ({value}), error => ({error})) : null;
-
-    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
-    try {
-        const isBlocked = await checkIfDeviceBlocked(deviceId);
-        if (isBlocked) {
-            window.location.replace('error.html');
-            return;
-        }
-    } catch (err) {}
-
-    const bootScreen = document.getElementById('boot-screen');
-
+    const inputKey = document.getElementById('license-input'), inputPhone = document.getElementById('auth-phone-input');
+    if (inputKey && savedKey) inputKey.value = savedKey;
+    if (inputPhone && savedPhone) inputPhone.value = savedPhone;
     if (savedKey) {
-        const inputKey = document.getElementById('license-input');
-        if (inputKey) inputKey.value = savedKey;
-    }
-    if (savedPhone) {
-        const inputPhone = document.getElementById('auth-phone-input');
-        if (inputPhone) inputPhone.value = savedPhone;
-    }
-
-    // Store renewals must be checked before using an old locally cached expiry date.
-    if (paidAccount) {
-        try {
-            const checked = await paidCheck;
-            if (checked.error) throw checked.error;
-            const result = checked.value;
-            if (result.valid) {
-                activatePurchasedLicense(result);
-            } else {
-                if (!result.isOffline) clearAuthStorage();
-                showSmsMessage(result.msg || '구독 이용기간을 확인해 주세요.');
-                document.getElementById('auth-screen')?.classList.remove('hidden');
-            }
-        } catch (error) {
-            showSmsMessage(error.message || '구독 상태를 확인할 수 없습니다. 다시 시도해 주세요.');
-            document.getElementById('auth-screen')?.classList.remove('hidden');
-        }
-        bootScreen?.classList.add('hidden');
-        return;
-    }
-
-    // 저장된 만료일은 연장 전 값일 수 있으므로 서버 확인 후 판단합니다.
-    const cleanDigits = (savedPhone || '').replace(/[^0-9]/g, '');
-
-    // 2단계 서버 검증: 앱 구동 시 1회 단발성 검증 (getDoc)
-    if (savedKey && cleanDigits.length >= 9) {
-        try {
-            const res = await firebaseVerifyLicense(savedKey, savedPhone, deviceId);
-            if (res.valid) {
-                localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-                startActiveServices(deviceId, savedPhone, res.actualKey || savedKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
-            } else {
-                if (!res.isOffline) clearAuthStorage();
-                const authMsg = document.getElementById('auth-message');
-                if (authMsg) authMsg.innerText = res.msg;
-                const authScreen = document.getElementById('auth-screen');
-                if (authScreen) authScreen.classList.remove('hidden');
-            }
-        } catch (e) {
-            const authMsg = document.getElementById('auth-message');
-            if (authMsg) authMsg.innerText = "보안 통신 오류가 발생했습니다. 네트워크를 확인해 주세요.";
-            const authScreen = document.getElementById('auth-screen');
-            if (authScreen) authScreen.classList.remove('hidden');
-        }
+        const result = await firebaseVerifyLicense(savedKey, savedPhone, deviceId, {resume:true});
+        if (version !== serviceVersion) return;
+        if (result.valid) { applyVerifiedLogin(result); return; }
+        if (!result.isOffline) clearAuthStorage();
+        showSmsMessage(result.msg);
     } else {
-        const authScreen = document.getElementById('auth-screen');
-        if (authScreen) authScreen.classList.remove('hidden');
+        try {
+            if (await checkIfDeviceBlocked(deviceId)) { window.location.replace('error.html'); return; }
+        } catch (error) { showSmsMessage(error.message); }
     }
-
-    if (bootScreen) bootScreen.classList.add('hidden');
+    document.getElementById('main-app')?.classList.add('hidden');
+    document.getElementById('auth-screen')?.classList.remove('hidden');
+    document.getElementById('boot-screen')?.classList.add('hidden');
 }
 
 // ==========================================
@@ -513,15 +519,6 @@ export async function verifyLicense() {
     const deviceId = getOrCreateDeviceId(); 
     showSmsMessage('');
 
-    // [보안 검문] 기기 고유번호(deviceId) 접속 제한 검사
-    try {
-        const isBlocked = await checkIfDeviceBlocked(deviceId);
-        if (isBlocked) {
-            window.location.replace('error.html');
-            return;
-        }
-    } catch (err) {}
-    
     if (smsVersion !== smsSessionVersion || smsVerifyInProgress) return;
     if (!keyInput) { 
         if (msgEl) msgEl.innerText = "라이선스 키를 입력해 주세요."; 
@@ -557,28 +554,7 @@ export async function verifyLicense() {
     }
 
     smsVerifyInProgress = true;
-    let smsExemptedForThisLicense = false;
-    let verifiedPaidAccess = null;
     try {
-        if (!isSmsVerified) {
-            const licCheck = await firebaseCheckLicenseOnce(keyInput, deviceId);
-            if (smsVersion !== smsSessionVersion) return;
-            if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) {
-                resetSmsSession();
-                showSmsMessage('휴대폰 번호가 변경되었습니다. 다시 인증해 주세요.');
-                return;
-            }
-            const registeredPhone = licCheck?.valid && licCheck.data ? phoneIdentity(licCheck.data.phone) : '';
-            if (registeredPhone && registeredPhone === phoneIdentity(rawPhone)) {
-                isSmsVerified = true;
-                verifiedPhoneNumber = rawPhone;
-                smsExemptedForThisLicense = true;
-                if (licCheck.verifiedAccess?.valid && licCheck.verifiedAccess.billingManaged) verifiedPaidAccess = licCheck.verifiedAccess;
-                stopSmsCountdown();
-                const timer = document.getElementById('auth-sms-timer');
-                if (timer) timer.innerText = '확인 완료';
-            }
-        }
         if (!isSmsVerified) {
             if (smsRequestedPhoneNumber && phoneIdentity(rawPhone) !== phoneIdentity(smsRequestedPhoneNumber)) {
                 resetSmsSession();
@@ -633,7 +609,7 @@ export async function verifyLicense() {
             if (timer) timer.innerText = '인증 완료';
         }
         // Reuse only the server result obtained during this click; never cache it across attempts.
-        const res = verifiedPaidAccess || await firebaseVerifyLicense(keyInput, formattedPhone, deviceId, { allowDeviceTransfer: !smsExemptedForThisLicense });
+        const res = await firebaseVerifyLicense(keyInput, formattedPhone, deviceId);
         if (smsVersion !== smsSessionVersion) return;
         if (phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) {
             resetSmsSession();
@@ -646,14 +622,7 @@ export async function verifyLicense() {
             return;
         }
         if (res && res.valid) {
-            if (res.billingManaged) localStorage.setItem('deliveryProBillingManaged', 'true');
-            const actualKey = res.actualKey || keyInput;
-            localStorage.setItem('deliveryProKey', actualKey);
-            localStorage.setItem('deliveryProUserPhone', formattedPhone); 
-            localStorage.setItem('deliveryProDispatchKey', res.dispatchKey || '');
-            if (res.expireDate) localStorage.setItem('deliveryProExpireDate', res.expireDate);
-            
-            startActiveServices(deviceId, formattedPhone, actualKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
+            applyVerifiedLogin(res);
         } else {
             if (msgEl) msgEl.innerText = res?.isOffline
                 ? '휴대폰 확인은 완료되었지만 이용권 서버에 연결하지 못했습니다. 잠시 후 [인증하고 시작하기]를 다시 눌러 주세요.'
@@ -663,11 +632,6 @@ export async function verifyLicense() {
         if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
     } finally {
         if (smsVersion === smsSessionVersion) {
-            // 번호 일치 면제는 조회한 라이선스에만 적용하고 다른 키로 재사용하지 않습니다.
-            if (smsExemptedForThisLicense) {
-                isSmsVerified = false;
-                verifiedPhoneNumber = '';
-            }
             smsVerifyInProgress = false;
             if (btn) {
                 btn.innerHTML = '인증하고 시작하기';
@@ -858,7 +822,9 @@ export async function startFreeTrial() {
             alert("7일 무료 체험이 시작되었습니다.\n안전 운전 하십시오!");
             closeTrialModal();
             
-            startActiveServices(deviceId, formattedPhone, res.trialKey, res.expireDate, res.dispatchKey, res.routeOwnerId);
+            const login = await firebaseVerifyLicense(res.trialKey, formattedPhone, deviceId);
+            if (!login.valid) throw new Error(login.msg);
+            applyVerifiedLogin(login);
         } else {
             if (msgEl) {
                 msgEl.innerText = res.msg;
@@ -883,6 +849,8 @@ export async function logout() {
     resetGpsPreferenceSession();
     
     const currentKey = localStorage.getItem('deliveryProKey');
+    // Stop the watcher before deliberately releasing this device on the server.
+    clearAuthStorage();
     if (currentKey && typeof firebaseClearDeviceData === 'function') {
         try {
             await firebaseClearDeviceData(currentKey);
@@ -891,7 +859,6 @@ export async function logout() {
         }
     }
     
-    clearAuthStorage();
     window.location.reload();
 }
 
@@ -900,15 +867,9 @@ window.sendPhoneAuthCode = sendPhoneAuthCode;
 window.sendTrialSmsCode = sendTrialSmsCode;
 
 
-export function activatePurchasedLicense(result) {
+export async function activatePurchasedLicense(result) {
     if (!result?.valid || !result.billingManaged || !result.actualKey || !result.routeOwnerId) throw new Error('구독 이용권 확인이 필요합니다.');
-    localStorage.setItem('deliveryProKey', result.actualKey);
-    localStorage.setItem('deliveryProUserPhone', result.phone);
-    localStorage.setItem('deliveryProDispatchKey', result.dispatchKey || '');
-    localStorage.setItem('deliveryProExpireDate', result.expireDate);
-    localStorage.setItem('deliveryProBillingManaged', 'true');
-    const keyInput = document.getElementById('license-input'), phoneInput = document.getElementById('auth-phone-input');
-    if (keyInput) keyInput.value = result.actualKey;
-    if (phoneInput) phoneInput.value = result.phone;
-    startActiveServices(getOrCreateDeviceId(), result.phone, result.actualKey, result.expireDate, result.dispatchKey, result.routeOwnerId);
+    const login = await firebaseVerifyLicense(result.actualKey, null, getOrCreateDeviceId());
+    if (!login.valid) throw new Error(login.msg);
+    applyVerifiedLogin(login);
 }

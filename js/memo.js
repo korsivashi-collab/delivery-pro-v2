@@ -92,9 +92,19 @@ export async function preloadBatchMemos() {
 // ==========================================
 // 3. 로컬 개인 메모 관리 헬퍼 (기기 로컬스토리지 전용)
 // ==========================================
+export function personalMemoStorageKey() {
+    const phone = String(localStorage.getItem('deliveryProUserPhone') || '').replace(/\D/g,'');
+    const national = phone.startsWith('82') ? '0'+phone.slice(2) : phone;
+    return 'deliveryPro_personal_memos:' + national;
+}
+function ownsMemo(memo, identity) {
+    const phone = String(identity?.phone || '').replace(/\D/g,'').replace(/^82/,'0');
+    return !!phone && memo.ownerPhone === phone;
+}
+
 export function getAllPersonalMemos() {
     try {
-        return JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
+        return JSON.parse(localStorage.getItem(personalMemoStorageKey()) || '{}');
     } catch (e) {
         return {};
     }
@@ -281,7 +291,7 @@ export async function openMemoModal(id) {
         
         const memoIdentity = await getBillingIdentity();
         if (version !== memoModalVersion) return;
-        const myMemo = memos.find(m => m.ownerUid && m.ownerUid === memoIdentity?.uid);
+        const myMemo = memos.find(m => ownsMemo(m, memoIdentity));
         if (myMemo) {
             const rawMemo = myMemo.memo || "";
             
@@ -331,7 +341,7 @@ export async function openMemoModal(id) {
         if (memos.length > 0) {
             let html = "";
             memos.forEach((m, idx) => {
-                let isMyMemo = (m.ownerUid && m.ownerUid === memoIdentity?.uid);
+                let isMyMemo = (ownsMemo(m, memoIdentity));
                 if (isMyMemo) visibleOwnedMemos.set(m.id, { address: currentMemoAddress, uid: memoIdentity.uid, owner: state.getRouteOwnerId() });
                 let crownHtml = (idx === 0) ? `<i class="fa-solid fa-crown text-yellow-400 mr-1 text-sm drop-shadow-sm"></i> ` : '';
                 let myBadge = isMyMemo ? `<span class="bg-blue-100 text-blue-700 text-[9px] font-bold px-1.5 py-0.5 rounded ml-1">내가 쓴 정보</span>` : '';
@@ -542,7 +552,7 @@ export function savePersonalMemo() {
 
     const allMemos = getAllPersonalMemos();
     allMemos[currentMemoAddress] = memoText;
-    localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(allMemos));
+    localStorage.setItem(personalMemoStorageKey(), JSON.stringify(allMemos));
 
     alert("개인 메모가 핸드폰에 안전하게 저장되었습니다.");
 
@@ -568,7 +578,7 @@ export function deletePersonalMemo() {
 
     const allMemos = getAllPersonalMemos();
     delete allMemos[currentMemoAddress];
-    localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(allMemos));
+    localStorage.setItem(personalMemoStorageKey(), JSON.stringify(allMemos));
 
     const inputEl = document.getElementById('personal-memo-input');
     const countEl = document.getElementById('personal-memo-char-count');
@@ -597,7 +607,7 @@ export function deletePersonalMemo() {
 // 9. 기기단 자체 암호화 / 복호화 유틸리티
 // ==========================================
 function getMemoSecretKey() {
-    const rawKey = localStorage.getItem('deliveryProKey') || 'DEV_KEY';
+    const rawKey = personalMemoStorageKey();
     return (rawKey + '_DELIVERY_PRO_ENC_SALT').replace(/[^a-zA-Z0-9_]/g, '');
 }
 
@@ -624,12 +634,13 @@ function decryptPayload(cipher, secretKey) {
 // ==========================================
 
 export async function backupPersonalMemosToCloud() {
-    const rawKey = localStorage.getItem('deliveryProKey');
+    const rawKey = localStorage.getItem('deliveryProUserPhone');
     if (!rawKey) {
         alert("로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.");
         return;
     }
     const cleanKey = rawKey.trim().replace(/[\/\\#?]/g, '_');
+    const storageKey = personalMemoStorageKey();
     const allMemos = getAllPersonalMemos();
     const memoKeys = Object.keys(allMemos);
     const count = memoKeys.length;
@@ -643,6 +654,7 @@ export async function backupPersonalMemosToCloud() {
         showLoading("기존 서버 백업 확인 중...");
         const existing = await firebaseGetTempMemoBackup(cleanKey);
         hideLoading();
+        if (storageKey !== personalMemoStorageKey()) throw new Error('사용자가 변경되었습니다. 다시 시도해 주세요.');
 
         if (existing && !existing.expired && existing.count > 0) {
             const ok = confirm(`⚠️ 서버에 기존 백업(${existing.count}건)이 보관되어 있습니다.\n현재 폰의 메모(${count}건)로 덮어쓰시겠습니까?`);
@@ -664,17 +676,19 @@ export async function backupPersonalMemosToCloud() {
 }
 
 export async function restorePersonalMemosFromCloud() {
-    const rawKey = localStorage.getItem('deliveryProKey');
+    const rawKey = localStorage.getItem('deliveryProUserPhone');
     if (!rawKey) {
         alert("로그인 정보가 올바르지 않습니다. 다시 로그인해 주세요.");
         return;
     }
     const cleanKey = rawKey.trim().replace(/[\/\\#?]/g, '_');
+    const storageKey = personalMemoStorageKey();
 
     try {
         showLoading("서버 백업 확인 중...");
         const backup = await firebaseGetTempMemoBackup(cleanKey);
         hideLoading();
+        if (storageKey !== personalMemoStorageKey()) throw new Error('사용자가 변경되었습니다. 다시 시도해 주세요.');
 
         if (!backup) {
             alert("서버에 보관된 임시 백업이 없습니다.\n기존 핸드폰에서 먼저 [기기변경 백업]을 실행해 주세요.");
@@ -698,13 +712,13 @@ export async function restorePersonalMemosFromCloud() {
             restoredObj = JSON.parse(decryptedJson);
         } catch (err) {
             hideLoading();
-            alert("암호 해독에 실패했습니다. 키 정보가 일치하지 않습니다.");
+            alert("메모 복구에 실패했습니다. 인증된 전화번호를 확인해 주세요.");
             return;
         }
 
         const currentMemos = getAllPersonalMemos();
         const mergedMemos = { ...currentMemos, ...restoredObj };
-        localStorage.setItem('deliveryPro_personal_memos', JSON.stringify(mergedMemos));
+        localStorage.setItem(personalMemoStorageKey(), JSON.stringify(mergedMemos));
 
         await firebaseDeleteTempMemoBackup(cleanKey);
         hideLoading();

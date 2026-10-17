@@ -350,7 +350,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
 
     return [{
         id: Date.now() + Math.random(),
-        assignedDriver: assignedDriver,
+        assignedDriver: (state.allLicenses || []).some(license => license.key === assignedDriver) ? assignedDriver : null,
         displayNumber: null, // 🌟 코스 순번 잔상 방지 초기화
         senderName: senderName,
         buyerName: buyerName,

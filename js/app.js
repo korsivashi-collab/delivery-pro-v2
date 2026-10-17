@@ -116,8 +116,7 @@ export async function initApp() {
     document.getElementById('sms-code-input')?.addEventListener('keydown', handleSmsCodeEnter);
     initResponsiveViewport();
 
-    state.loadActiveData();
-    cleanOldHistory();
+    const authReady = checkSavedAuth();
     initSwipeButton();
     checkUnreadNotices();
     initMemoEvents();
@@ -191,8 +190,8 @@ export async function initApp() {
     setGpsToggleHandler(setGpsPreference);
 
     renderList();
-    await checkSavedAuth();
-    initCompletionQueue(checkSavedAuth);
+    await authReady;
+    setTimeout(() => { cleanOldHistory(); initCompletionQueue(checkSavedAuth); }, 0);
 }
 
 // ==========================================

@@ -124,9 +124,15 @@ export function playBeepSound() {
 }
 
 let volatileNotices = [];
+let volatileNoticeOwner = null;
+function noticesStorageKey() {
+    const owner = state.getRouteOwnerId() || '';
+    if (volatileNoticeOwner !== owner) { volatileNotices=[]; volatileNoticeOwner=owner; }
+    return 'deliveryPro_notices:' + owner;
+}
 function readNotices() {
     try {
-        const saved = JSON.parse(localStorage.getItem('deliveryPro_notices') || '[]');
+        const saved = JSON.parse(localStorage.getItem(noticesStorageKey()) || '[]');
         if (!Array.isArray(saved)) throw new Error('알림 기록 형식 오류');
         const merged = new Map([...volatileNotices, ...saved].filter(n => n && n.msgId).map(n => [n.msgId,n]));
         return [...merged.values()].sort((a,b) => b.timestamp-a.timestamp).slice(0,50);
@@ -149,7 +155,7 @@ export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, send
         });
         if (notices.length > 50) notices = notices.slice(0, 50);
         volatileNotices = notices;
-        try { localStorage.setItem('deliveryPro_notices', JSON.stringify(notices)); } catch (error) { console.warn('알림 기록 저장 실패:', error); }
+        try { localStorage.setItem(noticesStorageKey(), JSON.stringify(notices)); } catch (error) { console.warn('알림 기록 저장 실패:', error); }
         checkUnreadNotices();
     }
 }
@@ -307,13 +313,8 @@ export function getHistoryOwnershipContext() {
 export function classifyHistoryOwnership(record, current = getHistoryOwnershipContext()) {
     if (!current.routeOwnerId || !current.licenseKey) return 'excluded';
     if (record.routeOwnerId) return record.routeOwnerId === current.routeOwnerId ? 'owned' : 'excluded';
-    // originalData.phone은 고객 전화번호이므로 기사 소유권 판정에 사용하지 않습니다.
-    const phone = value => String(value || '').replace(/\D/g, '');
-    const recordPhone = phone(record.phone);
-    const currentPhone = phone(current.phone);
-    if (recordPhone && recordPhone !== currentPhone) return 'excluded';
     if (record.licenseKey) return record.licenseKey === current.licenseKey ? 'owned' : 'excluded';
-    return recordPhone && recordPhone === currentPhone ? 'legacyCandidate' : 'excluded';
+    return 'excluded';
 }
 
 // 🌟 [UI 개편] 겹침 현상 원천 차단 및 시원한 주소 가독성을 보장하는 2단 카드 레이아웃
@@ -564,7 +565,7 @@ export function closeSettingsModal() {
 // 내 기여 활동 통계 카운트 및 이벤트 프로그레스바 갱신 함수
 export function updateContributionStats() {
     try {
-        const personalMemos = JSON.parse(localStorage.getItem('deliveryPro_personal_memos') || '{}');
+        const personalMemos = JSON.parse(localStorage.getItem('deliveryPro_personal_memos:' + String(localStorage.getItem('deliveryProUserPhone') || '').replace(/\D/g,'').replace(/^82/,'0')) || '{}');
         const personalCount = Object.keys(personalMemos).length;
 
         const myParkingMemos = JSON.parse(localStorage.getItem('deliveryPro_my_parking_memos') || '[]');

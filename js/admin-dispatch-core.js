@@ -50,14 +50,7 @@ export function getFilteredVisibleDrivers() {
 // 기기/전화번호 단독 일치는 소유권 근거가 아니며, legacy 후보도 현재 집계에서 제외합니다.
 export function classifyCompletionOwnership(c, lic) {
     if (c.routeOwnerId) return c.routeOwnerId === lic.routeOwnerId ? 'owned' : 'excluded';
-    const phone = value => String(value || '').replace(/\D/g, '');
-    const recordPhone = phone(c.phone);
-    const licensePhone = phone(lic.phone);
-    if (recordPhone && recordPhone !== licensePhone) return 'excluded';
     if (c.licenseKey) return c.licenseKey === lic.key ? 'owned' : 'excluded';
-    if (recordPhone && recordPhone === licensePhone && lic.deviceId && c.deviceId === lic.deviceId) {
-        return 'legacyCandidate';
-    }
     return 'excluded';
 }
 
@@ -121,7 +114,7 @@ export function getDriverRouteData(lic, selectedDate) {
     if (lic.deviceId) {
         candidateKeys = [lic.deviceId];
     } else {
-        candidateKeys = [lic.key, lic.phone].filter(Boolean);
+        candidateKeys = [lic.key].filter(Boolean);
     }
 
     let foundRoute = null;
@@ -269,7 +262,7 @@ export function setDispatchDetailTab(tab) {
 export function renderDriverDetailView(devId) {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId || l.phone === devId);
+    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
     const phone = licObj.phone || licObj.key || '기사';
 
@@ -435,7 +428,7 @@ export async function removeOrUnlinkDriver(devId, key) {
 // ==========================================
 export function drawDriverOnMap(devId) {
     forceClearMap(); 
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId || l.phone === devId);
+    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
 
     if (!map) return;

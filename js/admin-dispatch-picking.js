@@ -11,19 +11,17 @@ export const pickingModalState = {
     selectedDrivers: new Set()
 };
 
-// 기사 식별자(전화번호, 라이선스키, 디바이스ID) 다중 정밀 매칭 헬퍼
+// 기사 식별자(라이선스키, 디바이스ID) 다중 정밀 매칭 헬퍼
 function getDriverAssignedOrders(driverIdentifier) {
     if (!driverIdentifier || !state.parsedExcelList || state.parsedExcelList.length === 0) return [];
 
     const matchedLic = (state.allLicenses || []).find(l => 
-        l.phone === driverIdentifier || 
         l.key === driverIdentifier || 
         l.deviceId === driverIdentifier
     );
 
     const validKeys = new Set([driverIdentifier]);
     if (matchedLic) {
-        if (matchedLic.phone) validKeys.add(matchedLic.phone);
         if (matchedLic.key) validKeys.add(matchedLic.key);
         if (matchedLic.deviceId) validKeys.add(matchedLic.deviceId);
     }
@@ -37,7 +35,7 @@ export function openPickingDriverModal() {
     const driverNames = new Set();
     const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
     visibleDrivers.forEach(d => {
-        if (d.phone || d.key) driverNames.add(d.phone || d.key);
+        if (d.key) driverNames.add(d.key);
     });
     
     (state.parsedExcelList || []).forEach(o => {
@@ -71,7 +69,7 @@ export function toggleAllPickingDrivers(isChecked) {
     const driverNames = new Set();
     const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
     visibleDrivers.forEach(d => {
-        if (d.phone || d.key) driverNames.add(d.phone || d.key);
+        if (d.key) driverNames.add(d.key);
     });
     (state.parsedExcelList || []).forEach(o => {
         if (o.assignedDriver) driverNames.add(o.assignedDriver);
@@ -99,7 +97,7 @@ export function togglePickingDriver(driver) {
     const driverNames = new Set();
     const visibleDrivers = window.getFilteredVisibleDrivers ? window.getFilteredVisibleDrivers() : [];
     visibleDrivers.forEach(d => {
-        if (d.phone || d.key) driverNames.add(d.phone || d.key);
+        if (d.key) driverNames.add(d.key);
     });
     (state.parsedExcelList || []).forEach(o => {
         if (o.assignedDriver) driverNames.add(o.assignedDriver);

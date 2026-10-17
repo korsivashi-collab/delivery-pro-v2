@@ -56,6 +56,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 
         return {
             devId,
+            key: d.key || devId,
             phone: d.phone || devId,
             exactCap,
             targetCap: Math.floor(exactCap),
@@ -183,7 +184,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
                 });
                 bestDriver.assignedCount++;
                 bestDriver.assignedOrders.push(order);
-                order.assignedDriver = bestDriver.phone;
+                order.assignedDriver = bestDriver.key;
             });
             break;
         }
@@ -232,7 +233,7 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
 
         // 묶인 배송지들을 해당 기사에게 확정 배정
         batch.forEach(o => {
-            o.assignedDriver = bestDriver.phone;
+            o.assignedDriver = bestDriver.key;
             bestDriver.assignedOrders.push(o);
             bestDriver.assignedCount++;
         });

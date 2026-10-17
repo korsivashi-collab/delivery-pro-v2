@@ -155,6 +155,7 @@ export async function sendHistoryNoticeToSelected() {
     try {
         await addDoc(collection(db, "dispatch_messages"), {
             senderKey: "MASTER", senderType: "MASTER", senderTitle: "운영사 알림",
+            targetLicenseKeys: Array.from(state.historySelectedAccountKeys),
             targetDeviceIds: Array.from(new Set(targetDeviceIds)),
             targetPhones: Array.from(new Set(targetPhones)),
             content: content, createdAt: now.getTime(), dateStr: dateStr, timeStr: timeStr, acknowledged: []
@@ -219,7 +220,7 @@ export function renderAccountHistoryView() {
         const processedItems = filteredList.map((lic, idx) => {
             const devId = lic.deviceId || '';
             const phone = lic.phone || '';
-            const driverComps = state.allCompletions.filter(c => (devId && c.deviceId === devId) || (phone && c.phone === phone));
+            const driverComps = state.allCompletions.filter(c => c.routeOwnerId ? c.routeOwnerId === lic.routeOwnerId : c.licenseKey === lic.key);
             const totalCompCount = driverComps.length;
             const activeDatesSet = new Set();
             driverComps.forEach(c => {
@@ -378,7 +379,7 @@ export function renderAccountHistoryView() {
 
     const driverRoute = (targetDeviceId && state.activeRoutes[targetDeviceId]) ? state.activeRoutes[targetDeviceId] : null;
     const rawDests = driverRoute ? driverRoute.destinations || [] : [];
-    const driverDone = state.allCompletions.filter(c => (c.deviceId === targetDeviceId || (targetPhone && c.phone === targetPhone)));
+    const driverDone = state.allCompletions.filter(c => c.routeOwnerId ? c.routeOwnerId === targetLic.routeOwnerId : c.licenseKey === targetLic.key);
 
     const doneMap = {}; driverDone.forEach(c => { doneMap[c.address] = c; });
     const remainingDests = rawDests.filter(d => !doneMap[d.address]);
@@ -387,7 +388,7 @@ export function renderAccountHistoryView() {
     const doneCount = driverDone.length;
     const totalCount = pendingCount + doneCount;
     const rate = totalCount > 0 ? Math.round((doneCount / totalCount) * 100) : 0;
-    const driverMemos = state.allMemos.filter(m => targetDeviceId && m.deviceId === targetDeviceId);
+    const driverMemos = state.allMemos.filter(m => targetPhone && m.ownerPhone === String(targetPhone).replace(/\D/g,'').replace(/^82/,'0'));
 
     let html = `
     <div class="bg-blue-50 border border-blue-200 rounded-2xl p-3.5 shadow-inner mb-3 text-xs">

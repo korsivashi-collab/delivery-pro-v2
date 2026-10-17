@@ -199,7 +199,6 @@ export function renderDispatchDriverList() {
         
         const assignedOrders = (state.parsedExcelList || []).filter(o => 
             o.assignedDriver && (
-                o.assignedDriver === phoneDisplay || 
                 o.assignedDriver === licKey || 
                 o.assignedDriver === devId
             )
@@ -328,7 +327,6 @@ export function renderDispatchDriverDetail() {
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
     let assignedItems = (state.parsedExcelList || []).filter(item => 
         item.assignedDriver && (
-            item.assignedDriver === driverName || 
             item.assignedDriver === targetLic?.key || 
             item.assignedDriver === targetLic?.deviceId
         )
@@ -374,8 +372,8 @@ export function renderDispatchDriverDetail() {
     assignedItems.forEach((item, idx) => {
         let driverSelectOptions = `<option value="">-- 미배정 --</option>`;
         visibleDrivers.forEach(d => {
-            const dName = d.phone || d.key;
-            driverSelectOptions += `<option value="${dName}" ${dName === driverName ? 'selected' : ''}>${dName}</option>`;
+            const dName = d.key;
+            driverSelectOptions += `<option value="${dName}" ${dName === targetLic?.key ? 'selected' : ''}>${d.phone || dName}</option>`;
         });
 
         const tooltipAddress = item.fullAddress || item.address || '';
@@ -399,17 +397,17 @@ export function renderDispatchDriverDetail() {
     if (tbody) tbody.innerHTML = html;
 }
 
-export function changeOrderDriver(itemId, newDriverPhone) {
+export function changeOrderDriver(itemId, newDriverKey) {
     let item = state.parsedExcelList.find(o => String(o.id) === String(itemId) || String(o.orderNo) === String(itemId));
     if (!item && !isNaN(itemId)) {
         item = state.parsedExcelList[parseInt(itemId, 10)];
     }
     if (!item) return;
 
-    item.assignedDriver = newDriverPhone || null;
+    item.assignedDriver = newDriverKey || null;
     
-    if (newDriverPhone) {
-        const driverOrders = state.parsedExcelList.filter(o => o.assignedDriver === newDriverPhone);
+    if (newDriverKey) {
+        const driverOrders = state.parsedExcelList.filter(o => o.assignedDriver === newDriverKey);
         item.displayNumber = driverOrders.length;
     } else {
         delete item.displayNumber;
@@ -469,8 +467,8 @@ export async function revertAutoDispatch(options = {}) {
                 if (Number.isFinite(data.updatedAt)) revision = Math.max(revision, data.updatedAt + 1);
             });
             if (latestRoute && (latestRoute.dispatchDate || getLocalDateString(new Date(latestRoute.updatedAt))) !== selectedDate) continue;
-            // Include old key/phone document IDs as well as the current device.
-            for (const id of new Set([driver.deviceId, driver.key, driver.phone].filter(Boolean))) {
+            // Include old key document IDs as well as the current device.
+            for (const id of new Set([driver.deviceId, driver.key].filter(Boolean))) {
                 const ref = doc(db, 'routes', id);
                 const existing = await getDoc(ref);
                 if (existing.exists() && existing.data().routeOwnerId && existing.data().routeOwnerId !== routeOwnerId) continue;
@@ -621,7 +619,7 @@ export async function sendRoutesToDrivers() {
 
     const driverMap = {};
     selectedDriverList.forEach(d => {
-        const dName = d.phone || d.key;
+        const dName = d.key;
         const dKey = d.key;
         const devId = d.deviceId || d.key;
 
@@ -703,8 +701,8 @@ export async function sendRoutesToDrivers() {
 
             await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
 
-            // 🌟 중복 방지: devId 외에 남아있던 구형 식별자 문서(key, phone)는 자동 정리하여 옛날 9건 부활 차단
-            const otherKeys = [matchedLic.key, matchedLic.phone].filter(k => k && k !== devId);
+            // 🌟 중복 방지: devId 외에 남아있던 구형 식별자 문서(key)는 자동 정리하여 옛날 9건 부활 차단
+            const otherKeys = [matchedLic.key].filter(k => k && k !== devId);
             for (const ok of otherKeys) {
                 try {
                     const legacyRef = doc(db, "routes", ok);
@@ -748,7 +746,7 @@ export function printSelectedDriverItemList() {
 
     const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
-    const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === driverName);
+    const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === (targetLic?.key || state.selectedDispatchDriverId));
 
     if (!assignedItems || assignedItems.length === 0) {
         alert(`[${driverName}] 기사님에게 배정된 배송 주문 및 상품 데이터가 없습니다.`);

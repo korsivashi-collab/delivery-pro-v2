@@ -225,8 +225,8 @@ export async function addBlockedDeviceFromModal() {
     const devId = inputId ? inputId.value.trim() : '';
     const memo = inputMemo ? inputMemo.value.trim() : '';
 
-    if (!devId) {
-        alert("접속을 차단할 기기 고유번호(deviceId)를 입력해 주세요.");
+    if (!devId || !/^[\p{L}\p{N}_+ -]{1,160}$/u.test(devId)) {
+        alert("차단할 라이선스 키, 전화번호 또는 기기 고유번호를 입력해 주세요.");
         inputId?.focus();
         return;
     }
@@ -238,7 +238,7 @@ export async function addBlockedDeviceFromModal() {
             createdAt: Date.now()
         });
 
-        alert(`[접속 제한 등록 완료]\n\n기기 고유번호: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
+        alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
         if (inputId) inputId.value = '';
         if (inputMemo) inputMemo.value = '';
         renderModalBlockedDevices();
@@ -310,8 +310,8 @@ export async function addBlockedDevice() {
     const devId = inputEl ? inputEl.value.trim() : '';
     const memo = memoEl ? memoEl.value.trim() : '';
 
-    if (!devId) {
-        alert("접속을 차단할 기기 고유번호(deviceId)를 입력해 주세요.");
+    if (!devId || !/^[\p{L}\p{N}_+ -]{1,160}$/u.test(devId)) {
+        alert("차단할 라이선스 키, 전화번호 또는 기기 고유번호를 입력해 주세요.");
         if (inputEl) inputEl.focus();
         return;
     }
@@ -323,7 +323,7 @@ export async function addBlockedDevice() {
             createdAt: Date.now()
         });
 
-        alert(`[접속 제한 등록 완료]\n\n기기 고유번호: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
+        alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
         if (inputEl) inputEl.value = '';
         if (memoEl) memoEl.value = '';
         renderModalBlockedDevices();

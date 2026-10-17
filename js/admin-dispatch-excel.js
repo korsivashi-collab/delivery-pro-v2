@@ -244,8 +244,8 @@ export function renderExcelTable() {
         let driverSelectOptions = `<option value="">-- 미배정 --</option>`;
         visibleDrivers.forEach(d => {
             const dName = d.phone || d.key;
-            const isSelected = (item.assignedDriver === dName) ? 'selected' : '';
-            driverSelectOptions += `<option value="${dName}" ${isSelected}>${dName}</option>`;
+            const isSelected = (item.assignedDriver === d.key) ? 'selected' : '';
+            driverSelectOptions += `<option value="${d.key}" ${isSelected}>${dName}</option>`;
         });
 
         const courseBadge = (item.assignedDriver && item.displayNumber)

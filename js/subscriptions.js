@@ -103,7 +103,7 @@ async function prepareAccount(){
 }
 async function syncAccess(){await checkIdentity();const result=await billingRequest('sync',{deviceId:getOrCreateDeviceId()},identity.uid);
     if(!result.valid){message('활성 구독을 확인하지 못했습니다. Google Play 결제 상태를 확인한 뒤 구매 복원을 다시 눌러 주세요.');return;}
-    activatePurchasedLicense(result);subscriptionDialog.close();}
+    await activatePurchasedLicense(result);subscriptionDialog.close();}
 function buildDialog(){
     subscriptionDialog=document.createElement('dialog');subscriptionDialog.id='subscription-modal';
     subscriptionDialog.className='w-[calc(100%_-_2rem)] max-h-[90dvh] overflow-y-auto rounded-3xl p-6 bg-white text-slate-900 shadow-2xl backdrop:bg-black/60';
