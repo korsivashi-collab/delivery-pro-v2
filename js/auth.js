@@ -760,8 +760,8 @@ export function openTrialModal() {
     const days = typeof isSalesTrialEntry === 'function' && isSalesTrialEntry() ? 30 : 7;
     const title = document.getElementById('trial-title');
     const entry = document.getElementById('trial-entry-label');
-    if (title) title.textContent = `${days}일 무료 체험 시작`;
-    if (entry) entry.textContent = days === 30 ? '영업용 30일 무료 체험' : '처음이신가요? 7일 무료 체험';
+    if (title) title.textContent = days === 30 ? '30일 무료 체험' : '7일 무료 체험 시작';
+    if (entry) entry.textContent = days === 30 ? '30일 무료로 시작하기' : '처음이신가요? 7일 무료 체험';
     resetTrialSmsSession();
     const input = document.getElementById('trial-phone-input');
     const msg = document.getElementById('trial-error-msg');
