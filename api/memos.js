@@ -3,6 +3,15 @@ const {createHash} = require('node:crypto');
 const {verifiedPhone} = require('../server/billing.cjs');
 const {problem,phoneDigits} = require('../server/license-integrity.cjs');
 
+// A normalized ownerPhone is authoritative. Older records used only phone.
+function memoOwnerPhone(data) {
+ return phoneDigits(data.ownerPhone || data.phone);
+}
+function phoneVariants(phone) {
+ const digits=phoneDigits(phone), formatted=digits.replace(/^(010)(\d{4})(\d{4})$/,'$1-$2-$3');
+ return [...new Set([digits,formatted,'+82'+digits.slice(1),formatted.replace(/-/g,' '),
+  '+82 '+formatted.slice(1),'+82 '+formatted.slice(1).replace(/-/g,' '),'+82-'+formatted.slice(1)])];
+}
 function createHandler(sdk=admin) {
  return async (req,res)=>{
   res.setHeader('Cache-Control','no-store');
@@ -30,17 +39,29 @@ function createHandler(sdk=admin) {
     return res.status(200).json({backup});
    }
    if(input.action==='mine'){
-    const snap=await db.collection('memos').where('ownerPhone','==',ownerPhone).get();
-    return res.status(200).json({addresses:[...new Set(snap.docs.map(d=>d.data().address))],phone});
+    const queries=[db.collection('memos').where('ownerPhone','==',ownerPhone),
+     ...phoneVariants(phone).map(value=>db.collection('memos').where('phone','==',value))];
+    const snapshots=await Promise.all(queries.map(query=>query.get()));
+    const addresses=new Set();
+    for(const snapshot of snapshots)for(const item of snapshot.docs){
+     const data=item.data();
+     if(memoOwnerPhone(data)===ownerPhone && typeof data.address==='string' && data.address.trim())addresses.add(data.address);
+    }
+    return res.status(200).json({addresses:[...addresses],phone});
    }
    if(input.action==='save'){
     const address=String(input.address||'').trim(),memo=String(input.memo||'').trim();
     if(!address||address.length>500||!memo||memo.length>500)throw problem('메모 주소와 내용을 확인해 주세요.');
-    const id=createHash('sha256').update(JSON.stringify([ownerPhone,address])).digest('hex'),ref=db.collection('memos').doc(id);
+    let id=createHash('sha256').update(JSON.stringify([ownerPhone,address])).digest('hex');
+    const canonicalRef=db.collection('memos').doc(id);
     await db.runTransaction(async tx=>{
-     const previous=await tx.get(ref);if(previous.exists&&previous.data().ownerPhone!==ownerPhone)throw problem('메모 작성자가 일치하지 않습니다.',409);
+     const [canonical,existing]=await Promise.all([tx.get(canonicalRef),tx.get(db.collection('memos').where('address','==',address))]);
+     if(canonical.exists&&memoOwnerPhone(canonical.data())!==ownerPhone)throw problem('메모 작성자가 일치하지 않습니다.',409);
+     const previous=canonical.exists?canonical:existing.docs.filter(item=>memoOwnerPhone(item.data())===ownerPhone).sort((a,b)=>a.id.localeCompare(b.id))[0];
+     const ref=previous?.ref || canonicalRef;
+     id=ref.id;
      const now=Date.now(),time=new Date(now+9*3600000).toISOString().slice(0,16).replace('T',' ').replace(/-/g,'.');
-     tx.set(ref,{...(previous.data()||{likes:0,createdAt:now}),address,memo,ownerUid:uid,ownerPhone,phone,time,updatedAt:now,reported:false});
+     tx.set(ref,{...(previous?.data()||{likes:0,createdAt:now}),address,memo,ownerUid:uid,ownerPhone,phone,time,updatedAt:now,reported:false});
     });
     return res.status(200).json({id,phone});
    }
@@ -49,7 +70,7 @@ function createHandler(sdk=admin) {
    await db.runTransaction(async tx=>{
     const snap=await tx.get(ref);if(!snap.exists)throw problem('메모를 찾을 수 없습니다.',404);
     if(input.action==='delete'){
-     if(snap.data().ownerPhone!==ownerPhone)throw problem('본인이 작성한 메모만 삭제할 수 있습니다.',403);
+     if(memoOwnerPhone(snap.data())!==ownerPhone)throw problem('본인이 작성한 메모만 삭제할 수 있습니다.',403);
      tx.delete(ref);
     }else tx.set(ref,input.action==='like'?{likes:(Number(snap.data().likes)||0)+1}:{reported:true},{merge:true});
    });
