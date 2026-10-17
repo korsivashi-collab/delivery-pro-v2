@@ -75,7 +75,7 @@
             <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[560px]">
                 <div class="flex border-b border-gray-200 bg-gray-50/70 p-2 gap-1.5 flex-wrap">
                     <button onclick="window.switchMasterTab('regular')" id="tab-btn-regular" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition bg-white text-blue-600 shadow-sm border border-gray-200"><i class="fa-solid fa-user mr-1 text-blue-600"></i> 일반 계정 (<span id="count-regular">0</span>)</button>
-                    <button onclick="window.switchMasterTab('trial')" id="tab-btn-trial" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-clock mr-1 text-emerald-500"></i> 무료 계정(7일) (<span id="count-trial">0</span>)</button>
+                    <button onclick="window.switchMasterTab('trial')" id="tab-btn-trial" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-clock mr-1 text-emerald-500"></i> 무료체험 계정 (<span id="count-trial">0</span>)</button>
                     <button onclick="window.switchMasterTab('dispatch')" id="tab-btn-dispatch" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-building mr-1 text-purple-500"></i> 관제 계정 (<span id="count-dispatch">0</span>)</button>
                     <button onclick="window.switchMasterTab('memos')" id="tab-btn-memos" class="flex-1 min-w-[140px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-square-parking mr-1 text-yellow-500"></i> 주차 메모 DB (<span id="count-memos">0</span>)</button>
                     <button onclick="window.switchMasterTab('history')" id="tab-btn-history" class="flex-1 min-w-[150px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-address-book mr-1 text-indigo-500"></i> 계정/내역 조회</button>
@@ -88,7 +88,7 @@
                     <div id="pagination-regular"></div>
                 </div>
 
-                <!-- 탭 2: 무료(7일) 계정 -->
+                <!-- 탭 2: 무료체험 계정 -->
                 <div id="tab-content-trial" class="hidden flex-col flex-1">
                     <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-trial"></tbody></table></div>
                     <div id="pagination-trial"></div>
@@ -149,7 +149,7 @@
                             <div id="history-type-filter-group" class="flex items-center gap-1.5 bg-white p-1 rounded-xl border border-gray-200 shadow-xs">
                                 <button onclick="window.setHistoryAccountTypeFilter('ALL')" id="htype-btn-ALL" class="px-3 py-1 rounded-lg text-xs font-black bg-blue-600 text-white shadow-xs transition">전체보기 (<span id="htype-count-all">0</span>)</button>
                                 <button onclick="window.setHistoryAccountTypeFilter('regular')" id="htype-btn-regular" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">일반 (<span id="htype-count-reg">0</span>)</button>
-                                <button onclick="window.setHistoryAccountTypeFilter('trial')" id="htype-btn-trial" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">7일체험 (<span id="htype-count-trial">0</span>)</button>
+                                <button onclick="window.setHistoryAccountTypeFilter('trial')" id="htype-btn-trial" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">무료체험 (<span id="htype-count-trial">0</span>)</button>
                                 <button onclick="window.setHistoryAccountTypeFilter('dispatch')" id="htype-btn-dispatch" class="px-3 py-1 rounded-lg text-xs font-black text-gray-500 hover:bg-gray-100 transition">관제 (<span id="htype-count-dispatch">0</span>)</button>
                             </div>
                         </div>
@@ -575,7 +575,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-admin-auth-isolation","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261017-admin-auth-isolation"}}</script>
-    <script type="module" src="./js/admin-app.js?v=20261017-admin-auth-isolation"></script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-sales-trial","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-sales-trial","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-sales-trial","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261017-sales-trial"}}</script>
+    <script type="module" src="./js/admin-app.js?v=20261017-sales-trial"></script>
 </body>
 </html>

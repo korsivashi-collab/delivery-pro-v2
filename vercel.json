@@ -7,6 +7,14 @@
   },
   "rewrites": [
     {
+      "source": "/trial-month",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/api/start-trial-month",
+      "destination": "/api/start-trial?campaign=sales-month"
+    },
+    {
       "source": "/favicon.ico",
       "destination": "/icons/site-icon.png"
     },
@@ -35,6 +43,11 @@
   ],
   "redirects": [
     {
+      "source": "/trial-month/",
+      "destination": "/trial-month",
+      "permanent": false
+    },
+    {
       "source": "/",
       "has": [
         {
@@ -55,6 +68,17 @@
       ],
       "destination": "/admin.html",
       "permanent": false
+    }
+  ],
+  "headers": [
+    {
+      "source": "/trial-month",
+      "headers": [
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        }
+      ]
     }
   ]
 }

@@ -155,12 +155,12 @@
 
     <script type="importmap">
     {"imports":{
-        "./js/app.js":"./js/app.js?v=20261017-memo-phone-compat",
-        "./js/auth.js":"./js/auth.js?v=20261017-memo-phone-compat",
-        "./js/subscriptions.js":"./js/subscriptions.js?v=20261017-memo-phone-compat",
-        "./js/api.js":"./js/api.js?v=20261017-memo-phone-compat",
-        "./js/memo.js":"./js/memo.js?v=20261017-memo-phone-compat",
-        "./js/scanner.js":"./js/scanner.js?v=20261017-memo-phone-compat"
+        "./js/app.js":"./js/app.js?v=20261017-sales-trial",
+        "./js/auth.js":"./js/auth.js?v=20261017-sales-trial",
+        "./js/subscriptions.js":"./js/subscriptions.js?v=20261017-sales-trial",
+        "./js/api.js":"./js/api.js?v=20261017-sales-trial",
+        "./js/memo.js":"./js/memo.js?v=20261017-sales-trial",
+        "./js/scanner.js":"./js/scanner.js?v=20261017-sales-trial"
     }}
     </script>
     <script type="module">
@@ -255,7 +255,7 @@
                 <div class="flex-grow border-t border-slate-200"></div>
             </div>
             <button onclick="window.openTrialModal()" class="w-full text-emerald-800 bg-emerald-50 border border-emerald-200 hover:bg-emerald-100 font-bold rounded-xl text-sm px-5 py-3.5 transition flex items-center justify-center gap-2 active:scale-95">
-                <i class="fa-solid fa-gift text-emerald-600"></i> 처음이신가요? 7일 무료 체험
+                <i class="fa-solid fa-gift text-emerald-600"></i> <span id="trial-entry-label">처음이신가요? 7일 무료 체험</span>
             </button>
         </div>
         <footer class="auth-business-footer w-full max-w-sm shrink-0 mt-5 pb-2" aria-label="서비스 정책 및 사업자 정보">
@@ -278,7 +278,7 @@
     <div id="trial-modal" class="hidden fixed inset-0 bg-black/60 z-[140] flex items-center justify-center p-4 backdrop-blur-sm transition-opacity">
         <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl relative overflow-hidden animate-slide-up border border-slate-200">
             <div class="absolute top-0 left-0 w-full h-1 bg-emerald-500"></div>
-            <h3 class="font-black text-slate-900 text-lg mb-1 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-emerald-600"></i> 7일 무료 체험 시작</h3>
+            <h3 class="font-black text-slate-900 text-lg mb-1 flex items-center gap-2"><i class="fa-solid fa-clock-rotate-left text-emerald-600"></i> <span id="trial-title">7일 무료 체험 시작</span></h3>
             <p class="text-[11px] text-slate-500 font-bold mb-4 leading-relaxed">
                 관제 센터 식별을 위해<br>본인 휴대폰 번호를 정확하게 입력해 주세요.<br>
                 <span class="text-emerald-700 font-extrabold">(기기당 1회만 체험 가능합니다.)</span>
