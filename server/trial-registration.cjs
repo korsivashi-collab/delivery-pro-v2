@@ -11,11 +11,15 @@ async function assertTrialEligible(db, reader, phone, deviceId) {
         reader.get(db.collection('blocked_devices').doc(deviceId)),
         reader.get(db.collection('licenses')), reader.get(db.collection('driver_profiles'))
     ]);
+    // Deleted accounts may be registered again. Retained history is only a
+    // duplicate guard while its original account still exists.
+    const accountKeys = new Set([...licenses.docs, ...profiles.docs].map(doc => doc.id));
+    const hasAccount = snapshot => snapshot.exists && accountKeys.has(snapshot.data()?.trialKey);
     if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
-    if (history.exists || [...licenses.docs, ...profiles.docs].some(doc => phoneDigits(doc.data().phone) === phoneDigits(phone))) {
+    if (hasAccount(history) || [...licenses.docs, ...profiles.docs].some(doc => phoneDigits(doc.data().phone) === phoneDigits(phone))) {
         throw problem('이미 가입 또는 무료 체험 이력이 있는 휴대폰 번호입니다. 정식 라이선스를 이용해 주세요.', 409);
     }
-    if (deviceHistory.exists || licenses.docs.some(doc => doc.data().deviceId === deviceId && doc.data().type === 'trial') ||
+    if (hasAccount(deviceHistory) || licenses.docs.some(doc => doc.data().deviceId === deviceId && doc.data().type === 'trial') ||
         profiles.docs.some(doc => doc.data().deviceId === deviceId && (doc.id.startsWith('TRIAL-') || doc.data().type === 'trial'))) {
         throw problem('이미 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.', 409);
     }
@@ -52,9 +56,9 @@ async function registerTrial(db, identity, input, now = Date.now(), offer = 'sta
         const data = { key: trialKey, phone, routeOwnerId, deviceId, status: 'active', expireDate, allowTms: true, trialDays, trialSource: offer };
         tx.set(db.collection('licenses').doc(trialKey), { ...data, type: 'trial', dispatchKey: '', createdAt: now });
         tx.set(db.collection('driver_profiles').doc(trialKey), data);
-        // 클라이언트가 계정의 phone을 지우거나 계정을 삭제해도 체험 이력은 남습니다.
-        tx.create(historyRef, { trialKey, uid: identity.uid, createdAt: now, trialDays, trialSource: offer });
-        tx.create(deviceHistoryRef, { trialKey, createdAt: now, trialDays, trialSource: offer });
+        // Account deletion releases eligibility; replace any orphaned history.
+        tx.set(historyRef, { trialKey, uid: identity.uid, createdAt: now, trialDays, trialSource: offer });
+        tx.set(deviceHistoryRef, { trialKey, createdAt: now, trialDays, trialSource: offer });
         tx.set(lockRef, { revision: (lock.data()?.revision || 0) + 1, updatedAt: now });
         return { valid: true, trialKey, expireDate, dispatchKey: '', routeOwnerId, trialDays };
     });
