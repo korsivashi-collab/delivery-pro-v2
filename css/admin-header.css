@@ -59,3 +59,32 @@
     #dispatch-panel > .dispatch-header .dispatch-primary-nav { gap: 2px; }
     #dispatch-panel > .dispatch-header .dispatch-search { max-width: 280px; }
 }
+
+/* 자동할당 모달: 두 배정 기준을 항상 표시하고 실행 버튼 옆에 유지합니다. */
+#auto-dispatch-modal .auto-dispatch-toolbar { flex-wrap: wrap; gap: 12px; }
+#auto-dispatch-modal .auto-dispatch-actions { flex-wrap: wrap; min-width: 0; gap: 10px; }
+#auto-dispatch-modal .dispatch-assignment-control { flex: 0 0 auto; }
+#auto-dispatch-modal .dispatch-assignment-run { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
+#auto-dispatch-modal .dispatch-assignment-mode {
+    display: inline-flex; padding: 3px; gap: 3px; border: 1px solid #cbd5e1;
+    border-radius: 10px; background: #f1f5f9;
+}
+#auto-dispatch-modal .dispatch-assignment-mode button {
+    min-width: 86px; padding: 6px 10px; border-radius: 7px; color: #475569;
+    font-size: 12px; font-weight: 800; line-height: 20px; white-space: nowrap;
+}
+#auto-dispatch-modal .dispatch-assignment-mode button[aria-pressed="true"] { color: #fff; background: #2563eb; }
+#auto-dispatch-modal .dispatch-assignment-mode button[aria-pressed="true"]::before { content: '✓ '; }
+#auto-dispatch-modal .dispatch-assignment-mode button:hover { box-shadow: inset 0 0 0 2px #93b4ff; }
+#auto-dispatch-modal .dispatch-assignment-mode button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
+#auto-dispatch-modal #dispatch-mode-description { margin: 3px 0 0; color: #64748b; font-size: 10px; line-height: 14px; }
+#auto-dispatch-modal .auto-dispatch-actions button:disabled { opacity: .55; cursor: wait; }
+@media (max-width: 1850px) {
+    #auto-dispatch-modal .auto-dispatch-actions { flex: 1 0 100%; justify-content: flex-end; }
+}
+@media (max-width: 850px) {
+    #auto-dispatch-modal .auto-dispatch-toolbar { padding: 10px 12px; }
+    #auto-dispatch-modal .auto-dispatch-base { min-width: 0; max-width: none; flex: 1 0 100%; flex-wrap: wrap; }
+    #auto-dispatch-modal #saved-base-address-text { min-width: 100px; }
+    #auto-dispatch-modal .auto-dispatch-actions { justify-content: flex-start; }
+}
