@@ -12,7 +12,7 @@
     
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261018-dispatch-distance">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -223,14 +223,14 @@
 
     <!-- 1. PRO 배송 자동할당 모달 -->
     <div id="auto-dispatch-modal" class="hidden fixed inset-0 bg-slate-100 z-[400] flex flex-col overflow-hidden">
-        <header class="bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between shadow-sm flex-none gap-4">
+        <header class="auto-dispatch-toolbar bg-white border-b border-gray-200 px-6 py-3.5 flex items-center justify-between shadow-sm flex-none gap-4">
             <div class="flex items-center gap-3 flex-none w-[230px] shrink-0">
                 <div class="w-11 h-11 bg-gradient-to-br from-blue-600 to-indigo-600 text-white rounded-xl flex items-center justify-center text-xl shadow-md"><i class="fa-solid fa-route animate-pulse"></i></div>
                 <div><h2 class="text-lg font-black text-gray-900 flex items-center gap-1.5 tracking-tight leading-none">배송 자동할당 <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-1.5 py-0.5 rounded border border-amber-300">PRO</span></h2><p class="text-[10px] text-gray-400 font-bold mt-1">기사 권역별 물량 배분 및 전송</p></div>
             </div>
 
             <!-- 본사 거점 설정 바 -->
-            <div class="flex-1 bg-slate-50 px-4 py-2 rounded-2xl border border-gray-200 flex items-center gap-2.5 shadow-inner min-w-[380px] max-w-[650px]">
+            <div class="auto-dispatch-base flex-1 bg-slate-50 px-4 py-2 rounded-2xl border border-gray-200 flex items-center gap-2.5 shadow-inner min-w-[380px] max-w-[650px]">
                 <span class="text-xs font-black text-gray-700 whitespace-nowrap shrink-0"><i class="fa-solid fa-building text-blue-600 mr-1"></i>본사 거점</span>
                 <input type="text" id="company-base-address" placeholder="전체 주소 입력" class="w-40 bg-white border border-gray-300 rounded-lg text-xs p-1.5 font-bold outline-none focus:border-blue-500 transition shadow-2xs shrink-0">
                 <button type="button" id="btn-save-company-base" onclick="window.saveCompanyBaseAddress()" class="bg-slate-800 hover:bg-slate-900 text-white px-3 py-1.5 rounded-lg text-xs font-black shadow-2xs active:scale-95 whitespace-nowrap transition shrink-0">저장</button>
@@ -239,7 +239,7 @@
             </div>
 
             <!-- 상단 작업 버튼군 -->
-            <div class="flex items-center gap-2.5 flex-none shrink-0 ml-auto">
+            <div class="auto-dispatch-actions flex items-center gap-2.5 flex-none shrink-0 ml-auto">
                 <button type="button" id="btn-revert-auto-dispatch" onclick="window.revertAutoDispatch()" class="bg-white hover:bg-red-50 text-gray-700 hover:text-red-600 border border-gray-300 hover:border-red-300 text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="모든 주문의 기사 배정을 초기화합니다">
                     <i class="fa-solid fa-rotate-left text-sm"></i> 배정·전송 동선 취소
                 </button>
@@ -255,9 +255,18 @@
                 <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="좌측 목록에서 체크(토글)된 기사들에게 배송 동선을 전송합니다">
                     <i class="fa-solid fa-paper-plane text-sm"></i> 동선 전송
                 </button>
+                <div class="dispatch-assignment-run">
+                <div class="dispatch-assignment-control">
+                    <div class="dispatch-assignment-mode" role="group" aria-label="자동할당 배정 기준" aria-describedby="dispatch-mode-description">
+                        <button type="button" id="dispatch-mode-count" aria-pressed="true" onclick="window.setDispatchAssignmentMode('count')">배송 건수</button>
+                        <button type="button" id="dispatch-mode-distance" aria-pressed="false" onclick="window.setDispatchAssignmentMode('distance')" title="직선거리 차이를 줄여 배정합니다. 가중치가 설정된 경우 배정 건수를 유지합니다.">이동 거리</button>
+                    </div>
+                    <p id="dispatch-mode-description" aria-live="polite">가중치를 반영해 건수를 나눕니다.</p>
+                </div>
                 <button type="button" id="btn-run-auto-dispatch" onclick="window.runAutoDispatchAlgorithm()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-robot text-sm"></i> 자동할당 실행
                 </button>
+                </div>
                 <button type="button" id="btn-export-to-invoice" onclick="window.exportToInvoiceModal()" class="bg-slate-800 hover:bg-slate-900 text-white text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow-2xs active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-file-export text-xs"></i> 주문서 통합관리
                 </button>
@@ -639,7 +648,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261018-dispatch-distance","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261018-dispatch-distance"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261017-dispatch-session-guard"></script>
 </body>
 </html>
