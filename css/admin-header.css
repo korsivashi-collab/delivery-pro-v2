@@ -62,23 +62,24 @@
 
 /* 자동할당 모달: 거점·관리 도구와 업로드·실행을 두 줄로 구분합니다. */
 #auto-dispatch-modal .auto-dispatch-toolbar {
-    display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+    display: grid; grid-template-columns: auto minmax(0, 660px) minmax(0, 1fr);
     align-items: center; gap: 12px 20px; padding: 14px 24px;
 }
 #auto-dispatch-modal .auto-dispatch-brand { min-width: 220px; }
+#auto-dispatch-modal #btn-clear-company-base { padding: 5px 7px; border: 1px solid #fecaca; border-radius: 7px; }
 #auto-dispatch-modal .auto-dispatch-base { min-width: 0; max-width: none; }
-#auto-dispatch-modal #company-base-address { width: clamp(140px, 16vw, 280px); min-width: 0; }
+#auto-dispatch-modal #company-base-address { width: clamp(140px, 14vw, 210px); min-width: 0; }
 #auto-dispatch-modal #saved-base-address-text { min-width: 0; }
 #auto-dispatch-modal .auto-dispatch-utilities,
 #auto-dispatch-modal .auto-dispatch-execution { display: flex; align-items: center; gap: 10px; min-width: 0; }
 #auto-dispatch-modal .auto-dispatch-utilities { justify-content: flex-end; }
 #auto-dispatch-modal .auto-dispatch-actions {
-    grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center; gap: 20px; min-width: 0;
+    grid-column: 1 / -1; display: grid; grid-template-columns: minmax(280px, 400px) auto;
+    align-items: center; justify-content: center; gap: 28px; min-width: 0; padding: 2px 0;
 }
 #auto-dispatch-modal #excel-drop-zone {
-    width: 100%; min-width: 0; min-height: 76px; padding: 12px 20px;
-    justify-content: flex-start; text-align: left;
+    width: 100%; min-width: 0; min-height: 68px; padding: 10px 20px;
+    justify-content: center; text-align: left;
 }
 #auto-dispatch-modal #excel-drop-zone h4 { font-size: 14px; line-height: 22px; }
 #auto-dispatch-modal #excel-drop-zone p { font-size: 12px; line-height: 18px; white-space: normal; }
@@ -99,13 +100,16 @@
 #auto-dispatch-modal #dispatch-mode-description { margin: 3px 0 0; color: #64748b; font-size: 10px; line-height: 14px; }
 #auto-dispatch-modal .auto-dispatch-toolbar button:disabled { opacity: .55; cursor: wait; }
 @media (max-width: 1100px) {
-    #auto-dispatch-modal .auto-dispatch-toolbar { grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; padding: 12px 16px; }
-    #auto-dispatch-modal .auto-dispatch-base { grid-column: 1 / -1; grid-row: 2; }
-    #auto-dispatch-modal #company-base-address { width: clamp(160px, 32vw, 360px); }
+    #auto-dispatch-modal .auto-dispatch-toolbar { grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px 16px; padding: 12px 16px; }
+    #auto-dispatch-modal #company-base-address { width: 140px; }
+    #auto-dispatch-modal .auto-dispatch-base { flex-wrap: wrap; gap: 6px; }
+    #auto-dispatch-modal #saved-base-address-text { flex-basis: 65%; }
 }
 @media (max-width: 900px) {
-    #auto-dispatch-modal .auto-dispatch-actions { grid-template-columns: minmax(0, 1fr); gap: 10px; }
-    #auto-dispatch-modal .auto-dispatch-execution { justify-content: flex-end; }
+    #auto-dispatch-modal .auto-dispatch-actions { grid-template-columns: minmax(0, 400px); justify-content: center; gap: 12px; }
+    #auto-dispatch-modal .auto-dispatch-execution { flex-wrap: wrap; justify-content: center; }
+    #auto-dispatch-modal .auto-dispatch-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
+    #auto-dispatch-modal .auto-dispatch-base { grid-column: 1 / -1; grid-row: 2; }
 }
 @media (max-width: 600px) {
     #auto-dispatch-modal .auto-dispatch-toolbar { padding: 10px 12px; gap: 10px; }
@@ -114,7 +118,7 @@
     #auto-dispatch-modal .auto-dispatch-base { grid-row: 3; flex-wrap: wrap; padding: 10px; }
     #auto-dispatch-modal #company-base-address { flex: 1 1 120px; width: 120px; }
     #auto-dispatch-modal #saved-base-address-text { flex: 1 1 80%; }
-    #auto-dispatch-modal .auto-dispatch-execution { flex-wrap: wrap; justify-content: flex-start; }
+    #auto-dispatch-modal .auto-dispatch-execution { flex-wrap: wrap; justify-content: center; }
     #auto-dispatch-modal #excel-drop-zone { padding: 12px; }
     #auto-dispatch-modal .dispatch-assignment-run { gap: 8px; }
     #auto-dispatch-modal #btn-run-auto-dispatch { padding-left: 12px; padding-right: 12px; }
