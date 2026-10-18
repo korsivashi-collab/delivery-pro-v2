@@ -12,7 +12,6 @@ import {
     firebaseStartTrial,
     isSalesTrialEntry, 
     firebaseClearDeviceData,
-    checkIfDeviceBlocked,
     syncMyParkingMemosFromServer,
     listenToActiveRoutes,
     firebaseSendSmsVerification,
@@ -115,9 +114,7 @@ export async function sendPhoneAuthCode() {
     const button = document.getElementById('btn-send-sms');
     try {
         const deviceId = getOrCreateDeviceId();
-        const blocked = await checkIfDeviceBlocked(deviceId);
         if (version !== smsSessionVersion) return;
-        if (blocked) { window.location.replace('error.html'); return; }
         const rawPhone = (document.getElementById('auth-phone-input')?.value || '').trim();
         if (!rawPhone || rawPhone.replace(/[^0-9]/g, '').length < 9) {
             showSmsMessage('휴대폰 번호를 정확하게 입력해 주세요. (숫자 9자리 이상)');
@@ -497,10 +494,6 @@ async function restoreSavedAuth() {
         if (result.valid) { applyVerifiedLogin(result); return; }
         if (!result.isOffline) clearAuthStorage();
         showSmsMessage(result.msg);
-    } else {
-        try {
-            if (await checkIfDeviceBlocked(deviceId)) { window.location.replace('error.html'); return; }
-        } catch (error) { showSmsMessage(error.message); }
     }
     document.getElementById('main-app')?.classList.add('hidden');
     document.getElementById('auth-screen')?.classList.remove('hidden');
@@ -724,7 +717,6 @@ export async function sendTrialSmsCode() {
     let version = trialSmsVersion;
     const button = document.getElementById('btn-trial-send-sms');
     try {
-        if (await checkIfDeviceBlocked(getOrCreateDeviceId())) { window.location.replace('error.html'); return; }
         if (version !== trialSmsVersion) return;
         const phone = trialPhoneValue();
         resetTrialSmsSession();
@@ -787,7 +779,6 @@ export async function startFreeTrial() {
     const deviceId = getOrCreateDeviceId();
 
     try {
-        if (await checkIfDeviceBlocked(deviceId)) { window.location.replace('error.html'); return; }
         if (version !== trialSmsVersion) return;
         const formattedPhone = trialPhoneValue();
         if (!isTrialSmsVerified && !trialSmsConfirmationResult) {

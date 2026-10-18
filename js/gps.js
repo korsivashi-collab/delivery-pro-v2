@@ -279,8 +279,25 @@ if (typeof document !== 'undefined') {
 // 3. 백그라운드 GPS 위치 추적 시작 (외부 호출용)
 // ==========================================
 export function startGpsWatcher() {
+    const newlyEnabled = !isGpsWatcherActive;
     isGpsWatcherActive = true;
     refreshGpsTracking();
+    // Ask for location after login even with no deliveries. This one-shot fix
+    // does not subscribe to dispatch requests or upload a location report.
+    if (newlyEnabled && !canTrackGps() && document.visibilityState !== 'hidden' && navigator.geolocation) {
+        const session = gpsSession;
+        try {
+            navigator.geolocation.getCurrentPosition(
+                () => {},
+                error => {
+                    if (session !== gpsSession || !isGpsWatcherActive) return;
+                    if (error.code === 1) alert('위치 권한이 차단되어 있습니다. GPS를 사용하려면 브라우저와 기기의 위치 권한을 허용해 주세요.');
+                    else console.warn('초기 위치 확인 실패:', error.code);
+                },
+                { enableHighAccuracy: false, timeout: 5000, maximumAge: 60000 }
+            );
+        } catch (error) { console.warn('초기 위치 요청 실패:', error.message); }
+    }
 }
 
 // ==========================================

@@ -170,7 +170,7 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
 }
 
 // ==========================================
-// 2. 접속 제한 기기 관리 모달 및 CRUD
+// 2. 접속 차단 대상 관리 모달 및 CRUD
 // ==========================================
 
 export function openBlockedDeviceModal() {
@@ -226,8 +226,8 @@ export async function addBlockedDeviceFromModal() {
     const devId = inputId ? inputId.value.trim() : '';
     const memo = inputMemo ? inputMemo.value.trim() : '';
 
-    if (!devId || !/^[\p{L}\p{N}_+ -]{1,160}$/u.test(devId)) {
-        alert("차단할 라이선스 키, 전화번호 또는 기기 고유번호를 입력해 주세요.");
+    if (!devId || /^DEV-/i.test(devId) || !/^[\p{L}\p{N}_+ -]{1,160}$/u.test(devId)) {
+        alert("차단할 라이선스 키 또는 전화번호를 입력해 주세요.");
         inputId?.focus();
         return;
     }
@@ -235,17 +235,18 @@ export async function addBlockedDeviceFromModal() {
     try {
         await setDoc(doc(db, "blocked_devices", devId), {
             deviceId: devId,
+            ...( /^(010|\+82)/.test(devId) ? {phone: normalizeMasterPhone(devId)} : {licenseKey: devId.toUpperCase()} ),
             memo: memo || '관리자 직접 제한 등록',
             createdAt: Date.now()
         });
 
-        alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
+        alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n라이선스 키 또는 인증된 전화번호가 일치하면 접속이 거부됩니다.`);
         if (inputId) inputId.value = '';
         if (inputMemo) inputMemo.value = '';
         renderModalBlockedDevices();
         renderBlockedDevicesTable();
     } catch (e) {
-        alert("기기 접속 제한 등록 오류: " + e.message);
+        alert("접속 차단 등록 오류: " + e.message);
     }
 }
 
@@ -259,7 +260,7 @@ export function renderBlockedDevicesTable() {
     if (countBadge) countBadge.innerText = blockeds.length;
 
     if (blockeds.length === 0) {
-        tbody.innerHTML = `<tr><td colspan="6" class="py-16 text-center text-gray-400 font-bold text-xs">제한 등록된 기기 고유번호가 없습니다.</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" class="py-16 text-center text-gray-400 font-bold text-xs">등록된 접속 차단 정보가 없습니다.</td></tr>`;
         if (pagEl) pagEl.innerHTML = '';
         return;
     }
@@ -311,8 +312,8 @@ export async function addBlockedDevice() {
     const devId = inputEl ? inputEl.value.trim() : '';
     const memo = memoEl ? memoEl.value.trim() : '';
 
-    if (!devId || !/^[\p{L}\p{N}_+ -]{1,160}$/u.test(devId)) {
-        alert("차단할 라이선스 키, 전화번호 또는 기기 고유번호를 입력해 주세요.");
+    if (!devId || /^DEV-/i.test(devId) || !/^[\p{L}\p{N}_+ -]{1,160}$/u.test(devId)) {
+        alert("차단할 라이선스 키 또는 전화번호를 입력해 주세요.");
         if (inputEl) inputEl.focus();
         return;
     }
@@ -320,17 +321,18 @@ export async function addBlockedDevice() {
     try {
         await setDoc(doc(db, "blocked_devices", devId), {
             deviceId: devId,
+            ...( /^(010|\+82)/.test(devId) ? {phone: normalizeMasterPhone(devId)} : {licenseKey: devId.toUpperCase()} ),
             memo: memo || '관리자 직접 제한 등록',
             createdAt: Date.now()
         });
 
-        alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n해당 기기로 접속 시 차단 안내 대신 '서버 연결 오류' 화면으로 위장 처리됩니다.`);
+        alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n라이선스 키 또는 인증된 전화번호가 일치하면 접속이 거부됩니다.`);
         if (inputEl) inputEl.value = '';
         if (memoEl) memoEl.value = '';
         renderModalBlockedDevices();
         renderBlockedDevicesTable();
     } catch (e) {
-        alert("기기 접속 제한 등록 오류: " + e.message);
+        alert("접속 차단 등록 오류: " + e.message);
     }
 }
 

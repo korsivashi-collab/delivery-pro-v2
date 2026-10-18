@@ -145,18 +145,6 @@ async function compressImageToBlob(file, maxDimension = 960, quality = 0.65) {
     });
 }
 
-// 0. 기기 고유번호(deviceId) 접속 제한(블랙리스트) 검증
-export async function checkIfDeviceBlocked(deviceId) {
-    if (!deviceId) return false;
-    try {
-        const docRef = doc(db, "blocked_devices", deviceId);
-        const snap = await getDoc(docRef);
-        return snap.exists();
-    } catch (e) {
-        throw new Error('차단 정보를 확인할 수 없습니다. 네트워크를 확인해 주세요.');
-    }
-}
-
 // 1. 배송 완료 사진 고속 업로드 (경량화 규격 적용)
 export async function firebaseUploadDeliveryPhoto(file, deviceId, operationId = null) {
     const blob = await compressImageToBlob(file, 960, 0.65);
