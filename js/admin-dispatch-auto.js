@@ -463,11 +463,13 @@ export async function revertAutoDispatch(options = {}) {
             const resetId = crypto.randomUUID();
             const owned = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
             const documents = new Map();
+            const endpointRoutes = {};
             let revision = Date.now();
             let latestRoute = null;
             owned.forEach(snapshot => {
                 documents.set(snapshot.id, snapshot.ref);
                 const data = snapshot.data();
+                endpointRoutes[snapshot.id] = data;
                 if (!latestRoute || data.updatedAt > latestRoute.updatedAt) latestRoute = data;
                 if (Number.isFinite(data.updatedAt)) revision = Math.max(revision, data.updatedAt + 1);
             });
@@ -477,9 +479,13 @@ export async function revertAutoDispatch(options = {}) {
                 const ref = doc(db, 'routes', id);
                 const existing = await getDoc(ref);
                 if (existing.exists() && existing.data().routeOwnerId && existing.data().routeOwnerId !== routeOwnerId) continue;
+                if (existing.exists()) endpointRoutes[id] = existing.data();
                 documents.set(id, ref);
             }
             if (documents.size > 500) throw new Error('기사 동선 문서 수가 한 번에 처리 가능한 범위를 초과했습니다.');
+            // 배정 취소는 배송 목록만 초기화합니다. 기사가 선택한 종료 설정은 재배정에도 유지합니다.
+            const endLocation = resolveDriverEndLocation({ ...driver, routeOwnerId }, endpointRoutes) ||
+                { lat: 0, lng: 0, address: '' };
             const batch = writeBatch(db);
             const emptyRoutes = [];
             for (const [id, ref] of documents) {
@@ -488,7 +494,7 @@ export async function revertAutoDispatch(options = {}) {
                     dispatchDate: selectedDate,
                     dispatchKey: driver.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                     destinations: [], routePlan: null, startSelected: false, startLocation: null,
-                    endLocation: { lat: 0, lng: 0, address: '' }, updatedAt: revision, cleared: true
+                    endLocation: { ...endLocation }, updatedAt: revision, cleared: true
                 };
                 batch.set(ref, emptyRoute);
                 emptyRoutes.push([id, emptyRoute]);
