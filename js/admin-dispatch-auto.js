@@ -6,7 +6,7 @@ import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc, getDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
-import { executeAutoDispatch } from "./admin-dispatch-algorithm.js";
+import { executeAutoDispatch, optimizeRoute2Opt, resolveDriverEndLocation } from "./admin-dispatch-algorithm.js";
 
 // ==========================================
 // 0. 물량 가중치 영구 저장소(LocalStorage) 관리 헬퍼
@@ -424,6 +424,11 @@ export function changeOrderDriver(itemId, newDriverKey) {
 // ==========================================
 let resettingAssignments = false;
 let sendingRoutes = false;
+// 자동 정렬 이후 수동 편집한 순서는 유지합니다. 종료 설정만 바뀐 경우에만 재계산합니다.
+let autoDispatchRoutePlans = new Map();
+function dispatchOrderSignature(orders) {
+    return JSON.stringify(orders.map(o => [o.id, o.lat, o.lng, o.displayNumber]));
+}
 window.isDispatchRouteBusy = () => resettingAssignments || sendingRoutes;
 export async function revertAutoDispatch(options = {}) {
     const clearOrders = options.clearOrders === true;
@@ -571,19 +576,25 @@ export function runAutoDispatchAlgorithm() {
     try { companyBase = JSON.parse(localStorage.getItem('deliveryProCompanyBase') || 'null'); }
     catch { alert('회사 거점 저장값을 읽지 못했습니다. 거점을 다시 저장해 주세요.'); return; }
 
-    if (!companyBase?.lat || !companyBase?.lng) { alert('회사 거점을 먼저 저장해 주세요. 회사에서 가까운 배송지부터 시작하고 회사로 복귀합니다.'); return; }
+    if (!companyBase?.lat || !companyBase?.lng) { alert('회사 거점을 먼저 저장해 주세요. 회사에서 가까운 배송지부터 시작하고 기사별 종료지점을 반영합니다.'); return; }
 
     const result = executeAutoDispatch({
         targetOrders,
         activeDrivers,
         weights: autoDispatchState.weights,
-        companyBase
+        companyBase,
+        activeRoutes: state.activeRoutes
     });
 
     if (!result.success) {
         alert(`[알고리즘 실행 오류] ${result.message}`);
         return;
     }
+
+    autoDispatchRoutePlans = new Map(result.driverStats.filter(ds => ds.assignedOrders.length).map(ds => [ds.devId, {
+        signature: dispatchOrderSignature(ds.assignedOrders), endLocation: ds.endLocation,
+        base: { lat: Number(companyBase.lat), lng: Number(companyBase.lng) }
+    }]));
 
     if (window.renderExcelTable) window.renderExcelTable();
     if (window.renderDispatchDriverList) window.renderDispatchDriverList();
@@ -654,6 +665,7 @@ export async function sendRoutesToDrivers() {
     try {
         sendingRoutes = true;
         let successCount = 0;
+        let reordered = false;
         const nowTs = Date.now();
 
         for (const devId of sendTargetDevIds) {
@@ -678,28 +690,56 @@ export async function sendRoutesToDrivers() {
             let routeRevision = nowTs;
             let resetId = '';
             let resetRevision = -1;
+            const ownedRoutes = {};
             previousRoutes.forEach(snapshot => {
                 const previous = snapshot.data();
+                ownedRoutes[snapshot.id] = previous;
                 if (Number.isFinite(previous.updatedAt)) routeRevision = Math.max(routeRevision, previous.updatedAt + 1);
                 if (previous.resetId && previous.updatedAt > resetRevision) {
                     resetId = previous.resetId; resetRevision = previous.updatedAt;
                 }
             });
+            // 소유자 ID 도입 전 기기 문서도 자동할당 때 사용한 동일한 설정을 유지합니다.
+            if (Object.keys(ownedRoutes).length === 0 && state.activeRoutes?.[devId] &&
+                !state.activeRoutes[devId].routeOwnerId) {
+                ownedRoutes[devId] = state.activeRoutes[devId];
+            }
+            const endLocation = resolveDriverEndLocation(
+                { ...matchedLic, routeOwnerId }, ownedRoutes, companyBase
+            );
+            const autoPlan = autoDispatchRoutePlans.get(devId);
+            let orderedDestinations = destinations;
+            if (autoPlan && autoPlan.signature === dispatchOrderSignature(orders) &&
+                (autoPlan.endLocation?.lat !== endLocation.lat || autoPlan.endLocation?.lng !== endLocation.lng ||
+                 autoPlan.base.lat !== Number(companyBase.lat) || autoPlan.base.lng !== Number(companyBase.lng))) {
+                orderedDestinations = optimizeRoute2Opt(destinations, companyBase, endLocation);
+            }
             const routePayload = {
                 routeOwnerId,
                 resetId, cleared: false,
                 deviceId: devId,
                 phone: matchedLic.phone || devId,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
-                destinations: destinations,
-                startSelected: true, startLocation: destinations[0],
-                endLocation: { lat: Number(companyBase.lat), lng: Number(companyBase.lng), address: companyBase.address || '' },
+                destinations: orderedDestinations,
+                startSelected: true, startLocation: orderedDestinations[0],
+                endLocation,
                 routePlan: null,
                 dispatchDate: document.getElementById('dispatch-assign-date')?.value || getLocalDateString(),
                 updatedAt: routeRevision
             };
 
             await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
+            if (orderedDestinations !== destinations) {
+                const sourceOrders = new Map(destinations.map((destination, i) => [destination, orders[i]]));
+                orderedDestinations.forEach(destination => {
+                    sourceOrders.get(destination).displayNumber = destination.displayNumber;
+                });
+                autoDispatchRoutePlans.set(devId, {
+                    signature: dispatchOrderSignature(orders.slice().sort((a, b) => a.displayNumber - b.displayNumber)),
+                    endLocation, base: { lat: Number(companyBase.lat), lng: Number(companyBase.lng) }
+                });
+                reordered = true;
+            }
 
             // 🌟 중복 방지: devId 외에 남아있던 구형 식별자 문서(key)는 자동 정리하여 옛날 9건 부활 차단
             const otherKeys = [matchedLic.key].filter(k => k && k !== devId);
@@ -719,6 +759,11 @@ export async function sendRoutesToDrivers() {
         }
 
         renderSidebar();
+        if (reordered) {
+            window.renderExcelTable?.();
+            window.renderDispatchDriverDetail?.();
+            window.autoSaveExcelToFirebase?.();
+        }
         if (state.selectedDeviceId && state.dispatchNavState === 'DELIVERY') {
             drawDriverOnMap(state.selectedDeviceId);
         }

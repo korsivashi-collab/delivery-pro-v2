@@ -93,10 +93,31 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 // 3. 2-opt 기반 동선 순서 최적화 엔진 (꼬인 선 풀기)
 // ==========================================
 
-/**
- * 기사에게 배정된 배송지들을 거점에서 출발하여 순차적으로 이어지도록 정렬하고 번호 부여
- */
-export function optimizeRoute2Opt(orderList, basePos = null) {
+// 이미 수신한 경로에서 종료 설정만 읽습니다. 날짜와 배송 건수는 설정의 유효성과 무관합니다.
+export function resolveDriverEndLocation(driver, routes, companyBase = null) {
+    const entries = Object.entries(routes || {});
+    const owned = driver.routeOwnerId
+        ? entries.filter(([, route]) => route?.routeOwnerId === driver.routeOwnerId) : [];
+    const candidates = owned.length ? owned : entries.filter(([id, route]) =>
+        id === (driver.deviceId || driver.key) && route &&
+        (!route.routeOwnerId || route.routeOwnerId === driver.routeOwnerId));
+    candidates.sort(([aId, a], [bId, b]) =>
+        (Number.isFinite(b.updatedAt) ? b.updatedAt : -1) -
+        (Number.isFinite(a.updatedAt) ? a.updatedAt : -1) || aId.localeCompare(bId));
+    const endpoint = candidates[0]?.[1]?.endLocation;
+    const valid = p => p && p.lat !== null && p.lat !== undefined && p.lat !== '' &&
+        p.lng !== null && p.lng !== undefined && p.lng !== '' &&
+        Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)) &&
+        Math.abs(Number(p.lat)) <= 90 && Math.abs(Number(p.lng)) <= 180 &&
+        (Number(p.lat) !== 0 || Number(p.lng) !== 0);
+    const selected = valid(endpoint) ? endpoint : companyBase;
+    return valid(selected) ? {
+        lat: Number(selected.lat), lng: Number(selected.lng), address: selected.address || ''
+    } : null;
+}
+
+/** 기사에게 배정된 배송지를 거점 인근부터 기사별 종료지점 방향으로 정렬하고 번호를 부여합니다. */
+export function optimizeRoute2Opt(orderList, basePos = null, endPos = basePos) {
     if (!orderList?.length) return orderList;
     const valid = p => p && p.lat !== null && p.lng !== null && p.lat !== '' && p.lng !== '' &&
         Number.isFinite(Number(p.lat)) && Number.isFinite(Number(p.lng)) &&
@@ -112,7 +133,7 @@ export function optimizeRoute2Opt(orderList, basePos = null) {
         located.unshift(located.splice(nearest, 1)[0]);
     }
     const points = located.map((order, i) => ({ id: i, lat: Number(order.lat), lng: Number(order.lng), order }));
-    const end = valid(basePos) ? { lat: Number(basePos.lat), lng: Number(basePos.lng) } : null;
+    const end = valid(endPos) ? { lat: Number(endPos.lat), lng: Number(endPos.lng) } : null;
     const ordered = points.length > 1 ? calculateOptimizedRouteSync(points, points[0], end) : points;
     const result = [...ordered.map(point => point.order), ...missing];
     result.forEach((order, i) => { order.displayNumber = i + 1; });
@@ -128,7 +149,7 @@ export function optimizeRoute2Opt(orderList, basePos = null) {
  * 2) 해당 배송지 기준 하버사인 최근접 주문들을 모아 가장 가까운 가용 기사의 쿼터만큼 배정
  * 3) 거점 주변 잔여 물량까지 자연스럽게 내부 기사에게 순차 할당
  */
-export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null }) {
+export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null, activeRoutes = {} }) {
     if (!targetOrders || targetOrders.length === 0) {
         return { success: false, message: "할당할 배송 데이터가 없습니다." };
     }
@@ -239,10 +260,12 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
         });
     }
 
-    // 4. 각 기사별 배정 결과에 대해 2-opt 순서 최적화 실행 (현장 퇴근을 위한 동선 정렬)
+    // 4. 출발 기준은 유지하고, 기사 종료 설정이 없을 때만 회사 복귀를 적용합니다.
     driverStats.forEach(ds => {
         if (ds.assignedOrders.length > 0) {
-            ds.assignedOrders = optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng });
+            const driver = activeDrivers.find(d => (d.deviceId || d.key) === ds.devId);
+            ds.endLocation = resolveDriverEndLocation(driver, activeRoutes, { lat: baseLat, lng: baseLng, address: companyBase?.address || '' });
+            ds.assignedOrders = optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng }, ds.endLocation);
         }
     });
 
