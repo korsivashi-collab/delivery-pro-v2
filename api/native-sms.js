@@ -22,7 +22,7 @@ async function claimDevice(sdk, req, input, stamp) {
     if (input.phone && phoneDigits(input.phone) !== phoneDigits(phone)) throw problem('인증된 휴대폰 번호가 다릅니다.', 403);
     const db = sdk.firestore(), resume = input.action === 'resume-driver';
     const result = await db.runTransaction(async tx => {
-        const [exact] = await Promise.all([
+        const [exact, blockedSnapshot] = await Promise.all([
             tx.get(db.collection('licenses').doc(key)),
             assertNotBlocked(db, tx, key, phone, deviceId)
         ]);
@@ -33,7 +33,7 @@ async function claimDevice(sdk, req, input, stamp) {
         }
         if (!license?.exists) throw problem('등록되지 않은 라이선스 키입니다.', 404);
         const actualKey = license.id, data = license.data();
-        if (actualKey !== key) await assertNotBlocked(db, tx, actualKey, phone, deviceId);
+        if (actualKey !== key) await assertNotBlocked(db, tx, actualKey, phone, deviceId, blockedSnapshot);
         if (data.type === 'dispatch' || !isActive(data, new Date(stamp + 9 * 3600000).toISOString().slice(0,10), stamp)) {
             throw problem('사용이 정지되었거나 이용기간이 만료된 계정입니다.', 403);
         }

@@ -21,12 +21,12 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   if(expectedCustomer && account.rcUserId!==expectedCustomer)throw problem('계정이 변경되었습니다. 다시 확인해 주세요.',409);
   const licenseRef=db.collection('licenses').doc(account.licenseKey),profileRef=db.collection('driver_profiles').doc(account.licenseKey),lockRef=db.collection('admin_license_controls').doc('phone_integrity');
   const bindingRef=db.collection('billing_license_bindings').doc(account.licenseKey);
-  const [l,p,lock,blocked,binding]=await Promise.all([tx.get(licenseRef),tx.get(profileRef),tx.get(lockRef),device?tx.get(db.collection('blocked_devices').doc(device)):Promise.resolve({exists:false}),tx.get(bindingRef)]);
+  const [l,p,lock,blocked,binding]=await Promise.all([tx.get(licenseRef),tx.get(profileRef),tx.get(lockRef),device?require('../server/license-integrity.cjs').assertNotBlocked(db,tx,account.licenseKey,account.phone,device):Promise.resolve(null),tx.get(bindingRef)]);
   const license=l.data()||{},profile=p.data()||{};
   const cancelRef=cancellation?db.collection('payment_orders').doc(cancellation.orderId):null;
   const cancelOrder=cancelRef?(await tx.get(cancelRef)).data():null;
   if(binding.exists&&binding.data().uid!==uid)throw problem('이용권 소유자 정보를 확인해 주세요.',403);
-  if(blocked.exists||(!cancellation&&[license.status,profile.status].some(status=>['suspended','revoked'].includes(status))))throw problem('이용이 제한된 계정입니다.',403);
+  if(!cancellation&&[license.status,profile.status].some(status=>['suspended','revoked'].includes(status)))throw problem('이용이 제한된 계정입니다.',403);
   if(device&&(license.deviceId||profile.deviceId)&&(license.deviceId||profile.deviceId)!==device)throw problem('다른 기기에 연결된 계정입니다.',409);
   if(!license.driverSessionId&&(license.phone&&phoneDigits(license.phone)!==phoneDigits(account.phone)||profile.phone&&phoneDigits(profile.phone)!==phoneDigits(account.phone)))throw problem('전화번호 정보를 확인해 주세요.',409);
   if(license.routeOwnerId&&profile.routeOwnerId&&license.routeOwnerId!==profile.routeOwnerId)throw problem('계정 소유권을 확인해 주세요.',409);
