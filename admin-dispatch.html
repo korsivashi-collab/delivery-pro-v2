@@ -12,7 +12,7 @@
     
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261018-dispatch-layout2">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261018-dispatch-layout3">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -239,9 +239,10 @@
             </div>
 
             <div class="auto-dispatch-utilities">
-                <button type="button" id="btn-revert-auto-dispatch" onclick="window.revertAutoDispatch()" class="bg-white hover:bg-red-50 text-gray-700 hover:text-red-600 border border-gray-300 hover:border-red-300 text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="기사 배정과 전송된 동선을 취소합니다">
+                <button type="button" id="btn-revert-auto-dispatch" onclick="window.revertAutoDispatch()" class="bg-white hover:bg-red-50 text-gray-700 hover:text-red-600 border border-gray-300 hover:border-red-300 text-xs font-black px-3.5 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="주문서는 유지하고 기사에게 배정·전송된 배송 리스트를 취소합니다">
                     <i class="fa-solid fa-rotate-left text-sm"></i> 배송할당 취소
                 </button>
+                <button type="button" id="btn-clear-all-dispatch" onclick="window.clearAllExcelRows()" class="bg-white hover:bg-red-50 text-red-600 border border-red-200 text-xs font-black px-3 py-2.5 rounded-xl transition whitespace-nowrap" title="업로드한 전체 배송 리스트와 기사 배정·전송 내역을 초기화합니다">전체 초기화</button>
                 <button type="button" aria-label="자동할당 닫기" onclick="window.closeAutoDispatchModal()" class="w-9 h-9 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl flex items-center justify-center transition shadow-2xs">
                     <i class="fa-solid fa-xmark text-lg"></i>
                 </button>
@@ -252,18 +253,17 @@
                         <div class="w-8 h-8 bg-indigo-100 text-indigo-700 rounded-lg flex items-center justify-center text-base shadow-2xs shrink-0"><i class="fa-solid fa-file-import"></i></div>
                         <div class="text-left min-w-0">
                             <h4 class="font-black text-gray-800 text-sm">주문서 업로드</h4>
-                            <p class="text-xs text-gray-500 font-bold">엑셀·CSV·PDF · 클릭 또는 파일 끌어놓기</p>
+                            <p class="text-xs text-gray-500 font-bold">엑셀·CSV·PDF · 클릭 또는 끌어놓기</p>
                         </div>
                     </div>
                 </div>
                 <div class="auto-dispatch-execution">
                 <div class="dispatch-assignment-run">
                 <div class="dispatch-assignment-control">
-                    <div class="dispatch-assignment-mode" role="group" aria-label="자동할당 배정 기준" aria-describedby="dispatch-mode-description">
+                    <div class="dispatch-assignment-mode" role="group" aria-label="자동할당 배정 기준">
                         <button type="button" id="dispatch-mode-count" aria-pressed="true" onclick="window.setDispatchAssignmentMode('count')">배송 건수</button>
                         <button type="button" id="dispatch-mode-distance" aria-pressed="false" onclick="window.setDispatchAssignmentMode('distance')" title="직선거리 차이를 줄여 배정합니다. 가중치가 설정된 경우 배정 건수를 유지합니다.">이동 거리</button>
                     </div>
-                    <p id="dispatch-mode-description" aria-live="polite">가중치를 반영해 건수를 나눕니다.</p>
                 </div>
                 <button type="button" id="btn-run-auto-dispatch" onclick="window.runAutoDispatchAlgorithm()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-robot text-sm"></i> 자동할당 실행
@@ -338,7 +338,7 @@
                     </div>
                     <div class="flex gap-1 items-center">
                         <button onclick="window.deleteSelectedExcelRows()" class="px-2 py-1 bg-red-50 text-red-600 font-bold text-[10px] rounded border border-red-200 hover:bg-red-100 transition">선택 삭제</button>
-                        <button onclick="window.clearAllExcelRows()" class="px-2 py-1 bg-gray-100 text-gray-600 font-bold text-[10px] rounded border border-gray-200 hover:bg-gray-200 transition" title="업로드된 데이터와 기사 전송 동선을 전체 초기화합니다.">전체 초기화</button>
+
                     </div>
                 </div>
                 <div class="flex-1 overflow-auto custom-scrollbar bg-white">
