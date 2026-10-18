@@ -281,3 +281,149 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
         allocatedCount: targetOrders.length
     };
 }
+
+/**
+ * 기존 배정에서 배송지를 이동·교환해 기사별 직선거리 부담을 조정합니다.
+ * 검증한 조건: 최장 거리 + 0.05 × 표준편차, 총거리 증가 10% 이내,
+ * 평균 건수 -5~+5건, 상위 후보 3개 정밀 평가, 최대 30회 개선.
+ * 가중치가 있으면 목표 건수를 정확히 유지하고 교환만 허용합니다.
+ */
+export function executeDistanceBalancedDispatch(options) {
+    const validPoint = point => point && point.lat != null && point.lng != null &&
+        point.lat !== '' && point.lng !== '' && Number.isFinite(Number(point.lat)) &&
+        Number.isFinite(Number(point.lng)) && Math.abs(Number(point.lat)) <= 90 &&
+        Math.abs(Number(point.lng)) <= 180 && (Number(point.lat) !== 0 || Number(point.lng) !== 0);
+    const orders = options.targetOrders || [];
+    if (!validPoint(options.companyBase) || orders.some(order => !validPoint(order))) {
+        return { success: false, message: '이동 거리 기준으로 배정하려면 회사 거점과 선택한 모든 배송지의 좌표가 필요합니다. 주소와 좌표를 확인해 주세요.' };
+    }
+    const result = executeAutoDispatch(options);
+    if (!result.success) return result;
+
+    // 계산 순서는 입력 기사 순서로 고정합니다. 기존 건수 배정의 정렬은 바꾸지 않습니다.
+    const stats = options.activeDrivers.map(driver => result.driverStats.find(ds => ds.devId === (driver.deviceId || driver.key)));
+    const index = new Map(orders.map((order, i) => [order, i]));
+    const base = { lat: Number(options.companyBase.lat), lng: Number(options.companyBase.lng) };
+    const ends = stats.map((ds, d) => ds.endLocation || resolveDriverEndLocation(options.activeDrivers[d], options.activeRoutes, options.companyBase));
+    const n = orders.length, k = stats.length, baseIndex = n, endIndex = d => n + 1 + d;
+    const points = [...orders, base, ...ends];
+    const matrix = points.map(a => Float64Array.from(points, b => getBaseDist(Number(a.lat), Number(a.lng), Number(b.lat), Number(b.lng))));
+    const length = (route, d) => {
+        if (!route.length) return 0;
+        let sum = matrix[baseIndex][route[0]] + matrix[route.at(-1)][endIndex(d)];
+        for (let i = 1; i < route.length; i++) sum += matrix[route[i - 1]][route[i]];
+        return sum;
+    };
+    const cache = new Map();
+    const optimize = (route, d) => {
+        const key = d + ':' + route.join(',');
+        if (!cache.has(key)) {
+            const lightweight = route.map(i => ({ index: i, lat: Number(orders[i].lat), lng: Number(orders[i].lng) }));
+            cache.set(key, optimizeRoute2Opt(lightweight, base, ends[d]).map(order => order.index));
+        }
+        return cache.get(key).slice();
+    };
+    const total = values => values.reduce((sum, value) => sum + value, 0);
+    const objective = values => {
+        const mean = total(values) / k;
+        const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / k);
+        return Math.max(...values) + 0.05 * deviation;
+    };
+    let routes = stats.map(ds => ds.assignedOrders.map(order => index.get(order)));
+    let costs = routes.map(length);
+    const baselineTotal = total(costs), baselineMax = Math.max(...costs);
+    const ceiling = baselineTotal * 1.1;
+    const weighted = stats.some(ds => Number(options.weights?.[ds.devId] || 0) !== 0);
+    const limits = stats.map((ds, d) => weighted || ds.targetCap === 0
+        ? [routes[d].length, routes[d].length]
+        : [Math.max(1, Math.floor(n / k) - 5), Math.ceil(n / k) + 5]);
+    const near = orders.map((_, i) => Array.from({ length: n }, (__, j) => j).filter(j => j !== i)
+        .sort((a, b) => matrix[i][a] - matrix[i][b] || a - b).slice(0, 16));
+    const insert = (route, item, d) => {
+        if (!route.length) return { route: [item], delta: matrix[baseIndex][item] + matrix[item][endIndex(d)] };
+        let delta = Infinity, position = 0;
+        for (let i = 0; i <= route.length; i++) {
+            const a = i ? route[i - 1] : baseIndex, b = i < route.length ? route[i] : endIndex(d);
+            const next = matrix[a][item] + matrix[item][b] - matrix[a][b];
+            if (next < delta) { delta = next; position = i; }
+        }
+        const added = route.slice();
+        added.splice(position, 0, item);
+        return { route: added, delta };
+    };
+
+    let iterations = 0;
+    for (; iterations < 30; iterations++) {
+        const owner = Array(n), removed = new Map(), candidates = [], current = objective(costs);
+        routes.forEach((route, d) => route.forEach(item => {
+            owner[item] = d;
+            const shortened = route.filter(i => i !== item);
+            removed.set(item, { route: shortened, cost: length(shortened, d) });
+        }));
+        const consider = (a, b, ra, rb, ca, cb) => {
+            const predicted = costs.slice();
+            predicted[a] = ca; predicted[b] = cb;
+            const score = objective(predicted);
+            if (score < current - 1e-8 && total(predicted) <= ceiling + 1e-8) candidates.push({ a, b, ra, rb, score });
+        };
+        if (!weighted) for (let a = 0; a < k; a++) if (routes[a].length > limits[a][0]) {
+            for (const item of routes[a]) for (let b = 0; b < k; b++) if (a !== b && routes[b].length < limits[b][1]) {
+                const rm = removed.get(item), add = insert(routes[b], item, b);
+                consider(a, b, rm.route, add.route, rm.cost, costs[b] + add.delta);
+            }
+        }
+        const seen = new Set();
+        for (let item = 0; item < n; item++) for (const other of near[item]) {
+            const a = owner[item], b = owner[other], key = [Math.min(item, other), Math.max(item, other)].join(':');
+            if (a === b || seen.has(key)) continue;
+            seen.add(key);
+            const rmA = removed.get(item), rmB = removed.get(other);
+            const addA = insert(rmA.route, other, a), addB = insert(rmB.route, item, b);
+            consider(a, b, addA.route, addB.route, rmA.cost + addA.delta, rmB.cost + addB.delta);
+        }
+        candidates.sort((a, b) => a.score - b.score);
+        let best = null;
+        for (const candidate of candidates.slice(0, 3)) {
+            const ra = optimize(candidate.ra, candidate.a), rb = optimize(candidate.rb, candidate.b), next = costs.slice();
+            next[candidate.a] = length(ra, candidate.a); next[candidate.b] = length(rb, candidate.b);
+            const score = objective(next);
+            if (total(next) > ceiling + 1e-8 || score >= current - 1e-8) continue;
+            if (!best || score < best.score) best = { ...candidate, ra, rb, costs: next, score };
+        }
+        if (!best) break;
+        routes[best.a] = best.ra; routes[best.b] = best.rb; costs = best.costs;
+    }
+
+    const assigned = routes.flat();
+    if (assigned.length !== n || new Set(assigned).size !== n || assigned.some(i => !Number.isInteger(i) || i < 0 || i >= n) ||
+        routes.some((route, d) => route.length < limits[d][0] || route.length > limits[d][1])) {
+        throw new Error('거리 배정 결과 검증에 실패했습니다.');
+    }
+    routes.forEach((route, d) => {
+        stats[d].assignedOrders = route.map((i, position) => {
+            orders[i].assignedDriver = stats[d].key;
+            orders[i].displayNumber = position + 1;
+            return orders[i];
+        });
+        stats[d].assignedCount = route.length;
+    });
+    result.distanceBalance = { iterations, weightedCountsPreserved: weighted, baselineTotalKm: baselineTotal,
+        totalKm: total(costs), baselineMaxKm: baselineMax, maxKm: Math.max(...costs) };
+    return result;
+}
+
+// 동일한 엔진을 전용 작업 스레드에서도 실행하여 계산 중 관제 화면을 멈추지 않습니다.
+if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
+    self.onmessage = event => {
+        if (event.data?.type !== 'distance-dispatch') return;
+        try {
+            const options = event.data.options;
+            const indices = new Map(options.targetOrders.map((order, i) => [order, i]));
+            const result = executeDistanceBalancedDispatch(options);
+            self.postMessage({ result: { ...result, driverStats: result.driverStats?.map(ds => ({ ...ds,
+                assignedOrders: ds.assignedOrders.map(order => indices.get(order)) })) } });
+        } catch (error) {
+            self.postMessage({ error: error.message || '거리 배정 계산 중 오류가 발생했습니다.' });
+        }
+    };
+}
