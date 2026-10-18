@@ -1,21 +1,20 @@
 const { randomUUID, randomInt } = require('node:crypto');
-const { normalizePhone, phoneDigits, problem } = require('./license-integrity.cjs');
+const { normalizePhone, phoneDigits, problem, assertNotBlocked } = require('./license-integrity.cjs');
 
 // Shared by SMS issuance and final registration. Eligibility errors occur before paid SMS.
 async function assertTrialEligible(db, reader, phone, deviceId) {
     if (!normalizePhone(phone)) throw problem('휴대폰 번호를 입력해 주세요.');
     if (typeof deviceId !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(deviceId)) throw problem('기기 식별자가 올바르지 않습니다.');
-    const [history, deviceHistory, blocked, licenses, profiles] = await Promise.all([
+    const [history, deviceHistory, , licenses, profiles] = await Promise.all([
         reader.get(db.collection('trial_phone_history').doc(phoneDigits(phone))),
         reader.get(db.collection('trial_device_history').doc(deviceId)),
-        reader.get(db.collection('blocked_devices').doc(deviceId)),
+        assertNotBlocked(db, reader, '', phone, deviceId),
         reader.get(db.collection('licenses')), reader.get(db.collection('driver_profiles'))
     ]);
     // Deleted accounts may be registered again. Retained history is only a
     // duplicate guard while its original account still exists.
     const accountKeys = new Set([...licenses.docs, ...profiles.docs].map(doc => doc.id));
     const hasAccount = snapshot => snapshot.exists && accountKeys.has(snapshot.data()?.trialKey);
-    if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
     if (hasAccount(history) || [...licenses.docs, ...profiles.docs].some(doc => phoneDigits(doc.data().phone) === phoneDigits(phone))) {
         throw problem('이미 가입 또는 무료 체험 이력이 있는 휴대폰 번호입니다. 정식 라이선스를 이용해 주세요.', 409);
     }

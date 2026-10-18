@@ -64,19 +64,19 @@ function isActive(data, today, now) {
 }
 
 // Block-list failures propagate; an unavailable list must never grant access.
-async function assertNotBlocked(db, reader, key, phone, device) {
+async function assertNotBlocked(db, reader, key, phone, device, existingSnapshot = null) {
     const collection = db.collection('blocked_devices');
-    const snapshot = await (reader === db ? collection.get() : reader.get(collection));
+    const snapshot = existingSnapshot || await (reader === db ? collection.get() : reader.get(collection));
     const digits = phoneDigits(phone), cleanKey = String(key || '').trim().toUpperCase();
     for (const item of snapshot.docs) {
         const data = item.data();
         const keys = [data.key, data.licenseKey, data.licenseId, item.id].filter(Boolean).map(v => String(v).trim().toUpperCase());
         const phones = [data.phone, data.phoneNumber, item.id].filter(Boolean).map(phoneDigits);
-        if ((device && (item.id === device || data.deviceId === device)) ||
-            (cleanKey && keys.includes(cleanKey)) || (digits && phones.includes(digits))) {
+        if ((cleanKey && keys.includes(cleanKey)) || (digits && phones.includes(digits))) {
             throw problem('접속이 제한된 계정입니다.', 403);
         }
     }
+    return snapshot;
 }
 
 async function assertDriverSession(db, identity, key, device, now = Date.now()) {

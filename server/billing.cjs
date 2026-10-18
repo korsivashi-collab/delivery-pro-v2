@@ -1,5 +1,5 @@
 const { randomUUID, randomBytes } = require('node:crypto');
-const { normalizePhone, phoneDigits, problem, isActive } = require('./license-integrity.cjs');
+const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
 // Request-local durations only: no tokens, phone numbers, keys or payment data.
@@ -48,9 +48,9 @@ async function ensureAccount(db, identity, input, now) {
     const lockRef = db.collection('admin_license_controls').doc('phone_integrity');
     return db.runTransaction(async tx => {
         const [saved, lock, blocked, licenses] = await Promise.all([tx.get(ref), tx.get(lockRef),
-            tx.get(db.collection('blocked_devices').doc(device)), tx.get(db.collection('licenses'))]);
-        if (blocked.exists) throw problem('접속이 제한된 기기입니다.', 403);
+            assertNotBlocked(db, tx, '', phone, device), tx.get(db.collection('licenses'))]);
         const previous = saved.data();
+        if (previous?.licenseKey) await assertNotBlocked(db, tx, previous.licenseKey, phone, device, blocked);
         const restarting = previous?.deletedAt != null;
         const account = restarting ? null : previous;
         if (account && phoneDigits(account.phone) !== phoneDigits(phone)) throw problem('구독 계정의 인증 번호가 변경되었습니다. 고객센터에 문의해 주세요.', 409);
@@ -120,8 +120,7 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
         const bindingRef = db.collection('billing_license_bindings').doc(account.licenseKey);
         const [licenseSnap, profileSnap, binding, lock, blocked, allLicenses] = await Promise.all([
             tx.get(licenseRef), tx.get(profileRef), tx.get(bindingRef), tx.get(lockRef),
-            device ? tx.get(db.collection('blocked_devices').doc(device)) : Promise.resolve({exists:false}), tx.get(db.collection('licenses'))]);
-        if (blocked.exists) throw problem('접속이 제한된 기기입니다.',403);
+            device ? assertNotBlocked(db, tx, account.licenseKey, account.phone, device) : Promise.resolve(null), tx.get(db.collection('licenses'))]);
         const license = licenseSnap.data() || {}, profile = profileSnap.data() || {};
         if (binding.exists && binding.data().uid !== uid) throw problem('이용권 소유자가 다릅니다.',403);
         if (!license.driverSessionId && (license.phone && phoneDigits(license.phone) !== phoneDigits(account.phone) || profile.phone && phoneDigits(profile.phone) !== phoneDigits(account.phone))) throw problem('이용권 전화번호가 변경되었습니다. 고객센터에 문의해 주세요.',409);
