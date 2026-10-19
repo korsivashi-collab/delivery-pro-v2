@@ -1,21 +1,23 @@
 const admin = require('firebase-admin');
-const { randomInt, randomUUID, createHmac, timingSafeEqual } = require('node:crypto');
+const { randomInt, randomUUID, createHmac, createHash, timingSafeEqual } = require('node:crypto');
 const { assertTrialEligible } = require('../server/trial-registration.cjs');
 const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('../server/license-integrity.cjs');
 
 // Phone identity owns memos; a replaceable session owns access to a license.
 async function claimDevice(sdk, req, input, stamp) {
+    const testLogin = input.action === 'login-test-driver';
     const bearer = /^Bearer (.+)$/.exec(req.headers?.authorization || '')?.[1];
-    if (!bearer) throw problem('휴대폰 인증을 다시 진행해 주세요.', 401);
+    if (!bearer && !testLogin) throw problem('휴대폰 인증을 다시 진행해 주세요.', 401);
     let identity;
-    try { identity = await sdk.auth().verifyIdToken(bearer, true); }
+    try { identity = testLogin ? {testDriverSession:true} : await sdk.auth().verifyIdToken(bearer, true); }
     catch (_) { throw problem('휴대폰 인증이 만료되었습니다.', 401); }
+    const testSession = identity.testDriverSession === true;
     const provider = identity.firebase?.sign_in_provider;
-    if (!(provider === 'phone' || provider === 'custom' && identity.nativePhoneVerified === true) ||
-        !identity.phone_number || identity.uid === 'admin_master' || ['MASTER','DISPATCH'].includes(identity.role)) {
+    if (!testSession && (!(provider === 'phone' || provider === 'custom' && identity.nativePhoneVerified === true) ||
+        !identity.phone_number || identity.uid === 'admin_master' || ['MASTER','DISPATCH'].includes(identity.role))) {
         throw problem('휴대폰 인증을 완료해 주세요.', 403);
     }
-    const phone = normalizePhone(identity.phone_number), deviceId = input.deviceId;
+    const phone = normalizePhone(testLogin ? input.phone : testSession ? identity.testPhone : identity.phone_number), deviceId = input.deviceId;
     const key = typeof input.key === 'string' ? input.key.trim().toUpperCase() : '';
     if (!key || key.length > 100 || /[\/\u0000-\u001f]/.test(key) ||
         typeof deviceId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(deviceId)) throw problem('로그인 정보가 올바르지 않습니다.');
@@ -33,6 +35,15 @@ async function claimDevice(sdk, req, input, stamp) {
         }
         if (!license?.exists) throw problem('등록되지 않은 라이선스 키입니다.', 404);
         const actualKey = license.id, data = license.data();
+        if (testSession) {
+            if (data.testSmsBypass !== true || data.type !== 'regular' || data.billingManaged === true ||
+                !phone || phoneDigits(data.phone) !== phoneDigits(phone) ||
+                (!testLogin && identity.driverKey !== actualKey) ||
+                (await tx.get(db.collection('billing_license_bindings').doc(actualKey))).exists) {
+                throw Object.assign(problem('이 계정은 휴대폰 인증이 필요합니다.', 403), {code:'SMS_REQUIRED'});
+            }
+            if (testLogin) identity.uid = 'test-driver-' + createHash('sha256').update(actualKey).digest('hex');
+        }
         if (actualKey !== key) await assertNotBlocked(db, tx, actualKey, phone, deviceId, blockedSnapshot);
         if (data.type === 'dispatch' || !isActive(data, new Date(stamp + 9 * 3600000).toISOString().slice(0,10), stamp)) {
             throw problem('사용이 정지되었거나 이용기간이 만료된 계정입니다.', 403);
@@ -48,7 +59,7 @@ async function claimDevice(sdk, req, input, stamp) {
             return {valid:true,released:true};
         }
         const age = Math.floor(stamp / 1000) - identity.auth_time;
-        if (!sameSession && !(resume && sameBinding && !data.driverSessionId) && (!Number.isFinite(age) || age < -30 || age > 300)) {
+        if (!testSession && !sameSession && !(resume && sameBinding && !data.driverSessionId) && (!Number.isFinite(age) || age < -30 || age > 300)) {
             throw problem('새 로그인은 최근 휴대폰 인증이 필요합니다.', 401);
         }
         let routeOwnerId = data.routeOwnerId;
@@ -70,10 +81,11 @@ async function claimDevice(sdk, req, input, stamp) {
         return {valid:true, actualKey, phone, deviceId, driverSessionId, routeOwnerId,
             expireDate:data.expireDate || '', expiresAt:typeof data.expiresAt?.toMillis === 'function' ? data.expiresAt.toMillis() : data.expiresAt || null,
             billingManaged:data.billingManaged === true, dispatchKey:data.dispatchKey || '', allowTms:data.allowTms !== false,
-            needsToken:!sameSession};
+            testSmsBypass:testSession, needsToken:!sameSession || testLogin};
     });
     if (result.needsToken) result.token = await sdk.auth().createCustomToken(identity.uid, {
-        nativePhoneVerified:true, driverKey:result.actualKey, driverDeviceId:deviceId, driverSessionId:result.driverSessionId
+        ...(testSession ? {testDriverSession:true, testPhone:phone} : {nativePhoneVerified:true}),
+        driverKey:result.actualKey, driverDeviceId:deviceId, driverSessionId:result.driverSessionId
     });
     delete result.needsToken;
     return result;
@@ -101,7 +113,7 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
             let input;
             try { input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
             catch (_) { throw problem('인증 요청이 올바르지 않습니다.'); }
-            if (['claim-device', 'login-driver', 'resume-driver', 'release-driver'].includes(input?.action)) {
+            if (['claim-device', 'login-driver', 'resume-driver', 'release-driver', 'login-test-driver'].includes(input?.action)) {
                 if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({ projectId: env.FIREBASE_PROJECT_ID,
                     clientEmail: env.FIREBASE_CLIENT_EMAIL, privateKey: env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') }) });
                 return res.status(200).json(await claimDevice(sdk, req, input, now()));
@@ -222,7 +234,7 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
             const token = await auth.createCustomToken(user.uid, { nativePhoneVerified: true });
             return res.status(200).json({ token });
         } catch (error) {
-            return res.status(error.status || 500).json({ error: (error.status ? error.message : '문자 인증 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.') + '\n문제가 계속되면 ' + supportNotice });
+            return res.status(error.status || 500).json({ code:error.code || null, error: (error.status ? error.message : '문자 인증 처리에 실패했습니다. 잠시 후 다시 시도해 주세요.') + '\n문제가 계속되면 ' + supportNotice });
         }
     };
 }
