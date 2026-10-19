@@ -32,6 +32,7 @@ service cloud.firestore {
     // Paid licenses keep billing fields server-only; operational changes are scoped below.
     function ownsPaidLicense(key) {
       return request.auth != null &&
+        isStoreLicense(key) &&
         get(/databases/$(database)/documents/billing_license_bindings/$(key)).data.uid == request.auth.uid &&
         (request.auth.token.firebase.sign_in_provider == 'phone' ||
           (request.auth.token.firebase.sign_in_provider == 'custom' &&
@@ -79,6 +80,8 @@ service cloud.firestore {
         account.get('driverUid', '') == request.auth.uid &&
         account.get('driverSessionId', '') == request.auth.token.get('driverSessionId', '-') &&
         account.get('deviceId', '') == request.auth.token.get('driverDeviceId', '-') &&
+        (!request.auth.token.get('testDriverSession', false) ||
+          (account.get('testSmsBypass', false) == true && account.get('type', '') == 'regular')) &&
         !(account.get('status', '') in ['suspended', 'revoked', 'expired', 'upgraded']) &&
         (!('expiresAt' in account) || account.expiresAt == null ||
           (account.expiresAt is int && account.expiresAt > request.time.toMillis()) ||
@@ -162,9 +165,9 @@ service cloud.firestore {
       allow delete: if false;
       // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
       allow create: if isVerifiedMaster();
-      allow update: if paidOperationalUpdate(licenseKey) || driverSettings(licenseKey) ||
+      allow update: if driverSettings(licenseKey) || paidOperationalUpdate(licenseKey) ||
         (!isStoreLicense(licenseKey) && isWebAdmin() &&
-          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['driverUid', 'driverSessionId']) &&
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(['driverUid', 'driverSessionId', 'testSmsBypass']) &&
           (!('routeOwnerId' in resource.data) || request.resource.data.routeOwnerId == resource.data.routeOwnerId));
     }
 

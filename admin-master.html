@@ -388,6 +388,10 @@
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">만료일 (YYYY.MM.DD)</label><input type="date" id="edit-expire-input" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"></div>
                         <div><label class="block text-[10px] font-bold text-gray-500 mb-1">계정 상태</label><select id="edit-status-select" class="w-full bg-white border border-gray-300 rounded-xl p-2 text-xs font-bold outline-none focus:border-blue-500"><option value="active">정상 운행 (Active)</option><option value="suspended">사용 정지 (Suspended)</option><option value="expired">이용기간 만료</option><option value="revoked">이용권 회수</option><option value="upgraded">이전된 계정</option></select></div>
                     </div>
+                    <div id="edit-test-sms-bypass-container" class="hidden rounded-xl border border-amber-200 bg-amber-50 p-3">
+                        <label class="flex items-center gap-2 text-xs font-bold text-amber-900"><input type="checkbox" id="edit-test-sms-bypass" class="w-4 h-4 rounded">전화번호 인증 생략 (테스트용)</label>
+                        <p class="mt-1 text-[11px] text-amber-800">등록된 키와 전화번호로 SMS 없이 접속합니다. 계정 만료일·접속 제한은 유지되며, 해제하면 기존 테스트 접속도 종료됩니다.</p>
+                    </div>
                     <div id="edit-slots-container" class="hidden">
                         <label class="block text-[10px] font-bold text-purple-700 mb-1">관제 허용 슬롯 수 (0=무제한)</label>
                         <input type="number" id="edit-slots-input" class="w-full bg-white border border-purple-300 rounded-xl p-2 text-xs font-black outline-none focus:border-purple-500">
@@ -575,7 +579,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-trial-sms-precheck","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-trial-sms-precheck","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-trial-sms-precheck","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-trial-sms-precheck","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261019-test-sms-bypass","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261017-dispatch-session-guard"></script>
 </body>
 </html>
