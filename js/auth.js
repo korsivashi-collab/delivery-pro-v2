@@ -550,12 +550,17 @@ export async function verifyLicense() {
 
     smsVerifyInProgress = true;
     try {
-        if (!isSmsVerified && !smsConfirmationResult) {
+        if (!isSmsVerified) {
             const testResult = await firebaseLoginTestLicense(keyInput, formattedPhone, deviceId);
             if (smsVersion !== smsSessionVersion ||
                 keyInput !== (document.getElementById('license-input')?.value || '').trim().toUpperCase() ||
                 phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) return;
-            if (testResult?.valid) { applyVerifiedLogin(testResult); return; }
+            if (testResult?.valid) {
+                resetSmsSession();
+                smsVersion = smsSessionVersion;
+                applyVerifiedLogin(testResult);
+                return;
+            }
         }
         if (!isSmsVerified) {
             if (smsRequestedPhoneNumber && phoneIdentity(rawPhone) !== phoneIdentity(smsRequestedPhoneNumber)) {
