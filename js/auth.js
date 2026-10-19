@@ -7,6 +7,7 @@ import { state } from './state.js';
 
 import { 
     firebaseVerifyLicense, 
+    firebaseLoginTestLicense,
     watchLicenseStatus, 
     startDispatchMessageListener, 
     firebaseStartTrial,
@@ -549,6 +550,13 @@ export async function verifyLicense() {
 
     smsVerifyInProgress = true;
     try {
+        if (!isSmsVerified && !smsConfirmationResult) {
+            const testResult = await firebaseLoginTestLicense(keyInput, formattedPhone, deviceId);
+            if (smsVersion !== smsSessionVersion ||
+                keyInput !== (document.getElementById('license-input')?.value || '').trim().toUpperCase() ||
+                phoneIdentity(rawPhone) !== phoneIdentity(document.getElementById('auth-phone-input')?.value)) return;
+            if (testResult?.valid) { applyVerifiedLogin(testResult); return; }
+        }
         if (!isSmsVerified) {
             if (smsRequestedPhoneNumber && phoneIdentity(rawPhone) !== phoneIdentity(smsRequestedPhoneNumber)) {
                 resetSmsSession();
@@ -623,7 +631,7 @@ export async function verifyLicense() {
                 : (res && res.msg) ? res.msg : "인증에 실패했습니다. 키와 번호를 확인해 주세요.";
         }
     } catch (e) {
-        if (msgEl) msgEl.innerText = "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
+        if (msgEl) msgEl.innerText = e?.message || "통신 오류가 발생했습니다. 네트워크 상태를 확인 후 다시 시도해 주세요.";
     } finally {
         if (smsVersion === smsSessionVersion) {
             smsVerifyInProgress = false;

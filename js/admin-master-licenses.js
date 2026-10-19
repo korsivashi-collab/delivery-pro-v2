@@ -510,6 +510,10 @@ export function openEditLicenseModal(key) {
     document.getElementById('edit-phone-input').readOnly = false;
     document.getElementById('edit-expire-input').readOnly = false;
     document.getElementById('edit-phone-input').value = target.phone || '';
+    const bypassCheck = document.getElementById('edit-test-sms-bypass');
+    const bypassAllowed = (target.type || 'regular') === 'regular' && !target.billingManaged;
+    if (bypassCheck) { bypassCheck.checked = target.testSmsBypass === true; bypassCheck.disabled = !bypassAllowed; }
+    document.getElementById('edit-test-sms-bypass-container')?.classList.toggle('hidden', !bypassAllowed);
     document.getElementById('edit-device-input').value = target.deviceId || '';
     
     let expFormatted = '';
@@ -778,7 +782,8 @@ export async function saveLicenseEdit() {
         dispatchKey: target ? target.dispatchKey || '' : '',
         maxSlots: type === 'dispatch' ? parseInt(document.getElementById('edit-slots-input')?.value) || 0 : 0,
         maxSessions: maxSessions,
-        isPro: type === 'dispatch' ? isPro : false
+        isPro: type === 'dispatch' ? isPro : false,
+        testSmsBypass: type === 'regular' && !target?.billingManaged && document.getElementById('edit-test-sms-bypass')?.checked === true
     };
 
     const btn = document.getElementById('btn-save-license-edit');

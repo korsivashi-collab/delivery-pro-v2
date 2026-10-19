@@ -165,11 +165,27 @@ async function findDriverLicense(key) {
 }
 
 // 2. 라이선스 검증
+export async function firebaseLoginTestLicense(key, phone, deviceId) {
+    const response = await apiFetch('/api/native-sms', {method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({action:'login-test-driver', key, phone, deviceId})});
+    const result = await response.json();
+    if (!response.ok) {
+        if (result.code === 'SMS_REQUIRED') return null;
+        throw new Error(result.error || '테스트 접속을 확인할 수 없습니다.');
+    }
+    if (!result.valid || !result.token) throw new Error('테스트 접속 결과가 올바르지 않습니다.');
+    await signInWithCustomToken(auth, result.token);
+    return result;
+}
+
 export async function firebaseVerifyLicense(key, phone, deviceId, options = {}) {
     try {
         await auth.authStateReady();
         const user = auth.currentUser;
-        if (!user || phone && phoneIdentityDigits(user.phoneNumber) !== phoneIdentityDigits(phone)) {
+        const claims = user ? (await user.getIdTokenResult()).claims : {};
+        const testPhone = claims.testDriverSession === true ? claims.testPhone : user?.phoneNumber;
+        if (!user || phone && phoneIdentityDigits(testPhone) !== phoneIdentityDigits(phone)) {
             return {valid:false, requiresSms:true, msg:'휴대폰 인증을 진행해 주세요.'};
         }
         const response = await apiFetch('/api/native-sms', {method:'POST',
