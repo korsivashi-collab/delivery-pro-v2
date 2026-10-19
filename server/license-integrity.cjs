@@ -47,8 +47,11 @@ function validatePayload(input, create) {
         !Number.isInteger(maxSlots) || maxSlots < 0) throw problem('회선 수 또는 기사 슬롯 수가 올바르지 않습니다.');
     const deviceId = create ? '' : String(input.deviceId || '');
     if (deviceId.length > 200) throw problem('기기 식별자가 올바르지 않습니다.');
+    if (input.testSmsBypass !== undefined && typeof input.testSmsBypass !== 'boolean') throw problem('테스트 인증 생략 설정이 올바르지 않습니다.');
+    const testSmsBypass = input.testSmsBypass === true;
+    if (testSmsBypass && (type !== 'regular' || !normalizePhone(input.phone))) throw problem('테스트 인증 생략은 전화번호가 등록된 일반 계정에만 설정할 수 있습니다.');
     return { key, type, phone: normalizePhone(input.phone), expireDate, status, deviceId,
-        maxSlots, maxSessions, isPro: type === 'dispatch' && !!input.isPro };
+        testSmsBypass, maxSlots, maxSessions, isPro: type === 'dispatch' && !!input.isPro };
 }
 
 function isActive(data, today, now) {
@@ -88,6 +91,7 @@ async function assertDriverSession(db, identity, key, device, now = Date.now()) 
         throw problem('다른 기기에서 로그인하여 접속이 해제되었습니다.', 401);
     }
     if (!isActive(data, new Date(now + 9 * 3600000).toISOString().slice(0, 10), now)) throw problem('사용할 수 없는 이용권입니다.', 403);
+    if (identity.testDriverSession === true && (data.testSmsBypass !== true || data.type !== 'regular' || data.billingManaged)) throw problem('테스트 접속 허용이 해제되었습니다.', 401);
     return data;
 }
 
@@ -118,10 +122,12 @@ async function saveLicenses(db, request, now = Date.now()) {
         const billing = billingSnap.docs.filter(d => d.data().licenseKey === origKey);
         if (billing.length > 1) throw problem('결제 계정 연결이 중복되어 있습니다. 계정을 덮어쓸 수 없습니다.', 409);
         const bound = billing[0], account = bound?.data();
+        if (payloads.some(p => p.testSmsBypass) && (account || licenses.get(origKey)?.billingManaged)) throw problem('결제 계정에는 테스트 인증 생략을 설정할 수 없습니다.', 409);
         const renaming = !create && payloads[0].key !== origKey;
         const releasedKeys = [];
         for (const payload of payloads) {
             const binding = await tx.get(db.collection('billing_license_bindings').doc(payload.key));
+            if (payload.testSmsBypass && binding.exists) throw problem('결제 계정에는 테스트 인증 생략을 설정할 수 없습니다.', 409);
             if ((create || payload.key !== origKey) && (binding.exists || billingSnap.docs.some(d => d.data().licenseKey === payload.key))) {
                 const deleted = await tx.get(db.collection('admin_license_controls').doc('deleted-'+payload.key));
                 const pastOrders = await tx.get(db.collection('payment_orders').where('licenseKey','==',payload.key));
@@ -190,10 +196,17 @@ async function saveLicenses(db, request, now = Date.now()) {
             const routeOwnerId = previous.routeOwnerId || previousProfile.routeOwnerId || randomUUID();
             const license = { ...previous, ...payload, ...(account?{isPro:previous.isPro??true}:{}), routeOwnerId,
                 dispatchKey: previous.dispatchKey || '', createdAt: previous.createdAt ?? now + changed.length };
+            // Toggle/phone/key changes revoke any existing test session immediately.
+            if (previous.testSmsBypass === true && (!payload.testSmsBypass || renaming ||
+                phoneDigits(previous.phone) !== phoneDigits(payload.phone))) {
+                Object.assign(license, {deviceId:'', driverUid:'', driverSessionId:randomUUID()});
+            }
             // licenses에 없던 TMS 허용 설정은 기존 신분증의 설정을 우선 보존합니다.
             const profile = { ...previousProfile, key: payload.key, phone: payload.phone,
                 deviceId: payload.deviceId, status: payload.status, expireDate: payload.expireDate,
                 routeOwnerId, allowTms: previousProfile.allowTms ?? previous.allowTms ?? true };
+            if (license.driverUid === '' && license.driverSessionId) Object.assign(profile,
+                {deviceId:license.deviceId, driverUid:'', driverSessionId:license.driverSessionId});
             if (previousProfile.type) profile.type = payload.type;
             if (previous.phone && phoneDigits(previous.phone) === digits && previous.phone !== payload.phone) memoPhones.add(previous.phone);
             changed.push({ payload, license, profile, hasProfile: payload.type !== 'dispatch' || profiles.has(origKey) });
