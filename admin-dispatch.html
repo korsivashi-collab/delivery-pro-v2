@@ -262,7 +262,7 @@
                 <div class="dispatch-assignment-control">
                     <div class="dispatch-assignment-mode" role="group" aria-label="자동할당 배정 기준">
                         <button type="button" id="dispatch-mode-count" aria-pressed="true" onclick="window.setDispatchAssignmentMode('count')">배송 건수</button>
-                        <button type="button" id="dispatch-mode-distance" aria-pressed="false" onclick="window.setDispatchAssignmentMode('distance')" title="직선거리 차이를 줄여 배정합니다. 가중치가 설정된 경우 배정 건수를 유지합니다.">이동 거리</button>
+                        <button type="button" id="dispatch-mode-distance" aria-pressed="false" onclick="window.setDispatchAssignmentMode('distance')" title="가중치별 목표 건수를 우선하며 소폭 조정으로 전체 직선거리를 줄이는 테스트 방식입니다.">TEST</button>
                     </div>
                 </div>
                 <button type="button" id="btn-run-auto-dispatch" onclick="window.runAutoDispatchAlgorithm()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
@@ -648,7 +648,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261018-dispatch-distance","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261018-dispatch-distance"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261020-dispatch-count-first","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-count-first"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261017-dispatch-session-guard"></script>
 </body>
 </html>
