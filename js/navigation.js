@@ -44,6 +44,9 @@ export function selectNavigation(provider) {
         button.dataset.navigationProvider = provider;
         button.innerHTML = navigationButtonContent(provider);
     });
+    document.querySelectorAll('[data-kakao-caution]').forEach(note => {
+        note.hidden = provider !== 'kakao';
+    });
     document.getElementById('navigation-picker')?.close();
 }
 

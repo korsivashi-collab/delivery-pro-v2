@@ -213,6 +213,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                         <!-- 취소/삭제: 경고성 소프트 로즈 -->
                         <button onclick="cancelDestination(${idArgument})" class="w-[42px] shrink-0 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-rose-100 transition" title="배송 취소"><i class="fa-solid fa-trash-can text-[13px] shrink-0"></i></button>
                     </div>
+                    <p class="navigation-caution" data-kakao-caution ${getPreferredNavigation() === 'kakao' ? '' : 'hidden'}>경로 안내·안전운전 모드에서는 목적지 변경이 제한될 수 있습니다. 정차 후 해당 모드를 종료하고 다시 선택해 주세요.</p>
                 </div>`;
             listEl.appendChild(li);
         });
