@@ -282,17 +282,17 @@ function executeCountBaselineDispatch({ targetOrders, activeDrivers, weights = {
     };
 }
 
-// 배송 건수: 원래 가중치별 목표 건수를 정확히 유지하는 알고리즘입니다.
+// 가중치별 목표 건수를 우선하고 최대 1건 조정으로 전체 직선거리를 줄이는 단일 엔진입니다.
 export function executeAutoDispatch(options) {
-    return executeCountBaselineDispatch(options);
-}
-
-// TEST: 배송 건수를 우선하고 제한된 조정 범위에서 전체 직선거리를 줄입니다.
-export function executeDistanceBalancedDispatch(options) {
     return refineDispatch(options);
 }
 
-// TEST도 원래 건수 배정에서 시작하며 목표 건수와 가중치 순서를 우선합니다.
+// 이전 호출부 호환용 이름입니다. 별도의 배정 방식 없이 동일 엔진을 실행합니다.
+export function executeDistanceBalancedDispatch(options) {
+    return executeAutoDispatch(options);
+}
+
+// 초기 건수 배정에서 시작하며 목표 건수와 가중치 순서를 우선합니다.
 function refineDispatch(options) {
     const validPoint = point => point && point.lat != null && point.lng != null &&
         point.lat !== '' && point.lng !== '' && Number.isFinite(Number(point.lat)) &&
@@ -300,7 +300,7 @@ function refineDispatch(options) {
         Math.abs(Number(point.lng)) <= 180 && (Number(point.lat) !== 0 || Number(point.lng) !== 0);
     const orders = options.targetOrders || [];
     if (!validPoint(options.companyBase) || orders.some(order => !validPoint(order))) {
-        return { success: false, message: 'TEST로 배정하려면 회사 거점과 선택한 모든 배송지의 좌표가 필요합니다. 주소와 좌표를 확인해 주세요.' };
+        return { success: false, message: '자동할당하려면 회사 거점과 선택한 모든 배송지의 좌표가 필요합니다. 주소와 좌표를 확인해 주세요.' };
     }
     const result = executeCountBaselineDispatch(options);
     if (!result.success) return result;
@@ -337,6 +337,10 @@ function refineDispatch(options) {
     const ceiling = baselineTotal;
     const baselineCounts = routes.map(route => route.length);
     const countTolerance = 1;
+    const weightPairs = [];
+    stats.forEach((ds, d) => stats.forEach((other, e) => {
+        if (Number(options.weights?.[ds.devId] || 0) > Number(options.weights?.[other.devId] || 0)) weightPairs.push([d, e]);
+    }));
     const limits = stats.map(ds => {
         if (ds.targetCap === 0) return [0, 0];
         const tolerance = countTolerance;
@@ -367,10 +371,11 @@ function refineDispatch(options) {
             removed.set(item, { route: shortened, cost: length(shortened, d) });
         }));
         const consider = (a, b, ra, rb, ca, cb) => {
-            const counts = routes.map(route => route.length);
-            counts[a] = ra.length; counts[b] = rb.length;
-            if (stats.some((ds, d) => stats.some((other, e) =>
-                Number(options.weights?.[ds.devId] || 0) > Number(options.weights?.[other.devId] || 0) && counts[d] < counts[e]))) return;
+            if (weightPairs.length) {
+                const counts = routes.map(route => route.length);
+                counts[a] = ra.length; counts[b] = rb.length;
+                if (weightPairs.some(([d, e]) => counts[d] < counts[e])) return;
+            }
             const predicted = costs.slice();
             predicted[a] = ca; predicted[b] = cb;
             const score = objective(predicted);
@@ -430,11 +435,11 @@ function refineDispatch(options) {
 // 동일한 엔진을 전용 작업 스레드에서도 실행하여 계산 중 관제 화면을 멈추지 않습니다.
 if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
     self.onmessage = event => {
-        if (!['distance-dispatch', 'count-dispatch'].includes(event.data?.type)) return;
+        if (!['dispatch', 'distance-dispatch', 'count-dispatch'].includes(event.data?.type)) return;
         try {
             const options = event.data.options;
             const indices = new Map(options.targetOrders.map((order, i) => [order, i]));
-            const result = event.data.type === 'count-dispatch' ? executeAutoDispatch(options) : executeDistanceBalancedDispatch(options);
+            const result = executeAutoDispatch(options);
             self.postMessage({ result: { ...result, driverStats: result.driverStats?.map(ds => ({ ...ds,
                 assignedOrders: ds.assignedOrders.map(order => indices.get(order)) })) } });
         } catch (error) {

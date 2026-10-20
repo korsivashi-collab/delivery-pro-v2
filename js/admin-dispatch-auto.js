@@ -7,7 +7,7 @@ import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc, getDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 // 🌟 외곽 우선 하버사인 클러스터링 및 2-opt 순서 최적화 엔진 임포트
-import { executeAutoDispatch, executeDistanceBalancedDispatch, optimizeRoute2Opt, resolveDriverEndLocation } from "./admin-dispatch-algorithm.js";
+import { executeAutoDispatch, optimizeRoute2Opt, resolveDriverEndLocation } from "./admin-dispatch-algorithm.js";
 
 // ==========================================
 // 0. 물량 가중치 영구 저장소(LocalStorage) 관리 헬퍼
@@ -144,42 +144,9 @@ export function initDispatchResizer() {
 export const autoDispatchState = {
     selectedDrivers: new Set(),
     weights: loadSavedDriverWeights(),
-    assignmentMode: 'count',
-    modeStorageKey: '',
+    assignmentMode: 'count-first',
     isInit: false
 };
-
-function getDispatchAssignmentMode() {
-    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-    const key = `deliveryPro_dispatchAssignmentMode_${dispatchKey}`;
-    if (autoDispatchState.modeStorageKey !== key) {
-        let saved;
-        try { saved = localStorage.getItem(key); } catch {}
-        autoDispatchState.assignmentMode = saved === 'distance' ? 'distance' : 'count';
-        autoDispatchState.modeStorageKey = key;
-    }
-    return autoDispatchState.assignmentMode;
-}
-
-export function renderDispatchAssignmentMode() {
-    const mode = getDispatchAssignmentMode();
-    for (const value of ['count', 'distance']) {
-        const button = document.getElementById(`dispatch-mode-${value}`);
-        button?.setAttribute?.('aria-pressed', String(mode === value));
-        if (button) button.disabled = calculatingAssignments;
-    }
-    const description = document.getElementById('dispatch-mode-description');
-    if (description) description.textContent = calculatingAssignments ? '배정을 계산하고 있습니다…' : mode === 'distance'
-        ? '목표 건수에서 최대 1건만 조정해 전체 직선거리를 줄이는 TEST입니다.' : '가중치를 반영해 목표 건수를 정확히 나눕니다.';
-}
-
-export function setDispatchAssignmentMode(mode) {
-    if (!['count', 'distance'].includes(mode) || calculatingAssignments || resettingAssignments || sendingRoutes) return;
-    getDispatchAssignmentMode();
-    autoDispatchState.assignmentMode = mode;
-    try { localStorage.setItem(autoDispatchState.modeStorageKey, mode); } catch {}
-    renderDispatchAssignmentMode();
-}
 
 export function toggleAllDispatchDrivers(isChecked) {
     const drivers = getFilteredVisibleDrivers();
@@ -193,7 +160,6 @@ export function toggleAllDispatchDrivers(isChecked) {
 
 export function renderDispatchDriverList() {
     initDispatchResizer();
-    renderDispatchAssignmentMode();
 
     const listEl = document.getElementById('dispatch-driver-list');
     const countEl = document.getElementById('dispatch-driver-count');
@@ -628,7 +594,6 @@ export async function runAutoDispatchAlgorithm() {
 
     if (!companyBase?.lat || !companyBase?.lng) { alert('회사 거점을 먼저 저장해 주세요. 회사에서 가까운 배송지부터 시작하고 기사별 종료지점을 반영합니다.'); return; }
 
-    const mode = getDispatchAssignmentMode();
     const options = {
         targetOrders,
         activeDrivers,
@@ -645,7 +610,6 @@ export async function runAutoDispatchAlgorithm() {
             .map(id => document.getElementById(id)).filter(Boolean).map(element => ({ element, disabled: element.disabled }));
         locked.forEach(({ element }) => { element.disabled = true; });
         if (runButton) runButton.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 계산 중…';
-        renderDispatchAssignmentMode();
         // 작업 도중 원본 주문·기사 선택·종료 설정이 바뀌면 이전 조건의 결과를 반영하지 않습니다.
         const revision = () => JSON.stringify({ orders: state.parsedExcelList, drivers: getFilteredVisibleDrivers(),
             selectedDrivers: [...autoDispatchState.selectedDrivers], weights: autoDispatchState.weights,
@@ -654,7 +618,7 @@ export async function runAutoDispatchAlgorithm() {
             dispatchKey: sessionStorage.getItem('deliveryProDispatchKey') });
         try {
             const before = revision();
-            const commit = await calculateDistanceDispatch(options, mode);
+            const commit = await calculateDispatch(options);
             if (before !== revision()) throw new Error('계산 중 주문이나 기사 설정이 변경되었습니다. 현재 조건으로 자동할당을 다시 실행해 주세요.');
             result = commit();
         } catch (error) {
@@ -664,7 +628,6 @@ export async function runAutoDispatchAlgorithm() {
             calculatingAssignments = false;
             locked.forEach(({ element, disabled }) => { element.disabled = disabled; });
             if (runButton) runButton.innerHTML = originalHtml;
-            renderDispatchAssignmentMode();
         }
     }
 
@@ -683,10 +646,10 @@ export async function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? 'TEST' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\nTEST: 가중치별 목표 건수에서 최대 1건만 조정해 전체 직선거리를 줄입니다.' : '\n원래 배송 건수 알고리즘으로 가중치별 목표 건수를 유지합니다.'}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
+    alert(`[자동할당 배분 완료]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
 }
 
-function calculateDistanceDispatch(options, mode = 'distance') {
+function calculateDispatch(options) {
     // 원본을 건드리지 않고 계산합니다. 정상 결과가 검증된 뒤 원래 주문에 배정·순번만 복사합니다.
     const snapshot = JSON.parse(JSON.stringify(options));
     const originals = options.targetOrders.slice();
@@ -705,7 +668,7 @@ function calculateDistanceDispatch(options, mode = 'distance') {
     if (typeof Worker === 'undefined') {
         return new Promise((resolve, reject) => setTimeout(() => {
             try {
-                const result = mode === 'count' ? executeAutoDispatch(snapshot) : executeDistanceBalancedDispatch(snapshot);
+                const result = executeAutoDispatch(snapshot);
                 const indices = new Map(snapshot.targetOrders.map((order, i) => [order, i]));
                 if (result.success) result.driverStats.forEach(ds => { ds.assignedOrders = ds.assignedOrders.map(order => indices.get(order)); });
                 resolve(apply(result));
@@ -713,7 +676,7 @@ function calculateDistanceDispatch(options, mode = 'distance') {
         }, 0));
     }
     return new Promise((resolve, reject) => {
-        const worker = new Worker(new URL('./js/admin-dispatch-algorithm.js?v=20261020-dispatch-count-first', document.baseURI), { type: 'module' });
+        const worker = new Worker(new URL('./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single', document.baseURI), { type: 'module' });
         worker.onmessage = event => {
             worker.terminate();
             try {
@@ -723,7 +686,7 @@ function calculateDistanceDispatch(options, mode = 'distance') {
         };
         worker.onerror = () => { worker.terminate(); reject(new Error('거리 계산을 시작하지 못했습니다. 새로고침한 후 다시 시도해 주세요.')); };
         worker.onmessageerror = () => { worker.terminate(); reject(new Error('거리 계산 결과를 읽지 못했습니다. 다시 실행해 주세요.')); };
-        try { worker.postMessage({ type: mode === 'count' ? 'count-dispatch' : 'distance-dispatch', options: snapshot }); }
+        try { worker.postMessage({ type: 'dispatch', options: snapshot }); }
         catch (error) { worker.terminate(); reject(error); }
     });
 }
@@ -1038,7 +1001,6 @@ window.sortDetailByAddress = sortDetailByAddress;
 window.renderDispatchDriverDetail = renderDispatchDriverDetail;
 window.changeOrderDriver = changeOrderDriver;
 window.runAutoDispatchAlgorithm = runAutoDispatchAlgorithm;
-window.setDispatchAssignmentMode = setDispatchAssignmentMode;
 window.revertAutoDispatch = revertAutoDispatch;
 window.sendRoutesToDrivers = sendRoutesToDrivers;
 window.printSelectedDriverItemList = printSelectedDriverItemList;
