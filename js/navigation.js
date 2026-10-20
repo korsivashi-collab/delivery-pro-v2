@@ -113,8 +113,9 @@ export async function openKakaoNavi(lat, lng, name) {
             await KakaoNavigation.navigate({ lat, lng, name: destinationName });
             return;
         }
-        if (!window.Kakao?.Navi) throw new Error('카카오내비 모듈을 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 새로고침해 주세요.');
+        if (typeof window.Kakao?.init !== 'function') throw new Error('카카오내비 모듈을 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 새로고침해 주세요.');
         if (!window.Kakao.isInitialized()) window.Kakao.init('893c5c6ec8613974d84fa75fd6d0be11');
+        if (typeof window.Kakao.Navi?.start !== 'function') throw new Error('카카오내비 기능을 초기화하지 못했습니다. 새로고침 후 다시 시도해 주세요.');
         window.Kakao.Navi.start({ name: destinationName, x: lng, y: lat, coordType: 'wgs84', routeInfo: true });
     } catch (error) {
         alert(error?.message || '카카오내비를 실행하지 못했습니다. 설치 여부를 확인해 주세요.');
