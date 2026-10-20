@@ -96,9 +96,29 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
     if (destinations.length === 0) {
         if (listEl) {
             listEl.innerHTML = `
-                <li id="empty-state" class="text-center text-gray-400 py-16 border-2 border-dashed border-slate-300 rounded-2xl my-2 bg-white">
-                    <i class="fa-solid fa-receipt text-5xl mb-3 text-slate-300"></i>
-                    <p class="font-bold text-xs text-slate-500 leading-relaxed">주소지를 스캔하거나 관제에서 전송되면<br>동선이 생성됩니다.</p>
+                <li id="empty-state" class="my-2 rounded-2xl border border-slate-200 bg-white px-4 py-5 sm:px-6 sm:py-6">
+                    <div class="mx-auto w-full max-w-lg">
+                        <h2 class="text-base font-extrabold text-slate-900">배송을 시작해 보세요</h2>
+                        <ol class="mt-4 space-y-4 text-left">
+                            <li class="flex items-start gap-3">
+                                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600">1</span>
+                                <div><h3 class="text-sm font-bold text-slate-900">배송지 등록</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">[스캔]으로 명세서의 <strong class="font-bold text-slate-800">받는 분 정보가 잘 보이도록</strong> 촬영하세요. 관제에서 전송한 배송지도 확인할 수 있습니다.</p></div>
+                            </li>
+                            <li class="flex items-start gap-3">
+                                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600">2</span>
+                                <div><h3 class="text-sm font-bold text-slate-900">종료지점 설정</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">배송 후 돌아갈 장소를 설정하세요. <strong class="font-bold text-slate-800">종료지점을 설정하면 더 효율적인 배송 경로를 계산할 수 있습니다.</strong></p></div>
+                            </li>
+                            <li class="flex items-start gap-3">
+                                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600">3</span>
+                                <div><h3 class="text-sm font-bold text-slate-900">경로 최적화</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">하단 [≫]를 오른쪽 끝까지 밀고, <strong class="font-bold text-slate-800">처음 방문할 배송지</strong>를 선택하세요.</p></div>
+                            </li>
+                            <li class="flex items-start gap-3">
+                                <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600">4</span>
+                                <div><h3 class="text-sm font-bold text-slate-900">배송 진행</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">[길찾기]로 이동하고, 배송을 마치면 [완료]를 누르세요.</p></div>
+                            </li>
+                        </ol>
+                        <p class="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">경로 최적화는 배송지 2곳부터 가능합니다.</p>
+                    </div>
                 </li>`;
         }
         return;
