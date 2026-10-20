@@ -169,8 +169,8 @@ export function renderDispatchAssignmentMode() {
         if (button) button.disabled = calculatingAssignments;
     }
     const description = document.getElementById('dispatch-mode-description');
-    if (description) description.textContent = calculatingAssignments ? '이동 거리를 계산하고 있습니다…' : mode === 'distance'
-        ? '이동 거리 차이를 줄여 배정합니다.' : '가중치를 반영해 건수를 나눕니다.';
+    if (description) description.textContent = calculatingAssignments ? '배정을 계산하고 있습니다…' : mode === 'distance'
+        ? '이동 거리 차이를 줄여 배정합니다.' : '가중치에 따른 물량 범위 안에서 전체 이동 거리를 줄입니다.';
 }
 
 export function setDispatchAssignmentMode(mode) {
@@ -637,7 +637,7 @@ export async function runAutoDispatchAlgorithm() {
         activeRoutes: state.activeRoutes
     };
     let result;
-    if (mode === 'distance') {
+    {
         calculatingAssignments = true;
         const runButton = document.getElementById('btn-run-auto-dispatch');
         const originalHtml = runButton?.innerHTML;
@@ -654,7 +654,7 @@ export async function runAutoDispatchAlgorithm() {
             dispatchKey: sessionStorage.getItem('deliveryProDispatchKey') });
         try {
             const before = revision();
-            const commit = await calculateDistanceDispatch(options);
+            const commit = await calculateDistanceDispatch(options, mode);
             if (before !== revision()) throw new Error('계산 중 주문이나 기사 설정이 변경되었습니다. 현재 조건으로 자동할당을 다시 실행해 주세요.');
             result = commit();
         } catch (error) {
@@ -666,8 +666,6 @@ export async function runAutoDispatchAlgorithm() {
             if (runButton) runButton.innerHTML = originalHtml;
             renderDispatchAssignmentMode();
         }
-    } else {
-        result = executeAutoDispatch(options);
     }
 
     if (!result.success) {
@@ -685,10 +683,10 @@ export async function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? '이동 거리' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\n이동 거리는 직선거리 기준입니다. 가중치는 상대 처리량으로 반영하며 기사별 건수는 달라질 수 있습니다.' : ''}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
+    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? '이동 거리' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\n이동 거리는 직선거리 기준입니다. 가중치는 상대 처리량으로 반영하며 기사별 건수는 달라질 수 있습니다.' : '\n가중치에 따른 물량 범위 안에서 전체 직선거리 절감을 기준으로 배정합니다. 기사별 건수는 달라질 수 있습니다.'}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
 }
 
-function calculateDistanceDispatch(options) {
+function calculateDistanceDispatch(options, mode = 'distance') {
     // 원본을 건드리지 않고 계산합니다. 정상 결과가 검증된 뒤 원래 주문에 배정·순번만 복사합니다.
     const snapshot = JSON.parse(JSON.stringify(options));
     const originals = options.targetOrders.slice();
@@ -707,7 +705,7 @@ function calculateDistanceDispatch(options) {
     if (typeof Worker === 'undefined') {
         return new Promise((resolve, reject) => setTimeout(() => {
             try {
-                const result = executeDistanceBalancedDispatch(snapshot);
+                const result = mode === 'count' ? executeAutoDispatch(snapshot) : executeDistanceBalancedDispatch(snapshot);
                 const indices = new Map(snapshot.targetOrders.map((order, i) => [order, i]));
                 if (result.success) result.driverStats.forEach(ds => { ds.assignedOrders = ds.assignedOrders.map(order => indices.get(order)); });
                 resolve(apply(result));
@@ -715,7 +713,7 @@ function calculateDistanceDispatch(options) {
         }, 0));
     }
     return new Promise((resolve, reject) => {
-        const worker = new Worker(new URL('./js/admin-dispatch-algorithm.js?v=20261018-dispatch-distance', document.baseURI), { type: 'module' });
+        const worker = new Worker(new URL('./js/admin-dispatch-algorithm.js?v=20261020-dispatch-total', document.baseURI), { type: 'module' });
         worker.onmessage = event => {
             worker.terminate();
             try {
@@ -725,7 +723,7 @@ function calculateDistanceDispatch(options) {
         };
         worker.onerror = () => { worker.terminate(); reject(new Error('거리 계산을 시작하지 못했습니다. 새로고침한 후 다시 시도해 주세요.')); };
         worker.onmessageerror = () => { worker.terminate(); reject(new Error('거리 계산 결과를 읽지 못했습니다. 다시 실행해 주세요.')); };
-        try { worker.postMessage({ type: 'distance-dispatch', options: snapshot }); }
+        try { worker.postMessage({ type: mode === 'count' ? 'count-dispatch' : 'distance-dispatch', options: snapshot }); }
         catch (error) { worker.terminate(); reject(error); }
     });
 }

@@ -149,7 +149,7 @@ export function optimizeRoute2Opt(orderList, basePos = null, endPos = basePos) {
  * 2) 해당 배송지 기준 하버사인 최근접 주문들을 모아 가장 가까운 가용 기사의 쿼터만큼 배정
  * 3) 거점 주변 잔여 물량까지 자연스럽게 내부 기사에게 순차 할당
  */
-export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null, activeRoutes = {} }) {
+function executeCountBaselineDispatch({ targetOrders, activeDrivers, weights = {}, companyBase = null, activeRoutes = {} }) {
     if (!targetOrders || targetOrders.length === 0) {
         return { success: false, message: "할당할 배송 데이터가 없습니다." };
     }
@@ -282,13 +282,19 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
     };
 }
 
-/**
- * 기존 배정에서 배송지를 이동·교환해 기사별 직선거리 부담을 조정합니다.
- * 검증한 조건: 최장 거리 + 0.05 × 표준편차, 총거리 증가 10% 이내,
- * 가중치 목표량 대비 거리 부담을 최소화하며 총거리 증가는 10%로 제한합니다.
- * 가중치 적용 시 목표 건수의 ±35%(최소 5건), 미적용 시 평균 ±5건 내에서 이동·교환합니다.
- */
+// 배송 건수: 가중치 목표 건수 ±35%(최소 5건) 내에서 전체 직선거리 감소만 허용합니다.
+// 최장 경로는 기존 이하, 기사별 거리 증가는 max(5km, 기존 거리의 20%) 이내로 제한합니다.
+export function executeAutoDispatch(options) {
+    return refineDispatch(options, true);
+}
+
+// 이동 거리: 기존 최장 부담 + 0.05 × 표준편차 기준과 총거리 증가 10% 한도를 유지합니다.
 export function executeDistanceBalancedDispatch(options) {
+    return refineDispatch(options, false);
+}
+
+// 배송 건수 모드는 전체 거리 절감, 이동 거리 모드는 기존 거리 부담 균형 기준을 사용합니다.
+function refineDispatch(options, minimizeTotal) {
     const validPoint = point => point && point.lat != null && point.lng != null &&
         point.lat !== '' && point.lng !== '' && Number.isFinite(Number(point.lat)) &&
         Number.isFinite(Number(point.lng)) && Math.abs(Number(point.lat)) <= 90 &&
@@ -297,7 +303,7 @@ export function executeDistanceBalancedDispatch(options) {
     if (!validPoint(options.companyBase) || orders.some(order => !validPoint(order))) {
         return { success: false, message: '이동 거리 기준으로 배정하려면 회사 거점과 선택한 모든 배송지의 좌표가 필요합니다. 주소와 좌표를 확인해 주세요.' };
     }
-    const result = executeAutoDispatch(options);
+    const result = executeCountBaselineDispatch(options);
     if (!result.success) return result;
 
     // 계산 순서는 입력 기사 순서로 고정합니다. 기존 건수 배정의 정렬은 바꾸지 않습니다.
@@ -328,6 +334,7 @@ export function executeDistanceBalancedDispatch(options) {
     const weighted = stats.some(ds => Number(options.weights?.[ds.devId] || 0) !== 0);
     const capacity = stats.map(ds => ds.targetCap === 0 ? 0 : weighted ? ds.targetCap / (n / k) : 1);
     const objective = values => {
+        if (minimizeTotal) return total(values);
         const loads = values.flatMap((value, d) => capacity[d] > 0 ? [value / capacity[d]] : []);
         const mean = total(loads) / loads.length;
         const deviation = Math.sqrt(loads.reduce((sum, value) => sum + (value - mean) ** 2, 0) / loads.length);
@@ -336,11 +343,12 @@ export function executeDistanceBalancedDispatch(options) {
     let routes = stats.map(ds => ds.assignedOrders.map(order => index.get(order)));
     let costs = routes.map(length);
     const baselineTotal = total(costs), baselineMax = Math.max(...costs);
-    const ceiling = baselineTotal * 1.1;
+    const initialCosts = costs.slice();
+    const ceiling = baselineTotal * (minimizeTotal ? 1 : 1.1);
     const baselineCounts = routes.map(route => route.length);
     const limits = stats.map(ds => {
         if (ds.targetCap === 0) return [0, 0];
-        if (!weighted) return [Math.max(1, Math.floor(n / k) - 5), Math.ceil(n / k) + 5];
+        if (!weighted && !minimizeTotal) return [Math.max(1, Math.floor(n / k) - 5), Math.ceil(n / k) + 5];
         const tolerance = Math.max(5, Math.ceil(ds.targetCap * 0.35));
         return [Math.max(1, ds.targetCap - tolerance), ds.targetCap + tolerance];
     });
@@ -361,7 +369,7 @@ export function executeDistanceBalancedDispatch(options) {
     };
 
     let iterations = 0;
-    for (; iterations < 30; iterations++) {
+    for (; iterations < (minimizeTotal ? 50 : 30); iterations++) {
         const owner = Array(n), removed = new Map(), candidates = [], current = objective(costs);
         routes.forEach((route, d) => route.forEach(item => {
             owner[item] = d;
@@ -373,7 +381,9 @@ export function executeDistanceBalancedDispatch(options) {
             predicted[a] = ca; predicted[b] = cb;
             const score = objective(predicted);
             if (score < current - 1e-8 && total(predicted) <= ceiling + 1e-8 &&
-                Math.max(...predicted) <= Math.max(...costs) + 1e-8) candidates.push({ a, b, ra, rb, score });
+                (minimizeTotal
+                    ? Math.max(...predicted) <= baselineMax + 1e-8 && predicted.every((v, d) => v <= initialCosts[d] + Math.max(5, initialCosts[d] * 0.2) + 1e-8)
+                    : Math.max(...predicted) <= Math.max(...costs) + 1e-8)) candidates.push({ a, b, ra, rb, score });
         };
         for (let a = 0; a < k; a++) if (routes[a].length > limits[a][0]) {
             for (const item of routes[a]) for (let b = 0; b < k; b++) if (a !== b && routes[b].length < limits[b][1]) {
@@ -392,12 +402,14 @@ export function executeDistanceBalancedDispatch(options) {
         }
         candidates.sort((a, b) => a.score - b.score);
         let best = null;
-        for (const candidate of candidates.slice(0, 3)) {
+        for (const candidate of candidates.slice(0, minimizeTotal ? 5 : 3)) {
             const ra = optimize(candidate.ra, candidate.a), rb = optimize(candidate.rb, candidate.b), next = costs.slice();
             next[candidate.a] = length(ra, candidate.a); next[candidate.b] = length(rb, candidate.b);
             const score = objective(next);
             if (total(next) > ceiling + 1e-8 || score >= current - 1e-8 ||
-                Math.max(...next) > Math.max(...costs) + 1e-8) continue;
+                (minimizeTotal
+                    ? Math.max(...next) > baselineMax + 1e-8 || next.some((v, d) => v > initialCosts[d] + Math.max(5, initialCosts[d] * 0.2) + 1e-8)
+                    : Math.max(...next) > Math.max(...costs) + 1e-8)) continue;
             if (!best || score < best.score) best = { ...candidate, ra, rb, costs: next, score };
         }
         if (!best) break;
@@ -418,7 +430,7 @@ export function executeDistanceBalancedDispatch(options) {
         stats[d].assignedCount = route.length;
     });
     result.distanceBalance = { iterations, weightedCountsPreserved: routes.every((route, d) => route.length === baselineCounts[d]),
-        weightMode: 'relative-capacity', baselineObjective, objective: objective(costs),
+        weightMode: 'relative-capacity', objectiveMode: minimizeTotal ? 'total-distance' : 'distance-balance', baselineObjective, objective: objective(costs),
         countLimits: stats.map((ds, d) => ({ driverKey: ds.key, min: limits[d][0], max: limits[d][1] })),
         baselineTotalKm: baselineTotal,
         totalKm: total(costs), baselineMaxKm: baselineMax, maxKm: Math.max(...costs) };
@@ -428,11 +440,11 @@ export function executeDistanceBalancedDispatch(options) {
 // 동일한 엔진을 전용 작업 스레드에서도 실행하여 계산 중 관제 화면을 멈추지 않습니다.
 if (typeof WorkerGlobalScope !== 'undefined' && self instanceof WorkerGlobalScope) {
     self.onmessage = event => {
-        if (event.data?.type !== 'distance-dispatch') return;
+        if (!['distance-dispatch', 'count-dispatch'].includes(event.data?.type)) return;
         try {
             const options = event.data.options;
             const indices = new Map(options.targetOrders.map((order, i) => [order, i]));
-            const result = executeDistanceBalancedDispatch(options);
+            const result = event.data.type === 'count-dispatch' ? executeAutoDispatch(options) : executeDistanceBalancedDispatch(options);
             self.postMessage({ result: { ...result, driverStats: result.driverStats?.map(ds => ({ ...ds,
                 assignedOrders: ds.assignedOrders.map(order => indices.get(order)) })) } });
         } catch (error) {
