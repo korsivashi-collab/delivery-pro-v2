@@ -285,8 +285,8 @@ export function executeAutoDispatch({ targetOrders, activeDrivers, weights = {},
 /**
  * 기존 배정에서 배송지를 이동·교환해 기사별 직선거리 부담을 조정합니다.
  * 검증한 조건: 최장 거리 + 0.05 × 표준편차, 총거리 증가 10% 이내,
- * 평균 건수 -5~+5건, 상위 후보 3개 정밀 평가, 최대 30회 개선.
- * 가중치가 있으면 목표 건수를 정확히 유지하고 교환만 허용합니다.
+ * 가중치 목표량 대비 거리 부담을 최소화하며 총거리 증가는 10%로 제한합니다.
+ * 가중치 적용 시 목표 건수의 ±35%(최소 5건), 미적용 시 평균 ±5건 내에서 이동·교환합니다.
  */
 export function executeDistanceBalancedDispatch(options) {
     const validPoint = point => point && point.lat != null && point.lng != null &&
@@ -324,19 +324,27 @@ export function executeDistanceBalancedDispatch(options) {
         return cache.get(key).slice();
     };
     const total = values => values.reduce((sum, value) => sum + value, 0);
+    // 기존 가중치의 상대 처리량을 거리 부담에 반영합니다. 0건 목표 기사는 제외합니다.
+    const weighted = stats.some(ds => Number(options.weights?.[ds.devId] || 0) !== 0);
+    const capacity = stats.map(ds => ds.targetCap === 0 ? 0 : weighted ? ds.targetCap / (n / k) : 1);
     const objective = values => {
-        const mean = total(values) / k;
-        const deviation = Math.sqrt(values.reduce((sum, value) => sum + (value - mean) ** 2, 0) / k);
-        return Math.max(...values) + 0.05 * deviation;
+        const loads = values.flatMap((value, d) => capacity[d] > 0 ? [value / capacity[d]] : []);
+        const mean = total(loads) / loads.length;
+        const deviation = Math.sqrt(loads.reduce((sum, value) => sum + (value - mean) ** 2, 0) / loads.length);
+        return Math.max(...loads) + 0.05 * deviation;
     };
     let routes = stats.map(ds => ds.assignedOrders.map(order => index.get(order)));
     let costs = routes.map(length);
     const baselineTotal = total(costs), baselineMax = Math.max(...costs);
     const ceiling = baselineTotal * 1.1;
-    const weighted = stats.some(ds => Number(options.weights?.[ds.devId] || 0) !== 0);
-    const limits = stats.map((ds, d) => weighted || ds.targetCap === 0
-        ? [routes[d].length, routes[d].length]
-        : [Math.max(1, Math.floor(n / k) - 5), Math.ceil(n / k) + 5]);
+    const baselineCounts = routes.map(route => route.length);
+    const limits = stats.map(ds => {
+        if (ds.targetCap === 0) return [0, 0];
+        if (!weighted) return [Math.max(1, Math.floor(n / k) - 5), Math.ceil(n / k) + 5];
+        const tolerance = Math.max(5, Math.ceil(ds.targetCap * 0.35));
+        return [Math.max(1, ds.targetCap - tolerance), ds.targetCap + tolerance];
+    });
+    const baselineObjective = objective(costs);
     const near = orders.map((_, i) => Array.from({ length: n }, (__, j) => j).filter(j => j !== i)
         .sort((a, b) => matrix[i][a] - matrix[i][b] || a - b).slice(0, 16));
     const insert = (route, item, d) => {
@@ -364,9 +372,10 @@ export function executeDistanceBalancedDispatch(options) {
             const predicted = costs.slice();
             predicted[a] = ca; predicted[b] = cb;
             const score = objective(predicted);
-            if (score < current - 1e-8 && total(predicted) <= ceiling + 1e-8) candidates.push({ a, b, ra, rb, score });
+            if (score < current - 1e-8 && total(predicted) <= ceiling + 1e-8 &&
+                Math.max(...predicted) <= Math.max(...costs) + 1e-8) candidates.push({ a, b, ra, rb, score });
         };
-        if (!weighted) for (let a = 0; a < k; a++) if (routes[a].length > limits[a][0]) {
+        for (let a = 0; a < k; a++) if (routes[a].length > limits[a][0]) {
             for (const item of routes[a]) for (let b = 0; b < k; b++) if (a !== b && routes[b].length < limits[b][1]) {
                 const rm = removed.get(item), add = insert(routes[b], item, b);
                 consider(a, b, rm.route, add.route, rm.cost, costs[b] + add.delta);
@@ -387,7 +396,8 @@ export function executeDistanceBalancedDispatch(options) {
             const ra = optimize(candidate.ra, candidate.a), rb = optimize(candidate.rb, candidate.b), next = costs.slice();
             next[candidate.a] = length(ra, candidate.a); next[candidate.b] = length(rb, candidate.b);
             const score = objective(next);
-            if (total(next) > ceiling + 1e-8 || score >= current - 1e-8) continue;
+            if (total(next) > ceiling + 1e-8 || score >= current - 1e-8 ||
+                Math.max(...next) > Math.max(...costs) + 1e-8) continue;
             if (!best || score < best.score) best = { ...candidate, ra, rb, costs: next, score };
         }
         if (!best) break;
@@ -407,7 +417,10 @@ export function executeDistanceBalancedDispatch(options) {
         });
         stats[d].assignedCount = route.length;
     });
-    result.distanceBalance = { iterations, weightedCountsPreserved: weighted, baselineTotalKm: baselineTotal,
+    result.distanceBalance = { iterations, weightedCountsPreserved: routes.every((route, d) => route.length === baselineCounts[d]),
+        weightMode: 'relative-capacity', baselineObjective, objective: objective(costs),
+        countLimits: stats.map((ds, d) => ({ driverKey: ds.key, min: limits[d][0], max: limits[d][1] })),
+        baselineTotalKm: baselineTotal,
         totalKm: total(costs), baselineMaxKm: baselineMax, maxKm: Math.max(...costs) };
     return result;
 }

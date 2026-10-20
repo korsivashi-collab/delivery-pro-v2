@@ -685,7 +685,7 @@ export async function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? '이동 거리' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\n이동 거리는 직선거리 기준이며, 가중치가 설정된 경우 배정 건수를 유지합니다.' : ''}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
+    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? '이동 거리' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\n이동 거리는 직선거리 기준입니다. 가중치는 상대 처리량으로 반영하며 기사별 건수는 달라질 수 있습니다.' : ''}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
 }
 
 function calculateDistanceDispatch(options) {
