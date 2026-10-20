@@ -60,15 +60,14 @@
     #dispatch-panel > .dispatch-header .dispatch-search { max-width: 280px; }
 }
 
-/* 자동할당 도구를 넓은 화면에서 한 줄로 정렬합니다. */
+/* 자동할당: 거점·업로드·실행 영역이 화면 너비를 나눠 사용합니다. */
 #auto-dispatch-modal .auto-dispatch-toolbar {
-    display: grid; grid-template-columns: 230px minmax(310px, 550px) minmax(230px, 280px) auto auto;
-    align-items: center; justify-content: space-between; gap: 12px; padding: 12px 24px;
+    display: grid; grid-template-columns: 210px minmax(330px, 1.4fr) minmax(240px, 1fr) minmax(280px, .95fr) auto;
+    align-items: center; gap: 12px; padding: 12px 24px;
 }
 #auto-dispatch-modal .auto-dispatch-brand { grid-column: 1; grid-row: 1; min-width: 0; }
 #auto-dispatch-modal .auto-dispatch-base {
-    grid-column: 2; grid-row: 1; display: grid;
-    grid-template-columns: auto minmax(80px, 1fr) auto auto;
+    grid-column: 2; grid-row: 1; display: grid; grid-template-columns: auto minmax(80px, 1fr) auto auto;
     gap: 5px 8px; padding: 8px 10px; min-width: 0; max-width: none;
 }
 #auto-dispatch-modal #company-base-address { width: 100%; min-width: 0; }
@@ -76,52 +75,37 @@
 #auto-dispatch-modal #btn-clear-company-base { padding: 4px 5px; border: 1px solid #fecaca; border-radius: 7px; font-size: 10px; }
 #auto-dispatch-modal .auto-dispatch-actions { display: contents; }
 #auto-dispatch-modal .auto-dispatch-execution {
-    grid-column: 4; grid-row: 1; display: flex; align-items: center; gap: 10px; min-width: max-content;
+    grid-column: 4; grid-row: 1; display: grid; grid-template-columns: 1.2fr 1fr; align-items: center; gap: 10px; min-width: 0;
 }
+#auto-dispatch-modal .auto-dispatch-execution > button { width: 100%; height: 48px; justify-content: center; padding: 0 12px; font-size: 13px; }
 #auto-dispatch-modal .auto-dispatch-utilities {
-    grid-column: 5; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; gap: 10px; min-width: max-content;
+    grid-column: 5; grid-row: 1; display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-width: max-content;
 }
+#auto-dispatch-modal .auto-dispatch-utilities > button { height: 40px; }
 #auto-dispatch-modal #excel-drop-zone {
-    grid-column: 3; grid-row: 1; width: 100%; min-width: 0; min-height: 62px; padding: 8px 10px;
-    justify-content: center; text-align: left;
+    grid-column: 3; grid-row: 1; width: 100%; min-width: 0; min-height: 62px; padding: 8px 14px; justify-content: center; text-align: left;
 }
 #auto-dispatch-modal #excel-drop-zone h4 { font-size: 13px; line-height: 22px; }
 #auto-dispatch-modal #excel-drop-zone p { font-size: 10px; line-height: 16px; white-space: normal; }
-#auto-dispatch-modal .dispatch-assignment-control { flex: 0 0 auto; }
-#auto-dispatch-modal .dispatch-assignment-run { display: flex; align-items: center; gap: 10px; flex: 0 0 auto; }
-#auto-dispatch-modal .dispatch-assignment-mode {
-    display: inline-flex; padding: 3px; gap: 3px; border: 1px solid #cbd5e1;
-    border-radius: 10px; background: #f1f5f9;
-}
-#auto-dispatch-modal .dispatch-assignment-mode button {
-    min-width: 86px; padding: 6px 10px; border-radius: 7px; color: #475569;
-    font-size: 12px; font-weight: 800; line-height: 20px; white-space: nowrap;
-}
-#auto-dispatch-modal .dispatch-assignment-mode button[aria-pressed="true"] { color: #fff; background: #2563eb; }
-#auto-dispatch-modal .dispatch-assignment-mode button[aria-pressed="true"]::before { content: '✓ '; }
-#auto-dispatch-modal .dispatch-assignment-mode button:hover { box-shadow: inset 0 0 0 2px #93b4ff; }
-#auto-dispatch-modal .dispatch-assignment-mode button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
-#auto-dispatch-modal #dispatch-mode-description { margin: 3px 0 0; color: #64748b; font-size: 10px; line-height: 14px; }
+#auto-dispatch-modal .auto-dispatch-toolbar button:focus-visible { outline: 2px solid #2563eb; outline-offset: 3px; }
 #auto-dispatch-modal .auto-dispatch-toolbar button:disabled { opacity: .55; cursor: wait; }
-@media (max-width: 1550px) {
-    #auto-dispatch-modal .auto-dispatch-toolbar { grid-template-columns: 280px minmax(0, 1fr) auto; padding: 12px 16px; }
+@media (max-width: 1399px) {
+    #auto-dispatch-modal .auto-dispatch-toolbar { grid-template-columns: 210px minmax(300px, 1fr) auto; padding: 12px 16px; }
     #auto-dispatch-modal .auto-dispatch-utilities { grid-column: 3; }
-    #auto-dispatch-modal #excel-drop-zone { grid-column: 1; grid-row: 2; }
-    #auto-dispatch-modal .auto-dispatch-execution { grid-column: 2 / -1; grid-row: 2; justify-content: flex-end; }
+    #auto-dispatch-modal .auto-dispatch-actions { grid-column: 1 / -1; grid-row: 2; display: grid; grid-template-columns: 1.15fr 1fr; gap: 12px; align-items: center; min-width: 0; }
+    #auto-dispatch-modal #excel-drop-zone, #auto-dispatch-modal .auto-dispatch-execution { grid-column: auto; grid-row: auto; }
 }
 @media (max-width: 900px) {
     #auto-dispatch-modal .auto-dispatch-toolbar { grid-template-columns: minmax(0, 1fr) auto; }
     #auto-dispatch-modal .auto-dispatch-utilities { grid-column: 2; }
     #auto-dispatch-modal .auto-dispatch-base { grid-column: 1 / -1; grid-row: 2; }
-    #auto-dispatch-modal #excel-drop-zone { grid-column: 1 / -1; grid-row: 3; max-width: 400px; justify-self: center; }
-    #auto-dispatch-modal .auto-dispatch-execution { grid-column: 1 / -1; grid-row: 4; flex-wrap: wrap; justify-content: center; min-width: 0; }
+    #auto-dispatch-modal .auto-dispatch-actions { grid-row: 3; grid-template-columns: 1fr 1fr; }
 }
 @media (max-width: 600px) {
     #auto-dispatch-modal .auto-dispatch-toolbar { padding: 10px 12px; gap: 10px; }
-    #auto-dispatch-modal .auto-dispatch-utilities { grid-column: 1 / -1; grid-row: 2; justify-content: flex-start; }
+    #auto-dispatch-modal .auto-dispatch-brand { grid-column: 1 / -1; }
+    #auto-dispatch-modal .auto-dispatch-utilities { grid-column: 1 / -1; grid-row: 2; justify-content: space-between; }
     #auto-dispatch-modal .auto-dispatch-base { grid-row: 3; }
-    #auto-dispatch-modal #excel-drop-zone { grid-row: 4; }
-    #auto-dispatch-modal .auto-dispatch-execution { grid-row: 5; }
-    #auto-dispatch-modal .dispatch-assignment-run { gap: 8px; }
-    #auto-dispatch-modal #btn-run-auto-dispatch { padding-left: 12px; padding-right: 12px; }
+    #auto-dispatch-modal .auto-dispatch-actions { grid-row: 4; grid-template-columns: minmax(0, 1fr); gap: 10px; }
+    #auto-dispatch-modal .auto-dispatch-execution { gap: 10px; }
 }
