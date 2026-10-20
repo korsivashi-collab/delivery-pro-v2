@@ -1,6 +1,7 @@
 import { Capacitor, CapacitorHttp, registerPlugin } from './vendor/capacitor.js';
 
 export const FirebaseAuthentication = registerPlugin('FirebaseAuthentication');
+export const KakaoNavigation = registerPlugin('KakaoNavigation');
 export const isNativeApp = () => Capacitor.isNativePlatform();
 // 공개 백엔드 주소입니다. 앱 자산은 로컬, API만 HTTPS 서버로 연결합니다.
 const backendOrigin = 'https://delivery-pro-ksco.vercel.app';

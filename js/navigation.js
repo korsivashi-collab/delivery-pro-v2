@@ -5,6 +5,7 @@
 // =================================================================
 
 import { state, hasValidDeliveryCoordinates } from './state.js';
+import { isNativeApp, KakaoNavigation } from './native-platform.js';
 import { showLoading, hideLoading, withRequestDeadline } from './utils.js';
 
 
@@ -12,15 +13,17 @@ import { showLoading, hideLoading, withRequestDeadline } from './utils.js';
 const NAVIGATION_PREFERENCE_KEY = 'deliveryPro_preferredNavigation';
 let preferredNavigation = 'tmap';
 try {
-    if (localStorage.getItem(NAVIGATION_PREFERENCE_KEY) === 'naver') preferredNavigation = 'naver';
+    const saved = localStorage.getItem(NAVIGATION_PREFERENCE_KEY);
+    if (saved === 'naver' || saved === 'kakao') preferredNavigation = saved;
 } catch (_) { /* 저장소를 사용할 수 없어도 현재 세션에서는 선택 가능 */ }
 
 export function getPreferredNavigation() { return preferredNavigation; }
 
 export function navigationButtonContent(provider = preferredNavigation) {
     const isNaver = provider === 'naver';
-    return '<span class="navigation-brand" aria-hidden="true">' + (isNaver ? 'N' : 'T') + '</span>' +
-        '<span>' + (isNaver ? '네이버지도로 안내' : '티맵으로 안내') + '</span>' +
+    const isKakao = provider === 'kakao';
+    return '<span class="navigation-brand" aria-hidden="true">' + (isKakao ? 'K' : isNaver ? 'N' : 'T') + '</span>' +
+        '<span>' + (isKakao ? '카카오내비로 안내' : isNaver ? '네이버지도로 안내' : '티맵으로 안내') + '</span>' +
         '<svg class="navigation-arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 }
 
@@ -34,7 +37,7 @@ export function openNavigationPicker() {
 }
 
 export function selectNavigation(provider) {
-    if (provider !== 'tmap' && provider !== 'naver') return;
+    if (provider !== 'tmap' && provider !== 'naver' && provider !== 'kakao') return;
     preferredNavigation = provider;
     try { localStorage.setItem(NAVIGATION_PREFERENCE_KEY, provider); } catch (_) { /* 세션 선택 유지 */ }
     document.querySelectorAll('[data-navigation-launch]').forEach(button => {
@@ -45,8 +48,9 @@ export function selectNavigation(provider) {
 }
 
 export function openPreferredNavigation(lat, lng, name) {
-    if (preferredNavigation === 'naver') openNaverMap(lat, lng, name);
-    else openTmap(lat, lng, name);
+    if (preferredNavigation === 'kakao') return openKakaoNavi(lat, lng, name);
+    if (preferredNavigation === 'naver') return openNaverMap(lat, lng, name);
+    return openTmap(lat, lng, name);
 }
 
 window.openNavigationPicker = openNavigationPicker;
@@ -94,6 +98,26 @@ function launchNavigationApp(url, appName) {
         window.location.href = url;
     } catch (error) {
         alert(failureMessage);
+    }
+}
+
+// 웹은 기존 JavaScript 키, Android는 별도 네이티브 키를 사용하는 공식 SDK로 실행한다.
+export async function openKakaoNavi(lat, lng, name) {
+    if (!hasValidDeliveryCoordinates({ lat, lng })) {
+        alert('목적지 좌표가 유효하지 않습니다.');
+        return;
+    }
+    const destinationName = String(name || '목적지').trim() || '목적지';
+    try {
+        if (isNativeApp()) {
+            await KakaoNavigation.navigate({ lat, lng, name: destinationName });
+            return;
+        }
+        if (!window.Kakao?.Navi) throw new Error('카카오내비 모듈을 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 새로고침해 주세요.');
+        if (!window.Kakao.isInitialized()) window.Kakao.init('893c5c6ec8613974d84fa75fd6d0be11');
+        window.Kakao.Navi.start({ name: destinationName, x: lng, y: lat, coordType: 'wgs84', routeInfo: true });
+    } catch (error) {
+        alert(error?.message || '카카오내비를 실행하지 못했습니다. 설치 여부를 확인해 주세요.');
     }
 }
 
