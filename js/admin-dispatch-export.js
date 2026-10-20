@@ -66,7 +66,7 @@ export function executeExcelExport() {
                 const dt = new Date(c.completedAt);
                 const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
                 excelData.push([
-                    idx + 1, dStr, c.phone || '연락처 없음', c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
+                    idx + 1, dStr, c.phone || '연락처 없음', c.fullAddress || c.address || '', c.customerPhone || '미등록', c.tag || '전달완료', c.photoUrl || '사진 없음'
                 ]);
             });
             const ws = XLSX.utils.aoa_to_sheet(excelData);
@@ -95,7 +95,7 @@ export function executeExcelExport() {
                 const dt = new Date(p.updatedAt);
                 const dStr = `${dt.getFullYear()}.${String(dt.getMonth()+1).padStart(2,'0')}.${String(dt.getDate()).padStart(2,'0')} ${dt.toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}`;
                 excelData.push([
-                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.address || '', '대기(이동중)'
+                    p.displayNumber || idx + 1, dStr, p.driverPhone, p.fullAddress || p.address || '', '대기(이동중)'
                 ]);
             });
             const ws = XLSX.utils.aoa_to_sheet(excelData);

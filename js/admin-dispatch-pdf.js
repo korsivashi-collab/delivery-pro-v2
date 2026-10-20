@@ -1,6 +1,7 @@
 // js/admin-dispatch-pdf.js
 
 import { state } from "./admin-state.js";
+import { dispatchNavigationAddress, dispatchAddressMatches, validDispatchCoordinates } from "./address.js";
 
 // PDF.js 워커 경로 초기화
 if (window.pdfjsLib) {
@@ -246,10 +247,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     rawAddress = rawAddress.replace(/\[\d+\]/g, ' ').replace(/받\s*주소/g, ' ').replace(/\b받\b/g, ' ').replace(/\b주소\b/g, ' ').replace(/\|/g, ' ').replace(/[:]/g, ' ').trim();
 
     const fullAddress = rawAddress.replace(/\s{2,}/g, ' ').trim();
-    let cleanAddr = fullAddress;
-    const parenIdx = cleanAddr.indexOf('(');
-    if (parenIdx !== -1) cleanAddr = cleanAddr.slice(0, parenIdx);
-    const address = cleanAddr.replace(/\s{2,}/g, ' ').trim();
+    const address = dispatchNavigationAddress(fullAddress);
 
     // 8. 구매자 사업자번호 추출
     let bizNo = '';
@@ -377,11 +375,11 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
 // ==========================================
 async function getCoordsFromAddress(address) {
     if (!address) return null;
-    const cleanKey = address.trim();
+    const cleanKey = dispatchNavigationAddress(address);
     if (!cleanKey) return null;
 
     const cache = getGeoCache();
-    if (cache[cleanKey]) {
+    if (cache[cleanKey]?.dispatchVersion === 2 && validDispatchCoordinates(cache[cleanKey]) && dispatchAddressMatches(cleanKey, cache[cleanKey].fullAddress)) {
         return cache[cleanKey];
     }
 
@@ -399,10 +397,13 @@ async function getCoordsFromAddress(address) {
                 try {
                     geocoder.addressSearch(queryStr, (res, status) => {
                         if (status === window.kakao.maps.services.Status.OK && res && res[0]) {
-                            const fullAddr = (res[0].road_address && res[0].road_address.address_name) 
-                                ? res[0].road_address.address_name 
-                                : res[0].address_name;
-                            resolve({ success: true, data: { lat: parseFloat(res[0].y), lng: parseFloat(res[0].x), fullAddress: fullAddr } });
+                            const matches = res.filter(doc => validDispatchCoordinates({lat: doc.y, lng: doc.x}) &&
+                                [doc.road_address?.address_name, doc.address?.address_name, doc.address_name].some(value => dispatchAddressMatches(cleanKey, value)));
+                            const positions = new Set(matches.map(doc => doc.x + ',' + doc.y));
+                            if (positions.size !== 1) { resolve({success: false, retryable: false}); return; }
+                            const doc = matches[0];
+                            const matchedAddress = [doc.road_address?.address_name, doc.address?.address_name, doc.address_name].find(value => dispatchAddressMatches(cleanKey, value));
+                            resolve({ success: true, data: { lat: Number(doc.y), lng: Number(doc.x), fullAddress: matchedAddress, dispatchVersion: 2 } });
                         } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
                             resolve({ success: false, retryable: false });
                         } else {
@@ -425,13 +426,6 @@ async function getCoordsFromAddress(address) {
     };
 
     let coords = await queryKakaoWithRetry(cleanKey);
-
-    if (!coords) {
-        const basicMatch = cleanKey.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
-        if (basicMatch && basicMatch[0] !== cleanKey) {
-            coords = await queryKakaoWithRetry(basicMatch[0]);
-        }
-    }
 
     if (coords) {
         cache[cleanKey] = coords;
@@ -458,22 +452,19 @@ export async function batchGeocodePdfList(items) {
                     </div>`;
             }
 
-            if (item.address) {
-                if (!item.fullAddress) item.fullAddress = item.address;
-
-                const isCached = !!cache[item.address.trim()];
-                const coords = await getCoordsFromAddress(item.address);
-                if (coords) {
-                    item.lat = coords.lat;
-                    item.lng = coords.lng;
-                    if (coords.fullAddress) {
-                        item.address = coords.fullAddress;
-                    }
-                }
-                if (!isCached) {
-                    await new Promise(r => setTimeout(r, 40));
-                }
+            if (!item.fullAddress) item.fullAddress = item.address || '';
+            item.address = dispatchNavigationAddress(item.fullAddress);
+            const cleanKey = item.address;
+            const isCached = cache[cleanKey]?.dispatchVersion === 2;
+            // Clear stale coordinates before lookup; a failed lookup must never retain a previous location.
+            item.lat = null; item.lng = null;
+            item.geocodeError = '주소·좌표 확인 필요';
+            const coords = await getCoordsFromAddress(cleanKey);
+            if (coords) {
+                item.lat = coords.lat; item.lng = coords.lng;
+                delete item.geocodeError;
             }
+            if (!isCached) await new Promise(r => setTimeout(r, 40));
         }
     } finally {
         // 🌟 지오코딩 작업 중 오류가 발생하더라도 드롭존 UI 텍스트 잔상을 반드시 원래대로 복구

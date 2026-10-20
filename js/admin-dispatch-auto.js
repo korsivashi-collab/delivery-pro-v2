@@ -1,3 +1,4 @@
+import { dispatchNavigationAddress, dispatchOrderReady } from "./address.js";
 import { ensureRouteOwner } from './route-owner.js';
 // js/admin-dispatch-auto.js
 
@@ -419,7 +420,7 @@ export function renderDispatchDriverDetail() {
             <td class="text-center font-bold text-gray-600 w-12 font-mono">${courseNum}</td>
             <td class="font-bold text-gray-800 whitespace-normal break-keep" title="${tooltipAddress}">
                 ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
-                ${item.address || '-'}
+                ${item.fullAddress || item.address || '-'}
                 ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
             </td>
             <td class="text-center w-36" onclick="event.stopPropagation()">
@@ -465,7 +466,7 @@ let autoDispatchRoutePlans = new Map();
 function dispatchOrderSignature(orders) {
     return JSON.stringify(orders.map(o => [o.id, o.lat, o.lng, o.displayNumber]));
 }
-window.isDispatchRouteBusy = () => resettingAssignments || sendingRoutes || calculatingAssignments;
+window.isDispatchRouteBusy = () => window.dispatchAddressBusy || resettingAssignments || sendingRoutes || calculatingAssignments;
 export async function revertAutoDispatch(options = {}) {
     const clearOrders = options.clearOrders === true;
     const selectedDate = document.getElementById('dispatch-assign-date')?.value || getLocalDateString();
@@ -586,7 +587,7 @@ export async function revertAutoDispatch(options = {}) {
 // 6. 자동할당 알고리즘 실행
 // ==========================================
 export async function runAutoDispatchAlgorithm() {
-    if (resettingAssignments || sendingRoutes || calculatingAssignments) { alert('현재 동선 작업이 끝난 후 다시 시도해 주세요.'); return; }
+    if (window.dispatchAddressBusy || resettingAssignments || sendingRoutes || calculatingAssignments) { alert('현재 동선 작업이 끝난 후 다시 시도해 주세요.'); return; }
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("할당할 엑셀/주문 데이터가 없습니다."); 
         return;
@@ -612,6 +613,12 @@ export async function runAutoDispatchAlgorithm() {
 
     if (targetOrders.length === 0) {
         alert("선택된 배송지 데이터가 유효하지 않습니다.");
+        return;
+    }
+
+    const invalidOrders = targetOrders.filter(order => !dispatchOrderReady(order));
+    if (invalidOrders.length) {
+        alert('선택한 주문 중 주소·좌표 확인이 필요한 주문이 ' + invalidOrders.length + '건 있습니다. [주소·좌표 다시 확인] 후 자동할당해 주세요.');
         return;
     }
 
@@ -727,7 +734,7 @@ function calculateDistanceDispatch(options) {
 // 7. 토글 선택 기반 동선 전송 엔진 (🌟 잔여 옛날 키 자동 소거 연동)
 // ==========================================
 export async function sendRoutesToDrivers() {
-    if (resettingAssignments || sendingRoutes || calculatingAssignments) { alert('현재 동선 작업이 끝난 후 다시 시도해 주세요.'); return; }
+    if (window.dispatchAddressBusy || resettingAssignments || sendingRoutes || calculatingAssignments) { alert('현재 동선 작업이 끝난 후 다시 시도해 주세요.'); return; }
     if (!state.parsedExcelList || state.parsedExcelList.length === 0) {
         alert("전송할 배송 데이터가 없습니다.");
         return;
@@ -769,6 +776,11 @@ export async function sendRoutesToDrivers() {
         return;
     }
 
+    if (Object.values(driverMap).some(group => group.orders.some(order => !dispatchOrderReady(order)))) {
+        alert('주소·좌표가 확인되지 않은 주문이 있습니다. [주소·좌표 다시 확인] 후 자동할당을 다시 실행해 주세요.');
+        return;
+    }
+
     const totalOrdersToSend = sendTargetDevIds.reduce((sum, id) => sum + driverMap[id].orders.length, 0);
 
     if (!confirm(`체크된 기사 총 ${sendTargetDevIds.length}명에게 ${totalOrdersToSend}건의 최적화된 배송 동선을 전송하시겠습니까?\n\n* 전송 즉시 기사 스마트폰 앱에 1번부터 차례대로 코스가 등록됩니다.`)) {
@@ -793,7 +805,7 @@ export async function sendRoutesToDrivers() {
             const destinations = orders.map((ord, idx) => ({
                 id: ord.id ?? crypto.randomUUID(),
                 displayNumber: ord.displayNumber || (idx + 1),
-                address: ord.address || '',
+                address: dispatchNavigationAddress(ord.fullAddress || ord.address || ''),
                 fullAddress: ord.fullAddress || ord.address || '',
                 storeName: ord.storeName || ord.senderName || '',
                 phone: ord.phone || '', 

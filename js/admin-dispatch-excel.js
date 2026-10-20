@@ -2,42 +2,13 @@
 
 import { db } from "./admin-api.js";
 import { state, todayStr } from "./admin-state.js";
-import { processSinglePdfFile } from "./admin-dispatch-pdf.js";
+import { dispatchNavigationAddress, dispatchOrderReady } from "./address.js";
+import { processSinglePdfFile, batchGeocodePdfList } from "./admin-dispatch-pdf.js";
 import { doc, setDoc, getDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
 // 0. 로컬 스토리지 기반 주소 캐시(Cache) 관리 엔진
 // ==========================================
-const GEO_CACHE_KEY = 'deliveryPro_geoCache';
-let memoryGeoCache = null;
-
-function getGeoCache() {
-    if (memoryGeoCache !== null) return memoryGeoCache;
-    try {
-        const stored = localStorage.getItem(GEO_CACHE_KEY);
-        memoryGeoCache = stored ? JSON.parse(stored) : {};
-    } catch (e) {
-        memoryGeoCache = {};
-    }
-    return memoryGeoCache;
-}
-
-function saveGeoCache(cache) {
-    try {
-        const keys = Object.keys(cache);
-        if (keys.length > 3000) {
-            const trimmedCache = {};
-            keys.slice(keys.length - 2000).forEach(k => { trimmedCache[k] = cache[k]; });
-            memoryGeoCache = trimmedCache;
-            localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(trimmedCache));
-            return;
-        }
-        localStorage.setItem(GEO_CACHE_KEY, JSON.stringify(cache));
-    } catch (e) {
-        console.warn("주소 캐시 저장 실패:", e);
-    }
-}
-
 // ==========================================
 // 0-1. 전화번호 복원 및 표준화 헬퍼 (010-XXXX-XXXX)
 // ==========================================
@@ -74,39 +45,7 @@ export function formatPhoneNumber(val) {
 // 0-2. 주소 정밀 절삭 엔진
 // ==========================================
 export function cleanAddress(rawAddr) {
-    if (!rawAddr || typeof rawAddr !== 'string') return '';
-    let str = String(rawAddr).trim().replace(/[\r\n]+/g, ' ');
-
-    const regionRegex = /(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*/i;
-    const regionMatch = str.match(regionRegex);
-    if (!regionMatch) return str;
-
-    let addr = regionMatch[0];
-
-    const parenIdx = addr.indexOf('(');
-    if (parenIdx !== -1) {
-        addr = addr.slice(0, parenIdx);
-    }
-
-    addr = addr.split(/(?:연락처|전화|배송지명|간판명|매장명|상호|구매자|No\.|결제)/)[0];
-
-    addr = addr.replace(/\[\d+\]/g, ' ')
-               .replace(/받\s*주소/g, ' ')
-               .replace(/\b받\b/g, ' ')
-               .replace(/\b주소\b/g, ' ')
-               .replace(/\|/g, ' ')
-               .replace(/[:]/g, ' ')
-               .trim();
-
-    const roadMatch = addr.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리|가)\s*[\d\-]+/);
-    if (roadMatch) {
-        const rest = addr.slice(roadMatch[0].length).trim();
-        if (rest && (rest.includes('층') || rest.includes('호') || rest.includes('타워') || rest.includes('빌딩') || rest.includes('센터') || rest.includes('상가') || rest.length > 10)) {
-            addr = roadMatch[0].trim();
-        }
-    }
-
-    return addr.replace(/\s{2,}/g, ' ').trim();
+    return dispatchNavigationAddress(rawAddr);
 }
 
 // ==========================================
@@ -261,7 +200,7 @@ export function renderExcelTable() {
             </div>
         `;
 
-        const coordIcon = (item.lat && item.lng) 
+        const coordIcon = dispatchOrderReady(item) 
             ? `<i class="fa-solid fa-map-pin text-emerald-500 shrink-0 mt-0.5" title="좌표 확인 완료"></i>` 
             : `<i class="fa-solid fa-triangle-exclamation text-amber-500 shrink-0 mt-0.5" title="좌표 미확인 주소"></i>`;
 
@@ -288,7 +227,7 @@ export function renderExcelTable() {
                             ${item.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200">${item.storeName}</span>` : ''}
                             ${itemCountBadge}
                         </div>
-                        <span class="text-xs text-gray-900 block font-bold">${item.address || '-'}</span>
+                        <span class="text-xs text-gray-900 block font-bold">${item.fullAddress || item.address || '-'}${!dispatchOrderReady(item) ? '<span class="block text-red-600">주소·좌표 확인 필요</span>' : ''}</span>
                         ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
                     </div>
                 </div>
@@ -651,10 +590,12 @@ export function initExcelDropZone() {
 }
 
 export async function handleExcelUpload(e) {
-    if (window.isDispatchRouteBusy?.()) { alert("동선 전송이나 초기화가 끝난 후 업로드해 주세요."); return; }
+    if (window.dispatchAddressBusy || window.isDispatchRouteBusy?.()) { alert("동선 전송이나 초기화가 끝난 후 업로드해 주세요."); return; }
     const files = e.target.files; 
     if (!files || files.length === 0) return;
 
+    window.dispatchAddressBusy = true;
+    try {
     if (!state.parsedExcelList) state.parsedExcelList = [];
     const newlyAddedList = [];
 
@@ -692,7 +633,8 @@ export async function handleExcelUpload(e) {
     } else { 
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); 
     }
-    e.target.value = ''; 
+    e.target.value = '';
+    } finally { window.dispatchAddressBusy = false; }
 }
 
 export function processSingleExcelFile(file) {
@@ -726,111 +668,36 @@ export function processSingleExcelFile(file) {
 // ==========================================
 // 5. 주소 -> 정밀 좌표 지오코딩 엔진 (캐시 및 지수 백오프)
 // ==========================================
-async function getCoordsFromAddress(address) {
-    const targetAddr = cleanAddress(address);
-    if (!targetAddr) return null;
-    const cleanKey = targetAddr.trim();
-    if (!cleanKey) return null;
-
-    const cache = getGeoCache();
-    if (cache[cleanKey]) {
-        return cache[cleanKey];
-    }
-
-    if (!window.kakao || !window.kakao.maps || !window.kakao.maps.services) { 
-        return null; 
-    }
-    const geocoder = new window.kakao.maps.services.Geocoder();
-
-    const queryKakaoWithRetry = async (queryStr) => {
-        const maxRetries = 3;
-        const delays = [200, 500, 1000];
-
-        for (let attempt = 0; attempt <= maxRetries; attempt++) {
-            const result = await new Promise((resolve) => {
-                try {
-                    geocoder.addressSearch(queryStr, (res, status) => {
-                        if (status === window.kakao.maps.services.Status.OK && res && res[0]) {
-                            const fullAddr = (res[0].road_address && res[0].road_address.address_name) 
-                                ? res[0].road_address.address_name 
-                                : res[0].address_name;
-                            resolve({ success: true, data: { lat: parseFloat(res[0].y), lng: parseFloat(res[0].x), fullAddress: fullAddr } });
-                        } else if (status === window.kakao.maps.services.Status.ZERO_RESULT) {
-                            resolve({ success: false, retryable: false });
-                        } else {
-                            resolve({ success: false, retryable: true });
-                        }
-                    });
-                } catch (err) {
-                    resolve({ success: false, retryable: true });
-                }
-            });
-
-            if (result.success) return result.data;
-            if (!result.retryable || attempt === maxRetries) break;
-
-            const jitter = Math.floor(Math.random() * 50);
-            const delay = (delays[attempt] || 1000) + jitter;
-            await new Promise(r => setTimeout(r, delay));
-        }
-        return null;
-    };
-
-    let coords = await queryKakaoWithRetry(cleanKey);
-
-    if (!coords) {
-        const basicMatch = cleanKey.match(/^(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[\s\S]*?(?:로|길|동|읍|면|리)\s*[\d\-]+/);
-        if (basicMatch && basicMatch[0] !== cleanKey) {
-            coords = await queryKakaoWithRetry(basicMatch[0]);
-        }
-    }
-
-    if (coords) {
-        cache[cleanKey] = coords;
-        saveGeoCache(cache);
-        return coords;
-    }
-
-    return null;
-}
-
 async function batchGeocodeExcelList(items) {
-    const dropZone = document.getElementById('excel-drop-zone');
-    const originalDropHtml = dropZone ? dropZone.innerHTML : '';
-    const cache = getGeoCache();
-
-    for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (dropZone) {
-            dropZone.innerHTML = `
-                <div class="flex items-center gap-3 text-indigo-600 font-black text-sm">
-                    <i class="fa-solid fa-circle-notch fa-spin text-xl"></i>
-                    <span>배송지 좌표 분석 중... (${i + 1} / ${items.length})</span>
-                </div>`;
-        }
-        if (item.address && (!item.lat || !item.lng)) {
-            if (!item.fullAddress) item.fullAddress = item.address;
-            item.address = cleanAddress(item.address);
-
-            const cleanKey = item.address.trim();
-            const isCached = !!cache[cleanKey];
-
-            const coords = await getCoordsFromAddress(item.address);
-            if (coords) { 
-                item.lat = coords.lat; 
-                item.lng = coords.lng; 
-                if (coords.fullAddress) {
-                    item.address = coords.fullAddress;
-                }
-            }
-
-            if (!isCached) {
-                await new Promise(r => setTimeout(r, 40));
-            }
-        }
-    }
-    if (dropZone) dropZone.innerHTML = originalDropHtml;
+    return batchGeocodePdfList(items);
 }
+
+export async function recheckDispatchAddresses() {
+    if (window.dispatchAddressBusy || window.isDispatchRouteBusy?.()) { alert('현재 작업이 끝난 후 다시 시도해 주세요.'); return; }
+    const items = state.parsedExcelList || [];
+    if (!items.length) { alert('확인할 주문이 없습니다.'); return; }
+    const before = items.map(o => [o.lat, o.lng]);
+    window.dispatchAddressBusy = true;
+    const dateInput = document.getElementById('dispatch-assign-date');
+    const dateDisabled = dateInput?.disabled;
+    if (dateInput) dateInput.disabled = true;
+    const button = document.getElementById('btn-recheck-dispatch-addresses');
+    if (button) button.disabled = true;
+    try {
+        await batchGeocodePdfList(items);
+        if (items.some((o,i) => o.lat !== before[i][0] || o.lng !== before[i][1])) {
+            items.forEach(o => { delete o.assignedDriver; delete o.displayNumber; });
+        }
+        renderExcelTable();
+        window.renderDispatchDriverList?.();
+        window.renderDispatchDriverDetail?.();
+        await autoSaveExcelToFirebase();
+        const failed = items.filter(item => !dispatchOrderReady(item)).length;
+        alert(failed ? '주소·좌표 확인이 필요한 주문이 ' + failed + '건 있습니다. 목록의 원문 주소를 확인해 주세요.' : '전체 ' + items.length + '건의 주소·좌표를 확인했습니다. 자동할당을 다시 실행해 주세요.');
+    } catch (error) { alert('주소 확인 중 오류: ' + error.message); }
+    finally { window.dispatchAddressBusy = false; if (button) button.disabled = false; if (dateInput) dateInput.disabled = dateDisabled; }
+}
+window.recheckDispatchAddresses = recheckDispatchAddresses;
 
 // ==========================================
 // 6. 테이블 데이터 삭제/초기화 기능 (다중 뷰 실시간 동기화 및 메모리 잔상 방지)
@@ -842,6 +709,7 @@ export function toggleRowCheckbox(e, idx) {
 }
 
 export async function deleteExcelRow(idx) {
+    if (window.dispatchAddressBusy) { alert("주소 확인이 끝난 후 삭제해 주세요."); return; }
     if(!confirm("해당 주문건을 리스트에서 삭제하시겠습니까?")) return;
     state.parsedExcelList.splice(idx, 1); 
     renderExcelTable(); 
@@ -851,6 +719,7 @@ export async function deleteExcelRow(idx) {
 }
 
 export async function deleteSelectedExcelRows() {
+    if (window.dispatchAddressBusy) { alert("주소 확인이 끝난 후 삭제해 주세요."); return; }
     const checkboxes = document.querySelectorAll('#invoice-excel-tbody .row-checkbox:checked');
     if(checkboxes.length === 0) { 
         alert("삭제할 주문건을 좌측 체크박스에서 1개 이상 선택해주세요."); 

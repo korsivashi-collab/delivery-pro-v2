@@ -333,8 +333,8 @@ export function renderDriverDetailView(devId) {
                     : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
                 
                 let addressHtml = isDone 
-                    ? `<span class="font-bold text-gray-400 truncate line-through decoration-emerald-500 decoration-2">${storeBadge}${d.address}</span>` 
-                    : `<span class="font-bold text-gray-900 truncate">${storeBadge}${d.address}</span>`;
+                    ? `<span class="font-bold text-gray-400 whitespace-normal break-words line-through decoration-emerald-500 decoration-2">${storeBadge}${d.fullAddress || d.address}</span>` 
+                    : `<span class="font-bold text-gray-900 whitespace-normal break-words">${storeBadge}${d.fullAddress || d.address}</span>`;
                 
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
                 let statusBadge = isDone 
@@ -365,7 +365,7 @@ export function renderDriverDetailView(devId) {
                 <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                         <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>
-                        <span class="font-bold text-gray-900 truncate">${storeBadge}${d.address}</span>
+                        <span class="font-bold text-gray-900 truncate">${storeBadge}${d.fullAddress || d.address}</span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
                         <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shrink-0">배송 대기</span>
@@ -387,7 +387,7 @@ export function renderDriverDetailView(devId) {
                 let photoBtn = c.photoUrl ? `<a href="${c.photoUrl}" target="_blank" onclick="event.stopPropagation()" class="bg-blue-600 hover:bg-blue-700 text-white text-[9px] font-black px-2 py-0.5 rounded shadow-sm shrink-0 flex items-center gap-1"><i class="fa-solid fa-camera"></i> 사진</a>` : '';
                 html += `
                 <div onclick="window.focusMapPosition(${c.lat}, ${c.lng})" class="p-2.5 bg-white border border-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-200 hover:border-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-400 rounded-xl flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
-                    <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 truncate">${c.address}</span></div>
+                    <div class="flex items-center gap-2 min-w-0 flex-1"><span class="w-5 h-5 bg-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0">${idx + 1}</span><span class="font-bold text-gray-800 whitespace-normal break-words">${c.fullAddress || c.address}</span></div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">${photoBtn}<span class="bg-${(isCancelledTab || isOtherTab) ? 'gray' : 'emerald'}-600 text-white text-[10px] font-black px-2 py-0.5 rounded shadow-sm whitespace-nowrap">${isCancelledTab ? '취소' : isOtherTab ? '기타' : '✓'} ${timeOnly} [${c.tag || '완료'}]</span></div>
                 </div>`;
             });

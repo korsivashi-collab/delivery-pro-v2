@@ -86,7 +86,7 @@ export function downloadDispatchExcel(targetCompletions, selectedDate) {
             idx + 1,
             c.phone || '연락처 없음',
             dateTimeStr,
-            c.address || '',
+            c.fullAddress || c.address || '',
             c.customerPhone || '미등록',
             c.tag || '전달완료',
             c.photoUrl || '사진 없음'

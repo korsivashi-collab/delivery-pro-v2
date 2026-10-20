@@ -236,7 +236,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                     if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
                     addressGroups[addrKey].push({
                         type: 'PENDING', 
-                        address: d.address || d.fullAddress, 
+                        address: d.fullAddress || d.address, 
                         storeName: d.storeName || '',
                         dateStr: todayStr, 
                         timeStr: '이동/대기 중',
@@ -286,7 +286,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                 if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
                 addressGroups[addrKey].push({
                     type: 'DONE', 
-                    address: c.address, 
+                    address: c.fullAddress || c.address, 
                     dateStr: dStr, 
                     timeStr: tStr, 
                     tag: c.tag || '전달완료',
@@ -327,7 +327,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                     if (!addressGroups[addrKey]) addressGroups[addrKey] = [];
                     addressGroups[addrKey].push({
                         type: 'EXCEL',
-                        address: o.address || o.fullAddress,
+                        address: o.fullAddress || o.address,
                         storeName: o.storeName || '',
                         dateStr: todayStr,
                         timeStr: driverPhone !== '미배정' ? `담당: ${driverPhone}` : '미배정',

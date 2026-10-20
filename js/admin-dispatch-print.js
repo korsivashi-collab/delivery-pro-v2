@@ -372,7 +372,7 @@ export function renderInvoiceOrderList() {
 
         const senderDisplay = item.senderName || '정보 없음';
         const storeDisplay = item.storeName || '-';
-        const addressDisplay = item.address || item.fullAddress || '-';
+        const addressDisplay = item.fullAddress || item.address || '-';
 
         const driverBadge = item.assignedDriver
             ? `<span class="bg-blue-100 text-blue-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs truncate max-w-[70px] inline-block" title="${item.assignedDriver}">${item.assignedDriver}</span>`
