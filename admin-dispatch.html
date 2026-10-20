@@ -12,7 +12,7 @@
     
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261018-dispatch-layout3">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261020-dispatch-single">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -258,17 +258,9 @@
                     </div>
                 </div>
                 <div class="auto-dispatch-execution">
-                <div class="dispatch-assignment-run">
-                <div class="dispatch-assignment-control">
-                    <div class="dispatch-assignment-mode" role="group" aria-label="자동할당 배정 기준">
-                        <button type="button" id="dispatch-mode-count" aria-pressed="true" onclick="window.setDispatchAssignmentMode('count')">배송 건수</button>
-                        <button type="button" id="dispatch-mode-distance" aria-pressed="false" onclick="window.setDispatchAssignmentMode('distance')" title="가중치별 목표 건수를 우선하며 소폭 조정으로 전체 직선거리를 줄이는 테스트 방식입니다.">TEST</button>
-                    </div>
-                </div>
                 <button type="button" id="btn-run-auto-dispatch" onclick="window.runAutoDispatchAlgorithm()" class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap">
                     <i class="fa-solid fa-robot text-sm"></i> 자동할당 실행
                 </button>
-                </div>
                 <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="좌측 목록에서 체크(토글)된 기사들에게 배송 동선을 전송합니다">
                     <i class="fa-solid fa-paper-plane text-sm"></i> 동선 전송
                 </button>
@@ -648,7 +640,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261020-dispatch-count-first","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-count-first"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261020-dispatch-single","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261017-dispatch-session-guard"></script>
 </body>
 </html>
