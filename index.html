@@ -92,12 +92,16 @@
         #destination-list [id^="memo-preview-"] > span, #destination-list [id^="personal-memo-preview-"] > span,
         #destination-list [id^="memo-preview-"] > i, #destination-list [id^="personal-memo-preview-"] > i { color: #78350F; }
         #destination-list > li[data-id] > div:last-child { margin-top: 0; padding-top: 6px; border-color: #E2E8F0; }
-        #destination-list a[href^="tel:"], #destination-list a[href^="sms:"],
-        #destination-list button[onclick^="openMemoModal("] {
-            background: #FFFFFF; color: #172033; border-color: #E2E8F0;
+        #destination-list a[href^="tel:"] {
+            background: #ECFDF5; color: #065F46; border-color: #A7F3D0;
         }
-        #destination-list a[href^="tel:"] i, #destination-list a[href^="sms:"] i,
-        #destination-list button[onclick^="openMemoModal("] i { color: #172033; }
+        #destination-list a[href^="tel:"] i { color: #16A34A; font-size: 13px; }
+        #destination-list a[href^="tel:"]:active { background: #D1FAE5; }
+        #destination-list a[href^="sms:"] {
+            background: #F0F9FF; color: #075985; border-color: #BAE6FD;
+        }
+        #destination-list a[href^="sms:"] i { color: #0284C7; }
+        #destination-list a[href^="sms:"]:active { background: #E0F2FE; }
         #destination-list button[onclick^="completeDestination("] { background: #2563EB; color: #FFFFFF; }
         #destination-list button[onclick^="cancelDestination("] {
             background: #FFFFFF; color: #DC2626; border-color: #E2E8F0;
