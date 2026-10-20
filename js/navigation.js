@@ -7,6 +7,52 @@
 import { state, hasValidDeliveryCoordinates } from './state.js';
 import { showLoading, hideLoading, withRequestDeadline } from './utils.js';
 
+
+// 사용자가 선택한 내비는 기기에 저장하고 모든 배송지에 공통 적용한다.
+const NAVIGATION_PREFERENCE_KEY = 'deliveryPro_preferredNavigation';
+let preferredNavigation = 'tmap';
+try {
+    if (localStorage.getItem(NAVIGATION_PREFERENCE_KEY) === 'naver') preferredNavigation = 'naver';
+} catch (_) { /* 저장소를 사용할 수 없어도 현재 세션에서는 선택 가능 */ }
+
+export function getPreferredNavigation() { return preferredNavigation; }
+
+export function navigationButtonContent(provider = preferredNavigation) {
+    const isNaver = provider === 'naver';
+    return '<span class="navigation-brand" aria-hidden="true">' + (isNaver ? 'N' : 'T') + '</span>' +
+        '<span>' + (isNaver ? '네이버지도로 안내' : '티맵으로 안내') + '</span>' +
+        '<svg class="navigation-arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+}
+
+export function openNavigationPicker() {
+    const dialog = document.getElementById('navigation-picker');
+    if (!dialog) return;
+    dialog.querySelectorAll('[data-navigation-option]').forEach(button => {
+        button.setAttribute('aria-pressed', String(button.dataset.navigationOption === preferredNavigation));
+    });
+    if (!dialog.open) dialog.showModal();
+}
+
+export function selectNavigation(provider) {
+    if (provider !== 'tmap' && provider !== 'naver') return;
+    preferredNavigation = provider;
+    try { localStorage.setItem(NAVIGATION_PREFERENCE_KEY, provider); } catch (_) { /* 세션 선택 유지 */ }
+    document.querySelectorAll('[data-navigation-launch]').forEach(button => {
+        button.dataset.navigationProvider = provider;
+        button.innerHTML = navigationButtonContent(provider);
+    });
+    document.getElementById('navigation-picker')?.close();
+}
+
+export function openPreferredNavigation(lat, lng, name) {
+    if (preferredNavigation === 'naver') openNaverMap(lat, lng, name);
+    else openTmap(lat, lng, name);
+}
+
+window.openNavigationPicker = openNavigationPicker;
+window.selectNavigation = selectNavigation;
+window.openPreferredNavigation = openPreferredNavigation;
+
 let startMapInstance = null;
 let startMapMarkers = [];
 let isMapSdkLoaded = false;

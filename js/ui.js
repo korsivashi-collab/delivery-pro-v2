@@ -5,6 +5,7 @@
 // =================================================================
 
 import { state, destinationIdArgument, destinationIdAttribute, hasValidDeliveryCoordinates } from './state.js';
+import { getPreferredNavigation, navigationButtonContent } from './navigation.js';
 let memoRenderRevision = 0;
 
 // 전화번호 정제 보조 함수
@@ -114,7 +115,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                             </li>
                             <li class="flex items-start gap-3">
                                 <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600">4</span>
-                                <div><h3 class="text-sm font-bold text-slate-900">배송 진행</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">[길찾기]로 이동하고, 배송을 마치면 [완료]를 누르세요.</p></div>
+                                <div><h3 class="text-sm font-bold text-slate-900">배송 진행</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">[내비 선택]에서 앱을 고른 뒤 안내 버튼을 누르세요. 배송을 마치면 [완료]를 누르세요.</p></div>
                             </li>
                         </ol>
                         <p class="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">경로 최적화는 배송지 2곳부터 가능합니다.</p>
@@ -202,15 +203,12 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                         <!-- 완료: 즉각적인 반응을 돕는 솔리드 블루 -->
                         <button onclick="completeDestination(${idArgument})" class="flex-1 min-w-0 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs flex items-center justify-center gap-1 active:bg-blue-800 transition flex-nowrap"><i class="fa-solid fa-check text-[13px] shrink-0"></i><span class="text-[12px] font-black whitespace-nowrap tracking-tight">완료</span></button>
                     </div>
-                    <div class="flex gap-1.5 h-[36px]">
-                        <div class="flex-1 min-w-0 bg-slate-50 border border-slate-200 p-1 rounded-xl flex items-center gap-1.5 shadow-2xs">
-                            <span class="text-[11px] font-bold text-slate-500 px-1.5 shrink-0 whitespace-nowrap leading-none tracking-tight">길찾기</span>
-                            <div class="w-px h-3.5 bg-slate-200 shrink-0"></div>
-                            <div class="flex-1 grid grid-cols-2 gap-1 h-full">
-                                <button ${navigationDisabled} onclick="openTmap(${navLat}, ${navLng}, ${navTargetName})" class="bg-slate-900 text-white text-[11px] font-bold rounded-lg active:bg-black flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-map-location-dot text-[10px] shrink-0"></i> 티맵</button>
-                                <!-- 🌟 카카오내비 완전 대체: 네이버 내비게이션 버튼 연동 -->
-                                <button ${navigationDisabled} onclick="openNaverMap(${navLat}, ${navLng}, ${navTargetName})" class="bg-[#03C75A] hover:bg-[#02B351] text-white text-[11px] font-bold rounded-lg border border-[#02B351] active:bg-[#029b46] flex items-center justify-center gap-1 shadow-2xs h-full whitespace-nowrap tracking-tight"><i class="fa-solid fa-location-arrow text-[10px] shrink-0"></i> 네이버</button>
-                            </div>
+                    <div class="flex gap-1.5 h-[44px]">
+                        <div class="navigation-controls">
+                            <button type="button" onclick="openNavigationPicker()" class="navigation-select" aria-haspopup="dialog" aria-controls="navigation-picker">
+                                <span>내비 선택</span><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                            </button>
+                            <button type="button" ${navigationDisabled} data-navigation-launch data-navigation-provider="${getPreferredNavigation()}" onclick="openPreferredNavigation(${navLat}, ${navLng}, ${navTargetName})" class="navigation-launch">${navigationButtonContent()}</button>
                         </div>
                         <!-- 취소/삭제: 경고성 소프트 로즈 -->
                         <button onclick="cancelDestination(${idArgument})" class="w-[42px] shrink-0 bg-rose-50 text-rose-600 border border-rose-200 rounded-xl shadow-2xs flex items-center justify-center active:bg-rose-100 transition" title="배송 취소"><i class="fa-solid fa-trash-can text-[13px] shrink-0"></i></button>
