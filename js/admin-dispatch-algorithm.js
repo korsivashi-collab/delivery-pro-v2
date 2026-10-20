@@ -282,26 +282,25 @@ function executeCountBaselineDispatch({ targetOrders, activeDrivers, weights = {
     };
 }
 
-// 배송 건수: 가중치 목표 건수 ±35%(최소 5건) 내에서 전체 직선거리 감소만 허용합니다.
-// 최장 경로는 기존 이하, 기사별 거리 증가는 max(5km, 기존 거리의 20%) 이내로 제한합니다.
+// 배송 건수: 원래 가중치별 목표 건수를 정확히 유지하는 알고리즘입니다.
 export function executeAutoDispatch(options) {
-    return refineDispatch(options, true);
+    return executeCountBaselineDispatch(options);
 }
 
-// 이동 거리: 기존 최장 부담 + 0.05 × 표준편차 기준과 총거리 증가 10% 한도를 유지합니다.
+// TEST: 배송 건수를 우선하고 제한된 조정 범위에서 전체 직선거리를 줄입니다.
 export function executeDistanceBalancedDispatch(options) {
-    return refineDispatch(options, false);
+    return refineDispatch(options);
 }
 
-// 배송 건수 모드는 전체 거리 절감, 이동 거리 모드는 기존 거리 부담 균형 기준을 사용합니다.
-function refineDispatch(options, minimizeTotal) {
+// TEST도 원래 건수 배정에서 시작하며 목표 건수와 가중치 순서를 우선합니다.
+function refineDispatch(options) {
     const validPoint = point => point && point.lat != null && point.lng != null &&
         point.lat !== '' && point.lng !== '' && Number.isFinite(Number(point.lat)) &&
         Number.isFinite(Number(point.lng)) && Math.abs(Number(point.lat)) <= 90 &&
         Math.abs(Number(point.lng)) <= 180 && (Number(point.lat) !== 0 || Number(point.lng) !== 0);
     const orders = options.targetOrders || [];
     if (!validPoint(options.companyBase) || orders.some(order => !validPoint(order))) {
-        return { success: false, message: '이동 거리 기준으로 배정하려면 회사 거점과 선택한 모든 배송지의 좌표가 필요합니다. 주소와 좌표를 확인해 주세요.' };
+        return { success: false, message: 'TEST로 배정하려면 회사 거점과 선택한 모든 배송지의 좌표가 필요합니다. 주소와 좌표를 확인해 주세요.' };
     }
     const result = executeCountBaselineDispatch(options);
     if (!result.success) return result;
@@ -330,26 +329,17 @@ function refineDispatch(options, minimizeTotal) {
         return cache.get(key).slice();
     };
     const total = values => values.reduce((sum, value) => sum + value, 0);
-    // 기존 가중치의 상대 처리량을 거리 부담에 반영합니다. 0건 목표 기사는 제외합니다.
-    const weighted = stats.some(ds => Number(options.weights?.[ds.devId] || 0) !== 0);
-    const capacity = stats.map(ds => ds.targetCap === 0 ? 0 : weighted ? ds.targetCap / (n / k) : 1);
-    const objective = values => {
-        if (minimizeTotal) return total(values);
-        const loads = values.flatMap((value, d) => capacity[d] > 0 ? [value / capacity[d]] : []);
-        const mean = total(loads) / loads.length;
-        const deviation = Math.sqrt(loads.reduce((sum, value) => sum + (value - mean) ** 2, 0) / loads.length);
-        return Math.max(...loads) + 0.05 * deviation;
-    };
+    const objective = values => total(values);
     let routes = stats.map(ds => ds.assignedOrders.map(order => index.get(order)));
     let costs = routes.map(length);
     const baselineTotal = total(costs), baselineMax = Math.max(...costs);
     const initialCosts = costs.slice();
-    const ceiling = baselineTotal * (minimizeTotal ? 1 : 1.1);
+    const ceiling = baselineTotal;
     const baselineCounts = routes.map(route => route.length);
+    const countTolerance = 1;
     const limits = stats.map(ds => {
         if (ds.targetCap === 0) return [0, 0];
-        if (!weighted && !minimizeTotal) return [Math.max(1, Math.floor(n / k) - 5), Math.ceil(n / k) + 5];
-        const tolerance = Math.max(5, Math.ceil(ds.targetCap * 0.35));
+        const tolerance = countTolerance;
         return [Math.max(1, ds.targetCap - tolerance), ds.targetCap + tolerance];
     });
     const baselineObjective = objective(costs);
@@ -369,7 +359,7 @@ function refineDispatch(options, minimizeTotal) {
     };
 
     let iterations = 0;
-    for (; iterations < (minimizeTotal ? 50 : 30); iterations++) {
+    for (; iterations < 50; iterations++) {
         const owner = Array(n), removed = new Map(), candidates = [], current = objective(costs);
         routes.forEach((route, d) => route.forEach(item => {
             owner[item] = d;
@@ -377,13 +367,15 @@ function refineDispatch(options, minimizeTotal) {
             removed.set(item, { route: shortened, cost: length(shortened, d) });
         }));
         const consider = (a, b, ra, rb, ca, cb) => {
+            const counts = routes.map(route => route.length);
+            counts[a] = ra.length; counts[b] = rb.length;
+            if (stats.some((ds, d) => stats.some((other, e) =>
+                Number(options.weights?.[ds.devId] || 0) > Number(options.weights?.[other.devId] || 0) && counts[d] < counts[e]))) return;
             const predicted = costs.slice();
             predicted[a] = ca; predicted[b] = cb;
             const score = objective(predicted);
             if (score < current - 1e-8 && total(predicted) <= ceiling + 1e-8 &&
-                (minimizeTotal
-                    ? Math.max(...predicted) <= baselineMax + 1e-8 && predicted.every((v, d) => v <= initialCosts[d] + Math.max(5, initialCosts[d] * 0.2) + 1e-8)
-                    : Math.max(...predicted) <= Math.max(...costs) + 1e-8)) candidates.push({ a, b, ra, rb, score });
+                Math.max(...predicted) <= baselineMax + 1e-8 && predicted.every((v, d) => v <= initialCosts[d] + Math.max(5, initialCosts[d] * 0.2) + 1e-8)) candidates.push({ a, b, ra, rb, score });
         };
         for (let a = 0; a < k; a++) if (routes[a].length > limits[a][0]) {
             for (const item of routes[a]) for (let b = 0; b < k; b++) if (a !== b && routes[b].length < limits[b][1]) {
@@ -402,14 +394,12 @@ function refineDispatch(options, minimizeTotal) {
         }
         candidates.sort((a, b) => a.score - b.score);
         let best = null;
-        for (const candidate of candidates.slice(0, minimizeTotal ? 5 : 3)) {
+        for (const candidate of candidates.slice(0, 5)) {
             const ra = optimize(candidate.ra, candidate.a), rb = optimize(candidate.rb, candidate.b), next = costs.slice();
             next[candidate.a] = length(ra, candidate.a); next[candidate.b] = length(rb, candidate.b);
             const score = objective(next);
             if (total(next) > ceiling + 1e-8 || score >= current - 1e-8 ||
-                (minimizeTotal
-                    ? Math.max(...next) > baselineMax + 1e-8 || next.some((v, d) => v > initialCosts[d] + Math.max(5, initialCosts[d] * 0.2) + 1e-8)
-                    : Math.max(...next) > Math.max(...costs) + 1e-8)) continue;
+                Math.max(...next) > baselineMax + 1e-8 || next.some((v, d) => v > initialCosts[d] + Math.max(5, initialCosts[d] * 0.2) + 1e-8)) continue;
             if (!best || score < best.score) best = { ...candidate, ra, rb, costs: next, score };
         }
         if (!best) break;
@@ -430,7 +420,7 @@ function refineDispatch(options, minimizeTotal) {
         stats[d].assignedCount = route.length;
     });
     result.distanceBalance = { iterations, weightedCountsPreserved: routes.every((route, d) => route.length === baselineCounts[d]),
-        weightMode: 'relative-capacity', objectiveMode: minimizeTotal ? 'total-distance' : 'distance-balance', baselineObjective, objective: objective(costs),
+        weightMode: 'target-count', objectiveMode: 'count-first-total-distance', baselineObjective, objective: objective(costs),
         countLimits: stats.map((ds, d) => ({ driverKey: ds.key, min: limits[d][0], max: limits[d][1] })),
         baselineTotalKm: baselineTotal,
         totalKm: total(costs), baselineMaxKm: baselineMax, maxKm: Math.max(...costs) };

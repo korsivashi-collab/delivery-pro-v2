@@ -170,7 +170,7 @@ export function renderDispatchAssignmentMode() {
     }
     const description = document.getElementById('dispatch-mode-description');
     if (description) description.textContent = calculatingAssignments ? '배정을 계산하고 있습니다…' : mode === 'distance'
-        ? '이동 거리 차이를 줄여 배정합니다.' : '가중치에 따른 물량 범위 안에서 전체 이동 거리를 줄입니다.';
+        ? '목표 건수에서 최대 1건만 조정해 전체 직선거리를 줄이는 TEST입니다.' : '가중치를 반영해 목표 건수를 정확히 나눕니다.';
 }
 
 export function setDispatchAssignmentMode(mode) {
@@ -683,7 +683,7 @@ export async function runAutoDispatchAlgorithm() {
     if (window.renderDispatchDriverDetail) window.renderDispatchDriverDetail();
     if (window.autoSaveExcelToFirebase) window.autoSaveExcelToFirebase();
     
-    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? '이동 거리' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\n이동 거리는 직선거리 기준입니다. 가중치는 상대 처리량으로 반영하며 기사별 건수는 달라질 수 있습니다.' : '\n가중치에 따른 물량 범위 안에서 전체 직선거리 절감을 기준으로 배정합니다. 기사별 건수는 달라질 수 있습니다.'}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
+    alert(`[자동할당 배분 완료 · ${mode === 'distance' ? 'TEST' : '배송 건수'}]\n총 ${result.totalOrders}건을 ${activeDrivers.length}명의 기사에게 배정했습니다.${mode === 'distance' ? '\nTEST: 가중치별 목표 건수에서 최대 1건만 조정해 전체 직선거리를 줄입니다.' : '\n원래 배송 건수 알고리즘으로 가중치별 목표 건수를 유지합니다.'}\n\n좌측 기사 목록에서 배정 내역을 확인한 후 [동선 전송]을 진행해 주세요.`);
 }
 
 function calculateDistanceDispatch(options, mode = 'distance') {
@@ -713,7 +713,7 @@ function calculateDistanceDispatch(options, mode = 'distance') {
         }, 0));
     }
     return new Promise((resolve, reject) => {
-        const worker = new Worker(new URL('./js/admin-dispatch-algorithm.js?v=20261020-dispatch-total', document.baseURI), { type: 'module' });
+        const worker = new Worker(new URL('./js/admin-dispatch-algorithm.js?v=20261020-dispatch-count-first', document.baseURI), { type: 'module' });
         worker.onmessage = event => {
             worker.terminate();
             try {
