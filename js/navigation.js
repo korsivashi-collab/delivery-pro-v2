@@ -22,9 +22,12 @@ export function getPreferredNavigation() { return preferredNavigation; }
 export function navigationButtonContent(provider = preferredNavigation) {
     const isNaver = provider === 'naver';
     const isKakao = provider === 'kakao';
-    return '<span class="navigation-brand" aria-hidden="true">' + (isKakao ? 'K' : isNaver ? 'N' : 'T') + '</span>' +
+    const content = '<span class="navigation-brand" aria-hidden="true">' + (isKakao ? 'K' : isNaver ? 'N' : 'T') + '</span>' +
         '<span>' + (isKakao ? '카카오내비로 안내' : isNaver ? '네이버지도로 안내' : '티맵으로 안내') + '</span>' +
         '<svg class="navigation-arrow" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+    return isKakao
+        ? '<span class="navigation-main-label">' + content + '</span><small class="navigation-inline-caution">안전운전·길안내 중 목적지 설정 불가</small>'
+        : content;
 }
 
 export function openNavigationPicker() {
@@ -43,9 +46,6 @@ export function selectNavigation(provider) {
     document.querySelectorAll('[data-navigation-launch]').forEach(button => {
         button.dataset.navigationProvider = provider;
         button.innerHTML = navigationButtonContent(provider);
-    });
-    document.querySelectorAll('[data-kakao-caution]').forEach(note => {
-        note.hidden = provider !== 'kakao';
     });
     document.getElementById('navigation-picker')?.close();
 }
