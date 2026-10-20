@@ -135,6 +135,8 @@
         .navigation-launch { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; min-width: 0; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: #172033; color: #FFF; font-size: 12px; font-weight: 800; white-space: nowrap; }
         .navigation-launch[data-navigation-provider="naver"] { background: #03C75A; color: #FFF; }
         .navigation-launch[data-navigation-provider="kakao"] { background: #FEE500; color: #302A13; }
+        .navigation-caution { margin: 6px 2px 0; color: #92400E; font-size: 11px; line-height: 1.5; overflow-wrap: anywhere; }
+        .navigation-caution[hidden] { display: none; }
         [data-navigation-provider="kakao"] .navigation-brand { background: #302A13; color: #FEE500; }
         .navigation-brand { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; flex-shrink: 0; border-radius: 7px; background: #FFF; color: #172033; font-size: 19px; font-weight: 900; font-family: Arial, sans-serif; line-height: 1; }
         [data-navigation-provider="naver"] .navigation-brand { color: #03A94D; }
@@ -447,6 +449,7 @@
         <button type="button" class="navigation-option" data-navigation-option="kakao" data-navigation-provider="kakao" aria-pressed="false" onclick="selectNavigation('kakao')">
             <span class="navigation-brand" aria-hidden="true">K</span><span class="text-sm font-extrabold">카카오내비</span><span class="navigation-option-check" aria-hidden="true">✓</span>
         </button>
+        <p class="navigation-caution">경로 안내·안전운전 모드에서는 목적지 변경이 제한될 수 있습니다. 정차 후 해당 모드를 종료하고 다시 선택해 주세요.</p>
         <p class="mt-4 text-[11px] leading-relaxed text-slate-500">내비 앱이 설치되어 있어야 길 안내를 실행할 수 있습니다.</p>
     </dialog>
 
