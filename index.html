@@ -124,6 +124,23 @@
             #destination-list > li[data-id] > div:first-child { grid-template-columns: 68px 24px minmax(0, 1fr) 32px; }
             #destination-list > li[data-id] > div:first-child > div:last-child { grid-column: 4; grid-row: 1; }
         }
+        .navigation-controls { flex: 1; min-width: 0; display: flex; gap: 6px; }
+        .navigation-select { display: flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; padding: 0 11px; border: 1px solid #CBD5E1; border-radius: 10px; background: #FFF; color: #334155; font-size: 12px; font-weight: 700; white-space: nowrap; }
+        .navigation-select svg { width: 14px; height: 14px; color: #64748B; }
+        .navigation-launch { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; min-width: 0; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: #172033; color: #FFF; font-size: 12px; font-weight: 800; white-space: nowrap; }
+        .navigation-launch[data-navigation-provider="naver"] { background: #03C75A; color: #FFF; }
+        .navigation-brand { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; flex-shrink: 0; border-radius: 7px; background: #FFF; color: #172033; font-size: 19px; font-weight: 900; font-family: Arial, sans-serif; line-height: 1; }
+        [data-navigation-provider="naver"] .navigation-brand { color: #03A94D; }
+        .navigation-arrow { width: 16px; height: 16px; flex-shrink: 0; }
+        .navigation-select:active, .navigation-launch:active { filter: brightness(.94); }
+        .navigation-select:focus-visible, .navigation-launch:focus-visible, .navigation-option:focus-visible { outline: 3px solid #60A5FA; outline-offset: 2px; }
+        #navigation-picker { width: calc(100% - 32px); max-width: 380px; padding: 22px; border: 0; border-radius: 22px; color: #172033; background: #FFF; box-shadow: 0 24px 80px #0F172A33; }
+        #navigation-picker::backdrop { background: #0F172A80; }
+        .navigation-option { width: 100%; display: flex; align-items: center; gap: 12px; padding: 14px; margin-top: 10px; text-align: left; border: 1px solid #E2E8F0; border-radius: 14px; background: #FFF; }
+        .navigation-option .navigation-brand { width: 40px; height: 40px; border: 1px solid #E2E8F0; border-radius: 11px; font-size: 29px; }
+        .navigation-option[aria-pressed="true"] { border-color: #2563EB; background: #EFF6FF; }
+        .navigation-option-check { margin-left: auto; color: #2563EB; font-size: 18px; visibility: hidden; }
+        .navigation-option[aria-pressed="true"] .navigation-option-check { visibility: visible; }
         .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
         @keyframes slideUp { from { transform: translateY(20px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
     </style>
@@ -379,7 +396,7 @@
                             </li>
                             <li class="flex items-start gap-3">
                                 <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-blue-50 text-xs font-extrabold text-blue-600">4</span>
-                                <div><h3 class="text-sm font-bold text-slate-900">배송 진행</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">[길찾기]로 이동하고, 배송을 마치면 [완료]를 누르세요.</p></div>
+                                <div><h3 class="text-sm font-bold text-slate-900">배송 진행</h3><p class="mt-1 text-xs leading-relaxed text-slate-600">[내비 선택]에서 앱을 고른 뒤 안내 버튼을 누르세요. 배송을 마치면 [완료]를 누르세요.</p></div>
                             </li>
                         </ol>
                         <p class="mt-4 border-t border-slate-100 pt-3 text-[11px] leading-relaxed text-slate-500">경로 최적화는 배송지 2곳부터 가능합니다.</p>
@@ -407,6 +424,21 @@
             </div>
         </footer>
     </div>
+
+    <dialog id="navigation-picker" aria-labelledby="navigation-picker-title" aria-describedby="navigation-picker-description">
+        <div class="flex items-center justify-between gap-3">
+            <h2 id="navigation-picker-title" class="text-lg font-extrabold">내비 선택</h2>
+            <form method="dialog"><button type="submit" class="rounded-lg px-3 py-2 text-xs font-bold text-slate-500" aria-label="내비 선택 닫기">닫기</button></form>
+        </div>
+        <p id="navigation-picker-description" class="mt-1 mb-4 text-xs leading-relaxed text-slate-500">선택한 내비를 모든 배송지에서 사용합니다.</p>
+        <button type="button" class="navigation-option" data-navigation-option="tmap" data-navigation-provider="tmap" aria-pressed="false" onclick="selectNavigation('tmap')">
+            <span class="navigation-brand" aria-hidden="true">T</span><span class="text-sm font-extrabold">티맵</span><span class="navigation-option-check" aria-hidden="true">✓</span>
+        </button>
+        <button type="button" class="navigation-option" data-navigation-option="naver" data-navigation-provider="naver" aria-pressed="false" onclick="selectNavigation('naver')">
+            <span class="navigation-brand" aria-hidden="true">N</span><span class="text-sm font-extrabold">네이버지도</span><span class="navigation-option-check" aria-hidden="true">✓</span>
+        </button>
+        <p class="mt-4 text-[11px] leading-relaxed text-slate-500">내비 앱이 설치되어 있어야 길 안내를 실행할 수 있습니다.</p>
+    </dialog>
 
     <!-- 시작 지점 선택 모달 -->
     <div id="start-select-modal" class="hidden fixed inset-0 bg-black/60 z-[130] flex flex-col items-center justify-end sm:justify-center p-0 sm:p-4 pb-0 transition-opacity">
