@@ -269,18 +269,18 @@ export function buildPickingPageHtml(driverPhone, driverOrdersCount, aggregatedL
                 <td class="col-center early-quantities">${note}</td></tr>`;
         }).join('');
     };
-    const table = (list,offset) => `<table class="picking-table"><colgroup><col style="width:49%"><col style="width:12%"><col style="width:8%"><col style="width:9%"><col style="width:7%"><col style="width:15%"></colgroup>
+    const table = (list,offset) => `<table class="picking-table"><colgroup><col style="width:62%"><col style="width:10%"><col style="width:6%"><col style="width:6%"><col style="width:5%"><col style="width:11%"></colgroup>
         <thead><tr><th>품목명</th><th>규격</th><th>단위</th><th>수량</th><th>확인</th><th>비고</th></tr></thead><tbody>${renderRows(list,offset)}</tbody></table>`;
     const half = options.splitIndex || Math.ceil(aggregatedList.length / 2);
     const tables = isTwoColumn ? `<div class="two-column-wrapper"><div class="col-half">${table(aggregatedList.slice(0,half),0)}</div><div class="col-half">${table(aggregatedList.slice(half),half)}</div></div>` : table(aggregatedList,0);
     const route = (options.earlyStops || []).map(o => `<span><b>${String.fromCharCode(0x2460+o.number-1)}</b> ${escapePickingHtml(o.name)}</span>`).join('');
     return `<section class="print-page ${isTwoColumn ? 'mode-two-col' : 'mode-single-col'}">
         <header class="picking-header"><div class="picking-heading"><h1>${escapePickingHtml(driverPhone)} - ${escapePickingHtml(dateStr)}</h1>
-            <div class="picking-meta">배송 ${driverOrdersCount}건 · 품목 ${options.totalItemTypes ?? aggregatedList.length}종${options.pageNumber ? ` · ${options.pageNumber}페이지` : ''}</div></div>
-            <div class="picking-route">${route || '<span class="route-warning">배송 순번 미확정</span>'}</div></header>
-        <div class="picking-legend">비고 ①:3 = 1번 배송처에서 해당 단위 3개 하차 · 빈칸 = 초반 5곳 물량 없음${options.hasUnconfirmedSequence ? ' · 순번 미확정 주문은 표시 제외' : ''}</div>
+            <div class="picking-meta">배송 ${driverOrdersCount}건 · 품목 ${options.totalItemTypes ?? aggregatedList.length}종${options.pageNumber ? ` · ${options.pageNumber}페이지` : ''}</div>
+            <div class="picking-legend">비고 ①:3 = ① 배송처 하차 3 (행 단위 기준)${options.hasUnconfirmedSequence ? '<br>순번 미확정 주문은 비고 표시 제외' : ''}</div></div>
+            <div class="picking-route"><div class="route-title">초반 배송처 ①~⑤ · 방문 순서</div><div class="route-stops">${route || '<span class="route-warning">배송 순번 미확정</span>'}</div></div></header>
         <div class="table-container">${tables}</div>
-        <footer class="footer-sign"><span>중량 미확인 품목은 분류 아래 배치</span><span>상차 확인 __________</span><span>검수 확인 __________</span></footer>
+        <footer class="footer-sign"><span>상차 확인 __________</span><span>검수 확인 __________</span></footer>
     </section>`;
 }
 
@@ -290,29 +290,31 @@ export const pickingPrintStyles = `
     html,body { margin:0; padding:0; background:white; color:#172335; font-family:'Malgun Gothic',sans-serif; }
     .print-page { width:210mm; height:297mm; padding:7mm 7mm 6mm; margin:0 auto; display:flex; flex-direction:column; break-after:page; page-break-after:always; }
     .print-page:last-child { break-after:auto; page-break-after:auto; }
-    .picking-header { display:grid; grid-template-columns:minmax(0, .95fr) minmax(0, 1.15fr); gap:12px; border-bottom:2px solid #172335; padding-bottom:6px; }
+    .picking-header { display:grid; grid-template-columns:minmax(0, .9fr) minmax(0, 1.2fr); gap:14px; border-bottom:2px solid #172335; padding-bottom:5px; align-items:center; }
     .picking-heading h1 { margin:0 0 4px; font-size:17px; line-height:1.25; overflow-wrap:anywhere; }
     .picking-meta { font-size:10px; color:#4b5563; }
-    .picking-route { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:3px 7px; align-content:center; font-size:10px; line-height:1.25; overflow-wrap:anywhere; }
+    .picking-route { border-left:1px solid #b8c1cc; padding-left:10px; font-size:10px; line-height:1.25; overflow-wrap:anywhere; }
+    .route-title { font-size:10px; font-weight:700; color:#4b5563; margin-bottom:4px; }
+    .route-stops { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:3px 8px; }
     .picking-route b { font-size:12px; }
     .route-warning { grid-column:1/-1; }
-    .picking-legend { font-size:9px; line-height:1.3; margin:5px 0 6px; }
-    .table-container { flex:none; min-width:0; }
+    .picking-legend { font-size:9px; line-height:1.2; margin-top:4px; }
+    .table-container { flex:none; min-width:0; margin-top:5px; }
     .two-column-wrapper { display:flex; gap:10px; align-items:flex-start; }
     .col-half { flex:1; min-width:0; }
     .picking-table { width:100%; border-collapse:collapse; table-layout:fixed; border:1px solid #aab4c0; font-size:10px; }
     .picking-table th { background:#263345; color:white; font-weight:700; font-size:10px; padding:5px 1px; text-align:center; border-right:1px solid #78818d; }
-    .picking-table td { border:1px solid #b8c1cc; padding:4px 3px; line-height:1.2; overflow-wrap:anywhere; vertical-align:middle; }
-    .picking-table .product-name { font-size:12pt; font-weight:500; line-height:1.22; }
-    .product-identity { display:block; font-size:8px; color:#4b5563; line-height:1.25; margin-top:2px; }
-    .picking-table .category-row th { background:#dde2e8; color:#172335; padding:4px 5px; text-align:left; font-size:11px; border:1px solid #b8c1cc; }
+    .picking-table td { border:1px solid #b8c1cc; padding:1.5px 4px; line-height:1.05; overflow-wrap:anywhere; vertical-align:middle; }
+    .picking-table .product-name { font-size:11pt; font-weight:500; line-height:1.05; }
+    .product-identity { display:inline; font-size:9px; color:#4b5563; line-height:1.15; margin-left:5px; }
+    .picking-table .category-row th { background:#dde2e8; color:#172335; padding:3px 5px; text-align:left; font-size:11px; border:1px solid #b8c1cc; }
     .product-row.stripe { background:#f0f2f4; }
-    .quantity { font-size:12pt; font-weight:800; }
+    .quantity { font-size:11pt; font-weight:800; }
     .early-quantities { font-size:11px; font-weight:700; }
     .col-left { text-align:left; white-space:normal; word-break:normal; }
     .col-center { text-align:center; }
     .check-box { display:inline-block; width:11px; height:11px; border:1px solid #172335; }
-    .footer-sign { margin-top:auto; padding-top:7px; display:flex; justify-content:space-between; gap:8px; font-size:9px; }
+    .footer-sign { margin-top:auto; padding-top:7px; display:flex; justify-content:flex-end; gap:24px; font-size:9px; }
     @media print { html,body { width:210mm; } * { -webkit-print-color-adjust:exact; print-color-adjust:exact; } }
 `;
 
@@ -326,7 +328,8 @@ export function executePickingListPrint() {
     try {
         const doc = measure.contentDocument;
         doc.open();doc.write(`<html><head><style>${pickingPrintStyles}.print-page{height:auto!important;min-height:0!important}.footer-sign{margin-top:7px!important}</style></head><body></body></html>`);doc.close();
-        const fits = html => { doc.body.innerHTML=html; return doc.body.firstElementChild.getBoundingClientRect().height <= 1122; };
+        // Leave a small physical-print reserve for footer/font rounding across frames.
+        const fits = html => { doc.body.innerHTML=html; return doc.body.firstElementChild.getBoundingClientRect().height <= 1100; };
         const selected = new Set([...pickingModalState.selectedDrivers].map(getPickingDriverKey).filter(Boolean));
         for (const key of selected) {
             const orders = getDriverAssignedOrders(key);
@@ -345,12 +348,12 @@ export function executePickingListPrint() {
                 const options = {...opts,pageNumber,previousCategory:list[offset-1]?.category};
                 while (low<=high) {
                     const n=Math.floor((low+high)/2);
-                    if (fits(buildPickingPageHtml(phone,orders.length,list.slice(offset,offset+n),true,dateStr,options))) { fit=n;low=n+1; }
+                    if (fits(buildPickingPageHtml(phone,orders.length,list.slice(offset,offset+n),false,dateStr,options))) { fit=n;low=n+1; }
                     else high=n-1;
                 }
                 // Never silently clip or omit an abnormally long single product.
                 if (!fit) throw new Error('한 품목의 표시 내용이 A4 한 장을 넘습니다. 상품 정보를 확인해 주세요.');
-                allDriversPagesHtml+=buildPickingPageHtml(phone,orders.length,list.slice(offset,offset+fit),true,dateStr,options);
+                allDriversPagesHtml+=buildPickingPageHtml(phone,orders.length,list.slice(offset,offset+fit),false,dateStr,options);
                 offset+=fit;pageNumber++;
             }
         }
