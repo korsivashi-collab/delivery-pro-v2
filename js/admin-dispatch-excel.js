@@ -494,6 +494,14 @@ export function processExcelData(jsonData, fileName = '') {
         const taxType = taxKey ? String(row[taxKey] || '').trim() : '';
         const itemObj = { 
             name: itemName || '상품명 미지정',
+            // Preserve legacy unit (= first 규격/단위 column) for invoices and exports.
+            // Picking uses separate source fields without changing those consumers.
+            spec: String(row[keys.find(k => /^(규격|용량|포장규격)$/.test(k.replace(/\s+/g, '')))] ?? '').trim(),
+            quantityUnit: String(row[keys.find(k => /^(단위|수량단위|주문단위|포장단위)$/.test(k.replace(/\s+/g, '')))] ?? '').trim(),
+            productCode: String(row[keys.find(k => /^(상품코드|품목코드|제품코드|상품no|SKU)$/i.test(k.replace(/\s+/g, '')))] ?? '').trim(),
+            brand: String(row[keys.find(k => /^(브랜드|제조사|제조업체)$/.test(k.replace(/\s+/g, '')))] ?? '').trim(),
+            grade: String(row[keys.find(k => /^(등급|상품등급|품질등급)$/.test(k.replace(/\s+/g, '')))] ?? '').trim(),
+            pickingCategory: String(row[keys.find(k => /^(대분류|품목분류|상품분류)$/.test(k.replace(/\s+/g, '')))] ?? '').trim(),
             taxType,
             extra: Object.fromEntries(keys.filter(k => /^(품목코드|제품코드|제조번호|로트번호|유효기간|사용기한|보관조건)$/.test(k.replace(/\s+/g,''))).map(k => [k.replace(/\s+/g,''), String(row[k] ?? '')])), 
             qty: qty, 
