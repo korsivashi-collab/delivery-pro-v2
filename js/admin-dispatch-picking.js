@@ -195,8 +195,9 @@ export function buildPickingData(orders) {
     const items = new Map();
     orders.forEach((order, orderIndex) => {
         const raw = order.items?.length ? order.items : [{name: order.itemName || '상품명 미지정', unit: order.unit, qty: order.qty,
-            spec: order.spec, quantityUnit: order.quantityUnit, productCode: order.productCode, pickingCategory: order.pickingCategory}];
-        raw.forEach(source => {
+            spec: order.spec, quantityUnit: order.quantityUnit, productCode: order.productCode, pickingCategory: order.pickingCategory,
+            brand:order.brand, manufacturer:order.manufacturer, grade:order.grade, extra:order.extra}];
+        raw.forEach((source,sourceIndex) => {
             const name = pickingText(source.name) || '기타 품목';
             const legacyUnit = pickingText(source.unit);
             const spec = pickingText(source.spec) || (/\d/.test(legacyUnit) ? legacyUnit : '');
@@ -204,11 +205,15 @@ export function buildPickingData(orders) {
             const supplier = pickingText(source.supplier || order.senderName);
             const productCode = pickingText(source.productCode || source.sku || source.extra?.품목코드 || source.extra?.제품코드);
             const brand = pickingText(source.brand), grade = pickingText(source.grade);
-            const extra = Object.entries(source.extra || {}).sort(([a],[b]) => a.localeCompare(b));
-            // Exact identity, including supplier/code/spec/brand/grade/lot. No prefix or fuzzy merging.
-            const identity = JSON.stringify([supplier, productCode, name, spec, unit, brand, grade, extra]);
+            const manufacturer = pickingText(source.manufacturer || source.maker || source.extra?.제조사);
+            // Supplier catalog codes are not universal product IDs. Keep physical product
+            // attributes (including lot/expiry) exact, but ignore supplier and its codes.
+            const extra = Object.entries(source.extra || {}).filter(([k]) => !['품목코드','제품코드','상품코드','상품no','SKU'].includes(k))
+                .sort(([a],[b]) => a.localeCompare(b));
+            const identity = JSON.stringify([name, spec, unit, brand, manufacturer, grade, extra,
+                ['상품명 미지정','기타 품목'].includes(name) ? [supplier,productCode,orderIndex,sourceIndex] : null]);
             if (!items.has(identity)) {
-                const item = {name, spec, unit, supplier, productCode, brand, grade, extra, totalQty:0, orderCount:0,
+                const item = {name, spec, unit, brand, manufacturer, grade, extra, totalQty:0, orderCount:0,
                     earlyQuantities: {}, orderIndices:new Set(), unitWeightKg:source.unitWeightKg};
                 item.category = pickingCategory({...source, name});
                 item.unitWeightKg = getPickingUnitWeight(item);
@@ -258,7 +263,7 @@ export function buildPickingPageHtml(driverPhone, driverOrdersCount, aggregatedL
             const note = Object.entries(item.earlyQuantities || {}).sort(([a],[b]) => Number(a)-Number(b))
                 .map(([n,q]) => `<span class="early-quantity">${String.fromCharCode(0x2460 + Number(n)-1)}:${formatNumber(q)}</span>`).join(' ');
             const distinguishing = [item.brand && !item.name.includes(item.brand) ? item.brand : '',item.grade && !item.name.includes(item.grade) ? item.grade : '',
-                item.showIdentity ? item.supplier : '', item.showIdentity ? item.productCode : '',
+                item.manufacturer && item.manufacturer !== item.brand && !item.name.includes(item.manufacturer) ? item.manufacturer : '',
                 ...(item.extra || []).filter(([k])=>!['품목코드','제품코드'].includes(k)).map(([k,v])=>`${k}: ${v}`)].filter(Boolean).join(' · ');
             return `${group}<tr class="product-row ${(offset+i)%2 ? 'stripe' : ''}" data-picking-item="${offset+i}">
                 <td class="col-left product-name">${escapePickingHtml(item.name)}${distinguishing ? `<small class="product-identity">${escapePickingHtml(distinguishing)}</small>` : ''}</td>
