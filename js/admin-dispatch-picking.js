@@ -218,7 +218,7 @@ export function buildPickingData(orders) {
             item.totalQty += qty;
             item.orderIndices.add(orderIndex); // Repeated item lines in one order count once.
             const n = Number(order.displayNumber);
-            if (Number.isInteger(n) && n >= 1 && n <= 5 && numbers.get(n) === 1) {
+            if (Number.isInteger(n) && n >= 1 && n <= 8 && numbers.get(n) === 1) {
                 item.earlyQuantities[n] = (item.earlyQuantities[n] || 0) + qty;
             }
         });
@@ -239,7 +239,7 @@ export function buildPickingData(orders) {
     const categoryOrder = new Map(categories.map(([name],i) => [name,i]));
     const list = [...items.values()].sort((a,b) => categoryOrder.get(a.category)-categoryOrder.get(b.category) ||
         Number(a.totalWeightKg == null)-Number(b.totalWeightKg == null) || (b.totalWeightKg ?? 0)-(a.totalWeightKg ?? 0) || a.name.localeCompare(b.name,'ko') || a.spec.localeCompare(b.spec,'ko'));
-    const earlyStops = orders.filter(o => Number(o.displayNumber) >= 1 && Number(o.displayNumber) <= 5 && numbers.get(Number(o.displayNumber)) === 1)
+    const earlyStops = orders.filter(o => Number(o.displayNumber) >= 1 && Number(o.displayNumber) <= 8 && numbers.get(Number(o.displayNumber)) === 1)
         .sort((a,b) => Number(a.displayNumber)-Number(b.displayNumber)).map(o => ({number:Number(o.displayNumber),name:o.storeName || o.buyerName || '상호 미등록'}));
     return {items:list,earlyStops,hasUnconfirmedSequence:orders.some(o => !Number.isInteger(Number(o.displayNumber)) || Number(o.displayNumber)<1 || numbers.get(Number(o.displayNumber))!==1)};
 }
@@ -256,7 +256,7 @@ export function buildPickingPageHtml(driverPhone, driverOrdersCount, aggregatedL
                 category = current;
             }
             const note = Object.entries(item.earlyQuantities || {}).sort(([a],[b]) => Number(a)-Number(b))
-                .map(([n,q]) => `${String.fromCharCode(0x2460 + Number(n)-1)}:${formatNumber(q)}`).join('<br>');
+                .map(([n,q]) => `<span class="early-quantity">${String.fromCharCode(0x2460 + Number(n)-1)}:${formatNumber(q)}</span>`).join(' ');
             const distinguishing = [item.brand && !item.name.includes(item.brand) ? item.brand : '',item.grade && !item.name.includes(item.grade) ? item.grade : '',
                 item.showIdentity ? item.supplier : '', item.showIdentity ? item.productCode : '',
                 ...(item.extra || []).filter(([k])=>!['품목코드','제품코드'].includes(k)).map(([k,v])=>`${k}: ${v}`)].filter(Boolean).join(' · ');
@@ -278,7 +278,7 @@ export function buildPickingPageHtml(driverPhone, driverOrdersCount, aggregatedL
         <header class="picking-header"><div class="picking-heading"><h1>${escapePickingHtml(driverPhone)} - ${escapePickingHtml(dateStr)}</h1>
             <div class="picking-meta">배송 ${driverOrdersCount}건 · 품목 ${options.totalItemTypes ?? aggregatedList.length}종${options.pageNumber ? ` · ${options.pageNumber}페이지` : ''}</div>
             <div class="picking-legend">비고 ①:3 = ① 배송처 하차 3 (행 단위 기준)${options.hasUnconfirmedSequence ? '<br>순번 미확정 주문은 비고 표시 제외' : ''}</div></div>
-            <div class="picking-route"><div class="route-title">초반 배송처 ①~⑤ · 방문 순서</div><div class="route-stops">${route || '<span class="route-warning">배송 순번 미확정</span>'}</div></div></header>
+            <div class="picking-route"><div class="route-title">초반 배송처 ①~⑧ · 방문 순서</div><div class="route-stops">${route || '<span class="route-warning">배송 순번 미확정</span>'}</div></div></header>
         <div class="table-container">${tables}</div>
         <footer class="footer-sign"><span>상차 확인 __________</span><span>검수 확인 __________</span></footer>
     </section>`;
@@ -295,7 +295,7 @@ export const pickingPrintStyles = `
     .picking-meta { font-size:10px; color:#4b5563; }
     .picking-route { border-left:1px solid #b8c1cc; padding-left:10px; font-size:10px; line-height:1.25; overflow-wrap:anywhere; }
     .route-title { font-size:10px; font-weight:700; color:#4b5563; margin-bottom:4px; }
-    .route-stops { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:3px 8px; }
+    .route-stops { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:3px 8px; }
     .picking-route b { font-size:12px; }
     .route-warning { grid-column:1/-1; }
     .picking-legend { font-size:9px; line-height:1.2; margin-top:4px; }
@@ -311,6 +311,7 @@ export const pickingPrintStyles = `
     .product-row.stripe { background:#f0f2f4; }
     .quantity { font-size:11pt; font-weight:800; }
     .early-quantities { font-size:11px; font-weight:700; }
+    .early-quantity { display:inline-block; white-space:nowrap; margin:0 2px; }
     .col-left { text-align:left; white-space:normal; word-break:normal; }
     .col-center { text-align:center; }
     .check-box { display:inline-block; width:11px; height:11px; border:1px solid #172335; }
