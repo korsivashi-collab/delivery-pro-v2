@@ -115,14 +115,17 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
    if(c.signup)throw problem('관제 로그인이 필요합니다.',403);
    if(identity.role!=='MASTER'||identity.masterSmsVerified!==true||!(identity.masterSessionExpiresAt>now()/1000))throw problem('마스터 SMS 인증이 필요합니다.',403);
    const reason=String(input.reason||'').trim(),field=input.test===true?'testBalance':'balance';
-   if(!Number.isSafeInteger(input.balance)||input.balance<0||input.balance>10000000||!Number.isSafeInteger(input.revision)||reason.length<2||reason.length>200||!/^[a-f0-9-]{36}$/.test(input.requestId||''))throw problem('건수와 수정 사유를 확인해 주세요.');
+   if(!['add','reset'].includes(input.operation)||input.balance!==undefined||!Number.isSafeInteger(input.count)||(input.operation==='add'?(input.count<=0||input.count>10000000):input.count!==0)||!Number.isSafeInteger(input.revision)||reason.length<2||reason.length>200||!/^[a-f0-9-]{36}$/.test(input.requestId||''))throw problem('건수와 수정 사유를 확인해 주세요.');
    return db.runTransaction(async tx=>{
     const l=(await tx.get(ref)).data(),w=(await tx.get(walletRef)).data(),eventRef=db.collection('dispatch_billing_events').doc(input.requestId),old=await tx.get(eventRef);authorize(l,identity,input);
     if(l.dispatchBillingId!==id)throw problem('계정이 변경되었습니다.',409);
-    if(old.exists){if(old.data().walletId!==id||old.data().balance!==input.balance||old.data().test!==input.test)throw problem('수정 요청이 일치하지 않습니다.',409);return w;}
+    if(old.exists){if(old.data().walletId!==id||old.data().operation!==input.operation||old.data().count!==input.count||old.data().reason!==reason||old.data().test!==(input.test===true))throw problem('수정 요청이 일치하지 않습니다.',409);return w;}
     if(w.revision!==input.revision)throw problem('잔여 건수가 변경되었습니다. 다시 불러온 뒤 수정해 주세요.',409);
-    const event={walletId:id,at:now(),by:identity.uid,kind:'adjust',before:w[field],balance:input.balance,reason,test:input.test===true};
-    const updated={...w,[field]:input.balance,revision:w.revision+1,recent:[event,...w.recent].slice(0,20)};
+    if(input.operation==='reset' && (Number(w.reserved||0)>0 || Number(w.testReserved||0)>0 || w.pendingOrder))throw problem('발송 또는 결제 처리 중에는 0건 처리할 수 없습니다. 처리 결과를 확인한 뒤 다시 진행해 주세요.',409);
+    const balance=input.operation==='add'?w[field]+input.count:0;
+    if(!Number.isSafeInteger(balance)||balance>10000000)throw problem('최대 보유 건수를 초과합니다.');
+    const event={walletId:id,at:now(),by:identity.uid,kind:'adjust',operation:input.operation,count:input.count,before:w[field],balance,reason,test:input.test===true};
+    const updated={...w,[field]:balance,revision:w.revision+1,recent:[event,...w.recent].slice(0,20)};
     tx.create(eventRef,event);tx.set(walletRef,updated);return updated;
    });
   }
