@@ -95,6 +95,11 @@ function projectTracking(publication, phone, liveRoutes) {
             for (const id of stop.ids) if (!states.has(id) && publication.completionStates?.[stop.driver]?.[id]) states.set(id, publication.completionStates[stop.driver][id]);
             const statusOf = id => !samePlan ? 'checking' : activeIds.has(id) ? 'pending'
                 : states.get(id) === 'completed' ? 'completed' : states.get(id) === 'cancelled' ? 'cancelled' : 'checking';
+            const completedTime = ids => {
+                const times = ids.map(id => publication.completionTimes?.[stop.driver]?.[id]);
+                return ids.length && ids.every(id => statusOf(id) === 'completed') && times.every(t => Number.isFinite(t) && t > 0)
+                    ? Math.max(...times) : null;
+            };
             const statuses = stop.ids.map(statusOf);
             const status = statuses.every(s => s === 'completed') ? 'completed'
                 : statuses.every(s => s === 'cancelled') ? 'cancelled'
@@ -130,12 +135,12 @@ function projectTracking(publication, phone, liveRoutes) {
                         : statuses.every(s => s === 'cancelled') ? 'cancelled'
                         : statuses.includes('checking') ? 'checking' : 'pending';
                     return { sequence: i + 1, own: ids.some(id => stop.ids.includes(id)), status,
-                        address: ids.map(id => addresses.get(id)).find(Boolean) || '' };
+                        address: ids.map(id => addresses.get(id)).find(Boolean) || '', completedAt: completedTime(ids) };
                 });
             // The first remaining delivery is the next destination in the saved route, not GPS evidence.
             const next = routeList.find(s => s.status !== 'completed' && s.status !== 'cancelled');
             if (next?.status === 'pending') next.status = 'moving';
-            return { address: stop.address, orders: stop.orders, status, sequence, route: routeList };
+            return { address: stop.address, orders: stop.orders, status, sequence, completedAt: completedTime(stop.ids), route: routeList };
         }) };
 }
 async function livePublications(db, date, now) {
@@ -147,7 +152,7 @@ async function livePublications(db, date, now) {
     ]);
     const allLicenses = licenses.docs.map(d => ({ ...d.data(), key: d.id }));
     const routes = routeDocs.docs.map(d => ({ ...d.data(), documentId: d.id }));
-    const completions = completionDocs.docs.map(d => d.data());
+    const completions = completionDocs.docs.map(d => d.data()).sort((a,b)=>a.completedAt-b.completedAt);
     const publications = [];
     for (const company of allLicenses.filter(l => l.type === 'dispatch' && isActive(l, dayOf(now), now))) {
         const drivers = allLicenses.filter(l => l.type !== 'dispatch' && l.dispatchKey === company.key && l.routeOwnerId);
@@ -155,7 +160,7 @@ async function livePublications(db, date, now) {
         const rows = orders.docs.filter(d => d.data().dispatchKey === company.key || d.id === `${date}_${company.key}`)
             .flatMap(d => Array.isArray(d.data().orders) ? d.data().orders.map(o => ({ ...o })) : []);
         const companyRoutes = routes.filter(r => ownerKeys.has(r.routeOwnerId));
-        const completionStates = {};
+        const completionStates = {}, completionTimes = {};
         for (const record of completions) {
             const driver = ownerKeys.get(record.routeOwnerId), id = record.destinationId == null ? '' : String(record.destinationId);
             if (!driver || !id) continue;
@@ -166,6 +171,7 @@ async function livePublications(db, date, now) {
                 : ['배송 완료','완료','직접 전달','사진 완료','문 앞','주방'].includes(record.tag) || /^기타\s*:/.test(record.tag || '') ? 'completed' : '';
             if (!status) continue;
             (completionStates[driver] ||= {})[id] = status;
+            (completionTimes[driver] ||= {})[id] = status === 'completed' ? record.completedAt : null;
             const match = rows.find(o => String(o.assignedDriver || '') === driver &&
                 (String(o.id ?? '') === id || clean(record.orderNo) && clean(o.orderNo) === clean(record.orderNo)));
             const active = route && routeItems(route).some(d => String(d.id) === id);
@@ -178,7 +184,7 @@ async function livePublications(db, date, now) {
         for (const driver of drivers) if (!snapshot.plans[driver.key]) snapshot.plans[driver.key] = {
             owner: driver.routeOwnerId, name: clean(driver.name) || '담당 기사', routeId: '', slots: [], updatedAt: 0
         };
-        publications.push({ ...snapshot, completionStates, dispatchKey: company.key, company: clean(company.companyName || company.name) || '배송업체',
+        publications.push({ ...snapshot, completionStates, completionTimes, dispatchKey: company.key, company: clean(company.companyName || company.name) || '배송업체',
             date, expiresAt: start + 8 * DAY });
     }
     return { publications, routes };
@@ -244,9 +250,20 @@ function createHandler(sdk = admin) {
                 const licenseDocs = await Promise.all(keys.map(key => db.collection('licenses').doc(key).get()));
                 if (licenseDocs.some((d, i) => d.data()?.dispatchKey !== publication.dispatchKey || d.data()?.routeOwnerId !== publication.plans[keys[i]].owner))
                     throw problem('배송 담당 정보가 변경되었습니다. 배송업체에 확인해 주세요.', 404);
-                const snapshots = await Promise.all(keys.map(key => db.collection('routes').where('routeOwnerId', '==', publication.plans[key].owner).get()));
+                const dayStart = Date.parse(publication.date + 'T00:00:00+09:00');
+                const [snapshots, completionDocs] = await Promise.all([
+                    Promise.all(keys.map(key => db.collection('routes').where('routeOwnerId', '==', publication.plans[key].owner).get())),
+                    db.collection('completions').where('completedAt', '>=', dayStart).where('completedAt', '<', dayStart + DAY).get()
+                ]);
+                const completionTimes = {};
+                for (const record of completionDocs.docs.map(d=>d.data()).sort((a,b)=>a.completedAt-b.completedAt)) {
+                    const key = keys.find(key=>publication.plans[key].owner === record.routeOwnerId);
+                    if (!key || record.destinationId == null) continue;
+                    const completed = ['배송 완료','완료','직접 전달','사진 완료','문 앞','주방'].includes(record.tag) || /^기타\s*:/.test(record.tag || '');
+                    (completionTimes[key] ||= {})[String(record.destinationId)] = completed ? record.completedAt : null;
+                }
                 const routes = snapshots.flatMap(s => s.docs.map(d => ({ ...d.data(), documentId: d.id })));
-                const data = projectTracking(publication, token.phone, routes);
+                const data = projectTracking({ ...publication, completionTimes }, token.phone, routes);
                 if (cache.size >= 500) cache.delete(cache.keys().next().value);
                 cache.set(code, { until: now + 30000, data });
                 return res.status(200).json(data);
