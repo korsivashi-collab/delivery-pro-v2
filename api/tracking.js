@@ -26,16 +26,6 @@ function routeDay(route) {
         ? plan.date.split('-').map((v, i) => i ? v.padStart(2, '0') : v).join('-') : dayOf(route.updatedAt);
 }
 function routeItems(route) { return route.cleared ? [] : route.destinations || []; }
-function neighborhoodOf(value) {
-    const address = clean(value);
-    const pattern = /(?:^|[\s(,])([가-힣]+(?:\d+(?:[·.]\d+)*)?(?:동|읍|면|리|가))(?=[\s),]|$)/g;
-    // Parenthesized legal neighborhood takes precedence over road/building names.
-    for (const text of [...(address.match(/\([^)]*\)/g) || []), address]) {
-        const match = [...text.matchAll(pattern)][0];
-        if (match) return match[1];
-    }
-    return '';
-}
 function snapshotFor(orders, drivers, routes, date) {
     const rows = orders.filter(o => o && typeof o === 'object').map(o => ({ ...o }));
     const originalCount = rows.length, consumed = new Set(), plans = {};
@@ -129,18 +119,18 @@ function projectTracking(publication, phone, liveRoutes) {
                 slots = [...grouped.values()];
             }
             const sequence = slots.flatMap((ids, i) => ids.some(id => stop.ids.includes(id)) ? [i + 1] : []);
-            const neighborhoods = new Map();
+            const addresses = new Map();
             for (const group of publication.stops.filter(s => s.driver === stop.driver))
-                for (const id of group.ids) neighborhoods.set(id, neighborhoodOf(group.address));
-            for (const entry of entries) if (!neighborhoods.get(String(entry.id))) neighborhoods.set(String(entry.id), neighborhoodOf(entry.item?.address));
-            for (const item of samePlan ? routeItems(route) : []) neighborhoods.set(String(item.id), neighborhoodOf(item.fullAddress || item.address));
+                for (const id of group.ids) addresses.set(id, clean(group.address));
+            for (const entry of entries) if (!addresses.get(String(entry.id))) addresses.set(String(entry.id), clean(entry.item?.address));
+            for (const item of samePlan ? routeItems(route) : []) addresses.set(String(item.id), addressOf(item));
             const routeList = slots.map((ids, i) => {
                     const statuses = ids.map(statusOf);
                     const status = statuses.every(s => s === 'completed') ? 'completed'
                         : statuses.every(s => s === 'cancelled') ? 'cancelled'
                         : statuses.includes('checking') ? 'checking' : 'pending';
                     return { sequence: i + 1, own: ids.some(id => stop.ids.includes(id)), status,
-                        neighborhood: ids.map(id => neighborhoods.get(id)).find(Boolean) || '' };
+                        address: ids.map(id => addresses.get(id)).find(Boolean) || '' };
                 });
             // The first remaining delivery is the next destination in the saved route, not GPS evidence.
             const next = routeList.find(s => s.status !== 'completed' && s.status !== 'cancelled');
