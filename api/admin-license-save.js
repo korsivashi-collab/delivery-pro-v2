@@ -22,6 +22,7 @@ module.exports = async function handler(req, res) {
         if (identity.masterSmsVerified !== true || !(identity.masterSessionExpiresAt > Date.now() / 1000)) {
             return res.status(403).json({ error: '마스터 SMS 인증이 필요합니다. 다시 로그인해 주세요.' });
         }
+        if(['smsWallet','adjustSmsCredits'].includes(req.body?.action)) return res.status(200).json(await require('./dispatch-payment.js').createService().execute(admin.firestore(),identity,{...req.body,dispatchKey:req.body.key,action:req.body.action==='smsWallet'?'wallet':'adjust'}));
         if(req.body?.action==='cancelPayment') return res.status(200).json(await require('./payment-confirm.js').createService().cancelPayment(admin.firestore(),req.body,identity.uid));
         if(req.body?.action==='delete') return res.status(200).json(await deleteLicenseAccount(admin.firestore(),req.body));
         if(req.body?.action==='paymentInfo'){
