@@ -431,7 +431,7 @@ export async function generateNewLicense() {
                 expireDate: expStr,
                 deviceId: "",
                 status: "active",
-                maxSlots: (type === 'dispatch' ? 20 : 0),
+                maxSlots: (type === 'dispatch' ? 10 : 0),
                 maxSessions: (type === 'dispatch' ? 1 : 1),
                 isPro: false,
                 createdAt: Date.now() + i
