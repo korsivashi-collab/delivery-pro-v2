@@ -12,7 +12,7 @@
     
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261022-tracking-lookup">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261022-tracking-live">
     <style>
     #login-screen>div{max-height:calc(100dvh - 48px);overflow-y:auto}
     #login-billing-dialog{width:calc(100% - 32px);max-width:1180px;max-height:90dvh;border:0;border-radius:20px;padding:0;background:#f3f6fa;color:#17243b;box-shadow:0 25px 80px #0005}
@@ -80,7 +80,7 @@
     <dialog id="login-billing-dialog" aria-labelledby="dispatch-account-heading"><div class="login-billing-header"><div><h2 id="dispatch-account-heading">결제·문자 충전</h2><p id="dispatch-account-description"></p><span id="dispatch-account-mode-label" class="service-status-tag"></span></div><button type="button" onclick="document.getElementById('login-billing-dialog').close()" aria-label="요금 안내 닫기">닫기</button></div><div class="dispatch-service-page"><p class="customer-review-alert" style="margin-bottom:20px">관제 상품과 문자 충전 금액을 미리 확인하세요. 현재는 금액 확인 단계이며, 실제 결제·충전과 계정 적용은 진행되지 않습니다.</p><div id="dispatch-account-content"></div></div></dialog>
     <dialog id="customer-action-dialog" aria-labelledby="customer-dialog-heading"><div class="customer-dialog-header"><h2 id="customer-dialog-heading"></h2><button type="button" onclick="window.closeCustomerDialog()" aria-label="닫기">×</button></div><div id="customer-dialog-body"></div><div class="customer-dialog-footer"><button type="button" onclick="window.closeCustomerDialog()">닫기</button></div></dialog>
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 및 라우터 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-dispatch-trial-link","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261022-tracking-lookup","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-dispatch-10-slots"}}</script>
-    <script type="module" src="./js/admin-app.js?v=20261022-tracking-lookup"></script>
+    <script type="importmap">{"imports":{"./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-dispatch-trial-link","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261022-tracking-live","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-dispatch-10-slots"}}</script>
+    <script type="module" src="./js/admin-app.js?v=20261022-tracking-live"></script>
 </body>
 </html>
