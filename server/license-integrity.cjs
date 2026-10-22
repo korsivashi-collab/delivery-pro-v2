@@ -188,6 +188,7 @@ async function saveLicenses(db, request, now = Date.now()) {
                 }
             }
             const previous = create ? {} : licenses.get(origKey);
+            if(previous.dispatchBillingId && payload.type !== 'dispatch') throw problem('문자·결제 이력이 있는 관제 계정은 다른 계정 유형으로 변경할 수 없습니다.',409);
             const previousProfile = create ? {} : profiles.get(origKey) || {};
             if (previous.billingManaged && !account) throw problem('결제 연결 정보를 찾을 수 없습니다. 저장하지 않았습니다.', 409);
             if (previous.routeOwnerId && previousProfile.routeOwnerId && previous.routeOwnerId !== previousProfile.routeOwnerId) {
@@ -196,6 +197,7 @@ async function saveLicenses(db, request, now = Date.now()) {
             const routeOwnerId = previous.routeOwnerId || previousProfile.routeOwnerId || randomUUID();
             const license = { ...previous, ...payload, ...(account?{isPro:previous.isPro??true}:{}), routeOwnerId,
                 dispatchKey: previous.dispatchKey || '', createdAt: previous.createdAt ?? now + changed.length };
+            if(previous.dispatchBillingId && Number.isFinite(previous.expiresAt)) license.expiresAt=Date.parse(payload.expireDate.replace(/\./g,'-')+'T23:59:59.999+09:00');
             // Toggle/phone/key changes revoke any existing test session immediately.
             if (previous.testSmsBypass === true && (!payload.testSmsBypass || renaming ||
                 phoneDigits(previous.phone) !== phoneDigits(payload.phone))) {
@@ -325,6 +327,10 @@ async function deleteLicenseAccount(db, request, now = Date.now()) {
             tx.get(db.collection('billing_accounts')), tx.get(db.collection('payment_orders').where('licenseKey','==',key)), tx.get(db.collection('licenses'))
         ]);
         if(request.orphanOnly && l.exists) throw problem('계정이 현재 존재합니다. 삭제된 프로필 정리를 중단했습니다.',409);
+        if(l.data()?.dispatchBillingId){
+            const wallet=(await tx.get(db.collection('dispatch_wallets').doc(l.data().dispatchBillingId))).data();
+            if(wallet && (wallet.balance>0 || wallet.testBalance>0 || wallet.pendingOrder)) throw problem('문자 잔여 건수 또는 진행 중인 관제 결제가 있습니다. 잔액·결제 결과를 정리한 뒤 삭제해 주세요.',409);
+        }
         const linkedAccounts=accounts.docs.filter(d=>d.data().licenseKey===key);
         const paid=l.data()?.billingManaged || p.data()?.billingManaged || binding.exists || linkedAccounts.length || orders.docs.length;
         if(paid){
