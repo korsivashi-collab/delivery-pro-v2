@@ -134,20 +134,27 @@ function createHandler(sdk = admin) {
         res.setHeader('Referrer-Policy', 'no-referrer');
         if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: '지원하지 않는 요청입니다.' });
         try {
-            const code = String(req.query?.code || '');
-            if (req.method === 'GET' && !/^[A-Za-z0-9_-]{16}$/.test(code)) throw problem('올바른 배송조회 링크가 아닙니다.', 404);
+            const lookupRequest = req.method === 'POST' && req.body?.action === 'lookup';
+            const code = String(lookupRequest ? req.body.code || '' : req.query?.code || '');
+            if ((req.method === 'GET' || lookupRequest) && !/^[A-Za-z0-9_-]{16}$/.test(code)) throw problem('올바른 배송조회 링크가 아닙니다.', 404);
+            if (req.method === 'GET') throw problem('전화번호 또는 주문번호를 입력해 조회해 주세요.', 400);
+            const lookup = lookupRequest ? String(req.body.lookup || '').trim() : '';
+            if (lookupRequest && (!lookup || lookup.length > 150)) throw problem('전화번호 또는 주문번호를 입력해 주세요.');
             if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({
                 projectId: process.env.FIREBASE_PROJECT_ID, clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
                 privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
             }) });
             const db = sdk.firestore(), now = Date.now();
-            if (req.method === 'GET') {
+            if (lookupRequest) {
                 const cached = cache.get(code);
-                if (cached && cached.until > now && cached.data.expiresAt > now) return res.status(200).json(cached.data);
                 const token = (await db.collection('delivery_tracking_tokens').doc(code).get()).data();
                 if (!token || token.expiresAt <= now) throw problem('배송조회 기간이 끝났거나 사용할 수 없는 링크입니다.', 404);
                 const publication = (await db.collection('delivery_tracking_publications').doc(token.publication).get()).data();
                 if (!publication || publication.expiresAt <= now) throw problem('배송조회 기간이 끝났습니다.', 404);
+                const customerStops = publication.stops.filter(s => s.phone === token.phone);
+                if (phoneOf(lookup) !== token.phone && !customerStops.some(s => s.orders.some(order => order === lookup)))
+                    throw problem('입력한 정보와 일치하는 배송이 없습니다. 주문할 때 등록한 전화번호 또는 주문번호를 확인해 주세요.', 404);
+                if (cached && cached.until > now && cached.data.expiresAt > now) return res.status(200).json(cached.data);
                 const keys = [...new Set(publication.stops.filter(s => s.phone === token.phone).map(s => s.driver))];
                 if (!keys.length) throw problem('배송 정보를 확인할 수 없습니다.', 404);
                 const licenseDocs = await Promise.all(keys.map(key => db.collection('licenses').doc(key).get()));
