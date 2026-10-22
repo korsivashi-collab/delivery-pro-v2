@@ -611,18 +611,22 @@ async function showSmsCredits(key, visible=true) {
         const w=await saveMasterLicenses({action:'smsWallet',key});
         if(document.getElementById('edit-orig-key').value!==key)return;
         masterSmsWallet={...w,key};
-        box.innerHTML=`<b>문자 잔여 건수 직접 수정</b><p>실제 ${w.balance.toLocaleString()}건 · 테스트 ${w.testBalance.toLocaleString()}건</p><label>수정 대상 <select id="master-sms-environment"><option value="live">실제 발송 건수</option><option value="test">테스트 건수</option></select></label><label style="display:block">수정 후 잔여 건수 <input id="master-sms-count" type="number" min="0" max="10000000" step="1" value="${w.balance}"></label><label style="display:block">수정 사유 <input id="master-sms-reason" maxlength="200" placeholder="테스트 지급 / 오류 복구 등"></label><p>계정 저장과 별도로 즉시 반영되며 수정 전후 건수·사유·관리자가 기록됩니다.</p><button type="button" id="master-sms-save">문자 건수 적용</button><button type="button" id="master-sms-refresh">다시 불러오기</button>`;
-        document.getElementById('master-sms-environment').onchange=e=>{document.getElementById('master-sms-count').value=e.target.value==='test'?w.testBalance:w.balance;};
+        box.innerHTML=`<b>문자 건수 관리</b><p>현재 잔여: 실제 ${w.balance.toLocaleString()}건 · 테스트 ${w.testBalance.toLocaleString()}건</p><label style="display:block;margin:12px 0">지급 대상 <select id="master-sms-environment" style="border:1px solid #cbd5e1;padding:8px;border-radius:8px"><option value="live">실제 발송 건수</option><option value="test">테스트 건수</option></select></label><label style="display:block">추가 지급 건수 <input id="master-sms-count" type="number" min="1" max="10000000" step="1" placeholder="추가할 수량" style="width:100%;border:1px solid #cbd5e1;padding:10px;border-radius:8px"></label><label style="display:block;margin-top:10px">처리 사유 <input id="master-sms-reason" maxlength="200" placeholder="서비스 지급 / 오류 복구 / 환불 정리 등" style="width:100%;border:1px solid #cbd5e1;padding:10px;border-radius:8px"></label><p style="font-size:12px;margin:10px 0">현재 잔액에 입력한 수량을 추가합니다. 계정 저장과 별도로 즉시 반영되며 처리 이력이 남습니다.</p><button type="button" id="master-sms-save" style="background:#2563eb;color:white;border-radius:8px;padding:9px 14px">건수 추가</button> <button type="button" id="master-sms-refresh" style="padding:9px">새로고침</button><div style="border-top:1px solid #e2e8f0;margin-top:20px;padding-top:14px"><button type="button" id="master-sms-reset" style="border:1px solid #fecaca;color:#b91c1c;border-radius:8px;padding:9px 14px">잔여 건수 전체 0건 처리</button><p style="font-size:12px;color:#64748b">선택한 대상의 잔여 건수를 모두 소멸시킵니다. 환불은 별도로 직접 처리해 주세요.</p></div>`;
         document.getElementById('master-sms-refresh').onclick=()=>showSmsCredits(key);
-        document.getElementById('master-sms-save').onclick=async()=>{
-            const current=masterSmsWallet;if(current?.key!==key)return;
-            const balance=Number(document.getElementById('master-sms-count').value),reason=document.getElementById('master-sms-reason').value.trim(),test=document.getElementById('master-sms-environment').value==='test';
-            if(!Number.isSafeInteger(balance)||balance<0||balance>10000000||reason.length<2)return alert('0 이상의 정수 건수와 수정 사유를 입력해 주세요.');
-            if(!confirm(`${test?'테스트':'실제'} 문자 잔여 건수를 ${balance.toLocaleString()}건으로 변경할까요?`))return;
-            const button=document.getElementById('master-sms-save');button.disabled=true;
-            try {await saveMasterLicenses({action:'adjustSmsCredits',key,balance,reason,test,revision:current.revision,requestId:crypto.randomUUID()});await showSmsCredits(key);}
-            catch(e){alert(e.message+'\n다시 불러오기로 저장 결과를 확인해 주세요.');button.disabled=false;}
+        let busy=false;
+        const apply=async operation=>{
+            const current=masterSmsWallet;if(busy||current?.key!==key)return;
+            const count=operation==='reset'?0:Number(document.getElementById('master-sms-count').value),reason=document.getElementById('master-sms-reason').value.trim(),test=document.getElementById('master-sms-environment').value==='test';
+            if(!Number.isSafeInteger(count)||(operation==='add'&&(count<=0||count>10000000))||reason.length<2)return alert('추가 건수는 양의 정수로, 처리 사유는 2자 이상 입력해 주세요.');
+            const before=test?current.testBalance:current.balance;
+            if(!confirm(operation==='reset'?`${test?'테스트':'실제'} 잔여 ${before.toLocaleString()}건을 모두 소멸시켜 0건으로 처리할까요? 환불은 별도로 처리해야 합니다.`:`${test?'테스트':'실제'} 문자 ${count.toLocaleString()}건을 추가 지급할까요?`))return;
+            busy=true;const buttons=['master-sms-save','master-sms-reset','master-sms-refresh'].map(id=>document.getElementById(id));buttons.forEach(b=>b.disabled=true);
+            try {await saveMasterLicenses({action:'adjustSmsCredits',key,operation,count,reason,test,revision:current.revision,requestId:crypto.randomUUID()});await showSmsCredits(key);}
+            catch(e){alert(e.message+'\n새로고침으로 저장 결과를 확인해 주세요.');}
+            finally{busy=false;buttons.forEach(b=>b.disabled=false);}
         };
+        document.getElementById('master-sms-save').onclick=()=>apply('add');
+        document.getElementById('master-sms-reset').onclick=()=>apply('reset');
     } catch(e){box.textContent=e.message;}
 }
 
