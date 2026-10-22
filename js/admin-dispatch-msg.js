@@ -1,6 +1,6 @@
 // js/admin-dispatch-msg.js
 
-import { db, auth } from "./admin-api.js";
+import { db, auth, requestDispatchSignupSms, dispatchSignupToken } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { selectLatestOwnedRoute } from "./route-owner.js";
 import { playBeepSound, refreshDispatchSoundButton } from "./admin-utils.js";
@@ -668,8 +668,44 @@ export function renderDispatchAccount(mode='ACCOUNT'){
  if(!customerBilling.initialized&&account){customerBilling.plan=account.isPro?'pro':'basic';const slots=Number(account.maxSlots);customerBilling.slotPacks=Number.isSafeInteger(slots)&&slots>10&&slots%5===0?(slots-10)/5:0;customerBilling.extraPcs=Math.max(0,(Number(account.maxSessions)||(account.isPro?2:1))-(account.isPro?2:1));customerBilling.initialized=true;}
  container.innerHTML=`<section id="dispatch-billing-service" class="billing-page-section" aria-label="관제 상품 선택"><div class="dispatch-products-intro"><h3>관제 상품 선택</h3><p>상품별로 필요한 기사 회선과 PC를 선택하세요. 각 상품 안에서 총액과 이용기간을 확인할 수 있습니다.</p><small>현재 이용 상품은 저장된 허용량을 참고해 불러옵니다. 실제 계약 내용은 관리자 확인 후 확정합니다.</small></div><div class="dispatch-products-grid">${customerProductCard('basic')}${customerProductCard('pro')}</div><article class="service-card billing-extension-card">${customerContractExtensionPanel()}</article></section><section id="dispatch-billing-sms" class="billing-page-section" aria-label="문자 충전"><h3 class="billing-section-heading">문자 충전</h3><div class="billing-layout"><article class="service-card billing-options">${customerBillingOptions()}</article><aside class="service-card billing-checkout"><h3>충전 금액 확인</h3><div id="dispatch-billing-quote-sms"></div><p class="billing-checkout-note">문자 충전은 관제 상품과 별도로 결제합니다. 서버 승인 후 잔여 건수에 반영됩니다.</p><button type="button" id="dispatch-billing-review-sms" class="customer-primary-button" onclick="window.reviewDispatchBilling('sms')">충전금액 확인</button></aside></div></section><article class="service-card billing-history"><h3>결제·충전 및 사용 내역</h3><div id="dispatch-billing-history">조회 중</div><button type="button" onclick="window.refreshDispatchWallet()">잔액·내역 새로고침</button></article>`;updateDispatchBillingQuote();updateCustomerExtensionQuote();
 }
+function showDispatchSignupResult(r){
+ if(window.location?.search&&new URLSearchParams(window.location.search).has('dispatchSignup'))history.replaceState(null,'',location.pathname+'?view=billing');
+ const result=r.result||{};
+ openCustomerDialog(r.test?'신규 관제 가입 테스트 완료':'관제 가입이 완료되었습니다',`<p><b>${escapeMessage(result.companyName||'')}</b> · ${result.isPro?'PRO':'기본'} 관제</p><dl class="customer-review-details"><dt>이용기간</dt><dd>${escapeMessage(result.expireDate)}</dd><dt>기사 연결</dt><dd>${result.maxSlots}회선</dd><dt>PC 동시접속</dt><dd>${result.maxSessions}대</dd></dl>${r.test?'<p>테스트 결제 결과입니다. 실제 과금과 이용 가능한 관제 계정은 생성하지 않았습니다.</p>':`<p>앞으로 로그인할 때 사용하는 관제 키입니다. 안전하게 보관해 주세요.</p><pre class="customer-review-message" id="dispatch-issued-key">${escapeMessage(result.dispatchKey||r.dispatchKey)}</pre><button type="button" id="dispatch-signup-login" class="customer-primary-button">관제 시작하기</button>`}`);
+ const start=document.getElementById('dispatch-signup-login');if(start)start.onclick=()=>{document.getElementById('login-billing-dialog')?.close();closeCustomerDialog();document.getElementById('single-key-input').value=result.dispatchKey||r.dispatchKey;window.handleSingleKeyLogin();};
+}
+function openDispatchSignup(selection=null){
+ openCustomerDialog(selection?'업체 정보 입력 · 휴대폰 인증':'가입·결제 결과 확인',`<p>${selection?'담당자 휴대폰 인증 후 결제하면 관제 계정이 발급됩니다.':'가입할 때 인증한 담당자 휴대폰 번호로 발급된 관제 키와 결제 결과를 확인합니다.'}</p>${selection?'<label class="billing-field">업체명<input id="dispatch-signup-company" maxlength="60" autocomplete="organization" placeholder="업체명을 입력하세요"></label>':''}<label class="billing-field">담당자 휴대폰 번호<input id="dispatch-signup-phone" type="tel" autocomplete="tel" placeholder="010-1234-5678"></label><button type="button" id="dispatch-signup-send">인증번호 받기</button><label class="billing-field">인증번호<input id="dispatch-signup-code" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="인증번호 6자리"></label><button type="button" id="dispatch-signup-verify" disabled>인증 확인</button><p id="dispatch-signup-status" role="status" class="customer-help">입력한 번호로 인증번호를 보내 드립니다.</p>${selection?'<label style="display:flex;gap:8px;margin:16px 0"><input id="dispatch-signup-consent" type="checkbox"><span><a href="/terms.html" target="_blank" rel="noopener">이용약관</a> 및 <a href="/privacy.html" target="_blank" rel="noopener">개인정보처리방침</a>을 확인하고 가입에 동의합니다.</span></label><button type="button" id="dispatch-signup-next" class="customer-primary-button" disabled>가입 정보 확인 후 결제하기</button>':''}<button type="button" id="dispatch-signup-recover" disabled style="margin-top:12px">기존 가입·결제 결과 확인</button><p class="customer-help">이미 발급된 관제 키가 있으면 키로 로그인해 주세요.</p>`);
+ const form=document.getElementById('dispatch-signup-status'),phone=document.getElementById('dispatch-signup-phone'),send=document.getElementById('dispatch-signup-send'),verify=document.getElementById('dispatch-signup-verify'),next=document.getElementById('dispatch-signup-next'),recover=document.getElementById('dispatch-signup-recover');
+ let confirmation=null,verified=false;
+ send.onclick=async()=>{send.disabled=true;verified=false;verify.disabled=true;if(next)next.disabled=true;recover.disabled=true;form.textContent='인증번호를 요청하고 있습니다.';
+  try{confirmation=await requestDispatchSignupSms(phone.value);if(!form.isConnected)return;phone.readOnly=true;verify.disabled=false;form.textContent='인증번호를 발송했습니다. 6자리를 입력해 주세요.';}
+  catch(e){form.textContent=e.message;}finally{send.disabled=false;}
+ };
+ verify.onclick=async()=>{if(!confirmation)return;verify.disabled=true;send.disabled=true;form.textContent='휴대폰 인증 확인 중…';
+  try{await confirmation.confirm(document.getElementById('dispatch-signup-code').value.trim());if(!form.isConnected)return;verified=true;form.textContent='휴대폰 인증이 완료되었습니다.';recover.disabled=false;if(next)next.disabled=false;}
+  catch(e){form.textContent=e.message;verify.disabled=false;send.disabled=false;}
+ };
+ if(next)next.onclick=async()=>{if(!verified)return;next.disabled=true;recover.disabled=true;form.textContent='가입 신청을 확인하고 있습니다.';
+  try{
+   const r=await dispatchPaymentRequest({action:'prepare-signup',companyName:document.getElementById('dispatch-signup-company').value,consent:document.getElementById('dispatch-signup-consent').checked});
+   if(!form.isConnected)return;if(r.completed){showDispatchSignupResult(r);return;}
+   await startDispatchCheckout({...selection,signup:true});
+  }catch(e){form.textContent=e.message;}finally{next.disabled=false;recover.disabled=false;}
+ };
+ recover.onclick=async()=>{if(!verified)return;recover.disabled=true;if(next)next.disabled=true;form.textContent='가입·결제 결과를 확인하고 있습니다.';
+  try{const w=await dispatchPaymentRequest({action:'wallet',signup:true});if(!form.isConnected)return;if(w.completed)showDispatchSignupResult(w);else if(w.pendingOrder){const r=await dispatchPaymentRequest({action:'recover',signup:true});if(form.isConnected)showDispatchSignupResult(r);}else form.textContent='결제 완료 내역이 없습니다. 관제 상품을 선택해 가입을 진행해 주세요.';}
+  catch(e){form.textContent=e.message;}finally{recover.disabled=false;if(next)next.disabled=false;}
+ };
+}
+window.openDispatchSignupRecovery=()=>openDispatchSignup();
 let dispatchWalletLoading=false,dispatchCheckoutBusy=false,dispatchWidgets=null;
 async function dispatchPaymentRequest(input){
+ if(input.signup===true||input.action==='prepare-signup'){
+  const token=await dispatchSignupToken();
+  const r=await fetch('/api/dispatch-payment',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify({...input,signup:true})});
+  const result=await r.json();if(!r.ok)throw Error(result.error||'가입·결제 서버 연결을 확인해 주세요.');return result;
+ }
  await auth.authStateReady?.();
  if(!auth.currentUser||!customerDispatchKey())throw Error('관제 계정으로 로그인한 뒤 결제·충전을 이용해 주세요.');
  const r=await fetch('/api/dispatch-payment',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify({...input,dispatchKey:customerDispatchKey(),sessionToken:sessionStorage.getItem('deliveryProSessionToken')})});
@@ -691,6 +727,10 @@ async function loadDispatchPaymentSdk(){
  await new Promise((resolve,reject)=>{const script=document.createElement('script');script.src='https://js.tosspayments.com/v2/standard';const timer=setTimeout(()=>{script.remove();reject(Error('토스 결제수단을 불러오지 못했습니다. 다시 시도해 주세요.'));},15000);script.onload=()=>{clearTimeout(timer);resolve();};script.onerror=()=>{clearTimeout(timer);script.remove();reject(Error('토스 결제수단 연결에 실패했습니다.'));};document.head.append(script);});
 }
 async function startDispatchCheckout(selection){
+ if(!selection.signup&&(!auth.currentUser||!customerDispatchKey())){
+  if(selection.kind==='service')return openDispatchSignup(selection);
+  openCustomerDialog('문자 충전은 관제 가입 후 이용해 주세요','<p>관제 키가 있으면 먼저 로그인해 주세요. 처음 이용하는 업체는 기본 또는 PRO 관제 상품으로 가입할 수 있습니다.</p>');return;
+ }
  if(dispatchCheckoutBusy)return;dispatchCheckoutBusy=true;
  const button=document.getElementById('dispatch-checkout-start');if(button)button.disabled=true;
  try {
@@ -702,23 +742,25 @@ async function startDispatchCheckout(selection){
   await dispatchWidgets.renderAgreement({selector:'#dispatch-payment-agreement',variantKey:'AGREEMENT'});
   const pay=document.getElementById('dispatch-pay');if(!pay)return;pay.disabled=false;
   document.getElementById('dispatch-payment-status').textContent='결제수단을 선택하고 필수 약관에 동의해 주세요.';
-  pay.onclick=async()=>{pay.disabled=true;try{await dispatchWidgets.requestPayment({orderId:order.orderId,orderName:order.quote.label,successUrl:location.origin+'/admin-dispatch.html?view=billing&dispatchPayment=success',failUrl:location.origin+'/admin-dispatch.html?view=billing&dispatchPayment=failed'});}catch(e){document.getElementById('dispatch-payment-status').textContent=e.message;pay.disabled=false;}};
+  const returnPage=selection.signup?'/admin.html?view=billing&dispatchSignup=':'/admin-dispatch.html?view=billing&dispatchPayment=';
+  pay.onclick=async()=>{pay.disabled=true;try{await dispatchWidgets.requestPayment({orderId:order.orderId,orderName:order.quote.label,successUrl:location.origin+returnPage+'success',failUrl:location.origin+returnPage+'failed'});}catch(e){document.getElementById('dispatch-payment-status').textContent=e.message;pay.disabled=false;}};
  }catch(e){openCustomerDialog('결제 연결 안내',`<p>${escapeMessage(e.message)}</p><a href="/admin.html?view=billing">관제 로그인으로 이동</a>`);}
  finally{dispatchCheckoutBusy=false;if(button)button.disabled=false;}
 }
 let dispatchPaymentReturnHandled=false;
 async function finishDispatchPayment(){
- const params=new URLSearchParams(window.location.search);if(dispatchPaymentReturnHandled||!params.has('dispatchPayment'))return;dispatchPaymentReturnHandled=true;
- if(params.get('dispatchPayment')==='failed'){openCustomerDialog('결제가 완료되지 않았습니다',`<p>${escapeMessage(params.get('message')||'결제를 취소했습니다. 다시 상품을 선택할 수 있습니다.')}</p>`);return;}
+ const params=new URLSearchParams(window.location.search),signup=params.has('dispatchSignup');if(dispatchPaymentReturnHandled||!params.has('dispatchPayment')&&!signup)return;dispatchPaymentReturnHandled=true;
+ if(params.get(signup?'dispatchSignup':'dispatchPayment')==='failed'){openCustomerDialog('결제가 완료되지 않았습니다',`<p>${escapeMessage(params.get('message')||'결제를 취소했습니다. 다시 상품을 선택할 수 있습니다.')}</p><p>결제 완료 전에는 관제 계정이 발급되지 않습니다.</p>`);return;}
  openCustomerDialog('결제 승인 확인','<p>결제 결과를 서버에서 확인하고 있습니다. 재결제하지 마세요.</p>');
  try {
-  const r=await dispatchPaymentRequest({action:'confirm',orderId:params.get('orderId'),paymentKey:params.get('paymentKey'),amount:Number(params.get('amount'))});
+  const r=await dispatchPaymentRequest({action:'confirm',orderId:params.get('orderId'),paymentKey:params.get('paymentKey'),amount:Number(params.get('amount')),...(signup?{signup:true}:{})});
+  if(signup){showDispatchSignupResult(r);history.replaceState(null,'',location.pathname+'?view=billing');return;}
   openCustomerDialog(r.test?'테스트 결제 완료':'결제 완료',`<p>${r.result.count?`${r.result.count.toLocaleString()}건 충전 · 잔여 ${r.result.balance.toLocaleString()}건`:`관제 이용기간 ${escapeMessage(r.result.expireDate)}까지`}</p><p>${r.test?'테스트 전용 결과입니다. 실제 문자 잔여 건수와 관제 권한은 변경하지 않았습니다.':'서버에 반영되었습니다.'}</p>`);
   history.replaceState(null,'',location.pathname+'?view=billing');await refreshDispatchWallet();
- }catch(e){openCustomerDialog('결제 결과 재확인 필요',`<p>${escapeMessage(e.message)}</p><p>주문번호: ${escapeMessage(params.get('orderId'))}</p><button type="button" id="dispatch-payment-retry">같은 주문 다시 확인</button>`);document.getElementById('dispatch-payment-retry').onclick=()=>{dispatchPaymentReturnHandled=false;finishDispatchPayment();};}
+ }catch(e){openCustomerDialog('결제 결과 재확인 필요',`<p>${escapeMessage(e.message)}</p><p>주문번호: ${escapeMessage(params.get('orderId'))}</p><button type="button" id="dispatch-payment-retry">같은 주문 다시 확인</button>${signup?'<button type="button" onclick="window.openDispatchSignupRecovery()">휴대폰 재인증 후 가입·결제 결과 확인</button>':''}`);document.getElementById('dispatch-payment-retry').onclick=()=>{dispatchPaymentReturnHandled=false;finishDispatchPayment();};}
 }
 window.refreshDispatchWallet=refreshDispatchWallet;
-if(window.location?.search&&new URLSearchParams(window.location.search).has('dispatchPayment'))setTimeout(finishDispatchPayment,0);
+if(window.location?.search&&['dispatchPayment','dispatchSignup'].some(key=>new URLSearchParams(window.location.search).has(key)))setTimeout(finishDispatchPayment,0);
 export function chooseCustomerSmsPack(count){customerBilling.smsCount=count;const input=document.getElementById('dispatch-sms-count');if(input)input.value=count;updateDispatchBillingQuote();}
 export function openLoginBilling(){
  const dialog=document.getElementById('login-billing-dialog');if(!dialog)return;

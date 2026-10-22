@@ -26,6 +26,29 @@ export const storage = getStorage(app);
 // 관리자 세션은 위에서 탭 단위로 초기화합니다.
 export { signInWithCustomToken };
 
+// Signup phone proofs survive payment redirects without replacing admin/driver sessions.
+let dispatchSignupAuthPromise=null;
+async function getDispatchSignupAuth(){
+    if(!dispatchSignupAuthPromise)dispatchSignupAuthPromise=(async()=>{
+        const signupAuth=initializeAuth(initializeApp(firebaseConfig,'dispatch-signup'),{persistence:browserSessionPersistence});
+        await signupAuth.authStateReady();return signupAuth;
+    })();
+    return dispatchSignupAuthPromise;
+}
+export async function requestDispatchSignupSms(phone){
+    let digits=String(phone||'').replace(/[\s()-]/g,'');
+    if(/^010\d{8}$/.test(digits))digits='+82'+digits.slice(1);
+    if(!/^\+8210\d{8}$/.test(digits))throw new Error('휴대폰 번호를 010-1234-5678 형식으로 입력해 주세요.');
+    const signupAuth=await getDispatchSignupAuth();await signOut(signupAuth);
+    const {sendNativePhoneVerification}=await import('./native-phone-auth.js');
+    return sendNativePhoneVerification(digits,token=>signInWithCustomToken(signupAuth,token));
+}
+export async function dispatchSignupToken(){
+    const signupAuth=await getDispatchSignupAuth();
+    if(!signupAuth.currentUser)throw new Error('가입할 업체의 담당자 휴대폰 인증을 완료해 주세요.');
+    return signupAuth.currentUser.getIdToken();
+}
+
 function requireAdminSession() {
     window.dispatchEvent(new CustomEvent('admin-auth-required'));
     throw new Error('관리자 로그인이 만료되었습니다. 다시 로그인해 주세요.');
