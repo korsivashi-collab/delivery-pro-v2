@@ -1,7 +1,8 @@
 // Dispatch commerce is isolated from phone-authenticated driver purchases.
 const admin = require('firebase-admin');
-const {randomUUID} = require('node:crypto');
-const {problem} = require('../server/license-integrity.cjs');
+const {randomUUID,randomBytes} = require('node:crypto');
+const {problem,phoneDigits,assertNotBlocked} = require('../server/license-integrity.cjs');
+const {verifiedPhone} = require('../server/billing.cjs');
 const {addMonths} = require('./payment-confirm.js');
 const dateOf = n => new Date(n + 9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
 const expiryOf = l => Date.parse(String(l.expireDate||'').replace(/\./g,'-')+'T23:59:59.999+09:00') || 0;
@@ -21,6 +22,55 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
  const test=()=>String(env.TOSS_CLIENT_KEY||'').startsWith('test_');
  const ready=()=>env.WEB_PAYMENT_ENABLED==='true'&&/^(test|live)_gck_/.test(env.TOSS_CLIENT_KEY||'')&&/^(test|live)_gsk_/.test(env.TOSS_SECRET_KEY||'')&&test()===env.TOSS_SECRET_KEY.startsWith('test_')&&(!test()||env.WEB_PAYMENT_ALLOW_TEST==='true');
  const config=()=>({enabled:ready(),test:test(),clientKey:ready()?env.TOSS_CLIENT_KEY:null});
+ function signupPhone(identity){
+  if(identity.role||identity.testDriverSession)throw problem('신규 관제 가입을 위한 휴대폰 인증이 필요합니다.',403);
+  return verifiedPhone(identity);
+ }
+ async function signupContext(db,identity,input){
+  const phone=signupPhone(identity),draftRef=db.collection('dispatch_registrations').doc(identity.uid+'_'+(test()?'test':'live'));
+  return db.runTransaction(async tx=>{
+   const draft=(await tx.get(draftRef)).data();
+   if(!draft||draft.uid!==identity.uid||draft.phone!==phone)throw problem('업체 정보 입력과 휴대폰 인증을 먼저 완료해 주세요.',403);
+   const ref=db.collection('licenses').doc(draft.key),walletRef=db.collection('dispatch_wallets').doc(draft.walletId);
+   const l=(await tx.get(ref)).data(),w=(await tx.get(walletRef)).data();
+   await assertNotBlocked(db,tx,draft.key,phone,'');
+   if(!w||l&&l.dispatchBillingId!==draft.walletId)throw problem('가입 신청 정보를 확인해 주세요.',409);
+   if(draft.completed&&!draft.test&&!l)throw problem('삭제된 관제 계정입니다. 관리자에게 재가입을 문의해 주세요.',410);
+   return {id:draft.walletId,ref,walletRef,w,l:l||{},signup:true,draft,draftRef};
+  });
+ }
+ async function prepareSignup(db,identity,input){
+  const phone=signupPhone(identity),age=Math.floor(now()/1000)-identity.auth_time;
+  if(!Number.isFinite(age)||age< -30||age>300)throw problem('휴대폰 인증을 다시 진행해 주세요.',401);
+  const companyName=String(input.companyName||'').trim();
+  if(companyName.length<2||companyName.length>60||/[\u0000-\u001f]/.test(companyName)||input.consent!==true)throw problem('업체명과 약관·개인정보 동의를 확인해 주세요.');
+  if(!ready())throw problem('토스 결제 설정을 확인해 주세요.',503);
+  const draftRef=db.collection('dispatch_registrations').doc(identity.uid+'_'+(test()?'test':'live')),lockRef=db.collection('admin_license_controls').doc('phone_integrity');
+  return db.runTransaction(async tx=>{
+   const [saved,licenses,profiles,lock]=await Promise.all([tx.get(draftRef),tx.get(db.collection('licenses')),tx.get(db.collection('driver_profiles')),tx.get(lockRef)]);
+   await assertNotBlocked(db,tx,'',phone,'');
+   const old=saved.data();
+   if(old?.phone!==phone&&old)throw problem('가입 신청의 인증 번호가 다릅니다.',409);
+   const matches=[...licenses.docs,...profiles.docs].filter(d=>phoneDigits(d.data().phone)===phoneDigits(phone));
+   if(matches.some(d=>d.id!==old?.key))throw problem('이미 이 전화번호로 등록된 계정이 있습니다. 기존 관제 키로 로그인하거나 관리자에게 문의해 주세요.',409);
+   if(old){
+    if(old.completed)return {success:true,completed:true,test:test(),dispatchKey:old.key,result:old.result};
+    if(old.companyName!==companyName)throw problem('기존 가입 신청의 업체명이 다릅니다. 먼저 기존 신청의 결제 결과를 확인해 주세요.',409);
+    return {success:true,test:test(),companyName:old.companyName};
+   }
+   let key;
+   for(let attempt=0;attempt<5;attempt++){
+    const candidate='CTRL-'+randomBytes(12).toString('hex').toUpperCase();
+    if(!(await tx.get(db.collection('licenses').doc(candidate))).exists&&!(await tx.get(db.collection('driver_profiles').doc(candidate))).exists){key=candidate;break;}
+   }
+   if(!key)throw problem('계정 번호 생성에 실패했습니다. 다시 시도해 주세요.',503);
+   const walletId=randomUUID();
+   tx.create(draftRef,{uid:identity.uid,phone,companyName,key,walletId,test:test(),createdAt:now(),consentedAt:now(),consentVersion:'20261022'});
+   tx.create(db.collection('dispatch_wallets').doc(walletId),{balance:0,testBalance:0,revision:0,recent:[]});
+   tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
+   return {success:true,test:test(),companyName};
+  });
+ }
  function authorize(l,identity,input) {
   const master=identity.role==='MASTER'&&identity.masterSmsVerified===true&&identity.masterSessionExpiresAt>now()/1000;
   if(l?.type!=='dispatch')throw problem('관제 계정을 찾을 수 없습니다.',404);
@@ -48,8 +98,10 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   return {ok:r.ok,data:await r.json()};
  }
  async function execute(db,identity,input) {
-  const c=await context(db,identity,input),{ref,walletRef,id}=c;
-  if(input.action==='wallet')return {...config(),...c.w,customerKey:'dispatch_'+id};
+  if(input.action==='prepare-signup')return prepareSignup(db,identity,input);
+  const c=await (input.signup===true?signupContext(db,identity,input):context(db,identity,input)),{ref,walletRef,id}=c;
+  const authorizeCurrent=l=>{if(!c.signup)return authorize(l,identity,input);signupPhone(identity);if(l&&l.dispatchBillingId!==id)throw problem('계정 정보가 변경되었습니다.',409);};
+  if(input.action==='wallet')return {...config(),...c.w,customerKey:'dispatch_'+id,...(c.signup?{companyName:c.draft.companyName,completed:!!c.draft.completed,result:c.draft.result||null,dispatchKey:c.draft.completed?c.draft.key:null}:{})};
   if(input.action==='recover') {
    if(!ready())throw problem('토스 결제 설정을 확인해 주세요.',503);
    if(!c.w.pendingOrder)throw problem('확인할 진행 중 주문이 없습니다.',404);
@@ -60,6 +112,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
    return execute(db,identity,{...input,action:'confirm',orderId:o.orderId,paymentKey:r.data.paymentKey,amount:o.amount});
   }
   if(input.action==='adjust') {
+   if(c.signup)throw problem('관제 로그인이 필요합니다.',403);
    if(identity.role!=='MASTER'||identity.masterSmsVerified!==true||!(identity.masterSessionExpiresAt>now()/1000))throw problem('마스터 SMS 인증이 필요합니다.',403);
    const reason=String(input.reason||'').trim(),field=input.test===true?'testBalance':'balance';
    if(!Number.isSafeInteger(input.balance)||input.balance<0||input.balance>10000000||!Number.isSafeInteger(input.revision)||reason.length<2||reason.length>200||!/^[a-f0-9-]{36}$/.test(input.requestId||''))throw problem('건수와 수정 사유를 확인해 주세요.');
@@ -75,16 +128,17 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   }
   if(!ready())throw problem('토스 결제 설정이 필요합니다. 결제 키와 WEB_PAYMENT_ENABLED / WEB_PAYMENT_ALLOW_TEST 설정을 확인해 주세요.',503);
   if(input.action==='create-order') {
-   const q=quote(input);if(!test())checkService(c.l,q);
+   const q=quote(input);if(c.signup&&(q.kind!=='service'||c.draft.completed))throw problem('신규 관제 가입은 관제 이용료 결제로 진행해 주세요. 발급된 계정은 관제 키로 로그인해 주세요.',409);if(!test()&&!c.signup)checkService(c.l,q);
    return db.runTransaction(async tx=>{
-    const l=(await tx.get(ref)).data(),w=(await tx.get(walletRef)).data();authorize(l,identity,input);if(!test())checkService(l,q);
-    if(l.dispatchBillingId!==id)throw problem('계정이 변경되었습니다.',409);
+    const l=(await tx.get(ref)).data(),w=(await tx.get(walletRef)).data();authorizeCurrent(l);if(!test()&&!c.signup)checkService(l,q);
+    if(c.signup&&(await tx.get(c.draftRef)).data()?.completed)throw problem('이미 가입이 완료되었습니다. 관제 키로 로그인해 주세요.',409);
+    if(!c.signup&&l.dispatchBillingId!==id)throw problem('계정이 변경되었습니다.',409);
     const pending=w.pendingOrder?(await tx.get(db.collection('dispatch_payment_orders').doc(w.pendingOrder))).data():null;
     if(pending?.status==='created'&&(pending.paymentKey||pending.createdAt>now()-1800000)) {
      if(JSON.stringify(pending.quote)!==JSON.stringify(q)||pending.test!==test())throw problem('진행 중인 결제 주문을 먼저 확인해 주세요. 승인 요청 전 주문은 30분 후 다른 상품으로 변경할 수 있습니다.',409);
      return {...pending,...config(),customerKey:'dispatch_'+id};
     }
-    const orderId='DSP_'+randomUUID(),order={orderId,walletId:id,dispatchKey:input.dispatchKey,quote:q,amount:q.amount,status:'created',test:test(),createdAt:now()};
+    const orderId='DSP_'+randomUUID(),order={orderId,walletId:id,dispatchKey:c.signup?c.draft.key:input.dispatchKey,quote:q,amount:q.amount,status:'created',test:test(),createdAt:now(),...(c.signup?{signupUid:identity.uid}:{})};
     tx.create(db.collection('dispatch_payment_orders').doc(orderId),order);tx.set(walletRef,{...w,pendingOrder:orderId});
     return {...order,...config(),customerKey:'dispatch_'+id};
    });
@@ -105,16 +159,31 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   const p=r.data;
   if(!r.ok||p.status!=='DONE'||p.orderId!==order.orderId||p.paymentKey!==input.paymentKey||p.currency!=='KRW'||p.totalAmount!==order.amount||p.balanceAmount!==order.amount||!Number.isFinite(Date.parse(p.approvedAt)))throw problem('결제 완료가 확인되지 않았습니다. 재결제하지 말고 같은 주문을 다시 확인해 주세요.',409);
   return db.runTransaction(async tx=>{
-   const o=(await tx.get(orderRef)).data(),l=(await tx.get(ref)).data(),w=(await tx.get(walletRef)).data();authorize(l,identity,input);
-   if(l.dispatchBillingId!==id)throw problem('계정이 변경되었습니다. 관리자에게 주문번호를 알려 주세요.',409);
-   if(o.status==='completed')return {success:true,test:o.test,result:o.result};
+   const o=(await tx.get(orderRef)).data(),l=(await tx.get(ref)).data(),w=(await tx.get(walletRef)).data();authorizeCurrent(l);
+   if(!c.signup&&l.dispatchBillingId!==id)throw problem('계정이 변경되었습니다. 관리자에게 주문번호를 알려 주세요.',409);
+   if(o.status==='completed')return {success:true,test:o.test,result:c.signup?{...o.result,dispatchKey:c.draft.key}:o.result};
+   let signupLock,signupLockRef;
+   if(c.signup){
+    if(o.signupUid!==identity.uid||o.quote.kind!=='service'||l)throw problem('신규 계정 발급 상태를 확인해 주세요.',409);
+    const draft=(await tx.get(c.draftRef)).data();if(draft?.completed)throw problem('이미 처리된 가입 신청입니다.',409);
+    signupLockRef=db.collection('admin_license_controls').doc('phone_integrity');
+    signupLock=await tx.get(signupLockRef);
+    const licenses=await tx.get(db.collection('licenses')),profiles=await tx.get(db.collection('driver_profiles'));
+    await assertNotBlocked(db,tx,c.draft.key,c.draft.phone,'');
+    if([...licenses.docs,...profiles.docs].some(d=>phoneDigits(d.data().phone)===phoneDigits(c.draft.phone)))throw problem('이 전화번호의 계정이 이미 등록되어 발급을 보류했습니다. 재결제하지 말고 관리자에게 주문번호를 알려 주세요.',409);
+   }
    const q=o.quote,field=o.test?'testBalance':'balance',updated={...w,pendingOrder:null,revision:w.revision+1};let result;
    if(q.kind==='sms'){updated[field]+=q.count;result={balance:updated[field],count:q.count};}
    else {
-    if(!o.test)checkService(l,q);
-    const expiresAt=addMonths(Math.max(Date.parse(p.approvedAt),expiryOf(l)),q.months),expireDate=dateOf(expiresAt);
+    if(!o.test&&!c.signup)checkService(l,q);
+    const expiresAt=addMonths(Math.max(Date.parse(p.approvedAt),expiryOf(l||{})),q.months),expireDate=dateOf(expiresAt);
     result={expireDate,isPro:q.isPro,maxSlots:q.maxSlots,maxSessions:q.maxSessions};
-    if(!o.test)tx.set(ref,{...result,expiresAt,status:'active'},{merge:true});
+    if(c.signup){
+     result={...result,dispatchKey:c.draft.key,companyName:c.draft.companyName};
+     if(!o.test)tx.create(ref,{...result,key:c.draft.key,name:c.draft.companyName,type:'dispatch',phone:c.draft.phone,dispatchBillingId:id,routeOwnerId:randomUUID(),status:'active',expiresAt,createdAt:now(),deviceId:'',activeSessions:[]});
+     tx.set(c.draftRef,{completed:true,completedAt:now(),result},{merge:true});
+     tx.set(signupLockRef,{revision:(signupLock.data()?.revision||0)+1,updatedAt:now()});
+    }else if(!o.test)tx.set(ref,{...result,expiresAt,status:'active'},{merge:true});
    }
    const event={walletId:id,kind:q.kind,orderId:o.orderId,at:now(),amount:o.amount,test:o.test,result,label:q.label};updated.recent=[event,...w.recent].slice(0,20);
    tx.set(walletRef,updated);tx.create(db.collection('dispatch_billing_events').doc(o.orderId),event);tx.set(orderRef,{status:'completed',approvedAt:p.approvedAt,result},{merge:true});return {success:true,test:o.test,result};
