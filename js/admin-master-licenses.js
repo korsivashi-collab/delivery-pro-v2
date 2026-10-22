@@ -597,6 +597,33 @@ export function openEditLicenseModal(key) {
     }
     document.getElementById('edit-license-modal').classList.remove('hidden');
     showAccountPayments(key);
+    showSmsCredits(key, target.type === 'dispatch');
+}
+
+let masterSmsWallet = null;
+async function showSmsCredits(key, visible=true) {
+    let box=document.getElementById('master-sms-credit-editor');
+    if(!box){box=document.createElement('section');box.id='master-sms-credit-editor';document.getElementById('edit-status-select').parentElement.after(box);}
+    box.hidden=!visible;masterSmsWallet=null;if(!visible)return;
+    box.style.cssText='grid-column:1/-1;padding:16px;border:1px solid #cbd5e1;border-radius:12px;line-height:1.8';
+    box.textContent='문자 잔여 건수 조회 중…';
+    try {
+        const w=await saveMasterLicenses({action:'smsWallet',key});
+        if(document.getElementById('edit-orig-key').value!==key)return;
+        masterSmsWallet={...w,key};
+        box.innerHTML=`<b>문자 잔여 건수 직접 수정</b><p>실제 ${w.balance.toLocaleString()}건 · 테스트 ${w.testBalance.toLocaleString()}건</p><label>수정 대상 <select id="master-sms-environment"><option value="live">실제 발송 건수</option><option value="test">테스트 건수</option></select></label><label style="display:block">수정 후 잔여 건수 <input id="master-sms-count" type="number" min="0" max="10000000" step="1" value="${w.balance}"></label><label style="display:block">수정 사유 <input id="master-sms-reason" maxlength="200" placeholder="테스트 지급 / 오류 복구 등"></label><p>계정 저장과 별도로 즉시 반영되며 수정 전후 건수·사유·관리자가 기록됩니다.</p><button type="button" id="master-sms-save">문자 건수 적용</button><button type="button" id="master-sms-refresh">다시 불러오기</button>`;
+        document.getElementById('master-sms-environment').onchange=e=>{document.getElementById('master-sms-count').value=e.target.value==='test'?w.testBalance:w.balance;};
+        document.getElementById('master-sms-refresh').onclick=()=>showSmsCredits(key);
+        document.getElementById('master-sms-save').onclick=async()=>{
+            const current=masterSmsWallet;if(current?.key!==key)return;
+            const balance=Number(document.getElementById('master-sms-count').value),reason=document.getElementById('master-sms-reason').value.trim(),test=document.getElementById('master-sms-environment').value==='test';
+            if(!Number.isSafeInteger(balance)||balance<0||balance>10000000||reason.length<2)return alert('0 이상의 정수 건수와 수정 사유를 입력해 주세요.');
+            if(!confirm(`${test?'테스트':'실제'} 문자 잔여 건수를 ${balance.toLocaleString()}건으로 변경할까요?`))return;
+            const button=document.getElementById('master-sms-save');button.disabled=true;
+            try {await saveMasterLicenses({action:'adjustSmsCredits',key,balance,reason,test,revision:current.revision,requestId:crypto.randomUUID()});await showSmsCredits(key);}
+            catch(e){alert(e.message+'\n다시 불러오기로 저장 결과를 확인해 주세요.');button.disabled=false;}
+        };
+    } catch(e){box.textContent=e.message;}
 }
 
 
