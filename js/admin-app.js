@@ -224,7 +224,7 @@ window.onload = async () => {
         if (savedRole === 'MASTER') {
             window.location.href = 'admin-master.html';
         } else if (savedRole === 'DISPATCH') {
-            window.location.href = 'admin-dispatch.html';
+            window.location.href = 'admin-dispatch.html' + (urlParams.get('view') === 'billing' ? '?view=billing' : '');
         }
     }
 };
@@ -498,7 +498,7 @@ window.showDispatchPanel = function() {
     
     if (typeof initKakaoMap === 'function') initKakaoMap();
     window.initMasterDataSync();
-    if (typeof setDispatchMode === 'function') setDispatchMode('DELIVERY');
+    if (typeof setDispatchMode === 'function') setDispatchMode(new URLSearchParams(window.location.search).get('view') === 'billing' ? 'BILLING' : 'DELIVERY');
     if (typeof loadExcelFromFirebase === 'function') loadExcelFromFirebase();
 };
 
