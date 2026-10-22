@@ -16,6 +16,7 @@ service cloud.firestore {
     match /dispatch_wallets/{id} { allow read, write: if false; }
     match /dispatch_payment_orders/{id} { allow read, write: if false; }
     match /dispatch_billing_events/{id} { allow read, write: if false; }
+    match /dispatch_registrations/{id} { allow read, write: if false; }
     // Customer tracking capabilities and shared snapshots are server-only.
     match /delivery_tracking_tokens/{id} { allow read, write: if false; }
     match /delivery_tracking_publications/{id} { allow read, write: if false; }
