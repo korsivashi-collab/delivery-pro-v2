@@ -81,7 +81,10 @@ function projectTracking(publication, phone, liveRoutes) {
     const ownStops = publication.stops.filter(stop => stop.phone === phone);
     return { company: publication.company, date: publication.date, expiresAt: publication.expiresAt,
         updatedAt: Date.now(), stops: ownStops.map(stop => {
-            const plan = publication.plans[stop.driver], route = latestRoute(liveRoutes, plan.owner);
+            const plan = publication.plans[stop.driver];
+            if (!plan || !stop.ids.length) return { address: stop.address, orders: stop.orders,
+                driverName: plan?.name || '배정 예정', status: 'preparing', sequence: [], route: [] };
+            const route = latestRoute(liveRoutes, plan.owner);
             const sameDay = route && routeDay(route) === publication.date;
             const samePlan = sameDay && route.cleared !== true && (plan.routeId
                 ? route.routePlan?.ownerId === plan.owner && route.routePlan?.routeId === plan.routeId
@@ -89,6 +92,7 @@ function projectTracking(publication, phone, liveRoutes) {
             const entries = samePlan && Array.isArray(route.routePlan?.deliveries) ? route.routePlan.deliveries : [];
             const activeIds = samePlan ? new Set(routeItems(route).map(d => String(d.id))) : new Set();
             const states = new Map(entries.map(entry => [String(entry.id), entry.status]));
+            for (const id of stop.ids) if (!states.has(id) && publication.completionStates?.[stop.driver]?.[id]) states.set(id, publication.completionStates[stop.driver][id]);
             const statusOf = id => !samePlan ? 'checking' : activeIds.has(id) ? 'pending'
                 : states.get(id) === 'completed' ? 'completed' : states.get(id) === 'cancelled' ? 'cancelled' : 'checking';
             const statuses = stop.ids.map(statusOf);
@@ -126,8 +130,68 @@ function projectTracking(publication, phone, liveRoutes) {
                 }) };
         }) };
 }
+async function livePublications(db, date, now) {
+    const start = Date.parse(date + 'T00:00:00+09:00');
+    const [licenses, orders, routeDocs, completionDocs] = await Promise.all([
+        db.collection('licenses').get(), db.collection('dispatch_orders').where('date', '==', date).get(),
+        db.collection('routes').where('updatedAt', '>=', start).where('updatedAt', '<', start + DAY).get(),
+        db.collection('completions').where('completedAt', '>=', start).where('completedAt', '<', start + DAY).get()
+    ]);
+    const allLicenses = licenses.docs.map(d => ({ ...d.data(), key: d.id }));
+    const routes = routeDocs.docs.map(d => ({ ...d.data(), documentId: d.id }));
+    const completions = completionDocs.docs.map(d => d.data());
+    const publications = [];
+    for (const company of allLicenses.filter(l => l.type === 'dispatch' && isActive(l, dayOf(now), now))) {
+        const drivers = allLicenses.filter(l => l.type !== 'dispatch' && l.dispatchKey === company.key && l.routeOwnerId);
+        const ownerKeys = new Map(drivers.map(d => [d.routeOwnerId, d.key]));
+        const rows = orders.docs.filter(d => d.data().dispatchKey === company.key || d.id === `${date}_${company.key}`)
+            .flatMap(d => Array.isArray(d.data().orders) ? d.data().orders.map(o => ({ ...o })) : []);
+        const companyRoutes = routes.filter(r => ownerKeys.has(r.routeOwnerId));
+        const completionStates = {};
+        for (const record of completions) {
+            const driver = ownerKeys.get(record.routeOwnerId), id = record.destinationId == null ? '' : String(record.destinationId);
+            if (!driver || !id) continue;
+            const route = latestRoute(companyRoutes, record.routeOwnerId);
+            if (route?.cleared || (route?.routePlan?.ownerId === record.routeOwnerId && route.routePlan.date &&
+                (routeDay(route) !== date || !route.routePlan.orderIds?.map(String).includes(id)))) continue;
+            const status = record.tag === '배송 취소' ? 'cancelled'
+                : ['배송 완료','완료','직접 전달','사진 완료','문 앞','주방'].includes(record.tag) || /^기타\s*:/.test(record.tag || '') ? 'completed' : '';
+            if (!status) continue;
+            (completionStates[driver] ||= {})[id] = status;
+            const match = rows.find(o => String(o.assignedDriver || '') === driver &&
+                (String(o.id ?? '') === id || clean(record.orderNo) && clean(o.orderNo) === clean(record.orderNo)));
+            const active = route && routeItems(route).some(d => String(d.id) === id);
+            if (active) continue;
+            if (match) match._destinationId = id;
+            else if (phoneOf(record.customerPhone)) rows.push({ phone: record.customerPhone, fullAddress: record.fullAddress || record.address,
+                orderNo: record.orderNo, assignedDriver: driver, _destinationId: id });
+        }
+        const snapshot = snapshotFor(rows, drivers, companyRoutes, date);
+        for (const driver of drivers) if (!snapshot.plans[driver.key]) snapshot.plans[driver.key] = {
+            owner: driver.routeOwnerId, name: clean(driver.name) || '담당 기사', routeId: '', slots: [], updatedAt: 0
+        };
+        publications.push({ ...snapshot, completionStates, dispatchKey: company.key, company: clean(company.companyName || company.name) || '배송업체',
+            date, expiresAt: start + 8 * DAY });
+    }
+    return { publications, routes };
+}
+function lookupPublicData(index, lookup, now) {
+    const phone = phoneOf(lookup);
+    const matches = index.publications.flatMap(publication => publication.stops
+        .filter(stop => phone ? stop.phone === phone : stop.orders.includes(lookup))
+        .map(stop => ({ publication, phone: stop.phone })));
+    if (!matches.length) throw problem('입력한 정보와 일치하는 배송이 없습니다. 배송일과 받는 분의 전화번호 또는 주문번호를 확인해 주세요.', 404);
+    if (!phone && new Set(matches.map(m => m.phone)).size !== 1) throw problem('같은 주문번호가 여러 고객에게 등록되어 있습니다. 받는 분의 전화번호로 조회해 주세요.', 409);
+    const selectedPhone = phone || matches[0].phone, selected = [...new Set(matches.map(m => m.publication))];
+    const results = selected.map(p => projectTracking(p, selectedPhone, index.routes));
+    const companyNames = [...new Set(selected.map(p => p.company))];
+    return { company: companyNames.length === 1 ? companyNames[0] : '내 배송', date: selected[0].date,
+        expiresAt: Math.min(...selected.map(p => p.expiresAt)), updatedAt: now,
+        stops: results.flatMap((result, i) => result.stops.map(stop => ({ ...stop, companyName: selected[i].company }))) };
+}
 function createHandler(sdk = admin) {
     const cache = new Map();
+    let liveIndex = null;
     return async function handler(req, res) {
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
@@ -136,7 +200,9 @@ function createHandler(sdk = admin) {
         try {
             const lookupRequest = req.method === 'POST' && req.body?.action === 'lookup';
             const code = String(lookupRequest ? req.body.code || '' : req.query?.code || '');
-            if ((req.method === 'GET' || lookupRequest) && !/^[A-Za-z0-9_-]{16}$/.test(code)) throw problem('올바른 배송조회 링크가 아닙니다.', 404);
+            // Old preview URLs now resolve to the same real public search as /t.
+            const publicSearch = ['', 'Ab3dE5fG', 'Ab3dE5fGh7Jk9LmN'].includes(code);
+            if ((req.method === 'GET' || lookupRequest) && !publicSearch && !/^[A-Za-z0-9_-]{16}$/.test(code)) throw problem('올바른 배송조회 링크가 아닙니다.', 404);
             if (req.method === 'GET') throw problem('전화번호 또는 주문번호를 입력해 조회해 주세요.', 400);
             const lookup = lookupRequest ? String(req.body.lookup || '').trim() : '';
             if (lookupRequest && (!lookup || lookup.length > 150)) throw problem('전화번호 또는 주문번호를 입력해 주세요.');
@@ -145,6 +211,16 @@ function createHandler(sdk = admin) {
                 privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
             }) });
             const db = sdk.firestore(), now = Date.now();
+            if (lookupRequest && publicSearch) {
+                const date = String(req.body.date || dayOf(now)), start = Date.parse(date + 'T00:00:00+09:00');
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(start) || dayOf(start) !== date || Math.abs(start - now) > 7 * DAY)
+                    throw problem('배송일은 오늘 기준 7일 이내로 선택해 주세요.');
+                if (!liveIndex || liveIndex.date !== date || liveIndex.until <= now) {
+                    const data = await livePublications(db, date, now);
+                    liveIndex = { date, until: now + 30000, data };
+                }
+                return res.status(200).json(lookupPublicData(liveIndex.data, lookup, now));
+            }
             if (lookupRequest) {
                 const cached = cache.get(code);
                 const token = (await db.collection('delivery_tracking_tokens').doc(code).get()).data();
@@ -227,3 +303,4 @@ module.exports = createHandler();
 module.exports.createHandler = createHandler;
 module.exports.snapshotFor = snapshotFor;
 module.exports.projectTracking = projectTracking;
+module.exports.lookupPublicData = lookupPublicData;
