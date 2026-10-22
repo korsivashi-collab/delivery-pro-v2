@@ -124,6 +124,8 @@ async function saveLicenses(db, request, now = Date.now()) {
         const bound = billing[0], account = bound?.data();
         if (payloads.some(p => p.testSmsBypass) && (account || licenses.get(origKey)?.billingManaged)) throw problem('결제 계정에는 테스트 인증 생략을 설정할 수 없습니다.', 409);
         const renaming = !create && payloads[0].key !== origKey;
+        const registrations = renaming && licenses.get(origKey)?.dispatchBillingId
+            ? await tx.get(db.collection('dispatch_registrations').where('walletId','==',licenses.get(origKey).dispatchBillingId)) : {docs:[]};
         const releasedKeys = [];
         for (const payload of payloads) {
             const binding = await tx.get(db.collection('billing_license_bindings').doc(payload.key));
@@ -247,6 +249,10 @@ async function saveLicenses(db, request, now = Date.now()) {
             set(db.collection('billing_license_bindings').doc(payloads[0].key), {uid:bound.id,provider:account.webManaged?'toss':'google_play'});
             remove(db.collection('billing_license_bindings').doc(origKey));
             for (const order of orderSnap.docs) if(order.data().licenseKey===origKey) set(order.ref, {licenseKey:payloads[0].key}, {merge:true});
+        }
+        for(const registration of registrations.docs){
+            const data=registration.data();
+            set(registration.ref,{key:payloads[0].key,...(data.result?{result:{...data.result,dispatchKey:payloads[0].key}}:{})},{merge:true});
         }
         for (const document of allocationSnap.docs) {
             const orders = document.data().orders;
