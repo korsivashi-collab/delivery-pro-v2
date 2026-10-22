@@ -3,7 +3,7 @@
 import { db } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { playBeepSound, refreshDispatchSoundButton } from "./admin-utils.js";
-import { collection, doc, addDoc, deleteDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { collection, doc, addDoc, deleteDoc, getDoc, getDocs, query, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 const escapeMessage = value => String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;", "'":"&#39;"}[c]));
 
@@ -331,3 +331,140 @@ window.insertCustomTemplateById = id => {
     const template = state.allDispatchTemplates.find(t => t.id === id);
     if (template) insertCustomTemplate(template.content || '');
 };
+
+// 고객 배송안내 1차: 문구·배송 대상 미리보기. 실제 SENS 발송/차감은 연결하지 않습니다.
+let customerLoadedOrders = [], customerLoadedDate = '', customerLoadedOwner = '';
+let customerLoadVersion = 0, customerDeliveryPage = 1, customerLoadState = 'idle';
+let customerEucCharacters;
+const CUSTOMER_SMS_LIMIT = 80;
+const CUSTOMER_SAMPLE_LINK = 'https://mtsk.co.kr/t/Ab3dE5fG';
+function customerDispatchKey() { return sessionStorage.getItem('deliveryProDispatchKey') || ''; }
+function customerAccount() { const key=customerDispatchKey(); return (state.allLicenses || []).find(l => l.key === key || l.id === key); }
+export function measureCustomerSms(value) {
+    if (!customerEucCharacters) {
+        customerEucCharacters = new Set();
+        const decoder = new TextDecoder('euc-kr');
+        for (let lead=0x81; lead<=0xfe; lead++) for (let trail=0x41; trail<=0xfe; trail++) {
+            const character=decoder.decode(new Uint8Array([lead,trail]));
+            if (Array.from(character).length===1 && character!=='\ufffd') customerEucCharacters.add(character);
+        }
+    }
+    let bytes=0, unsupported=false;
+    for (const character of String(value || '')) {
+        if (character.codePointAt(0)<=0x7f) bytes++;
+        else { bytes+=2; if (!customerEucCharacters.has(character)) unsupported=true; }
+    }
+    return {bytes,unsupported};
+}
+function customerFixedMessage() {
+    const account=customerAccount();
+    const company=String(account?.companyName || account?.name || '업체명').replace(/[\r\n]/g,' ').trim();
+    return `[${company}] 배송조회\n${CUSTOMER_SAMPLE_LINK}`;
+}
+export function updateCustomerMessagePreview() {
+    const input=document.getElementById('customer-message-input'); if (!input) return;
+    const fixed=customerFixedMessage(),body=input.value.replace(/\r\n?/g,'\n');
+    const fixedMeasurement=measureCustomerSms(fixed),fixedSize=fixedMeasurement.bytes,separator=body ? 1 : 0;
+    const available=Math.max(0,CUSTOMER_SMS_LIMIT-fixedSize-1),measurement=measureCustomerSms(body);
+    const total=fixedSize+separator+measurement.bytes,remaining=CUSTOMER_SMS_LIMIT-total;
+    document.getElementById('customer-fixed-preview').textContent=fixed;
+    document.getElementById('customer-message-preview').textContent=(body ? body+'\n' : '')+fixed;
+    const counter=document.getElementById('customer-message-remaining');
+    counter.textContent=remaining<0 ? `${-remaining}바이트 초과 · 문구를 줄여 주세요` : `추가 입력 가능 ${Math.max(0,available-measurement.bytes)}바이트 · 한글 약 ${Math.floor(Math.max(0,available-measurement.bytes)/2)}자`;
+    counter.classList.toggle('is-over',remaining<0 || measurement.unsupported || fixedMeasurement.unsupported);
+    document.getElementById('customer-message-bytes').textContent=`전체 ${total} / ${CUSTOMER_SMS_LIMIT}바이트`;
+    const help=document.getElementById('customer-message-validation');
+    help.textContent=measurement.unsupported || fixedMeasurement.unsupported ? '이모지 등 문자 전송 시 바뀔 수 있는 문자를 제거해 주세요.' : total>CUSTOMER_SMS_LIMIT ? '단문 한도를 넘었습니다. 자동으로 장문 전환하지 않습니다.' : `기본 안내 ${fixedSize}바이트를 확보했습니다. 예시 링크 기준이며 실제 링크 확정 시 다시 확인합니다.`;
+    help.classList.toggle('is-error',measurement.unsupported || fixedMeasurement.unsupported || total>CUSTOMER_SMS_LIMIT);
+}
+export function saveCustomerMessageDraft() {
+    const key=customerDispatchKey(),input=document.getElementById('customer-message-input'); if (!key || !input) return;
+    const note=document.getElementById('customer-draft-notice');
+    const body=input.value.replace(/\r\n?/g,'\n'),measurement=measureCustomerSms((body ? body+'\n' : '')+customerFixedMessage());
+    if (measurement.bytes>CUSTOMER_SMS_LIMIT || measurement.unsupported) { note.textContent='단문 한도와 지원 문자를 확인한 뒤 저장해 주세요.'; return; }
+    try { localStorage.setItem('customerDeliveryDraft:'+encodeURIComponent(key),input.value);note.textContent='현재 브라우저에 안내 문구를 저장했습니다.'; }
+    catch (_) { note.textContent='브라우저 저장 공간을 사용할 수 없습니다. 입력한 문구는 현재 화면에서 유지됩니다.'; }
+}
+export function openCustomerDeliveryPage() {
+    const date=document.getElementById('customer-delivery-date'),input=document.getElementById('customer-message-input'); if (!date || !input) return;
+    if (!date.value) date.value=document.getElementById('dispatch-assign-date')?.value || getLocalDateString();
+    const key=customerDispatchKey();
+    if (input.dataset.owner!==key) {
+        input.dataset.owner=key;
+        try { input.value=localStorage.getItem('customerDeliveryDraft:'+encodeURIComponent(key)) ?? '오늘 배송 예정입니다.'; } catch (_) { input.value='오늘 배송 예정입니다.'; }
+    }
+    updateCustomerMessagePreview();
+    return refreshCustomerDeliveryList();
+}
+export async function refreshCustomerDeliveryList() {
+    const date=document.getElementById('customer-delivery-date')?.value,key=customerDispatchKey();
+    if (!date || !key) return;
+    const version=++customerLoadVersion;
+    customerLoadState='loading';customerLoadedOrders=[];customerLoadedDate=date;customerLoadedOwner=key;customerDeliveryPage=1;
+    renderCustomerDeliveryList();
+    const button=document.getElementById('customer-refresh-button'); if (button) button.disabled=true;
+    try {
+        const snapshot=await getDoc(doc(db,'dispatch_orders',`${date}_${key}`));
+        if (version!==customerLoadVersion || key!==customerDispatchKey() || date!==document.getElementById('customer-delivery-date')?.value) return;
+        const orders=snapshot.exists() ? snapshot.data().orders : [];
+        customerLoadedOrders=Array.isArray(orders) ? orders : [];customerLoadState='ready';
+    } catch (_) { if (version===customerLoadVersion) {customerLoadedOrders=[];customerLoadState='error';} }
+    finally { if (version===customerLoadVersion) {if(button)button.disabled=false;renderCustomerDeliveryList();} }
+}
+function customerPhone(value) {
+    let text=String(value || '').trim(); if (!/^[+\d\s()-]+$/.test(text)) return '';
+    let digits=text.replace(/\D/g,'');if(text.startsWith('+82'))digits='0'+digits.slice(2).replace(/^0/,'');
+    return /^010\d{8}$/.test(digits) ? digits : '';
+}
+export function groupCustomerDeliveries(orders, licenses=[]) {
+    const groups=new Map();
+    (orders || []).forEach((order,index)=>{
+        if (!order || typeof order!=='object') return;
+        const phone=customerPhone(order.phone),address=String(order.fullAddress || order.address || '').trim().replace(/\s+/g,' ');
+        // 상세 주소까지 보존합니다. 번호/주소 누락 행은 자동 병합하지 않습니다.
+        const key=phone && address ? JSON.stringify([phone,address]) : 'unresolved:'+index;
+        if (!groups.has(key))groups.set(key,{phone,rawPhone:String(order.phone || ''),address,names:new Set(),orders:[],drivers:new Map(),unassigned:false});
+        const group=groups.get(key);group.orders.push(String(order.orderNo || '주문번호 없음'));
+        group.names.add(String(order.recipientName || order.customerName || order.storeName || '').trim());
+        const driver=licenses.find(l=>l.key===order.assignedDriver || l.id===order.assignedDriver);
+        if (order.assignedDriver) {
+            const label=driver?.name || driver?.phone || order.assignedDriver;
+            group.drivers.set(String(order.assignedDriver),String(label)+(order.displayNumber ? ` · ${order.displayNumber}번` : ''));
+        } else group.unassigned=true;
+    });
+    return Array.from(groups.values());
+}
+export function renderCustomerDeliveryList() {
+    const tbody=document.getElementById('customer-delivery-tbody');if(!tbody)return;
+    const date=document.getElementById('customer-delivery-date')?.value,key=customerDispatchKey();
+    const orders=customerLoadedOwner===key && customerLoadedDate===date ? customerLoadedOrders : [];
+    const licenses=(state.allLicenses || []).filter(l=>l.dispatchKey===key && l.type!=='dispatch');
+    const groups=groupCustomerDeliveries(orders,licenses),phones=new Set(groups.map(g=>g.phone).filter(Boolean));
+    for(const [id,value]of [['customer-order-count',orders.length],['customer-stop-count',groups.length],['customer-phone-count',phones.size],['customer-invalid-count',groups.filter(g=>!g.phone).length]])document.getElementById(id).textContent=value.toLocaleString('ko-KR');
+    const query=String(document.getElementById('customer-delivery-search')?.value || '').trim().toLowerCase();
+    const filtered=groups.filter(g=>[g.address,g.rawPhone,g.phone,...g.names,...g.orders,...g.drivers.values()].join(' ').toLowerCase().includes(query));
+    const maxPage=Math.max(1,Math.ceil(filtered.length/50));customerDeliveryPage=Math.max(1,Math.min(customerDeliveryPage,maxPage));
+    const start=(customerDeliveryPage-1)*50;
+    tbody.innerHTML=filtered.slice(start,start+50).map((g,index)=>{
+        const needsCheck=!g.phone || !g.address || g.unassigned || g.drivers.size>1;
+        const checks=[!g.phone?'번호 확인':'',!g.address?'주소 확인':'',g.unassigned?'미배정':'',g.drivers.size>1?'분할 배송 확인':''].filter(Boolean);
+        return `<tr><td>${start+index+1}</td><td>${escapeMessage([...g.names].filter(Boolean).join(', ') || '수취인')}<small>${escapeMessage(g.phone ? g.phone.replace(/^(\d{3})(\d{4})(\d{4})$/,'$1-$2-$3') : g.rawPhone || '번호 없음')}</small></td><td>${escapeMessage(g.address || '주소 없음')}${g.orders.length>1?`<small>추가 주문 포함 ${g.orders.length}건</small>`:''}</td><td>${g.orders.map(escapeMessage).join('<br>')}</td><td>${[...g.drivers.values()].map(escapeMessage).join('<br>') || '미배정'}</td><td><span class="customer-row-tag ${needsCheck?'needs-check':''}">${checks.join(' · ') || '대상 확인 가능'}</span></td><td><span class="customer-send-state">미발송</span></td></tr>`;
+    }).join('') || `<tr><td colspan="7" class="customer-empty-cell">${customerLoadState==='loading'?'배송 목록을 불러오고 있습니다.':customerLoadState==='error'?'목록을 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.':query?'검색 결과가 없습니다.':'선택한 날짜에 자동할당으로 등록된 배송 목록이 없습니다.'}</td></tr>`;
+    document.getElementById('customer-list-status').textContent=customerLoadState==='loading'?'목록 확인 중':customerLoadState==='error'?'불러오기 실패':`조회된 배송지 ${filtered.length.toLocaleString('ko-KR')}곳 · 실제 발송 전 대상 확인`;
+    document.getElementById('customer-page-label').textContent=`${customerDeliveryPage} / ${maxPage} 페이지`;
+    document.getElementById('customer-page-prev').disabled=customerDeliveryPage<=1;
+    document.getElementById('customer-page-next').disabled=customerDeliveryPage>=maxPage;
+    updateCustomerMessagePreview();
+}
+export function filterCustomerDeliveries() { customerDeliveryPage=1;renderCustomerDeliveryList(); }
+export function changeCustomerDeliveryPage(delta) { customerDeliveryPage+=delta;renderCustomerDeliveryList(); }
+export function renderDispatchAccount(mode='ACCOUNT') {
+    const account=customerAccount(),expiry=account?.expireDate || (account?.expiresAt ? getLocalDateString(new Date(typeof account.expiresAt.toMillis==='function'?account.expiresAt.toMillis():Number(account.expiresAt))) : '미등록');
+    const label=document.getElementById('dispatch-expiry-label');if(label)label.textContent=`사용기한 ${expiry}`;
+    const container=document.getElementById('dispatch-account-content');if(!container)return;
+    const billing=mode==='BILLING';document.getElementById('dispatch-account-heading').textContent=billing?'결제·충전':'이용정보';
+    document.getElementById('dispatch-account-description').textContent=billing?'이용료 결제와 고객 배송안내 충전을 확인하는 공간입니다.':'현재 관제 계정의 이용 상태를 확인하세요.';
+    const cards=billing ? [['관제 이용료','결제 안내 준비 중','현재 계약·이용권의 금액을 확인하는 기능을 준비합니다.'],['고객 배송안내','발송 성공 건당 35원','기본료 없이 사용한 만큼 · 부가세 포함 예정'],['문자 충전 잔액','연결 전','현재는 잔액 조회·충전·차감이 지원되지 않습니다.']] : [['현재 관제 등급',account ? account.isPro?'PRO 관제':'기본 관제' : '확인 중','자동할당·주문서 통합관리는 PRO에서 제공합니다.'],['사용기한',expiry,'계약기간·결제 내역은 추후 이곳에서 확인할 수 있습니다.'],['관제 계정',customerDispatchKey() || '확인 중','로그인한 회사 관제 계정 기준으로 표시됩니다.']];
+    container.innerHTML=`<div class="account-info-grid">${cards.map(([title,value,detail])=>`<article class="service-card"><h3>${escapeMessage(title)}</h3><strong>${escapeMessage(value)}</strong><p>${escapeMessage(detail)}</p></article>`).join('')}</div><article class="service-card account-info-note">${billing?'결제·충전 메뉴의 위치를 먼저 마련했습니다. 현재 결제나 충전은 진행되지 않습니다.':'사용 중인 계정의 정보를 확인하는 공간입니다. 요금 안내·결제 기능은 준비 후 연결됩니다.'}<br><button type="button" onclick="window.setDispatchMode('${billing?'ACCOUNT':'BILLING'}')">${billing?'이용정보 보기':'결제·충전 보기'}</button></article>`;
+}
+Object.assign(window,{openCustomerDeliveryPage,refreshCustomerDeliveryList,renderCustomerDeliveryList,updateCustomerMessagePreview,saveCustomerMessageDraft,filterCustomerDeliveries,changeCustomerDeliveryPage,renderDispatchAccount});

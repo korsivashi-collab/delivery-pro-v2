@@ -145,16 +145,32 @@ export function setDispatchMode(mode, keepSelected = false) {
     state.dispatchNavState = mode; 
     if (!keepSelected && mode === 'DELIVERY') state.selectedDeviceId = null;
     
-    ['DELIVERY', 'MESSAGE', 'LOCATION'].forEach(m => {
+    ['DELIVERY', 'MESSAGE', 'LOCATION', 'CUSTOMER', 'ACCOUNT', 'BILLING'].forEach(m => {
         const btn = document.getElementById(`nav-btn-${m}`);
-        if (btn) btn.className = (m === mode) ? "px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5" : "px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5";
+        if (btn) {
+            btn.setAttribute('aria-pressed', String(m === mode));
+            if (['DELIVERY','MESSAGE','LOCATION'].includes(m)) btn.className = (m === mode) ? "px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5" : "px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5";
+        }
     });
+
+    const serviceMode = ['CUSTOMER','ACCOUNT','BILLING'].includes(mode);
+    document.getElementById('common-sidebar')?.classList.toggle('hidden', serviceMode);
+    document.getElementById('customer-delivery-section')?.classList.toggle('hidden', mode !== 'CUSTOMER');
+    document.getElementById('dispatch-account-section')?.classList.toggle('hidden', !['ACCOUNT','BILLING'].includes(mode));
 
     const mapSec = document.getElementById('map-section');
     const msgSec = document.getElementById('message-section');
     const dateBar = document.getElementById('sidebar-date-bar');
     const filterControls = document.getElementById('map-filter-controls');
     const fitAllBtn = document.getElementById('btn-fit-all-drivers');
+
+    if (serviceMode) {
+        mapSec?.classList.add('hidden'); msgSec?.classList.add('hidden');
+        forceClearMap();
+        renderSidebar();
+        if (mode === 'CUSTOMER') window.openCustomerDeliveryPage?.();
+        return;
+    }
 
     if (mode === 'MESSAGE') {
         if (mapSec) mapSec.classList.add('hidden');
@@ -184,6 +200,9 @@ export function setDispatchMode(mode, keepSelected = false) {
 
 export function renderSidebar() {
     updateProButtonsUI();
+    window.renderDispatchAccount?.(state.dispatchNavState === 'BILLING' ? 'BILLING' : 'ACCOUNT');
+    if (state.dispatchNavState === 'CUSTOMER') { window.renderCustomerDeliveryList?.(); return; }
+    if (['ACCOUNT','BILLING'].includes(state.dispatchNavState)) return;
 
     if (state.dispatchNavState === 'DELIVERY') {
         if (state.selectedDeviceId) renderDriverDetailView(state.selectedDeviceId);
