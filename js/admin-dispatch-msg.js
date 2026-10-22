@@ -332,14 +332,14 @@ window.insertCustomTemplateById = id => {
     if (template) insertCustomTemplate(template.content || '');
 };
 
-// 고객 배송안내 1차: 문구·배송 대상 미리보기. 실제 SENS 발송/차감은 연결하지 않습니다.
-let customerLoadedOrders = [], customerLoadedDate = '', customerLoadedOwner = '';
-let customerLoadVersion = 0, customerDeliveryPage = 1, customerLoadState = 'idle';
-let customerEucCharacters;
-const CUSTOMER_SMS_LIMIT = 80;
-const CUSTOMER_SAMPLE_LINK = 'https://mtsk.co.kr/t/Ab3dE5fG';
-function customerDispatchKey() { return sessionStorage.getItem('deliveryProDispatchKey') || ''; }
-function customerAccount() { const key=customerDispatchKey(); return (state.allLicenses || []).find(l => l.key === key || l.id === key); }
+// 배송안내 문자서비스 화면. 대상·견적 확인만 수행하며 발송/결제 API는 호출하지 않습니다.
+let customerLoadedOrders=[],customerLoadedDate='',customerLoadedOwner='',customerLoadVersion=0,customerDeliveryPage=1,customerLoadState='idle';
+let customerEucCharacters,customerDeliveryFilter='all',customerSelectedPhones=new Set(),customerDialogFocus=null;
+const CUSTOMER_SMS_LIMIT=80,CUSTOMER_SAMPLE_LINK='https://mtsk.co.kr/t/Ab3dE5fG',CUSTOMER_SMS_PRICE=35;
+const customerBilling={tab:'service',plan:'basic',period:'monthly',drivers:false,seats:5,smsCount:1000,initialized:false,owner:''};
+function customerDispatchKey(){return sessionStorage.getItem('deliveryProDispatchKey')||'';}
+function customerAccount(){const key=customerDispatchKey();return (state.allLicenses||[]).find(l=>l.key===key||l.id===key);}
+const customerMoney=value=>Math.round(value).toLocaleString('ko-KR')+'원';
 export function measureCustomerSms(value) {
     if (!customerEucCharacters) {
         customerEucCharacters = new Set();
@@ -356,66 +356,28 @@ export function measureCustomerSms(value) {
     }
     return {bytes,unsupported};
 }
-function customerFixedMessage() {
-    const account=customerAccount();
-    const company=String(account?.companyName || account?.name || '업체명').replace(/[\r\n]/g,' ').trim();
-    return `[${company}] 배송조회\n${CUSTOMER_SAMPLE_LINK}`;
+function customerFixedMessage(){const account=customerAccount(),company=String(account?.companyName||account?.name||'업체명').replace(/[\r\n]/g,' ').trim();return `[${company}] 배송조회\n${CUSTOMER_SAMPLE_LINK}`;}
+function customerMessage(){const body=document.getElementById('customer-message-input')?.value.replace(/\r\n?/g,'\n')||'';return (body?body+'\n':'')+customerFixedMessage();}
+export function updateCustomerMessagePreview(){
+ const input=document.getElementById('customer-message-input');if(!input)return;
+ const fixed=customerFixedMessage(),body=input.value.replace(/\r\n?/g,'\n'),fixedSize=measureCustomerSms(fixed).bytes,total=measureCustomerSms(customerMessage()),available=Math.max(0,80-fixedSize-1-measureCustomerSms(body).bytes);
+ document.getElementById('customer-fixed-preview').textContent=fixed;document.getElementById('customer-message-preview').textContent=customerMessage();
+ const counter=document.getElementById('customer-message-remaining');counter.textContent=total.bytes>80?`${total.bytes-80}바이트 초과 · 문구를 줄여 주세요`:`더 입력 가능 ${available}바이트 · 한글 약 ${Math.floor(available/2)}자`;counter.classList.toggle('is-over',total.bytes>80||total.unsupported);
+ document.getElementById('customer-message-bytes').textContent=`전체 ${total.bytes} / 80바이트`;
+ const help=document.getElementById('customer-message-validation');help.textContent=total.unsupported?'이모지 등 문자 전송 시 바뀔 수 있는 문자를 제거해 주세요.':total.bytes>80?'단문 한도를 넘었습니다. 자동으로 장문 전환하지 않습니다.':`업체명·조회 링크 ${fixedSize}바이트를 제외한 입력량입니다. 실제 링크 확정 시 재확인합니다.`;help.classList.toggle('is-error',total.unsupported||total.bytes>80);
+ updateCustomerSelectionSummary();
 }
-export function updateCustomerMessagePreview() {
-    const input=document.getElementById('customer-message-input'); if (!input) return;
-    const fixed=customerFixedMessage(),body=input.value.replace(/\r\n?/g,'\n');
-    const fixedMeasurement=measureCustomerSms(fixed),fixedSize=fixedMeasurement.bytes,separator=body ? 1 : 0;
-    const available=Math.max(0,CUSTOMER_SMS_LIMIT-fixedSize-1),measurement=measureCustomerSms(body);
-    const total=fixedSize+separator+measurement.bytes,remaining=CUSTOMER_SMS_LIMIT-total;
-    document.getElementById('customer-fixed-preview').textContent=fixed;
-    document.getElementById('customer-message-preview').textContent=(body ? body+'\n' : '')+fixed;
-    const counter=document.getElementById('customer-message-remaining');
-    counter.textContent=remaining<0 ? `${-remaining}바이트 초과 · 문구를 줄여 주세요` : `추가 입력 가능 ${Math.max(0,available-measurement.bytes)}바이트 · 한글 약 ${Math.floor(Math.max(0,available-measurement.bytes)/2)}자`;
-    counter.classList.toggle('is-over',remaining<0 || measurement.unsupported || fixedMeasurement.unsupported);
-    document.getElementById('customer-message-bytes').textContent=`전체 ${total} / ${CUSTOMER_SMS_LIMIT}바이트`;
-    const help=document.getElementById('customer-message-validation');
-    help.textContent=measurement.unsupported || fixedMeasurement.unsupported ? '이모지 등 문자 전송 시 바뀔 수 있는 문자를 제거해 주세요.' : total>CUSTOMER_SMS_LIMIT ? '단문 한도를 넘었습니다. 자동으로 장문 전환하지 않습니다.' : `기본 안내 ${fixedSize}바이트를 확보했습니다. 예시 링크 기준이며 실제 링크 확정 시 다시 확인합니다.`;
-    help.classList.toggle('is-error',measurement.unsupported || fixedMeasurement.unsupported || total>CUSTOMER_SMS_LIMIT);
+export function saveCustomerMessageDraft(){const key=customerDispatchKey(),input=document.getElementById('customer-message-input');if(!key||!input)return;const note=document.getElementById('customer-draft-notice'),size=measureCustomerSms(customerMessage());if(size.bytes>80||size.unsupported){note.textContent='단문 한도와 지원 문자를 확인한 뒤 저장해 주세요.';return;}try{localStorage.setItem('customerDeliveryDraft:'+encodeURIComponent(key),input.value);note.textContent='현재 브라우저에 안내 문구를 저장했습니다.';}catch(_){note.textContent='저장 공간을 사용할 수 없습니다. 입력 문구는 현재 화면에서 유지됩니다.';}}
+export function openCustomerDeliveryPage(){const date=document.getElementById('customer-delivery-date'),input=document.getElementById('customer-message-input');if(!date||!input)return;if(!date.value)date.value=document.getElementById('dispatch-assign-date')?.value||getLocalDateString();const key=customerDispatchKey();if(input.dataset.owner!==key){input.dataset.owner=key;try{input.value=localStorage.getItem('customerDeliveryDraft:'+encodeURIComponent(key))??'오늘 배송 예정입니다.';}catch(_){input.value='오늘 배송 예정입니다.';}}updateCustomerMessagePreview();return refreshCustomerDeliveryList();}
+export async function refreshCustomerDeliveryList(){
+ const date=document.getElementById('customer-delivery-date')?.value,key=customerDispatchKey();if(!date||!key)return;
+ const version=++customerLoadVersion;closeCustomerDialog();customerLoadState='loading';customerLoadedOrders=[];customerLoadedDate=date;customerLoadedOwner=key;customerDeliveryPage=1;customerSelectedPhones.clear();renderCustomerDeliveryList();
+ const button=document.getElementById('customer-refresh-button');if(button)button.disabled=true;
+ try{const snapshot=await getDoc(doc(db,'dispatch_orders',`${date}_${key}`));if(version!==customerLoadVersion||key!==customerDispatchKey()||date!==document.getElementById('customer-delivery-date')?.value)return;const orders=snapshot.exists()?snapshot.data().orders:[];customerLoadedOrders=Array.isArray(orders)?orders:[];customerLoadState='ready';}
+ catch(_){if(version===customerLoadVersion){customerLoadedOrders=[];customerLoadState='error';}}
+ finally{if(version===customerLoadVersion){if(button)button.disabled=false;renderCustomerDeliveryList();}}
 }
-export function saveCustomerMessageDraft() {
-    const key=customerDispatchKey(),input=document.getElementById('customer-message-input'); if (!key || !input) return;
-    const note=document.getElementById('customer-draft-notice');
-    const body=input.value.replace(/\r\n?/g,'\n'),measurement=measureCustomerSms((body ? body+'\n' : '')+customerFixedMessage());
-    if (measurement.bytes>CUSTOMER_SMS_LIMIT || measurement.unsupported) { note.textContent='단문 한도와 지원 문자를 확인한 뒤 저장해 주세요.'; return; }
-    try { localStorage.setItem('customerDeliveryDraft:'+encodeURIComponent(key),input.value);note.textContent='현재 브라우저에 안내 문구를 저장했습니다.'; }
-    catch (_) { note.textContent='브라우저 저장 공간을 사용할 수 없습니다. 입력한 문구는 현재 화면에서 유지됩니다.'; }
-}
-export function openCustomerDeliveryPage() {
-    const date=document.getElementById('customer-delivery-date'),input=document.getElementById('customer-message-input'); if (!date || !input) return;
-    if (!date.value) date.value=document.getElementById('dispatch-assign-date')?.value || getLocalDateString();
-    const key=customerDispatchKey();
-    if (input.dataset.owner!==key) {
-        input.dataset.owner=key;
-        try { input.value=localStorage.getItem('customerDeliveryDraft:'+encodeURIComponent(key)) ?? '오늘 배송 예정입니다.'; } catch (_) { input.value='오늘 배송 예정입니다.'; }
-    }
-    updateCustomerMessagePreview();
-    return refreshCustomerDeliveryList();
-}
-export async function refreshCustomerDeliveryList() {
-    const date=document.getElementById('customer-delivery-date')?.value,key=customerDispatchKey();
-    if (!date || !key) return;
-    const version=++customerLoadVersion;
-    customerLoadState='loading';customerLoadedOrders=[];customerLoadedDate=date;customerLoadedOwner=key;customerDeliveryPage=1;
-    renderCustomerDeliveryList();
-    const button=document.getElementById('customer-refresh-button'); if (button) button.disabled=true;
-    try {
-        const snapshot=await getDoc(doc(db,'dispatch_orders',`${date}_${key}`));
-        if (version!==customerLoadVersion || key!==customerDispatchKey() || date!==document.getElementById('customer-delivery-date')?.value) return;
-        const orders=snapshot.exists() ? snapshot.data().orders : [];
-        customerLoadedOrders=Array.isArray(orders) ? orders : [];customerLoadState='ready';
-    } catch (_) { if (version===customerLoadVersion) {customerLoadedOrders=[];customerLoadState='error';} }
-    finally { if (version===customerLoadVersion) {if(button)button.disabled=false;renderCustomerDeliveryList();} }
-}
-function customerPhone(value) {
-    let text=String(value || '').trim(); if (!/^[+\d\s()-]+$/.test(text)) return '';
-    let digits=text.replace(/\D/g,'');if(text.startsWith('+82'))digits='0'+digits.slice(2).replace(/^0/,'');
-    return /^010\d{8}$/.test(digits) ? digits : '';
-}
+function customerPhone(value){const text=String(value||'').trim();if(!/^[+\d\s()-]+$/.test(text))return '';let digits=text.replace(/\D/g,'');if(text.startsWith('+82'))digits='0'+digits.slice(2).replace(/^0/,'');return /^010\d{8}$/.test(digits)?digits:'';}
 export function groupCustomerDeliveries(orders, licenses=[]) {
     const groups=new Map();
     (orders || []).forEach((order,index)=>{
@@ -423,7 +385,7 @@ export function groupCustomerDeliveries(orders, licenses=[]) {
         const phone=customerPhone(order.phone),address=String(order.fullAddress || order.address || '').trim().replace(/\s+/g,' ');
         // 상세 주소까지 보존합니다. 번호/주소 누락 행은 자동 병합하지 않습니다.
         const key=phone && address ? JSON.stringify([phone,address]) : 'unresolved:'+index;
-        if (!groups.has(key))groups.set(key,{phone,rawPhone:String(order.phone || ''),address,names:new Set(),orders:[],drivers:new Map(),unassigned:false});
+        if (!groups.has(key))groups.set(key,{key,phone,rawPhone:String(order.phone || ''),address,names:new Set(),orders:[],drivers:new Map(),unassigned:false});
         const group=groups.get(key);group.orders.push(String(order.orderNo || '주문번호 없음'));
         group.names.add(String(order.recipientName || order.customerName || order.storeName || '').trim());
         const driver=licenses.find(l=>l.key===order.assignedDriver || l.id===order.assignedDriver);
@@ -434,37 +396,63 @@ export function groupCustomerDeliveries(orders, licenses=[]) {
     });
     return Array.from(groups.values());
 }
-export function renderCustomerDeliveryList() {
-    const tbody=document.getElementById('customer-delivery-tbody');if(!tbody)return;
-    const date=document.getElementById('customer-delivery-date')?.value,key=customerDispatchKey();
-    const orders=customerLoadedOwner===key && customerLoadedDate===date ? customerLoadedOrders : [];
-    const licenses=(state.allLicenses || []).filter(l=>l.dispatchKey===key && l.type!=='dispatch');
-    const groups=groupCustomerDeliveries(orders,licenses),phones=new Set(groups.map(g=>g.phone).filter(Boolean));
-    for(const [id,value]of [['customer-order-count',orders.length],['customer-stop-count',groups.length],['customer-phone-count',phones.size],['customer-invalid-count',groups.filter(g=>!g.phone).length]])document.getElementById(id).textContent=value.toLocaleString('ko-KR');
-    const query=String(document.getElementById('customer-delivery-search')?.value || '').trim().toLowerCase();
-    const filtered=groups.filter(g=>[g.address,g.rawPhone,g.phone,...g.names,...g.orders,...g.drivers.values()].join(' ').toLowerCase().includes(query));
-    const maxPage=Math.max(1,Math.ceil(filtered.length/50));customerDeliveryPage=Math.max(1,Math.min(customerDeliveryPage,maxPage));
-    const start=(customerDeliveryPage-1)*50;
-    tbody.innerHTML=filtered.slice(start,start+50).map((g,index)=>{
-        const needsCheck=!g.phone || !g.address || g.unassigned || g.drivers.size>1;
-        const checks=[!g.phone?'번호 확인':'',!g.address?'주소 확인':'',g.unassigned?'미배정':'',g.drivers.size>1?'분할 배송 확인':''].filter(Boolean);
-        return `<tr><td>${start+index+1}</td><td>${escapeMessage([...g.names].filter(Boolean).join(', ') || '수취인')}<small>${escapeMessage(g.phone ? g.phone.replace(/^(\d{3})(\d{4})(\d{4})$/,'$1-$2-$3') : g.rawPhone || '번호 없음')}</small></td><td>${escapeMessage(g.address || '주소 없음')}${g.orders.length>1?`<small>추가 주문 포함 ${g.orders.length}건</small>`:''}</td><td>${g.orders.map(escapeMessage).join('<br>')}</td><td>${[...g.drivers.values()].map(escapeMessage).join('<br>') || '미배정'}</td><td><span class="customer-row-tag ${needsCheck?'needs-check':''}">${checks.join(' · ') || '대상 확인 가능'}</span></td><td><span class="customer-send-state">미발송</span></td></tr>`;
-    }).join('') || `<tr><td colspan="7" class="customer-empty-cell">${customerLoadState==='loading'?'배송 목록을 불러오고 있습니다.':customerLoadState==='error'?'목록을 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.':query?'검색 결과가 없습니다.':'선택한 날짜에 자동할당으로 등록된 배송 목록이 없습니다.'}</td></tr>`;
-    document.getElementById('customer-list-status').textContent=customerLoadState==='loading'?'목록 확인 중':customerLoadState==='error'?'불러오기 실패':`조회된 배송지 ${filtered.length.toLocaleString('ko-KR')}곳 · 실제 발송 전 대상 확인`;
-    document.getElementById('customer-page-label').textContent=`${customerDeliveryPage} / ${maxPage} 페이지`;
-    document.getElementById('customer-page-prev').disabled=customerDeliveryPage<=1;
-    document.getElementById('customer-page-next').disabled=customerDeliveryPage>=maxPage;
-    updateCustomerMessagePreview();
+function currentCustomerGroups(){const date=document.getElementById('customer-delivery-date')?.value,key=customerDispatchKey();const orders=customerLoadedOwner===key&&customerLoadedDate===date?customerLoadedOrders:[];return {orders,groups:groupCustomerDeliveries(orders,(state.allLicenses||[]).filter(l=>l.dispatchKey===key&&l.type!=='dispatch'))};}
+function customerReadyPhones(groups){const phones=new Set(groups.map(g=>g.phone).filter(Boolean));return new Set([...phones].filter(phone=>groups.filter(g=>g.phone===phone).every(g=>g.address&&!g.unassigned&&g.drivers.size===1)));}
+function customerPhoneProblem(value){const raw=String(value||'').trim(),digits=raw.replace(/\D/g,'');if(!raw)return '전화번호가 비어 있습니다.';if(/^050/.test(digits))return '050 안심번호입니다. 문자 수신 가능 여부를 확인하고 수취인의 실제 휴대폰 번호를 등록해 주세요.';if(/^(02|0[3-6][1-5]|070)/.test(digits))return '일반전화·인터넷전화 형식입니다. 현재 발송 대상은 010 휴대폰 번호만 지원합니다.';if(/[\/,;]/.test(raw))return '전화번호가 여러 개 들어 있습니다. 수취인의 휴대폰 번호 하나를 등록해 주세요.';return '010으로 시작하는 11자리 휴대폰 번호 형식이 아닙니다. 누락된 숫자나 불필요한 문자를 확인해 주세요.';}
+function customerGroupProblems(group){return [!group.phone?customerPhoneProblem(group.rawPhone):'',!group.address?'배송지 주소가 없습니다.': '',group.unassigned?'아직 담당 기사가 배정되지 않은 주문이 있습니다.':'',group.drivers.size>1?'같은 배송지에 여러 기사가 배정되어 있습니다. 추가 방문인지 분할 배송인지 확인해 주세요.':''].filter(Boolean);}
+export function renderCustomerDeliveryList(){
+ const tbody=document.getElementById('customer-delivery-tbody');if(!tbody)return;
+ const {orders,groups}=currentCustomerGroups(),phones=new Set(groups.map(g=>g.phone).filter(Boolean)),ready=customerReadyPhones(groups),validStops=groups.filter(g=>g.phone).length,invalid=groups.length-validStops;
+ customerSelectedPhones=new Set([...customerSelectedPhones].filter(phone=>ready.has(phone)));
+ for(const [id,value]of [['customer-order-count',orders.length],['customer-stop-count',groups.length],['customer-phone-count',phones.size],['customer-invalid-count',invalid]])document.getElementById(id).textContent=value.toLocaleString('ko-KR');
+ document.getElementById('customer-count-explanation').textContent=`주문 ${orders.length}건 → 배송지 ${groups.length}곳 = 휴대폰 형식 확인 ${validStops}곳 + 번호 확인 필요 ${invalid}곳. 같은 번호의 다른 배송지 ${validStops-phones.size}곳을 제외하면 수신번호는 ${phones.size}개입니다. 배정·주소까지 확인된 발송 가능 번호는 ${ready.size}개입니다. 번호 형식 확인은 실제 수신을 보장하지 않습니다.`;
+ document.querySelectorAll('[data-customer-filter]').forEach(button=>button.setAttribute('aria-pressed',String(button.dataset.customerFilter===customerDeliveryFilter)));
+ const query=String(document.getElementById('customer-delivery-search')?.value||'').trim().toLowerCase();
+ const filtered=groups.map((g,index)=>({g,index})).filter(({g})=>{
+  const match=customerDeliveryFilter==='all'||customerDeliveryFilter==='valid'&&g.phone||customerDeliveryFilter==='invalid'&&!g.phone||customerDeliveryFilter==='ready'&&ready.has(g.phone)||customerDeliveryFilter==='check'&&g.phone&&customerGroupProblems(g).length||customerDeliveryFilter==='selected'&&customerSelectedPhones.has(g.phone);
+  return match&&[g.address,g.rawPhone,g.phone,...g.names,...g.orders,...g.drivers.values()].join(' ').toLowerCase().includes(query);
+ });
+ const maxPage=Math.max(1,Math.ceil(filtered.length/50));customerDeliveryPage=Math.max(1,Math.min(customerDeliveryPage,maxPage));const start=(customerDeliveryPage-1)*50;
+ tbody.innerHTML=filtered.slice(start,start+50).map(({g,index},offset)=>{
+  const problems=customerGroupProblems(g),eligible=ready.has(g.phone);
+  const label=!g.phone?'번호 확인':!g.address?'주소 확인':g.unassigned?'미배정':g.drivers.size>1?'분할 배송 확인':!eligible?'다른 배송지 확인':'대상 확인 가능';
+  return `<tr><td><input type="checkbox" aria-label="${escapeMessage(g.phone||'번호 확인 필요')} 발송 대상" data-phone="${g.phone}" onchange="window.toggleCustomerRecipient(this.dataset.phone,this.checked)" ${customerSelectedPhones.has(g.phone)?'checked':''} ${eligible?'':'disabled'}></td><td>${start+offset+1}</td><td>${escapeMessage([...g.names].filter(Boolean).join(', ')||'수취인')}<small>${escapeMessage(g.phone?g.phone.replace(/^(\d{3})(\d{4})(\d{4})$/,'$1-$2-$3'):g.rawPhone||'번호 없음')}</small></td><td>${escapeMessage(g.address||'주소 없음')}${g.orders.length>1?`<small>추가 주문 포함 ${g.orders.length}건</small>`:''}</td><td>${g.orders.map(escapeMessage).join('<br>')}</td><td>${[...g.drivers.values()].map(escapeMessage).join('<br>')||'미배정'}</td><td>${problems.length||!eligible?`<button type="button" class="customer-row-tag needs-check" onclick="window.showCustomerDeliveryIssue(${index})">${label} →</button>`:`<span class="customer-row-tag">${label}</span>`}</td><td><span class="customer-send-state">미발송</span></td></tr>`;
+ }).join('')||`<tr><td colspan="8" class="customer-empty-cell">${customerLoadState==='loading'?'배송 목록을 불러오고 있습니다.':customerLoadState==='error'?'목록을 불러오지 못했습니다. 새로고침으로 다시 시도해 주세요.':groups.length?'현재 필터·검색 조건에 맞는 배송지가 없습니다.':'선택한 날짜에 등록된 배송 목록이 없습니다.'}</td></tr>`;
+ document.getElementById('customer-list-status').textContent=customerLoadState==='loading'?'목록 확인 중':customerLoadState==='error'?'불러오기 실패':`표시 ${filtered.length}곳 · 체크한 번호에 한 번씩 안내`;
+ document.getElementById('customer-page-label').textContent=`${customerDeliveryPage} / ${maxPage} 페이지`;document.getElementById('customer-page-prev').disabled=customerDeliveryPage<=1;document.getElementById('customer-page-next').disabled=customerDeliveryPage>=maxPage;updateCustomerMessagePreview();
 }
-export function filterCustomerDeliveries() { customerDeliveryPage=1;renderCustomerDeliveryList(); }
-export function changeCustomerDeliveryPage(delta) { customerDeliveryPage+=delta;renderCustomerDeliveryList(); }
-export function renderDispatchAccount(mode='ACCOUNT') {
-    const account=customerAccount(),expiry=account?.expireDate || (account?.expiresAt ? getLocalDateString(new Date(typeof account.expiresAt.toMillis==='function'?account.expiresAt.toMillis():Number(account.expiresAt))) : '미등록');
-    const label=document.getElementById('dispatch-expiry-label');if(label)label.textContent=`사용기한 ${expiry}`;
-    const container=document.getElementById('dispatch-account-content');if(!container)return;
-    const billing=mode==='BILLING';document.getElementById('dispatch-account-heading').textContent=billing?'결제·충전':'이용정보';
-    document.getElementById('dispatch-account-description').textContent=billing?'이용료 결제와 고객 배송안내 충전을 확인하는 공간입니다.':'현재 관제 계정의 이용 상태를 확인하세요.';
-    const cards=billing ? [['관제 이용료','결제 안내 준비 중','현재 계약·이용권의 금액을 확인하는 기능을 준비합니다.'],['고객 배송안내','발송 성공 건당 35원','기본료 없이 사용한 만큼 · 부가세 포함 예정'],['문자 충전 잔액','연결 전','현재는 잔액 조회·충전·차감이 지원되지 않습니다.']] : [['현재 관제 등급',account ? account.isPro?'PRO 관제':'기본 관제' : '확인 중','자동할당·주문서 통합관리는 PRO에서 제공합니다.'],['사용기한',expiry,'계약기간·결제 내역은 추후 이곳에서 확인할 수 있습니다.'],['관제 계정',customerDispatchKey() || '확인 중','로그인한 회사 관제 계정 기준으로 표시됩니다.']];
-    container.innerHTML=`<div class="account-info-grid">${cards.map(([title,value,detail])=>`<article class="service-card"><h3>${escapeMessage(title)}</h3><strong>${escapeMessage(value)}</strong><p>${escapeMessage(detail)}</p></article>`).join('')}</div><article class="service-card account-info-note">${billing?'결제·충전 메뉴의 위치를 먼저 마련했습니다. 현재 결제나 충전은 진행되지 않습니다.':'사용 중인 계정의 정보를 확인하는 공간입니다. 요금 안내·결제 기능은 준비 후 연결됩니다.'}<br><button type="button" onclick="window.setDispatchMode('${billing?'ACCOUNT':'BILLING'}')">${billing?'이용정보 보기':'결제·충전 보기'}</button></article>`;
+export function filterCustomerDeliveries(){customerDeliveryPage=1;renderCustomerDeliveryList();}
+export function changeCustomerDeliveryPage(delta){customerDeliveryPage+=delta;renderCustomerDeliveryList();}
+export function setCustomerDeliveryFilter(filter){customerDeliveryFilter=['all','valid','invalid','ready','check','selected'].includes(filter)?filter:'all';customerDeliveryPage=1;renderCustomerDeliveryList();}
+export function toggleCustomerRecipient(phone,checked){if(!customerReadyPhones(currentCustomerGroups().groups).has(phone))return;if(checked)customerSelectedPhones.add(phone);else customerSelectedPhones.delete(phone);renderCustomerDeliveryList();}
+export function selectAllCustomerRecipients(selected){customerSelectedPhones=selected?customerReadyPhones(currentCustomerGroups().groups):new Set();renderCustomerDeliveryList();}
+function updateCustomerSelectionSummary(){const count=customerSelectedPhones.size,number=document.getElementById('customer-selected-count');if(number)number.textContent=count;const cost=document.getElementById('customer-selected-cost');if(cost)cost.textContent=`예상 이용금액 ${customerMoney(count*CUSTOMER_SMS_PRICE)} · 부가세 포함`;const button=document.getElementById('customer-review-button');if(button)button.textContent=count?`${count}개 번호 발송 확인`:'발송 대상 선택 후 확인';}
+function openCustomerDialog(title,html){const dialog=document.getElementById('customer-action-dialog');if(!dialog)return;customerDialogFocus=document.activeElement;document.getElementById('customer-dialog-heading').textContent=title;document.getElementById('customer-dialog-body').innerHTML=html;if(!dialog.open)dialog.showModal();}
+export function closeCustomerDialog(){const dialog=document.getElementById('customer-action-dialog');if(dialog?.open){dialog.close();if(customerDialogFocus?.isConnected)customerDialogFocus.focus();}}
+export function showCustomerDeliveryIssue(index){const {groups}=currentCustomerGroups(),g=groups[index];if(!g)return;let problems=customerGroupProblems(g);if(!problems.length)problems=groups.filter(other=>other.phone===g.phone).flatMap(customerGroupProblems);openCustomerDialog('발송 대상 확인',`<dl class="customer-review-details"><dt>입력된 번호</dt><dd>${escapeMessage(g.rawPhone||'없음')}</dd><dt>배송지</dt><dd>${escapeMessage(g.address||'없음')}</dd><dt>주문번호</dt><dd>${g.orders.map(escapeMessage).join(', ')}</dd></dl><ul class="customer-issue-list">${problems.map(p=>`<li>${escapeMessage(p)}</li>`).join('')}</ul><p class="customer-dialog-note">주문서 통합관리 또는 원본 주문에서 수정한 뒤, 이 화면에서 새로고침해 주세요. 같은 번호에 확인이 필요한 다른 배송지가 있으면 해당 번호는 함께 제외됩니다.</p>`);}
+export function reviewCustomerSend(){
+ const {groups}=currentCustomerGroups(),ready=customerReadyPhones(groups),phones=[...customerSelectedPhones].filter(p=>ready.has(p));
+ if(customerLoadState!=='ready'||!phones.length){openCustomerDialog('발송 대상을 먼저 선택해 주세요','<p>목록의 체크박스로 대상을 고르거나 <b>발송 가능 번호 전체 선택</b>을 누르세요. 같은 번호의 여러 배송지는 함께 선택되고 문자는 한 번만 보냅니다.</p><p class="customer-dialog-note">번호·주소·담당 기사 확인이 필요한 대상은 먼저 수정해야 합니다.</p>');return;}
+ const measurement=measureCustomerSms(customerMessage());if(measurement.bytes>80||measurement.unsupported){openCustomerDialog('안내 문구를 확인해 주세요','<p>80바이트를 초과했거나 지원하지 않는 문자가 포함되어 있습니다. 문구를 수정한 뒤 다시 확인해 주세요.</p>');return;}
+ const stops=groups.filter(g=>phones.includes(g.phone));
+ openCustomerDialog('문자 발송 전 최종 확인',`<div class="customer-review-alert">현재는 발송 확인 화면입니다. 실제 문자 발송·건수 차감은 하지 않습니다.</div><dl class="customer-review-details"><dt>배송일</dt><dd>${escapeMessage(document.getElementById('customer-delivery-date').value)}</dd><dt>발송 대상</dt><dd><b>${phones.length}개 번호</b> · 배송지 ${stops.length}곳</dd><dt>예상 차감</dt><dd>${phones.length}건 / ${customerMoney(phones.length*35)} (부가세 포함)</dd><dt>잔여 발송 건수</dt><dd>미연결 · 실제 발송 전 서버에서 확인</dd></dl><pre class="customer-review-message">${escapeMessage(customerMessage())}</pre><details><summary>수신번호 ${phones.length}개 확인</summary><p>${phones.map(escapeMessage).join('<br>')}</p></details><p class="customer-dialog-note">고객별 배송조회 링크·잔액·SENS 연결이 완료되면 이 단계에서 발송을 승인합니다. 목록에는 확인 중 → 발송 완료 / 실패가 반영됩니다.</p><button type="button" class="customer-primary-button" disabled>실제 발송 연결 후 전송 가능</button>`);
 }
-Object.assign(window,{openCustomerDeliveryPage,refreshCustomerDeliveryList,renderCustomerDeliveryList,updateCustomerMessagePreview,saveCustomerMessageDraft,filterCustomerDeliveries,changeCustomerDeliveryPage,renderDispatchAccount});
+export function openCustomerContactGuide(){openCustomerDialog('배송 문의번호 운영 안내','<p><b>배송 문의는 각 배송업체 대표번호로 연결하는 방식을 권합니다.</b> 기사 개인번호는 노출하지 않고, 배송조회 화면 아래에 업체명·문의번호·응대시간을 안내합니다.</p><p>문자에는 짧은 조회 안내를 유지하고, 문의번호는 조회 화면에 표시하면 단문 입력 공간도 확보할 수 있습니다.</p><p class="customer-dialog-note">050 안심번호는 번호 보호·연결 서비스이고, 자동응답(ARS)은 별도 기능입니다. 필요할 때 업체별 문의 분배·응대시간 안내를 검토하되, SMS 발신번호로 사용할 수 있는지는 번호 상품과 SENS 등록 조건을 별도로 확인해야 합니다.</p>');}
+export function setDispatchBillingTab(tab){customerBilling.tab=tab==='sms'?'sms':'service';const container=document.getElementById('dispatch-account-content');if(container)delete container.dataset.renderKey;renderDispatchAccount('BILLING');}
+export function changeDispatchBilling(field,value){if(field==='plan')customerBilling.plan=value==='pro'?'pro':'basic';if(field==='period')customerBilling.period=value==='yearly'?'yearly':'monthly';if(field==='drivers')customerBilling.drivers=value===true;if(field==='seats')customerBilling.seats=Number(value);if(field==='smsCount')customerBilling.smsCount=Number(value);updateDispatchBillingQuote();}
+function dispatchBillingQuote(){if(customerBilling.tab==='sms'){const count=customerBilling.smsCount;if(!Number.isSafeInteger(count)||count<100||count>100000)return {error:'충전 건수는 100~100,000 사이의 정수로 입력해 주세요.'};return {total:count*35,label:`배송안내 문자 ${count.toLocaleString('ko-KR')}건`,lines:[['문자 충전',`${count.toLocaleString('ko-KR')}건 × 35원`,count*35]]};}const yearly=customerBilling.period==='yearly',months=yearly?12:1,monthly=customerBilling.plan==='pro'?(yearly?148500:165000):(yearly?49500:55000),lines=[[`${customerBilling.plan==='pro'?'PRO':'기본'} 관제`,`${months}개월 · 월 환산 ${customerMoney(monthly)}`,monthly*months]];if(customerBilling.drivers){if(!Number.isSafeInteger(customerBilling.seats)||customerBilling.seats<5||customerBilling.seats>1000)return {error:'기업 기사 이용권은 최소 5개부터 1,000개까지 정수로 입력해 주세요.'};lines.push(['기업 기사 이용권',`${customerBilling.seats}개 × 7,700원 × ${months}개월`,customerBilling.seats*7700*months]);}return {total:lines.reduce((sum,line)=>sum+line[2],0),label:`${customerBilling.plan==='pro'?'PRO':'기본'} 관제 ${months}개월`,lines,yearly};}
+function updateDispatchBillingQuote(){const box=document.getElementById('dispatch-billing-quote');if(!box)return;const quote=dispatchBillingQuote(),button=document.getElementById('dispatch-billing-review');document.querySelectorAll('[data-sms-pack]').forEach(b=>b.setAttribute('aria-pressed',String(Number(b.dataset.smsPack)===customerBilling.smsCount)));const seats=document.getElementById('dispatch-billing-seats');if(seats)seats.disabled=!customerBilling.drivers;if(quote.error){box.innerHTML=`<p class="customer-error">${escapeMessage(quote.error)}</p>`;if(button)button.disabled=true;return;}box.innerHTML=`${quote.lines.map(([name,detail,amount])=>`<div class="billing-quote-line"><span>${escapeMessage(name)}<small>${escapeMessage(detail)}</small></span><b>${customerMoney(amount)}</b></div>`).join('')}<div class="billing-quote-total"><span>총 결제 예정금액</span><strong>${customerMoney(quote.total)}</strong></div><p>공급가액 ${customerMoney(Math.round(quote.total/1.1))} + 부가세 ${customerMoney(quote.total-Math.round(quote.total/1.1))}</p>`;if(button)button.disabled=false;}
+export function reviewDispatchBilling(){const quote=dispatchBillingQuote();if(quote.error)return;openCustomerDialog(customerBilling.tab==='sms'?'문자 충전금액 확인':'이용료 결제금액 확인',`<div class="customer-review-alert">결제 연결 전 확인 화면입니다. 카드 승인·충전 건수 지급·사용기한 연장은 진행되지 않습니다.</div><dl class="customer-review-details"><dt>관제 계정</dt><dd>${escapeMessage(customerDispatchKey())}</dd><dt>선택 상품</dt><dd>${escapeMessage(quote.label)}</dd><dt>결제 예정금액</dt><dd><b>${customerMoney(quote.total)}</b> · 부가세 포함</dd></dl>${quote.yearly?'<p>1년 이용료를 한 번에 납부하는 선택입니다. 연 선납 할인은 계약 확정 후 적용합니다.</p>':''}<p class="customer-dialog-note">${customerBilling.tab==='sms'?'실제 결제 성공을 서버가 확인한 뒤 잔여 건수가 반영됩니다. 현재 화면에서는 잔액을 생성하지 않습니다.':'계약 상품·기사 수·적용 기간은 실제 결제 전에 확인합니다. 기존 사용기한을 임의로 변경하지 않습니다.'}</p><button type="button" class="customer-primary-button" disabled>실제 결제 연결 후 승인 가능</button>`);}
+function customerAccountExpiry(account){if(account?.expireDate)return account.expireDate;if(account?.expiresAt){const stamp=typeof account.expiresAt.toMillis==='function'?account.expiresAt.toMillis():Number(account.expiresAt);if(Number.isFinite(stamp))return getLocalDateString(new Date(stamp));}return '미등록';}
+export function renderDispatchAccount(mode='ACCOUNT'){
+ const account=customerAccount(),expiry=customerAccountExpiry(account),key=customerDispatchKey(),label=document.getElementById('dispatch-expiry-label');if(label)label.textContent=`사용기한 ${expiry}`;
+ const container=document.getElementById('dispatch-account-content');if(!container)return;if(customerBilling.owner!==key){Object.assign(customerBilling,{owner:key,initialized:false,plan:'basic',period:'monthly',drivers:false,seats:5,smsCount:1000});}const billing=mode==='BILLING',signature=JSON.stringify([mode,key,account?.companyName,account?.name,expiry,account?.isPro,account?.status,account?.maxSlots,account?.maxSessions,customerBilling.tab,(state.allLicenses||[]).filter(l=>l.dispatchKey===key&&l.type!=='dispatch').length]);if(container.dataset.renderKey===signature)return;container.dataset.renderKey=signature;
+ document.getElementById('dispatch-account-heading').textContent=billing?'결제·문자 충전':'이용정보';document.getElementById('dispatch-account-description').textContent=billing?'관제 이용료와 문자 충전을 구분해서 선택하고 금액을 확인하세요. 모든 금액은 부가세 포함입니다.':'현재 관제 등급·사용기한·연결 기사 현황을 확인하세요.';const modeLabel=document.getElementById('dispatch-account-mode-label');if(modeLabel)modeLabel.textContent=billing?'결제 연결 전 · 금액 확인 가능':'현재 계정';
+ const connected=(state.allLicenses||[]).filter(l=>l.dispatchKey===key&&l.type!=='dispatch');
+ if(!billing){container.innerHTML=`<div class="account-info-grid">${[['관제 등급',account?account.isPro?'PRO 관제':'기본 관제':'확인 중',account?.isPro?'기본 기능 + 자동할당·주문서 통합관리':'배송관리·기사 메시지·위치확인·데이터 추출'],['사용기한',expiry,'현재 계정에 등록된 사용기한입니다.'],['연결 기사',connected.length+'명',account?.maxSlots?`연결 한도 ${account.maxSlots}명`:'연결 한도 별도 제한 없음']].map(([title,value,detail])=>`<article class="service-card"><h3>${title}</h3><strong>${escapeMessage(value)}</strong><p>${escapeMessage(detail)}</p></article>`).join('')}</div><article class="service-card account-detail-card"><h3>회사·계정 정보</h3><dl class="customer-review-details"><dt>업체명</dt><dd>${escapeMessage(account?.companyName||account?.name||'미등록')}</dd><dt>관제 계정</dt><dd>${escapeMessage(key||'확인 중')}</dd><dt>상태</dt><dd>${escapeMessage(account?({active:'이용 중',suspended:'사용 정지',expired:'기간 만료',revoked:'회수됨'}[account.status]||'확인 필요'):'확인 중')}</dd><dt>동시 접속 한도</dt><dd>${escapeMessage(String(account?.maxSessions||(account?.isPro?2:1)))}대</dd><dt>계약·납부 정보</dt><dd>계약·결제 기록 서버 연결 후 표시</dd><dt>문자 잔여 건수</dt><dd>미연결 · 0건으로 간주하지 않습니다.</dd></dl><div class="account-action-row"><button type="button" onclick="window.setDispatchMode('BILLING')">이용료·요금 확인</button><button type="button" onclick="window.setDispatchMode('BILLING');window.setDispatchBillingTab('sms')">문자 충전</button></div></article>`;return;}
+ if(!customerBilling.initialized&&account){customerBilling.plan=account.isPro?'pro':'basic';customerBilling.initialized=true;}
+ const sms=customerBilling.tab==='sms';
+ container.innerHTML=`<div class="billing-page-tabs"><button type="button" aria-pressed="${!sms}" onclick="window.setDispatchBillingTab('service')">관제 이용료</button><button type="button" aria-pressed="${sms}" onclick="window.setDispatchBillingTab('sms')">문자 충전</button></div><div class="billing-layout"><article class="service-card billing-options">${sms?`<h3>배송안내 문자 충전</h3><p class="billing-intro">기본료 없이 성공 건당 35원 · 배송조회 포함</p><div class="billing-wallet"><span>현재 잔여 발송 건수</span><strong>미연결</strong><small>사용 가능·발송 예약·사용 확정 내역을 서버 연결 후 표시합니다.</small></div><div class="sms-pack-grid">${[1000,3000,5000,10000].map(count=>`<button type="button" data-sms-pack="${count}" onclick="window.chooseCustomerSmsPack(${count})"><b>${count.toLocaleString('ko-KR')}건</b><span>${customerMoney(count*35)}</span></button>`).join('')}</div><label class="billing-field">직접 충전 건수 입력<input type="number" id="dispatch-sms-count" min="100" max="100000" step="1" value="${customerBilling.smsCount}" oninput="window.changeDispatchBilling('smsCount',this.value)"></label><ul class="billing-terms"><li>같은 수신번호에 묶인 주문은 중복 발송하지 않습니다.</li><li>발송 결과가 확인 중인 건은 예약 건수로 구분할 예정입니다.</li><li>최종 실패 건은 예약을 해제하고 사용 가능 건수로 복구할 예정입니다.</li></ul>`:`<h3>관제 요금제 선택</h3><p class="billing-intro">기사 이용료는 별도입니다. PRO에는 기본 관제 기능이 포함됩니다.</p><div class="billing-plan-grid">${[['basic','기본 관제',55000,'배송관리 · 기사 메시지 · 위치확인 · 데이터 추출'],['pro','PRO 관제',165000,'기본 기능 전체 + 자동할당 · 주문서 통합관리']].map(([id,title,price,features])=>`<label class="billing-plan"><input type="radio" name="dispatch-plan" value="${id}" ${customerBilling.plan===id?'checked':''} onchange="window.changeDispatchBilling('plan',this.value)"><b>${title}</b><strong>${customerMoney(price)}<small>/월</small></strong><span>${features}</span></label>`).join('')}</div><fieldset class="billing-period"><legend>이용 기간</legend><label><input type="radio" name="dispatch-period" value="monthly" ${customerBilling.period==='monthly'?'checked':''} onchange="window.changeDispatchBilling('period',this.value)"> 1개월</label><label><input type="radio" name="dispatch-period" value="yearly" ${customerBilling.period==='yearly'?'checked':''} onchange="window.changeDispatchBilling('period',this.value)"> 1년 선납 · 제안 할인 10%</label></fieldset><p class="customer-help">연 선납은 12개월 총액을 한 번 결제합니다. 할인·계약 조건은 계약 확정 후 적용합니다.</p><div class="billing-driver-option"><label><input type="checkbox" ${customerBilling.drivers?'checked':''} onchange="window.changeDispatchBilling('drivers',this.checked)"> 기업 기사 이용권 함께 선택</label><label class="billing-field">필요 계정 수<input type="number" id="dispatch-billing-seats" min="5" max="1000" step="1" value="${customerBilling.seats}" oninput="window.changeDispatchBilling('seats',this.value)"></label><p>최소 5계정 · 계정당 월 7,700원. 기존에 보유한 이용권과 중복 구매하지 않도록 계약 시 확인합니다.</p></div>`}</article><aside class="service-card billing-checkout"><h3>${sms?'충전':'이용료'} 금액 확인</h3><div id="dispatch-billing-quote"></div><p class="billing-checkout-note">실제 결제·차감은 아직 연결하지 않았습니다. 선택한 상품과 금액을 먼저 확인할 수 있습니다.</p><button type="button" id="dispatch-billing-review" class="customer-primary-button" onclick="window.reviewDispatchBilling()">${sms?'충전':'결제'}금액 확인</button></aside></div><article class="service-card billing-history"><h3>결제·충전 및 사용 내역</h3><div class="billing-history-grid"><div><b>이용료 결제 내역</b><p>실제 납부일·금액·적용 기간은 결제 서버 연결 후 표시됩니다.</p></div><div><b>문자 충전·차감 내역</b><p>충전·발송 예약·성공 차감·실패 복구를 구분해 표시할 예정입니다. 현재 처리된 거래는 없습니다.</p></div></div></article>`;updateDispatchBillingQuote();
+}
+export function chooseCustomerSmsPack(count){customerBilling.smsCount=count;const input=document.getElementById('dispatch-sms-count');if(input)input.value=count;updateDispatchBillingQuote();}
+Object.assign(window,{openCustomerDeliveryPage,refreshCustomerDeliveryList,renderCustomerDeliveryList,updateCustomerMessagePreview,saveCustomerMessageDraft,filterCustomerDeliveries,changeCustomerDeliveryPage,renderDispatchAccount,setCustomerDeliveryFilter,toggleCustomerRecipient,selectAllCustomerRecipients,showCustomerDeliveryIssue,reviewCustomerSend,closeCustomerDialog,openCustomerContactGuide,setDispatchBillingTab,changeDispatchBilling,reviewDispatchBilling,chooseCustomerSmsPack});
