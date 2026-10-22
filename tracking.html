@@ -6,25 +6,29 @@
 <title>배송조회 · 배송경로PRO</title>
 <style>
 :root{color-scheme:light;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Malgun Gothic",sans-serif;color:#172b4d;background:#f3f6fb}*{box-sizing:border-box}body{margin:0}header{background:#fff;border-bottom:1px solid #e1e8f2}header div,main,footer{max-width:760px;margin:auto;padding:22px}header div{display:flex;align-items:center;justify-content:space-between;gap:12px}header strong{font-size:17px;color:#1d4ed8}header span{font-size:12px;color:#66758b}h1{font-size:30px;letter-spacing:-1px;margin:12px 0}h2{font-size:19px;margin:0}p{line-height:1.7}.intro{color:#66758b;margin:0 0 22px}.toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px;font-size:12px;color:#66758b;margin-bottom:18px}button{background:white;border:1px solid #cfdaeb;border-radius:9px;padding:10px 14px;color:#204276;font:inherit;cursor:pointer}button:disabled{opacity:.5;cursor:wait}.card{border:1px solid #dee6f2;background:white;border-radius:18px;margin:0 0 20px;padding:24px;box-shadow:0 4px 20px #1c417108}.top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}.badge{font-size:12px;font-weight:700;color:#1d4ed8;background:#edf3ff;border-radius:30px;padding:7px 11px;white-space:nowrap}.badge.completed{background:#e6f6ee;color:#08764b}.badge.cancelled,.badge.checking{background:#fff3df;color:#8a5c09}.address{font-size:17px;font-weight:700;line-height:1.6;margin:18px 0 12px;overflow-wrap:anywhere}.meta{display:flex;flex-wrap:wrap;gap:10px 22px;font-size:13px;color:#66758b}.meta b{color:#243b60}.orders{font-size:12px;color:#66758b;margin:14px 0 18px;overflow-wrap:anywhere}.progress-title{display:flex;justify-content:space-between;gap:12px;font-size:12px;margin-top:24px}.progress-track{height:7px;background:#edf1f7;border-radius:10px;overflow:hidden;margin:10px 0 18px}.progress-track i{display:block;height:100%;background:#2471f5;border-radius:10px}.route{list-style:none;padding:0;margin:0;max-height:390px;overflow:auto;border:1px solid #e5ebf4;border-radius:12px}.route li{display:flex;align-items:center;gap:12px;padding:12px 14px;border-bottom:1px solid #edf1f7;font-size:13px}.route li:last-child{border-bottom:0}.route .own{background:#edf4ff;box-shadow:inset 3px 0 #2563eb;font-weight:700}.num{background:#f1f4f9;border-radius:50%;width:28px;height:28px;display:grid;place-items:center;flex-shrink:0;font-size:11px}.own .num{background:#2563eb;color:#fff}.route .state{margin-left:auto;color:#718096;font-size:12px}.route .done{color:#08764b}.route small{color:#1d4ed8;margin-left:5px}.notice{font-size:12px;color:#66758b;background:#eaf0f8;border-radius:12px;padding:14px 17px}.error{border:1px solid #eed8b5;background:#fffaf1;border-radius:14px;padding:22px;line-height:1.8}#status:empty{display:none}footer{font-size:11px;line-height:1.9;color:#718096;padding-top:4px;padding-bottom:30px}.demo{background:#fff3df;padding:12px 18px;border-radius:12px;font-size:13px;margin-bottom:20px}summary{cursor:pointer;font-size:12px;color:#64748b}.route-hint{font-size:12px;color:#66758b;margin:12px 0 0}@media(max-width:480px){header div,main,footer{padding:18px}h1{font-size:26px}.card{padding:18px}.address{font-size:16px}.top h2{font-size:17px}}
+[hidden]{display:none!important}body.lookup-mode{background:#0f172a;min-height:100dvh;display:grid;place-items:center;padding:24px}.lookup-panel{width:100%;max-width:424px;background:white;border:1px solid #e5e7eb;border-radius:26px;padding:34px 32px 26px;text-align:center;position:relative;overflow:hidden;box-shadow:0 24px 60px #0003}.lookup-panel:before{content:'';position:absolute;top:0;left:0;right:0;height:6px;background:#2563eb}.lookup-logo{display:block;width:140px;height:auto;margin:0 auto 20px}.lookup-panel h1{font-size:23px;margin:0 0 8px}.lookup-subtitle{font-size:13px;color:#8793a6;margin:0 0 25px}.lookup-panel label{display:block;text-align:left;font-size:13px;font-weight:700;margin-bottom:10px;color:#334155}.lookup-panel input{box-sizing:border-box;width:100%;padding:16px 15px;border:1px solid #cbd5e1;border-radius:12px;background:#f8fafc;font:inherit;font-size:14px;color:#172b4d;outline:none}.lookup-panel input:focus{border-color:#2563eb;box-shadow:0 0 0 3px #2563eb15}.lookup-panel .lookup-submit{width:100%;background:#2563eb;color:#fff;font-size:15px;font-weight:800;border:0;border-radius:12px;padding:16px;margin-top:18px;box-shadow:0 8px 16px #2563eb20}.lookup-help{font-size:12px;line-height:1.8;color:#7b879a;margin:20px 0 0;text-align:left}.lookup-help b{color:#475569}.lookup-message{color:#b45309;font-size:12px;line-height:1.7;text-align:left;margin:12px 0 0}.lookup-message:empty{display:none}.lookup-footer{border-top:1px solid #edf0f5;margin-top:26px;padding-top:16px;font-size:11px;color:#94a3b8;line-height:1.8}.lookup-example{background:#edf4ff;border-radius:10px;padding:12px;margin:18px 0 0;text-align:left;font-size:12px;color:#45628e;line-height:1.8}.lookup-example button{margin-top:8px;padding:6px 10px;font-size:12px}#results{width:100%}@media(max-width:480px){body.lookup-mode{padding:18px}.lookup-panel{padding:32px 24px 24px}}
 </style>
 </head>
-<body>
+<body class="lookup-mode">
+<section id="lookup-panel" class="lookup-panel" aria-labelledby="lookup-title"><img class="lookup-logo" src="/icons/header-logo-06-640.png" width="640" height="357" alt="배송경로PRO"><h1 id="lookup-title">고객 배송조회</h1><p class="lookup-subtitle">내 배송이 어디까지 진행됐는지 확인하세요.</p><form id="lookup-form"><label for="lookup-input">전화번호나 주문번호를 입력하세요.</label><input id="lookup-input" type="text" autocomplete="off" maxlength="150" placeholder="전화번호 또는 주문번호" required aria-describedby="lookup-help lookup-message"><button id="lookup-submit" class="lookup-submit" type="submit">내 배송 조회하기</button></form><p id="lookup-message" class="lookup-message" role="status" aria-live="polite"></p><p id="lookup-help" class="lookup-help"><b>전화번호</b> · 주문 시 등록한 받는 분의 휴대폰 번호<br><b>주문번호</b> · 주문내역에 표시된 번호를 그대로 입력<br>조회하면 배송 순서와 배송 완료 여부가 표시됩니다.</p><div id="lookup-example" class="lookup-example" hidden>화면 확인용 예시입니다.<br>전화번호 <b>010-1234-5678</b><br>주문번호 <b>예시주문-001</b><br><button id="sample-fill" type="button">예시 전화번호 넣기</button></div><div class="lookup-footer">문자로 받은 배송조회 링크에서 이용해 주세요.<br>배송 문의는 주문한 배송업체로 연락해 주세요.</div></section>
+<div id="results" hidden>
 <header><div><strong>배송경로PRO</strong><span>고객 배송조회</span></div></header>
 <main>
 <h1 id="company">내 배송 확인</h1><p id="intro" class="intro">배송 정보를 확인하고 있습니다.</p>
 <div id="demo" class="demo" hidden>화면 확인용 예시입니다. 아래 내용은 실제 고객의 배송 정보가 아닙니다.</div>
-<div class="toolbar"><span id="updated" aria-live="polite"></span><button id="refresh" type="button">새로고침</button></div>
+<div class="toolbar"><span id="updated" aria-live="polite"></span><div><button id="lookup-back" type="button">다시 조회</button> <button id="refresh" type="button">새로고침</button></div></div>
 <div id="status" role="status" aria-live="polite"></div><section id="deliveries" aria-label="내 배송지"></section>
 <p class="notice">배송 순서와 처리 상태를 안내합니다. 교통·현장 상황에 따라 순서가 바뀔 수 있습니다. 정확한 기사 위치와 도착 시각은 제공하지 않습니다.</p>
 </main>
 <footer>다른 고객의 주소와 연락처, 기사 전화번호는 표시하지 않습니다.<br>배송 관련 문의는 주문한 배송업체로 연락해 주세요.</footer>
+</div>
 <script>
 (() => {
  const $=id=>document.getElementById(id),labels={pending:'배송 예정',completed:'배송됨',cancelled:'배송 취소',checking:'상태 확인 중',partial:'일부 배송 처리'};
  const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  const parts=location.pathname.split('/').filter(Boolean),code=parts[0]==='t'&&parts.length===2?parts[1]:'';
  const sample=code==='Ab3dE5fG'||code==='Ab3dE5fGh7Jk9LmN';
- let loading=false,timer;
+ let loading=false,timer,confirmedLookup='';
  function render(data){
   $('company').textContent=data.company+' 배송조회';
   $('intro').textContent=data.date+' · 내 배송지 '+data.stops.length+'곳';
@@ -34,22 +38,26 @@
    return `<article class="card"><div class="top"><h2>내 배송지 ${index+1}</h2><span class="badge ${escape(stop.status)}">${escape(labels[stop.status]||labels.checking)}</span></div><p class="address">${escape(stop.address)}</p><div class="meta"><span>담당 기사 <b>${escape(stop.driverName)}</b></span><span>배송 순서 <b>${stop.sequence.length?stop.sequence.map(escape).join(', ')+'번':'확인 중'}</b></span></div><details class="orders"><summary>연결된 주문 ${stop.orders.length}건</summary><p>${stop.orders.map(escape).join('<br>')}</p></details><div class="progress-title"><b>기사 배송 진행</b><span>${finished} / ${total}곳 배송 완료</span></div><div class="progress-track"><i style="width:${total?Math.round(finished/total*100):0}%"></i></div><ol class="route" aria-label="전체 배송 순서">${stop.route.map(r=>`<li class="${r.own?'own':''}" ${r.own?'aria-current="step"':''}><span class="num">${escape(r.sequence)}</span><span>${r.own?'내 배송지 <small>내 차례</small>':'다른 배송지'}</span><span class="state ${r.status==='completed'?'done':''}">${r.status==='completed'?'✓ ':''}${escape(labels[r.status]||labels.checking)}</span></li>`).join('')}</ol><p class="route-hint">파란색으로 표시된 순서가 내 배송지입니다.</p></article>`;
   }).join('');
  }
- async function load(){
-  if(loading)return;loading=true;$('refresh').disabled=true;
+ async function load(lookup=confirmedLookup){
+  if(loading||!lookup.trim())return;loading=true;$('refresh').disabled=true;$('lookup-submit').disabled=true;$('lookup-message').textContent='배송 정보를 확인하고 있습니다.';
   try{
-   if(sample){$('demo').hidden=false;render({company:'예시 배송업체',date:new Date().toLocaleDateString('sv-SE'),updatedAt:Date.now(),stops:[{address:'서울시 예시구 예시로 12 · 화면 확인용 주소',driverName:'김배송',status:'pending',sequence:[4],orders:['예시주문-001','예시주문-002'],route:Array.from({length:8},(_,i)=>({sequence:i+1,own:i===3,status:i<2?'completed':'pending'}))}]});$('status').textContent='';return;}
+   if(sample){if(lookup.replace(/[^0-9]/g,'')!=='01012345678'&&!['예시주문-001','예시주문-002'].includes(lookup))throw new Error('예시 전화번호 010-1234-5678 또는 예시주문-001을 입력해 주세요.');$('demo').hidden=false;render({company:'예시 배송업체',date:new Date().toLocaleDateString('sv-SE'),updatedAt:Date.now(),stops:[{address:'서울시 예시구 예시로 12 · 화면 확인용 주소',driverName:'김배송',status:'pending',sequence:[4],orders:['예시주문-001','예시주문-002'],route:Array.from({length:8},(_,i)=>({sequence:i+1,own:i===3,status:i<2?'completed':'pending'}))}]});$('status').textContent='';showResults(lookup);return;}
    if(!/^[A-Za-z0-9_-]{16}$/.test(code))throw new Error('올바른 배송조회 링크로 접속해 주세요. 문자에 포함된 전체 주소를 확인해 주세요.');
    const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);
-   let response;try{response=await fetch('/api/tracking?code='+encodeURIComponent(code),{cache:'no-store',credentials:'omit',signal:controller.signal});}finally{clearTimeout(timeout);}
+   let response;try{response=await fetch('/api/tracking',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'lookup',code,lookup}),cache:'no-store',credentials:'omit',signal:controller.signal});}finally{clearTimeout(timeout);}
    const data=await response.json();if(!response.ok)throw new Error(data.error||'배송 정보를 불러오지 못했습니다.');
-   render(data);$('status').textContent='';
-  }catch(error){$('deliveries').replaceChildren();$('updated').textContent='';$('intro').textContent='문자로 받은 링크에서 배송 정보를 확인하세요.';$('status').className='error';$('status').textContent=error.name==='AbortError'?'응답이 지연되고 있습니다. 새로고침을 눌러 다시 확인해 주세요.':error.message;}
-  finally{loading=false;$('refresh').disabled=false;}
+   render(data);$('status').textContent='';showResults(lookup);
+  }catch(error){$('deliveries').replaceChildren();$('updated').textContent='';$('intro').textContent='문자로 받은 링크에서 배송 정보를 확인하세요.';$('status').className='error';$('status').textContent=error.name==='AbortError'?'응답이 지연되고 있습니다. 다시 조회해 주세요.':error.message;$('lookup-message').textContent=$('status').textContent;}
+  finally{loading=false;$('refresh').disabled=false;$('lookup-submit').disabled=false;}
  }
- $('refresh').addEventListener('click',load);
- function schedule(){clearInterval(timer);if(!document.hidden&&!sample)timer=setInterval(load,60000);}
- document.addEventListener('visibilitychange',()=>{schedule();if(!document.hidden)load();});
- schedule();load();
+ function showResults(lookup){confirmedLookup=lookup;$('lookup-panel').hidden=true;$('results').hidden=false;document.body.classList.remove('lookup-mode');$('lookup-message').textContent='';schedule();}
+ $('lookup-form').addEventListener('submit',event=>{event.preventDefault();load($('lookup-input').value.trim());});
+ $('refresh').addEventListener('click',()=>load());
+ $('lookup-back').addEventListener('click',()=>{if(loading)return;clearInterval(timer);confirmedLookup='';$('lookup-panel').hidden=false;$('results').hidden=true;document.body.classList.add('lookup-mode');$('deliveries').replaceChildren();$('lookup-input').focus();});
+ $('sample-fill').addEventListener('click',()=>{$('lookup-input').value='010-1234-5678';$('lookup-input').focus();});
+ function schedule(){clearInterval(timer);if(!document.hidden&&!sample&&confirmedLookup)timer=setInterval(()=>load(),60000);}
+ document.addEventListener('visibilitychange',()=>{schedule();if(!document.hidden&&confirmedLookup)load();});
+ $('lookup-example').hidden=!sample;
 })();
 </script>
 </body>
