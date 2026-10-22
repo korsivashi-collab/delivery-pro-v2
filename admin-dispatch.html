@@ -12,7 +12,7 @@
     
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261020-dispatch-single">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261022-customer-delivery">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -29,62 +29,37 @@
     <!-- 실시간 웹 관제 메인 패널 -->
     <div id="dispatch-panel" class="flex flex-col h-full w-full bg-gray-100">
         <!-- 1. 관제 상단 헤더 바 -->
-        <header class="dispatch-header bg-white border-b border-gray-200 z-20 shadow-sm flex-none px-5 py-2.5 flex items-center justify-between gap-3 overflow-x-auto hide-scrollbar">
-            <!-- 브랜드·계정 및 기존 메뉴 -->
-            <div class="dispatch-header-left flex items-center gap-4 shrink-0">
-                <div onclick="window.location.reload()" class="dispatch-brand flex items-center gap-2 cursor-pointer group">
-                    <img src="./icons/header-logo-06-640.png" alt="배송 경로 PRO" width="640" height="357" style="display:block;width:88px;height:auto;object-fit:contain;flex-shrink:0;">
-                    <div class="dispatch-brand-copy">
-                        <h1 class="text-sm font-black text-gray-900 tracking-tight leading-none group-hover:text-blue-600 transition">배송 관제</h1>
-                        <span id="dispatch-sub-title" class="text-[9px] text-gray-400 font-bold mt-0.5 block">실시간 관제</span>
-                    </div>
+        <header class="dispatch-header">
+            <div class="dispatch-header-left">
+                <div onclick="window.location.reload()" class="dispatch-brand" title="배송 관제 새로고침">
+                    <img src="./icons/header-logo-06-640.png" alt="배송경로PRO" width="640" height="357">
+                    <div class="dispatch-brand-copy"><h1>배송 관제</h1><span id="dispatch-sub-title">실시간 관제</span></div>
                 </div>
-                <div class="dispatch-brand-divider w-px h-6 bg-gray-200"></div>
-                <div class="dispatch-primary-nav flex items-center gap-1 bg-slate-100 p-1 rounded-xl border border-slate-200 shadow-inner">
-                    <button onclick="window.setDispatchMode('DELIVERY')" id="nav-btn-DELIVERY" class="px-3 py-1.5 rounded-lg text-xs font-black bg-blue-600 text-white shadow-sm transition flex items-center gap-1.5">
-                        <i class="fa-solid fa-route text-[11px]"></i> 배송 관리
-                    </button>
-                    <button onclick="window.setDispatchMode('MESSAGE')" id="nav-btn-MESSAGE" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
-                        <i class="fa-solid fa-comment-dots text-[11px]"></i> 메시지 <span id="dispatch-inbox-badge" class="hidden rounded-full bg-red-500 text-white px-1.5 text-[10px]">0</span>
-                    </button>
-                    <button onclick="window.setDispatchMode('LOCATION')" id="nav-btn-LOCATION" class="px-3 py-1.5 rounded-lg text-xs font-black text-gray-500 hover:text-gray-900 hover:bg-white transition flex items-center gap-1.5">
-                        <i class="fa-solid fa-map-location-dot text-[11px]"></i> 위치 확인
-                    </button>
-                    <div class="w-px h-5 bg-gray-300 mx-0.5"></div>
-                    <button onclick="window.openExcelExportModal()" class="px-3 py-1.5 rounded-lg text-xs font-black text-emerald-600 hover:text-emerald-700 hover:bg-emerald-50 transition flex items-center gap-1.5 shadow-sm active:scale-95" title="데이터 추출">
-                        <i class="fa-solid fa-file-excel text-[11px]"></i> 데이터 추출
-                    </button>
-                </div>
+                <nav class="dispatch-primary-nav" aria-label="관제 기능">
+                    <button type="button" onclick="window.setDispatchMode('DELIVERY')" id="nav-btn-DELIVERY" class="bg-blue-600" aria-pressed="true"><i class="fa-solid fa-route"></i>배송관리</button>
+                    <button type="button" onclick="window.setDispatchMode('MESSAGE')" id="nav-btn-MESSAGE" aria-pressed="false"><i class="fa-solid fa-comment-dots"></i>메시지<span id="dispatch-inbox-badge" class="hidden rounded-full bg-red-500 text-white px-1.5 text-[10px]">0</span></button>
+                    <button type="button" onclick="window.setDispatchMode('LOCATION')" id="nav-btn-LOCATION" aria-pressed="false"><i class="fa-solid fa-map-location-dot"></i>위치확인</button>
+                    <button type="button" onclick="window.openExcelExportModal()" class="dispatch-export-button"><i class="fa-solid fa-file-excel"></i>데이터 추출</button>
+                </nav>
             </div>
-
-            <!-- 중앙: 주소 / 목적지 실시간 검색창 (엔터 입력 또는 검색 버튼 클릭 시 우측 패널 연동) -->
-            <div class="dispatch-search flex-1 max-w-md relative min-w-[220px]">
-                <div class="relative w-full flex items-center">
-                    <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400 text-xs"></i>
-                    <input type="text" id="global-search-input" onkeyup="if(window.event.keyCode===13){window.handleGlobalSearch(this.value)}" placeholder="기사, 주소, 상호, 연락처 검색 (Enter ↵)" class="w-full pl-9 pr-16 py-2 bg-gray-50 border border-gray-200 rounded-xl text-xs font-bold text-gray-800 placeholder-gray-400 focus:bg-white focus:border-blue-500 outline-none transition shadow-inner">
-                    <div class="absolute right-2 flex items-center gap-1">
-                        <button onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden text-gray-400 hover:text-gray-600 text-xs px-1" title="검색어 지우기">
-                            <i class="fa-solid fa-circle-xmark"></i>
-                        </button>
-                        <button onclick="window.handleGlobalSearch(document.getElementById('global-search-input').value)" class="text-blue-600 hover:text-blue-800 bg-blue-50 hover:bg-blue-100 rounded px-2 py-1 text-[10px] font-black transition">
-                            검색
-                        </button>
+            <div class="dispatch-workspace-tools">
+                <div class="dispatch-pro-tools" aria-label="PRO 업무 도구">
+                    <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')"><span>PRO</span><i class="fa-solid fa-robot"></i><span>자동할당</span></button>
+                    <button type="button" id="btn-pro-invoice" onclick="window.handleProFeature('INVOICE')"><span>PRO</span><i class="fa-solid fa-print"></i><span>주문서 통합관리</span></button>
+                </div>
+                <div class="dispatch-search">
+                    <div class="relative w-full flex items-center">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400"></i>
+                        <input type="search" id="global-search-input" onkeydown="if(event.key==='Enter'){window.handleGlobalSearch(this.value)}" placeholder="기사·주소·연락처 검색" aria-label="기사 주소 연락처 통합 검색" class="w-full pl-9 pr-16 border outline-none">
+                        <div class="absolute right-2 flex items-center"><button type="button" onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden" aria-label="검색어 지우기"><i class="fa-solid fa-circle-xmark"></i></button><button type="button" onclick="window.handleGlobalSearch(document.getElementById('global-search-input').value)">검색</button></div>
                     </div>
                 </div>
             </div>
-
-            <!-- 우측: PRO 기능 버튼 및 알림함, 로그아웃 -->
-            <div class="dispatch-header-actions flex items-center gap-2 shrink-0">
-                <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')" class="relative bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-xs font-black px-3.5 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:shadow-md active:scale-95">
-                    <span class="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm">PRO</span>
-                    <i class="fa-solid fa-robot text-amber-200"></i><span>자동할당</span>
-                </button>
-                <button type="button" id="btn-pro-invoice" onclick="window.handleProFeature('INVOICE')" class="relative bg-slate-800 text-white text-xs font-black px-3.5 py-2 rounded-xl transition shadow-sm flex items-center gap-1.5 hover:bg-slate-900 active:scale-95">
-                    <span class="absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm">PRO</span>
-                    <i class="fa-solid fa-print text-amber-200"></i><span>주문서 통합관리</span>
-                </button>
-                <div class="w-px h-5 bg-gray-200 mx-1"></div>
-                <button onclick="window.systemLogout()" class="bg-gray-100 hover:bg-gray-200 text-gray-600 text-xs font-bold px-3 py-2 rounded-xl transition">로그아웃</button>
+            <div class="dispatch-header-actions">
+                <button type="button" id="nav-btn-CUSTOMER" onclick="window.setDispatchMode('CUSTOMER')" aria-pressed="false"><i class="fa-solid fa-paper-plane"></i>고객 배송안내</button>
+                <button type="button" id="nav-btn-ACCOUNT" onclick="window.setDispatchMode('ACCOUNT')" aria-pressed="false" class="dispatch-account-button"><span>이용정보</span><small id="dispatch-expiry-label">사용기한 확인 중</small></button>
+                <button type="button" id="nav-btn-BILLING" onclick="window.setDispatchMode('BILLING')" aria-pressed="false"><i class="fa-regular fa-credit-card"></i>결제·충전</button>
+                <button type="button" onclick="window.systemLogout()">로그아웃</button>
             </div>
         </header>
 
@@ -213,6 +188,32 @@
 
                     <div id="custom-template-list" class="flex-1 p-3 overflow-y-auto space-y-2.5 hide-scrollbar bg-slate-50/50"></div>
                 </div>
+            </section>
+
+            <section id="customer-delivery-section" class="hidden dispatch-service-page" aria-labelledby="customer-delivery-heading">
+                <div class="service-page-heading"><div><span class="service-eyebrow">CUSTOMER DELIVERY</span><h2 id="customer-delivery-heading">고객 배송안내</h2><p>문자 안내 문구와 배송 대상을 한곳에서 확인하세요.</p></div><span class="service-status-tag">문구·목록 미리보기</span></div>
+                <div class="customer-compose-grid">
+                    <article class="service-card"><div class="service-card-heading"><h3>배송안내 문자 설정</h3><span>단문 SMS · 80바이트</span></div>
+                        <label class="customer-field-label" for="customer-message-input">직접 입력하는 안내 문구</label>
+                        <textarea id="customer-message-input" rows="3" maxlength="500" oninput="window.updateCustomerMessagePreview()" placeholder="예: 오늘 배송 예정입니다."></textarea>
+                        <div class="customer-byte-line"><strong id="customer-message-remaining" aria-live="polite"></strong><span id="customer-message-bytes"></span></div>
+                        <p id="customer-message-validation" class="customer-help" aria-live="polite"></p>
+                        <div class="customer-fixed-block"><div><strong>항상 포함되는 기본 안내</strong><span>직접 입력 영역과 별도로 자동 포함</span></div><pre id="customer-fixed-preview"></pre><p>업체명과 고객별 배송조회 링크가 들어갑니다. 아래 링크는 형식 확인용 예시입니다.</p></div>
+                        <div class="customer-compose-footer"><span>한글 2바이트 · 영문/숫자 1바이트 · 줄바꿈 포함</span><button type="button" onclick="window.saveCustomerMessageDraft()">문구 저장</button></div>
+                        <p id="customer-draft-notice" class="customer-help" role="status">문구는 현재 브라우저에 업체별로 저장됩니다.</p>
+                    </article>
+                    <article class="service-card customer-phone-card"><div class="service-card-heading"><h3>고객에게 보이는 문자</h3><span>표시 예시</span></div><div class="customer-phone"><span class="customer-phone-sender">배송안내</span><div id="customer-message-preview" class="customer-message-bubble"></div><span class="customer-phone-caption">조회 링크에서 본인의 배송 진행을 확인합니다.</span></div><div class="customer-preview-note"><strong>배송조회 + 문자 안내</strong><p>기본료 없이 발송 성공 건당 35원 예정<br>현재 화면에서는 실제 발송·요금 차감이 이루어지지 않습니다.</p></div></article>
+                </div>
+                <article class="service-card customer-list-card"><div class="customer-list-heading"><div><h3>등록된 배송 목록</h3><p>같은 전화번호·같은 배송지는 묶고, 다른 배송지는 구분합니다.</p></div><div class="customer-list-tools"><label for="customer-delivery-date">배송일</label><input type="date" id="customer-delivery-date" onchange="window.refreshCustomerDeliveryList()"><button type="button" id="customer-refresh-button" onclick="window.refreshCustomerDeliveryList()"><i class="fa-solid fa-rotate-right"></i>새로고침</button></div></div>
+                    <div class="customer-list-summary"><span>등록 주문 <strong id="customer-order-count">0</strong>건</span><span>배송지 묶음 <strong id="customer-stop-count">0</strong>곳</span><span>유효 수신번호 <strong id="customer-phone-count">0</strong>개</span><span class="customer-summary-warning">번호 확인 <strong id="customer-invalid-count">0</strong>곳</span></div>
+                    <div class="customer-list-search"><input type="search" id="customer-delivery-search" oninput="window.filterCustomerDeliveries()" placeholder="주문번호·전화번호·주소·기사 검색" aria-label="고객 배송 목록 검색"><span id="customer-list-status" role="status">배송 목록을 불러와 주세요.</span></div>
+                    <div class="customer-table-scroll"><table class="customer-delivery-table"><thead><tr><th>번호</th><th>수취인·연락처</th><th>배송지</th><th>주문번호</th><th>담당 기사·순번</th><th>안내 대상 확인</th><th>발송 상태</th></tr></thead><tbody id="customer-delivery-tbody"></tbody></table></div>
+                    <div class="customer-send-legend"><span>발송 상태</span><span>미발송</span><span class="is-success">발송 완료</span><span class="is-failure">발송 실패</span><span class="is-pending">확인 중</span><small>실제 발송 연결 전이므로 현재 목록은 미발송으로 표시됩니다.</small></div><div class="customer-list-footer"><span id="customer-page-label"></span><div><button type="button" id="customer-page-prev" onclick="window.changeCustomerDeliveryPage(-1)">이전</button><button type="button" id="customer-page-next" onclick="window.changeCustomerDeliveryPage(1)">다음</button></div><button type="button" class="customer-send-button" disabled>문자 발송 준비 중</button></div>
+                </article>
+            </section>
+            <section id="dispatch-account-section" class="hidden dispatch-service-page" aria-labelledby="dispatch-account-heading">
+                <div class="service-page-heading"><div><span class="service-eyebrow">MY WORKSPACE</span><h2 id="dispatch-account-heading">이용정보</h2><p id="dispatch-account-description">현재 관제 계정의 이용 상태를 확인하세요.</p></div></div>
+                <div id="dispatch-account-content"></div>
             </section>
         </main>
     </div>
@@ -640,7 +641,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261020-dispatch-single","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261021-picking-product-identity"}}</script>
-    <script type="module" src="./js/admin-app.js?v=20261017-dispatch-session-guard"></script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261017-dispatch-session-guard","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261018-login-gps","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261022-customer-delivery","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261022-customer-delivery","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261020-dispatch-single","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261021-picking-product-identity"}}</script>
+    <script type="module" src="./js/admin-app.js?v=20261022-customer-delivery"></script>
 </body>
 </html>
