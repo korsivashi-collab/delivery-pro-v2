@@ -336,7 +336,7 @@ window.insertCustomTemplateById = id => {
 // 배송안내 문자서비스 화면. 대상·견적 확인만 수행하며 발송/결제 API는 호출하지 않습니다.
 let customerLoadedOrders=[],customerLoadedDate='',customerLoadedOwner='',customerLoadVersion=0,customerDeliveryPage=1,customerLoadState='idle';
 let customerEucCharacters,customerDeliveryFilter='all',customerSelectedPhones=new Set(),customerDialogFocus=null;
-const CUSTOMER_SMS_LIMIT=80,CUSTOMER_SAMPLE_LINK='https://mtsk.co.kr/t/Ab3dE5fGh7Jk9LmN',CUSTOMER_SMS_PRICE=35;
+const CUSTOMER_SMS_LIMIT=80,CUSTOMER_TRACKING_LINK='https://mtsk.co.kr/t',CUSTOMER_SMS_PRICE=35;
 const customerBilling={plan:'basic',period:'monthly',drivers:false,seats:5,slotPacks:0,extraPcs:0,extensionPacks:0,extensionPcs:0,smsCount:1000,initialized:false,owner:''};
 const customerProductSelections={basic:null,pro:null};
 function customerDispatchKey(){return sessionStorage.getItem('deliveryProDispatchKey')||'';}
@@ -359,7 +359,7 @@ export function measureCustomerSms(value) {
     return {bytes,unsupported};
 }
 function customerCompanyHeading(){const account=customerAccount(),company=String(account?.companyName||account?.name||'업체명').replace(/[\r\n]/g,' ').trim();return `[${company}] 배송조회`;}
-function customerFixedMessage(){return CUSTOMER_SAMPLE_LINK;}
+function customerFixedMessage(){return CUSTOMER_TRACKING_LINK;}
 function customerDefaultBody(){return '오늘 배송 예정입니다.\n'+customerCompanyHeading();}
 function customerMessage(){const body=document.getElementById('customer-message-input')?.value.replace(/\r\n?/g,'\n')||'';return (body?body+'\n':'')+customerFixedMessage();}
 export function updateCustomerMessagePreview(){
