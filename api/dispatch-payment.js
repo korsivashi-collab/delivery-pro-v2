@@ -175,7 +175,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
     await assertNotBlocked(db,tx,c.draft.key,c.draft.phone,'');
     if([...licenses.docs,...profiles.docs].some(d=>phoneDigits(d.data().phone)===phoneDigits(c.draft.phone)))throw problem('이 전화번호의 계정이 이미 등록되어 발급을 보류했습니다. 재결제하지 말고 관리자에게 주문번호를 알려 주세요.',409);
    }
-   const q=o.quote,field=o.test?'testBalance':'balance',updated={...w,pendingOrder:null,revision:w.revision+1};let result;
+   const q=o.quote,field=o.test?'testBalance':'balance',updated={...w,pendingOrder:w.pendingOrder===o.orderId?null:w.pendingOrder||null,revision:w.revision+1};let result;
    if(q.kind==='sms'){updated[field]+=q.count;result={balance:updated[field],count:q.count};}
    else {
     if(!o.test&&!c.signup)checkService(l,q);
