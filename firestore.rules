@@ -13,6 +13,9 @@ service cloud.firestore {
     match /billing_license_bindings/{id} { allow read, write: if false; }
     match /billing_events/{id} { allow read, write: if false; }
     match /payment_orders/{id} { allow read, write: if false; }
+    // Customer tracking capabilities and shared snapshots are server-only.
+    match /delivery_tracking_tokens/{id} { allow read, write: if false; }
+    match /delivery_tracking_publications/{id} { allow read, write: if false; }
     function isStoreLicense(key) {
       return exists(/databases/$(database)/documents/billing_license_bindings/$(key));
     }
