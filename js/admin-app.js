@@ -598,6 +598,8 @@ window.initMasterDataSync = function() {
         
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
             drawDriverOnMap(state.selectedDeviceId);
+        } else if (!isMaster && !state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && state.showAllDeliveryRoutes) {
+            window.drawAllDeliveryRoutes?.();
         } else if (!isMaster && !state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof forceClearMap === 'function') {
             forceClearMap();
         }

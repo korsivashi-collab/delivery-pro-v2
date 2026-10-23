@@ -25,6 +25,7 @@ export function formatNumber(num) {
 }
 
 export function forceClearMap() {
+    state.showAllDeliveryRoutes = false;
     if (window.clearMapOverlays) {
         window.clearMapOverlays();
     } else {
@@ -206,7 +207,10 @@ export function renderSidebar() {
 
     if (state.dispatchNavState === 'DELIVERY') {
         if (state.selectedDeviceId) renderDriverDetailView(state.selectedDeviceId);
-        else renderDriverListView();
+        else {
+            renderDriverListView();
+            if (state.showAllDeliveryRoutes) drawAllDeliveryRoutes();
+        }
     } else if (state.dispatchNavState === 'MESSAGE') {
         if (window.renderMessageSidebar) window.renderMessageSidebar();
     } else if (state.dispatchNavState === 'LOCATION') {
@@ -224,6 +228,7 @@ export function renderDriverListView() {
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-600"></i> 운행 기사 (<span id="driver-count">${visibleLicenses.length}</span>명)</h2>
+        <button type="button" onclick="window.showAllDeliveryRoutes()" aria-pressed="${!!state.showAllDeliveryRoutes}" class="text-xs font-bold px-2 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">전체 기사 경로</button>
         <button onclick="window.openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
     `;
 
@@ -235,7 +240,7 @@ export function renderDriverListView() {
     const isToday = (selectedDate === getLocalDateString(new Date()));
 
     let html = '';
-    visibleLicenses.forEach(lic => {
+    visibleLicenses.forEach((lic, driverIndex) => {
         const devId = lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         
@@ -252,12 +257,12 @@ export function renderDriverListView() {
         <div onclick="window.selectDriver('${devId}')" class="cursor-pointer p-3.5 rounded-2xl border bg-white hover:bg-blue-50/50 hover:border-blue-400 border-gray-200 shadow-sm transition relative mb-2">
             <div class="flex justify-between items-center mb-1.5">
                 <span class="font-black text-sm text-gray-900 tracking-tight flex items-center gap-1.5">
-                    <i class="fa-solid fa-phone text-blue-500 text-xs"></i>${phone}
+                    <i class="fa-solid fa-circle text-xs" style="color:${routeColors[driverIndex % routeColors.length]}" title="지도 경로 색상"></i>${phone}
                     <span class="text-[10px] text-gray-400 font-mono font-normal">[${lic.key}]</span>
                 </span>
                 <div class="flex items-center gap-1.5">
                     <span class="text-xs font-black px-2 py-0.5 rounded-full ${rate === 100 ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}">${rate}%</span>
-                    <button onclick="event.stopPropagation(); window.removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-gray-400 hover:text-red-600 bg-gray-100 hover:bg-red-50 border border-gray-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button>
+                    <button onclick="event.stopPropagation(); window.removeOrUnlinkDriver('${devId}', '${lic.key}')" class="text-[10px] text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 border border-red-200 px-2 py-0.5 rounded-md font-bold transition">연결해제</button>
                 </div>
             </div>
             <div class="w-full bg-gray-100 rounded-full h-1.5 mb-2.5 overflow-hidden">
@@ -445,8 +450,28 @@ export async function removeOrUnlinkDriver(devId, key) {
 // ==========================================
 // 3. 지도 위에 경로 및 마커 렌더링
 // ==========================================
-export function drawDriverOnMap(devId) {
-    forceClearMap(); 
+const routeColors = ['#2563eb', '#e11d48', '#059669', '#9333ea', '#d97706', '#0891b2', '#4f46e5', '#be185d', '#4d7c0f'];
+export function drawAllDeliveryRoutes() {
+    forceClearMap();
+    state.showAllDeliveryRoutes = true;
+    if (!map) return;
+    const group = { bounds: new kakao.maps.LatLngBounds(), points: 0 };
+    getFilteredVisibleDrivers().forEach((lic, index) => drawDriverOnMap(lic.deviceId || lic.key, { ...group, color: routeColors[index % routeColors.length], label: lic.name || lic.phone || lic.key, group }));
+    if (group.points) map.setBounds(group.bounds);
+    let notice = document.getElementById('all-route-notice');
+    if (!notice) {
+        notice = document.createElement('div'); notice.id = 'all-route-notice';
+        notice.className = 'text-xs text-blue-800 bg-blue-50 rounded-lg p-3 mb-2';
+        notice.setAttribute('role', 'status');
+        document.getElementById('sidebar-content')?.prepend(notice);
+    }
+    notice.textContent = group.points ? '전체 기사 경로 · 기사별 색상 / 실선: 배송, 점선: 완료. 배송 순서를 연결한 선입니다. 기사 카드를 누르면 상세 화면으로 이동합니다.' : '선택한 날짜와 경로 조건에 표시할 배송지가 없습니다.';
+}
+window.showAllDeliveryRoutes = () => { state.selectedDeviceId = null; state.showAllDeliveryRoutes = true; renderSidebar(); };
+window.drawAllDeliveryRoutes = drawAllDeliveryRoutes;
+
+export function drawDriverOnMap(devId, overview = null) {
+    if (!overview) forceClearMap();
     const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
     const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
 
@@ -462,7 +487,7 @@ export function drawDriverOnMap(devId) {
     const completions = summary.done;
     const currentTarget = rawDests[0];
 
-    const bounds = new kakao.maps.LatLngBounds();
+    const bounds = overview ? overview.group.bounds : new kakao.maps.LatLngBounds();
     let pointsCount = 0;
     const plannedPath = [];
     const completedPath = [];
@@ -472,7 +497,7 @@ export function drawDriverOnMap(devId) {
     if (companyBaseStr) {
         try {
             const companyBase = JSON.parse(companyBaseStr);
-            if (companyBase.lat && companyBase.lng && rawDests.length > 0) {
+            if (companyBase.lat && companyBase.lng && rawDests.length > 0 && (!overview || currentMode !== 'completed')) {
                 const basePos = new kakao.maps.LatLng(companyBase.lat, companyBase.lng);
                 plannedPath.push(basePos);
                 bounds.extend(basePos);
@@ -482,12 +507,13 @@ export function drawDriverOnMap(devId) {
     }
 
     completions.forEach(comp => {
-        if (comp.lat && comp.lng) {
+        if (comp.lat && comp.lng && (!overview || currentMode !== 'planned')) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
             bounds.extend(pos); completedPath.push(pos); pointsCount++;
             const content = document.createElement('div');
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
+            if (overview) { content.textContent = `${overview.label} · 완료`; content.style.backgroundColor = overview.color; }
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
             overlay.customType = 'completed'; 
             
@@ -500,7 +526,7 @@ export function drawDriverOnMap(devId) {
 
     if (rawDests.length > 0) {
         rawDests.forEach((d, idx) => {
-            if (d.lat && d.lng) {
+            if (d.lat && d.lng && (!overview || currentMode !== 'completed')) {
                 const pos = new kakao.maps.LatLng(d.lat, d.lng);
                 plannedPath.push(pos);
                 if (!doneMap.has(d)) {
@@ -512,6 +538,7 @@ export function drawDriverOnMap(devId) {
                     content.innerHTML = isCurrent 
                         ? `<i class="fa-solid fa-truck-fast mr-1"></i>${courseNum}번 이동` 
                         : `${courseNum}번`;
+                    if (overview) { content.textContent = `${overview.label} · ${courseNum}번`; content.style.backgroundColor = overview.color; }
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
                     overlay.customType = 'planned'; 
                     
@@ -526,23 +553,26 @@ export function drawDriverOnMap(devId) {
 
     if (plannedPath.length > 1 && driverRoute) {
         window.mapPlannedPolyline = new kakao.maps.Polyline({
-            path: plannedPath, strokeWeight: 4, strokeColor: '#2563eb', strokeOpacity: 0.75, strokeStyle: 'solid'
+            path: plannedPath, strokeWeight: 4, strokeColor: overview?.color || '#2563eb', strokeOpacity: 0.75, strokeStyle: 'solid'
         });
         if (currentMode === 'all' || currentMode === 'planned') {
             window.mapPlannedPolyline.setMap(map);
         }
+        if (overview) window.myMapOverlays.push(window.mapPlannedPolyline);
     }
 
     if (completedPath.length > 1) {
         window.mapCompletedPolyline = new kakao.maps.Polyline({
-            path: completedPath, strokeWeight: 5, strokeColor: '#10b981', strokeOpacity: 0.85, strokeStyle: 'solid'
+            path: completedPath, strokeWeight: 5, strokeColor: overview?.color || '#10b981', strokeOpacity: 0.85, strokeStyle: overview ? 'shortdash' : 'solid'
         });
         if (currentMode === 'all' || currentMode === 'completed') {
             window.mapCompletedPolyline.setMap(map);
         }
+        if (overview) window.myMapOverlays.push(window.mapCompletedPolyline);
     }
 
-    if (pointsCount > 0) map.setBounds(bounds);
+    if (overview) overview.group.points += pointsCount;
+    else if (pointsCount > 0) map.setBounds(bounds);
 }
 
 export function setMapPolylineMode(mode) {
@@ -575,7 +605,8 @@ export function setMapPolylineMode(mode) {
             }
         });
     }
-    if (state.selectedDeviceId) drawDriverOnMap(state.selectedDeviceId);
+    if (state.showAllDeliveryRoutes) drawAllDeliveryRoutes();
+    else if (state.selectedDeviceId) drawDriverOnMap(state.selectedDeviceId);
 }
 
 // ==========================================
