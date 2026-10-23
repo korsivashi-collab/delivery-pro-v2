@@ -129,17 +129,21 @@
             #destination-list > li[data-id] > div:first-child { grid-template-columns: 68px 24px minmax(0, 1fr) 32px; }
             #destination-list > li[data-id] > div:first-child > div:last-child { grid-column: 4; grid-row: 1; }
         }
-        .navigation-controls { flex: 1; min-width: 0; display: flex; gap: 6px; }
-        .navigation-select { display: flex; align-items: center; justify-content: center; gap: 5px; flex-shrink: 0; padding: 0 11px; border: 1px solid #CBD5E1; border-radius: 10px; background: #FFF; color: #334155; font-size: 12px; font-weight: 700; white-space: nowrap; }
-        .navigation-select svg { width: 14px; height: 14px; color: #64748B; }
-        .navigation-launch { display: flex; align-items: center; justify-content: center; gap: 8px; flex: 1; min-width: 0; padding: 0 10px; border: 1px solid transparent; border-radius: 10px; background: #172033; color: #FFF; font-size: 12px; font-weight: 800; white-space: nowrap; }
+        /* 글자 확대 시 줄 수와 버튼 높이가 함께 늘어나도록 고정 높이를 사용하지 않는다. */
+        .navigation-row { display: flex; align-items: stretch; gap: 6px; min-height: 44px; }
+        .navigation-controls { flex: 1; min-width: 0; display: flex; flex-wrap: wrap; gap: 6px; }
+        .navigation-select { display: flex; align-items: center; justify-content: center; gap: 5px; flex: 1 1 74px; min-width: 0; min-height: 44px; padding: 6px; border: 1px solid #CBD5E1; border-radius: 10px; background: #FFF; color: #334155; font-size: 12px; font-weight: 700; line-height: 1.35; white-space: normal; overflow-wrap: anywhere; }
+        .navigation-select > span { min-width: 0; }
+        .navigation-select svg { width: 14px; height: 14px; flex-shrink: 0; color: #64748B; }
+        .navigation-launch { display: flex; align-items: center; justify-content: center; gap: 6px; flex: 2 1 150px; min-width: 0; min-height: 44px; padding: 6px; border: 1px solid transparent; border-radius: 10px; background: #172033; color: #FFF; font-size: 12px; font-weight: 800; line-height: 1.35; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
+        .navigation-launch > span:not(.navigation-brand), .navigation-main-label > span:not(.navigation-brand) { min-width: 0; }
         .navigation-launch[data-navigation-provider="naver"] { background: #03C75A; color: #FFF; }
         .navigation-launch[data-navigation-provider="kakao"] { background: #FEE500; color: #302A13; flex-direction: column; gap: 2px; padding: 3px 4px; }
-        .navigation-main-label { display: flex; align-items: center; justify-content: center; gap: 6px; }
-        .navigation-main-label .navigation-brand { width: 19px; height: 19px; font-size: 15px; border-radius: 5px; }
-        .navigation-inline-caution { font-size: 10px; font-weight: 500; line-height: 1.15; white-space: normal; word-break: keep-all; }
+        .navigation-main-label { display: flex; align-items: center; justify-content: center; gap: 4px; width: 100%; min-width: 0; }
+        .navigation-main-label .navigation-brand { width: 1.27em; height: 1.27em; font-size: 15px; border-radius: 5px; }
+        .navigation-inline-caution { display: block; width: 100%; min-width: 0; font-size: 10px; font-weight: 500; line-height: 1.35; white-space: normal; word-break: keep-all; overflow-wrap: anywhere; }
         [data-navigation-provider="kakao"] .navigation-brand { background: #302A13; color: #FEE500; }
-        .navigation-brand { display: inline-flex; align-items: center; justify-content: center; width: 25px; height: 25px; flex-shrink: 0; border-radius: 7px; background: #FFF; color: #172033; font-size: 19px; font-weight: 900; font-family: Arial, sans-serif; line-height: 1; }
+        .navigation-brand { display: inline-flex; align-items: center; justify-content: center; width: 1.32em; height: 1.32em; flex-shrink: 0; border-radius: 7px; background: #FFF; color: #172033; font-size: 19px; font-weight: 900; font-family: Arial, sans-serif; line-height: 1; }
         [data-navigation-provider="naver"] .navigation-brand { color: #03A94D; }
         .navigation-arrow { width: 16px; height: 16px; flex-shrink: 0; }
         .navigation-select:active, .navigation-launch:active { filter: brightness(.94); }
