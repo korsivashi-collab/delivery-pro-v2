@@ -88,7 +88,8 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   return {success:true,...access};
  }
  async function sendLicenseSms(db,uid,orderId,customer){
-  const [access,secret,serviceId,sender]=['NCP_ACCESS_KEY','NCP_SECRET_KEY','NCP_SENS_SERVICE_ID','NCP_SENS_SENDER'].map(k=>env[k]?.trim());
+  const [access,secret,serviceId]=['NCP_ACCESS_KEY','NCP_SECRET_KEY','NCP_SENS_SERVICE_ID'].map(k=>env[k]?.trim());
+  const sender='01083294575'; // Approved SENS sender; never the sales/contact number.
   if(!access||!secret||!/^ncp:sms:[a-z]{2}:\d+:[A-Za-z0-9_-]+$/.test(serviceId||'')||!/^\d{8,11}$/.test(sender||''))return 'unavailable';
   const ref=db.collection('payment_orders').doc(orderId);
   const claim=await db.runTransaction(async tx=>{

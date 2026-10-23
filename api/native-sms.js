@@ -94,18 +94,14 @@ async function claimDevice(sdk, req, input, stamp) {
 // OTP and counters are server-only Firestore collections (default-denied by existing rules).
 function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) => fetch(...args), now = Date.now, log = record => console.warn('[SENS SMS]', JSON.stringify(record)) } = {}) {
     function config() {
-        const values = ['NCP_ACCESS_KEY', 'NCP_SECRET_KEY', 'NCP_SENS_SERVICE_ID', 'NCP_SENS_SENDER'].map(key => env[key]?.trim());
-        if (values.some(value => !value) || !/^\d{8,12}$/.test(values[3])) throw problem('문자 인증 서버 설정을 확인해 주세요.', 503);
+        const values = ['NCP_ACCESS_KEY', 'NCP_SECRET_KEY', 'NCP_SENS_SERVICE_ID'].map(key => env[key]?.trim());
+        if (values.some(value => !value)) throw problem('문자 인증 서버 설정을 확인해 주세요.', 503);
         if (!/^ncp:sms:[a-z]{2}:\d+:[A-Za-z0-9_-]+$/.test(values[2])) throw problem('NCP_SENS_SERVICE_ID 설정을 확인해 주세요. SMS 서비스 ID 전체를 입력해야 합니다.', 503);
-        return values;
+        return [...values, '01083294575']; // Approved SENS sender; separate from the company contact.
     }
     return async function handler(req, res) {
         res.setHeader('Cache-Control', 'no-store');
-        const supportDigits = String(env.NCP_SENS_SENDER || '').trim();
-        const contact = /^0\d{8,10}$/.test(supportDigits) ? (supportDigits.startsWith('02') ?
-            supportDigits.replace(/^(02)(\d{3,4})(\d{4})$/, '$1-$2-$3') :
-            supportDigits.replace(/^(\d{3})(\d{3,4})(\d{4})$/, '$1-$2-$3')) :
-            /^\d{8}$/.test(supportDigits) ? supportDigits.replace(/^(\d{4})(\d{4})$/, '$1-$2') : '010-7650-7542';
+        const contact = '010-7650-7542';
         const supportNotice = `고객센터 ${contact}로 문의해 주세요.`;
 
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
