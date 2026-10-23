@@ -203,7 +203,7 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
                         <!-- 완료: 즉각적인 반응을 돕는 솔리드 블루 -->
                         <button onclick="completeDestination(${idArgument})" class="flex-1 min-w-0 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-xs flex items-center justify-center gap-1 active:bg-blue-800 transition flex-nowrap"><i class="fa-solid fa-check text-[13px] shrink-0"></i><span class="text-[12px] font-black whitespace-nowrap tracking-tight">완료</span></button>
                     </div>
-                    <div class="flex gap-1.5 h-[44px]">
+                    <div class="navigation-row">
                         <div class="navigation-controls">
                             <button type="button" onclick="openNavigationPicker()" class="navigation-select" aria-haspopup="dialog" aria-controls="navigation-picker">
                                 <span>내비 선택</span><svg viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="m4 6 4 4 4-4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>
