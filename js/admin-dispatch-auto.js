@@ -435,14 +435,17 @@ function dispatchOrderSignature(orders) {
 window.isDispatchRouteBusy = () => window.dispatchAddressBusy || resettingAssignments || sendingRoutes || calculatingAssignments;
 export async function revertAutoDispatch(options = {}) {
     const clearOrders = options.clearOrders === true;
-    const selectedDate = document.getElementById('dispatch-assign-date')?.value || getLocalDateString();
+    const selectedDate = getLocalDateString();
+    const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey');
+    if (!dispatchKey) { alert('관제 연결 정보를 확인할 수 없어 초기화를 중단했습니다. 다시 로그인해 주세요.'); return; }
+    const connectedDrivers = getFilteredVisibleDrivers().filter(driver => driver.key && driver.type !== 'dispatch' && driver.dispatchKey === dispatchKey);
     if (resettingAssignments) return;
     if (calculatingAssignments) { alert('자동할당 계산이 끝난 후 초기화해 주세요.'); return; }
     if (sendingRoutes) { alert('동선 전송이 끝난 후 초기화해 주세요.'); return; }
     const hasExcelOrders = state.parsedExcelList && state.parsedExcelList.length > 0;
     const hasActiveRoutes = Object.keys(state.activeRoutes || {}).length > 0;
 
-    if (!hasExcelOrders && !hasActiveRoutes) {
+    if (!hasExcelOrders && !hasActiveRoutes && connectedDrivers.length === 0) {
         alert("초기화할 배송 데이터나 기사 동선이 없습니다.");
         return;
     }
@@ -462,22 +465,22 @@ export async function revertAutoDispatch(options = {}) {
     try {
         // Keep an owned empty route so offline/restarted clients receive the reset,
         // rather than interpreting a missing document as an unsynced local route.
-        for (const driver of getFilteredVisibleDrivers()) {
+        for (const driver of connectedDrivers) {
+            // 화면 목록이 오래되었거나 MASTER가 전체 계정을 보고 있어도 현재 연결만 처리합니다.
+            const licenseSnapshot = await getDoc(doc(db, 'licenses', driver.key));
+            if (!licenseSnapshot.exists() || licenseSnapshot.data().dispatchKey !== dispatchKey || licenseSnapshot.data().type === 'dispatch') continue;
             const routeOwnerId = await ensureRouteOwner(db, driver.key);
             const resetId = crypto.randomUUID();
             const owned = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
             const documents = new Map();
             const endpointRoutes = {};
             let revision = Date.now();
-            let latestRoute = null;
             owned.forEach(snapshot => {
                 documents.set(snapshot.id, snapshot.ref);
                 const data = snapshot.data();
                 endpointRoutes[snapshot.id] = data;
-                if (!latestRoute || data.updatedAt > latestRoute.updatedAt) latestRoute = data;
                 if (Number.isFinite(data.updatedAt)) revision = Math.max(revision, data.updatedAt + 1);
             });
-            if (latestRoute && (latestRoute.dispatchDate || getLocalDateString(new Date(latestRoute.updatedAt))) !== selectedDate) continue;
             // Include old key document IDs as well as the current device.
             for (const id of new Set([driver.deviceId, driver.key].filter(Boolean))) {
                 const ref = doc(db, 'routes', id);
@@ -496,7 +499,7 @@ export async function revertAutoDispatch(options = {}) {
                 const emptyRoute = {
                     routeOwnerId, resetId, deviceId: id, phone: driver.phone || '',
                     dispatchDate: selectedDate,
-                    dispatchKey: driver.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
+                    dispatchKey,
                     destinations: [], routePlan: null, startSelected: false, startLocation: null,
                     endLocation: { ...endLocation }, updatedAt: revision, cleared: true
                 };
