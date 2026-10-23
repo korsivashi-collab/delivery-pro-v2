@@ -228,7 +228,7 @@ export function renderDriverListView() {
 
     headerEl.innerHTML = `
         <h2 class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-600"></i> 운행 기사 (<span id="driver-count">${visibleLicenses.length}</span>명)</h2>
-        <button type="button" onclick="window.showAllDeliveryRoutes()" aria-pressed="${!!state.showAllDeliveryRoutes}" class="text-xs font-bold px-2 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100">전체 기사 경로</button>
+        <button type="button" onclick="window.showAllDeliveryRoutes()" aria-pressed="${!!state.showAllDeliveryRoutes}" class="text-xs font-bold px-2 py-1.5 rounded-lg border ${state.showAllDeliveryRoutes ? 'border-blue-600 bg-blue-600 text-white hover:bg-blue-700' : 'border-gray-200 bg-white text-gray-600 hover:bg-gray-100'}">전체 기사 경로 ${state.showAllDeliveryRoutes ? 'ON' : 'OFF'}</button>
         <button onclick="window.openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
     `;
 
@@ -467,7 +467,13 @@ export function drawAllDeliveryRoutes() {
     }
     notice.textContent = group.points ? '기사별 색상으로 경로선만 표시합니다. 실선: 배송 · 점선: 완료. 배송지 번호는 기사 카드를 선택해 확인하세요.' : '선택한 날짜와 경로 조건에 표시할 배송지가 없습니다.';
 }
-window.showAllDeliveryRoutes = () => { state.selectedDeviceId = null; state.showAllDeliveryRoutes = true; renderSidebar(); };
+window.showAllDeliveryRoutes = () => {
+    const enabled = !state.showAllDeliveryRoutes;
+    state.selectedDeviceId = null;
+    forceClearMap();
+    state.showAllDeliveryRoutes = enabled;
+    renderSidebar();
+};
 window.drawAllDeliveryRoutes = drawAllDeliveryRoutes;
 
 export function drawDriverOnMap(devId, overview = null) {
