@@ -456,7 +456,7 @@ export function drawAllDeliveryRoutes() {
     state.showAllDeliveryRoutes = true;
     if (!map) return;
     const group = { bounds: new kakao.maps.LatLngBounds(), points: 0 };
-    getFilteredVisibleDrivers().forEach((lic, index) => drawDriverOnMap(lic.deviceId || lic.key, { ...group, color: routeColors[index % routeColors.length], label: lic.name || lic.phone || lic.key, group }));
+    getFilteredVisibleDrivers().forEach((lic, index) => drawDriverOnMap(lic.deviceId || lic.key, { color: routeColors[index % routeColors.length], group }));
     if (group.points) map.setBounds(group.bounds);
     let notice = document.getElementById('all-route-notice');
     if (!notice) {
@@ -465,7 +465,7 @@ export function drawAllDeliveryRoutes() {
         notice.setAttribute('role', 'status');
         document.getElementById('sidebar-content')?.prepend(notice);
     }
-    notice.textContent = group.points ? '전체 기사 경로 · 기사별 색상 / 실선: 배송, 점선: 완료. 배송 순서를 연결한 선입니다. 기사 카드를 누르면 상세 화면으로 이동합니다.' : '선택한 날짜와 경로 조건에 표시할 배송지가 없습니다.';
+    notice.textContent = group.points ? '기사별 색상으로 경로선만 표시합니다. 실선: 배송 · 점선: 완료. 배송지 번호는 기사 카드를 선택해 확인하세요.' : '선택한 날짜와 경로 조건에 표시할 배송지가 없습니다.';
 }
 window.showAllDeliveryRoutes = () => { state.selectedDeviceId = null; state.showAllDeliveryRoutes = true; renderSidebar(); };
 window.drawAllDeliveryRoutes = drawAllDeliveryRoutes;
@@ -510,10 +510,10 @@ export function drawDriverOnMap(devId, overview = null) {
         if (comp.lat && comp.lng && (!overview || currentMode !== 'planned')) {
             const pos = new kakao.maps.LatLng(comp.lat, comp.lng);
             bounds.extend(pos); completedPath.push(pos); pointsCount++;
+            if (overview) return;
             const content = document.createElement('div');
             content.className = 'custom-overlay completed';
             content.innerHTML = `<i class="fa-solid fa-check mr-1"></i>${comp.tag || '완료'}`;
-            if (overview) { content.textContent = `${overview.label} · 완료`; content.style.backgroundColor = overview.color; }
             const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
             overlay.customType = 'completed'; 
             
@@ -531,6 +531,7 @@ export function drawDriverOnMap(devId, overview = null) {
                 plannedPath.push(pos);
                 if (!doneMap.has(d)) {
                     bounds.extend(pos); pointsCount++;
+                    if (overview) return;
                     const isCurrent = d === currentTarget;
                     const courseNum = d.displayNumber || (idx + 1);
                     const content = document.createElement('div');
@@ -538,7 +539,6 @@ export function drawDriverOnMap(devId, overview = null) {
                     content.innerHTML = isCurrent 
                         ? `<i class="fa-solid fa-truck-fast mr-1"></i>${courseNum}번 이동` 
                         : `${courseNum}번`;
-                    if (overview) { content.textContent = `${overview.label} · ${courseNum}번`; content.style.backgroundColor = overview.color; }
                     const overlay = new kakao.maps.CustomOverlay({ position: pos, content: content, yAnchor: 1.1 });
                     overlay.customType = 'planned'; 
                     
