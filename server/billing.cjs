@@ -28,6 +28,26 @@ function deviceId(value) {
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(value)) throw problem('기기 정보가 올바르지 않습니다.');
     return value;
 }
+// A bounded summary of the server response; never store credentials or the raw receipt.
+function purchaseDiagnosis(payload, now, allowSandbox = false) {
+    const subscriber=payload?.subscriber || {}, entitlement=subscriber.entitlements?.[ENTITLEMENT];
+    const subscriptions=Object.entries(subscriber.subscriptions || {}).slice(0,20).map(([id,p])=>({
+        productId:String(id).slice(0,160), productPlanId:String(p.product_plan_identifier || '').slice(0,160),
+        store:String(p.store || '').slice(0,40), sandbox:typeof p.is_sandbox==='boolean'?p.is_sandbox:null,
+        refunded:p.refunded_at!=null,
+        expiresAt:Math.max(Date.parse(p.expires_date)||0,Date.parse(p.grace_period_expires_date)||0)
+    }));
+    const product=entitlement?.product_identifier;
+    const matching=subscriptions.filter(p=>p.productId===product || p.productId.split(':')[0]===product);
+    let code='ACTIVE';
+    if(!entitlement)code='ENTITLEMENT_MISSING';
+    else if(!matching.length)code='SUBSCRIPTION_MISSING';
+    else if(!matching.some(p=>PRODUCTS.includes(p.productId)))code='PRODUCT_ID_UNRECOGNIZED';
+    else if(!matching.some(p=>PRODUCTS.includes(p.productId)&&p.store==='play_store'&&!p.refunded&&typeof p.sandbox==='boolean'&&(!p.sandbox||allowSandbox)))code='STORE_REFUND_OR_SANDBOX_REJECTED';
+    else if(!evaluatePurchase(payload,now,allowSandbox).active)code='EXPIRED_OR_INVALID_EXPIRY';
+    return {code,checkedAt:now,allowSandbox,entitlementProduct:String(product || '').slice(0,160),
+        entitlementExpiresAt:Math.max(Date.parse(entitlement?.expires_date)||0,Date.parse(entitlement?.grace_period_expires_date)||0),subscriptions};
+}
 function evaluatePurchase(payload, now, allowSandbox = false) {
     if (!payload?.subscriber || !Number.isFinite(payload.request_date_ms)) throw problem('구독 확인 서버 응답이 올바르지 않습니다.', 502);
     const subscriber = payload.subscriber, entitlement = subscriber.entitlements?.[ENTITLEMENT];
@@ -234,4 +254,4 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
         return {active:false,valid:false,msg:'확인된 Google Play 구독이 없습니다.'};
     });
 }
-module.exports = { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, ensureAndroidAccount, applyPurchase, requestTiming };
+module.exports = { purchaseDiagnosis, ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, ensureAndroidAccount, applyPurchase, requestTiming };
