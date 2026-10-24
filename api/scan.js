@@ -1,5 +1,7 @@
 // api/scan.js
-// Gemini-only evaluation route. No OCR provider, parser, retry or fallback is connected here.
+// Gemini scans use the existing driver session; usage is synchronized separately at optimization.
+const admin = require('firebase-admin');
+const { assertDriverSession } = require('../server/license-integrity.cjs');
 const API_MODEL = 'gemini-3.1-flash-lite';
 const TIMEOUT_MS = 45000;
 const MAX_IMAGE_BYTES = 3 * 1024 * 1024;
@@ -66,18 +68,57 @@ function classifyStatus(status, upstream) {
     if (status === 429) return 'GEMINI_RATE_LIMIT';
     return 'GEMINI_UPSTREAM_ERROR';
 }
+async function authenticateScan(req, sdk, env, now) {
+    const token = /^Bearer (.+)$/.exec(req.headers?.authorization || '')?.[1];
+    if (!token) throw failure('GEMINI_AUTH_REQUIRED', 401);
+    if (!sdk.apps.length) sdk.initializeApp({credential:sdk.credential.cert({
+        projectId:env.FIREBASE_PROJECT_ID, clientEmail:env.FIREBASE_CLIENT_EMAIL,
+        privateKey:env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
+    })});
+    let identity;
+    try { identity = await sdk.auth().verifyIdToken(token); }
+    catch (_) { throw failure('GEMINI_AUTH_REQUIRED', 401); }
+    if (typeof identity.driverKey !== 'string' || !identity.driverKey || identity.driverKey.includes('/')) throw failure('GEMINI_AUTH_REQUIRED', 401);
+    try {
+        const account = await assertDriverSession(sdk.firestore(), identity, identity.driverKey, identity.driverDeviceId, now);
+        if (!account.routeOwnerId || account.routeOwnerId.includes('/')) throw failure('GEMINI_LICENSE_REQUIRED', 403);
+        return account;
+    } catch (error) {
+        throw failure(error.status === 401 ? 'GEMINI_AUTH_REQUIRED' : 'GEMINI_LICENSE_REQUIRED', error.status === 401 ? 401 : 403);
+    }
+}
+async function scanUsage(db, account, body, now) {
+    if (body.routeOwnerId !== account.routeOwnerId) throw failure('GEMINI_AUTH_REQUIRED', 401);
+    const month = new Date(now).toISOString().slice(0,7), ref = db.collection('scan_usage').doc(account.routeOwnerId);
+    const current = data => data?.month === month && Number.isSafeInteger(data.count) && data.count >= 0 ? data.count : 0;
+    if (body.action === 'get-usage') return {month,count:current((await ref.get()).data())};
+    if (!/^\d{4}-\d{2}$/.test(body.month || '') || !Number.isSafeInteger(body.count) || body.count < 0 || body.count > 1250) throw failure('SCAN_USAGE_INVALID', 400);
+    return db.runTransaction(async tx => {
+        const snapshot = await tx.get(ref), stored = snapshot.data();
+        const count = Math.max(current(stored), body.month === month ? body.count : 0);
+        if (!snapshot.exists || stored.month !== month || stored.count !== count) tx.set(ref,{month,count,updatedAt:now});
+        return {month,count};
+    });
+}
 function createHandler({ fetchImpl = (...args) => fetch(...args), env = process.env,
+    sdk = admin, authenticate = req => authenticateScan(req,sdk,env,now()),
     timeoutMs = TIMEOUT_MS, now = () => Date.now(), log = record => console.info('[Gemini scan]', record) } = {}) {
     return async function handler(req, res) {
-        const started = now(); let usage = null, upstreamStatus = null, success = false, code = null;
+        const started = now(); let usage = null, upstreamStatus = null, success = false, code = null, usageRequest = false;
         res.setHeader('Cache-Control', 'no-store');
         try {
             if (req.method !== 'POST') { res.setHeader('Allow', 'POST'); throw failure('METHOD_NOT_ALLOWED', 405); }
-            if (!env.GEMINI_API_KEY?.trim()) throw failure('GEMINI_KEY_MISSING', 503);
             let body;
             try { body = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
             catch (_) { throw failure('IMAGE_FORMAT_ERROR', 400); }
+            if (['get-usage','sync-usage'].includes(body?.action)) {
+                usageRequest = true;
+                const account = await authenticate(req);
+                return res.status(200).json({usage:await scanUsage(sdk.firestore(),account,body,now())});
+            }
+            if (!env.GEMINI_API_KEY?.trim()) throw failure('GEMINI_KEY_MISSING', 503);
             const { imageContent, mimeType } = validateImage(body);
+            await authenticate(req);
             const controller = new AbortController(); let timer;
             let upstream;
             try {
@@ -125,7 +166,7 @@ function createHandler({ fetchImpl = (...args) => fetch(...args), env = process.
             code = error.code && error.status ? error.code : 'GEMINI_NETWORK_ERROR';
             return res.status(error.status || 502).json({ error: { code } });
         } finally {
-            log({ model: API_MODEL, success, code, upstreamStatus, durationMs: now() - started,
+            if (!usageRequest) log({ model: API_MODEL, success, code, upstreamStatus, durationMs: now() - started,
                 inputTokens: usage?.promptTokenCount ?? null,
                 outputTokens: usage?.candidatesTokenCount ?? null,
                 totalTokens: usage?.totalTokenCount ?? null });
