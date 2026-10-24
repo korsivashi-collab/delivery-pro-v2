@@ -59,8 +59,10 @@ export function changeMasterTabPagination(tabKey, targetPage) {
 }
 
 export function renderMasterTables() {
-    const regulars = state.allLicenses.filter(l => l.type === 'regular' || (!l.type && !l.isTrial && !(l.key || '').startsWith('TRIAL-')));
-    const trials = state.allLicenses.filter(l => l.type === 'trial' || l.isTrial || (l.key || '').startsWith('TRIAL-'));
+    // Explicit server type wins over legacy flags and the original trial key.
+    const typeOf = l => l.type || (l.isTrial || (l.key || '').startsWith('TRIAL-') ? 'trial' : 'regular');
+    const regulars = state.allLicenses.filter(l => typeOf(l) === 'regular');
+    const trials = state.allLicenses.filter(l => typeOf(l) === 'trial');
     const dispatches = state.allLicenses.filter(l => l.type === 'dispatch');
     const blockeds = state.allBlockedDevices || [];
 
