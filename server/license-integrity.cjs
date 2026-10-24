@@ -464,6 +464,9 @@ async function linkDispatchDriver(db, identity, request, now = Date.now()) {
 
 // Server-owned indexes authorize legacy owner/device documents without exposing all licenses.
 async function dispatchAccessAction(db, identity, request, now = Date.now()) {
+    if (request.action === 'prepareNoticeInbox') return prepareNoticeInbox(db, identity, request, now);
+    if (request.action === 'sendDispatchMessage') return sendPrivateNotice(db, identity, request, now);
+    if (request.action === 'deleteDispatchMessage') return deletePrivateNotice(db, identity, request, now);
     const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
     if (!master && identity?.role !== 'DISPATCH') throw problem('관제 로그인이 필요합니다.', 403);
     const keys = [...new Set((Array.isArray(request.keys) ? request.keys : []).map(validateKey))];
@@ -479,19 +482,6 @@ async function dispatchAccessAction(db, identity, request, now = Date.now()) {
         const drivers = await Promise.all(keys.map(key => tx.get(db.collection('licenses').doc(key))));
         for (const d of drivers) {
             if (!d.exists || d.data().type === 'dispatch' || (!master && d.data().dispatchKey !== identity.uid)) throw problem('연결된 기사만 처리할 수 있습니다.', 403);
-        }
-        if (request.action === 'sendDispatchMessage') {
-            const content = String(request.content || '').trim();
-            if (!content || content.length > 300) throw problem('메시지는 1~300자로 입력해 주세요.');
-            const date = new Date(now + 9 * 3600000).toISOString();
-            tx.set(db.collection('dispatch_messages').doc(), {
-                senderKey: master ? 'MASTER' : identity.uid, senderType: master ? 'MASTER' : 'DISPATCH',
-                senderTitle: master ? '운영사 알림' : '회사 알림', targetLicenseKeys: keys,
-                targetDeviceIds: [...new Set(drivers.flatMap(d => [d.id, d.data().deviceId].filter(Boolean)))],
-                targetPhones: drivers.map(d => d.data().phone || '').filter(Boolean), content,
-                createdAt: now, dateStr: date.slice(0, 10), timeStr: date.slice(11, 16), acknowledged: []
-            });
-            return { success: true };
         }
         if (request.action === 'unlinkDispatchDriver') {
             if (keys.length !== 1) throw problem('기사를 한 명씩 해제해 주세요.');
@@ -522,10 +512,140 @@ async function dispatchAccessAction(db, identity, request, now = Date.now()) {
     });
 }
 
+// Public inbox copies never contain recipient keys, phones, devices, or the sender's address book.
+function noticeInboxId(key, license) {
+    if (typeof license.routeOwnerId !== 'string' || !license.routeOwnerId || license.routeOwnerId.includes('/')) throw problem('기사 데이터 연결을 먼저 확인해 주세요.', 409);
+    return (license.type === 'dispatch' ? 'dispatch_' : 'driver_') + license.routeOwnerId;
+}
+function noticeBody(message) {
+    return {senderKey:message.senderKey, senderType:message.senderType || (message.senderKey === 'MASTER' ? 'MASTER' : 'DISPATCH'),
+        senderTitle:message.senderTitle || (message.senderKey === 'MASTER' ? '운영사 알림' : '회사 알림'),
+        content:String(message.content || ''), createdAt:Number(message.createdAt) || 0,
+        dateStr:String(message.dateStr || ''), timeStr:String(message.timeStr || '')};
+}
+async function assertNoticeSender(db, tx, identity, request, now) {
+    const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
+    if (master) return 'MASTER';
+    if (identity?.role !== 'DISPATCH') throw problem('관제 로그인이 필요합니다.', 403);
+    const account = (await tx.get(db.collection('licenses').doc(identity.uid))).data();
+    if (account?.type !== 'dispatch' || !isActive(account, new Date(now + 9*3600000).toISOString().slice(0,10), now)) throw problem('관제 이용권을 확인해 주세요.', 403);
+    const sessions = account.activeSessions?.length ? account.activeSessions : [account.currentSessionToken].filter(Boolean);
+    if (sessions.length && !sessions.includes(request.sessionToken)) throw problem('관제 접속이 해제되었습니다.', 401);
+    return identity.uid;
+}
+async function prepareNoticeInbox(db, identity, request, now) {
+    return db.runTransaction(async tx=>{
+        const sender=await assertNoticeSender(db,tx,identity,request,now);
+        const key=validateKey(request.keys?.[0]);
+        if(sender!=='MASTER' && sender!==key) throw problem('본인 수신함만 준비할 수 있습니다.',403);
+        const account=await tx.get(db.collection('licenses').doc(key)), data=account.data();
+        if(!account.exists || data.type!=='dispatch') throw problem('관제 계정을 확인해 주세요.',403);
+        if(!data.routeOwnerId){data.routeOwnerId=randomUUID();tx.update(account.ref,{routeOwnerId:data.routeOwnerId});}
+        return {inboxId:noticeInboxId(key,data)};
+    });
+}
+async function sendPrivateNotice(db, identity, request, now = Date.now()) {
+    const keys = [...new Set((Array.isArray(request.keys) ? request.keys : []).map(validateKey))];
+    if (!keys.length || keys.length > 400) throw problem('알림은 한 요청에 1~400명씩 전송해 주세요.');
+    const content = String(request.content || '').trim();
+    if (!content || content.length > 5000 || (identity?.role !== 'MASTER' && content.length > 300)) throw problem('알림 내용의 길이를 확인해 주세요.');
+    const id = request.messageId;
+    if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(id)) throw problem('발송 식별정보를 확인해 주세요.');
+    const ref = db.collection('dispatch_messages').doc(id);
+    return db.runTransaction(async tx => {
+        const senderKey = await assertNoticeSender(db, tx, identity, request, now);
+        const previous = await tx.get(ref);
+        if (previous.exists) {
+            const old = previous.data();
+            if (old.senderKey !== senderKey || old.content !== content || JSON.stringify(old.targetLicenseKeys) !== JSON.stringify(keys) || old.deleting) throw problem('이미 사용된 발송 식별정보입니다.', 409);
+            return {success:true, sent:keys.length, messageId:id};
+        }
+        const recipients = await Promise.all(keys.map(key => tx.get(db.collection('licenses').doc(key))));
+        for (const recipient of recipients) {
+            if (!recipient.exists || (senderKey !== 'MASTER' && (recipient.data().type === 'dispatch' || recipient.data().dispatchKey !== senderKey))) throw problem('연결된 수신 계정만 선택해 주세요.', 403);
+        }
+        const inboxIds = recipients.map(d => {
+            const data=d.data();
+            if(data.type==='dispatch' && !data.routeOwnerId){data.routeOwnerId=randomUUID();tx.update(d.ref,{routeOwnerId:data.routeOwnerId});}
+            return noticeInboxId(d.id,data);
+        });
+        const date = new Date(now + 9*3600000).toISOString();
+        const message = {senderKey, senderType:senderKey === 'MASTER' ? 'MASTER' : 'DISPATCH', senderTitle:senderKey === 'MASTER' ? '운영사 알림' : '회사 알림',
+            content, createdAt:now, dateStr:date.slice(0,10), timeStr:date.slice(11,16),
+            targetLicenseKeys:keys, targetDeviceIds:[...new Set(recipients.flatMap(d => [d.id,d.data().deviceId].filter(Boolean)))],
+            targetPhones:recipients.map(d => d.data().phone || '').filter(Boolean), acknowledged:[], inboxIds, inboxVersion:2};
+        tx.set(ref, message);
+        for (const inboxId of new Set(inboxIds)) tx.set(db.collection('dispatch_inboxes').doc(inboxId).collection('messages').doc(id), noticeBody(message));
+        return {success:true, sent:keys.length, messageId:id};
+    });
+}
+async function deletePrivateNotice(db, identity, request, now = Date.now()) {
+    const id = request.messageId;
+    if (typeof id !== 'string' || !id || id.length > 200 || id.includes('/')) throw problem('알림 식별정보를 확인해 주세요.');
+    const ref = db.collection('dispatch_messages').doc(id);
+    const inboxIds = await db.runTransaction(async tx => {
+        const senderKey = await assertNoticeSender(db, tx, identity, request, now);
+        const message = await tx.get(ref);
+        if (!message.exists) return [];
+        if (senderKey !== 'MASTER' && message.data().senderKey !== senderKey) throw problem('본인이 보낸 알림만 삭제할 수 있습니다.', 403);
+        tx.update(ref, {deleting:true});
+        return message.data().inboxIds || [];
+    });
+    // A legacy broadcast can have more than 500 recipients. Keep its source until all copies are removed so retry can finish cleanup.
+    for (let i=0; i<inboxIds.length; i+=400) {
+        const batch = db.batch();
+        for (const inboxId of inboxIds.slice(i,i+400)) batch.delete(db.collection('dispatch_inboxes').doc(inboxId).collection('messages').doc(id));
+        await batch.commit();
+    }
+    await ref.delete();
+    return {success:true};
+}
+async function migrateNoticeInboxes(db, request = {}) {
+    const checkpointRef=db.collection('admin_license_controls').doc('notice_inboxes_v2');
+    const checkpoint=(await checkpointRef.get()).data() || {};
+    if(checkpoint.complete && request.restart!==true) return {success:true,migrated:0,skipped:0,hasMore:false,cursor:checkpoint.cursor || ''};
+    const cursor=request.cursor || (request.restart ? '' : checkpoint.cursor) || '';
+    let query = db.collection('dispatch_messages').orderBy(require('firebase-admin').firestore.FieldPath.documentId()).limit(10);
+    if (cursor) {
+        if (typeof cursor !== 'string' || cursor.includes('/') || cursor.length>200) throw problem('이관 위치가 올바르지 않습니다.');
+        query = query.startAfter(cursor);
+    }
+    const page = await query.get(); let migrated=0, skipped=0;
+    for (const source of page.docs) {
+        const initial = source.data();
+        if (initial.inboxVersion === 2 || initial.senderType === 'DRIVER' || !initial.senderKey || initial.deleting) continue;
+        const keys = [...new Set((initial.targetLicenseKeys || []).filter(k=>typeof k==='string' && k && !k.includes('/')))];
+        if (!keys.length) { skipped++; continue; }
+        for (let i=0; i<keys.length; i+=400) {
+            await db.runTransaction(async tx => {
+                const current = await tx.get(source.ref);
+                if (!current.exists || current.data().inboxVersion===2 || current.data().deleting) return;
+                const message = current.data();
+                const recipients = await Promise.all(keys.slice(i,i+400).map(k=>tx.get(db.collection('licenses').doc(k))));
+                const inboxIds = new Set(message.inboxIds || []);
+                for (const recipient of recipients) {
+                    const data = recipient.data();
+                    const created = data?.createdAt?.toMillis ? data.createdAt.toMillis() : Number(data?.createdAt);
+                    if (!recipient.exists || (Number.isFinite(created) && created > Number(message.createdAt))) { skipped++; continue; }
+                    if(data.type==='dispatch' && !data.routeOwnerId){data.routeOwnerId=randomUUID();tx.update(recipient.ref,{routeOwnerId:data.routeOwnerId});}
+                    let inboxId; try { inboxId = noticeInboxId(recipient.id, data); } catch (_) { skipped++; continue; }
+                    inboxIds.add(inboxId);
+                    tx.set(db.collection('dispatch_inboxes').doc(inboxId).collection('messages').doc(source.id), noticeBody(message));
+                }
+                tx.update(source.ref, {inboxIds:[...inboxIds], ...(i+400>=keys.length ? {inboxVersion:2} : {})});
+            });
+        }
+        migrated++;
+    }
+    const nextCursor=page.docs.at(-1)?.id || cursor;
+    await checkpointRef.set({cursor:nextCursor,complete:page.size<10},{merge:true});
+    return {success:true,migrated,skipped,hasMore:page.size===10,cursor:nextCursor};
+}
+
 // Administrator grants are independent of provider payment history and cancellation arithmetic.
 function effectivePeriod(license, paidExpiresAt, now) {
     const expiresAt = Math.max(paidExpiresAt || 0, Number.isFinite(license.adminExpiresAt) ? license.adminExpiresAt : 0);
     const status = ['suspended','revoked'].includes(license.status) ? license.status : expiresAt > now ? 'active' : 'expired';
     return { expiresAt, expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'), status };
 }
-module.exports = { dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
+module.exports = { migrateNoticeInboxes, dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
