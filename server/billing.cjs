@@ -1,4 +1,4 @@
-const { randomUUID, randomBytes } = require('node:crypto');
+const { randomUUID, randomBytes, createHash } = require('node:crypto');
 const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked, effectivePeriod } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
@@ -73,39 +73,61 @@ function evaluatePurchase(payload, now, allowSandbox = false) {
     return valid ? { ...valid, active: true, snapshotAt: payload.request_date_ms } : empty;
 }
 // The web checkout uses the default path unchanged. Only the Android API opts
-// into explicit driver-session selection and deterministic legacy lookup.
+// into key-owned billing with replaceable, verified checkout contacts.
 async function ensureAndroidAccount(db, identity, input, now) {
-    if(identity?.testDriverSession === true)throw problem('구매 전 실제 휴대폰 인증이 필요합니다.',403);
+    if(identity?.testDriverSession)throw problem('구매 전 실제 휴대폰 인증이 필요합니다.',403);
     const phone=verifiedPhone(identity), device=deviceId(input.deviceId);
-    if(identity.driverKey) {
-        const selected=await db.runTransaction(async tx=>{
-            const key=identity.driverKey, license=(await tx.get(db.collection('licenses').doc(key))).data();
-            if(!license || !identity.driverSessionId || license.driverSessionId!==identity.driverSessionId ||
-                license.driverUid!==identity.uid || license.deviceId!==device || identity.driverDeviceId!==device ||
-                phoneDigits(license.phone)!==phoneDigits(phone)) throw problem('접속이 해제되었습니다. 다시 인증해 주세요.',401);
-            if(input.licenseKey && input.licenseKey!==key)throw problem('로그인한 이용권과 요청한 이용권이 다릅니다.',403);
-            if(['suspended','revoked','upgraded'].includes(license.status))throw problem('접속이 제한된 이용권입니다.',403);
-            await assertNotBlocked(db,tx,key,phone,device);
-            const binding=(await tx.get(db.collection('billing_license_bindings').doc(key))).data();
-            if(!binding?.uid)return null;
-            const owner=(await tx.get(db.collection('billing_accounts').doc(binding.uid))).data();
-            if(!owner || owner.deletedAt!=null || owner.licenseKey!==key)throw problem('결제 소유자 연결 정보를 확인해 주세요.',409);
-            // A verified driver uses the company key; purchaser identity remains on its orders.
-            return {...owner,uid:binding.uid,canPurchase:!owner.webManaged && !owner.pendingWebOrder && !owner.webHistory?.length,
-                reason:owner.webManaged?'웹 이용권의 사용 기간은 유지됩니다.':owner.pendingWebOrder || owner.webHistory?.length?'이 키에 연결된 웹 주문을 확인해 주세요.':''};
-        });
-        if(selected)return selected;
-    }
-    // Keep expired, orphaned web reservations in their original ledger. New app registration
-    // uses a separate customer and never cancels or reassigns the web order.
-    const old=(await db.collection('billing_accounts').doc(identity.uid).get()).data();
-    if(!identity.driverKey && old && !old.deletedAt && old.pendingWebOrder &&
-        !(old.pendingWebUntil>now) && !old.webManaged && !old.webHistory?.length && !old.access?.active && !input.licenseKey) {
-        const [license,profile]=await Promise.all(['licenses','driver_profiles'].map(c=>db.collection(c).doc(old.licenseKey).get()));
-        if(!license.exists && !profile.exists)
-            return ensureAccount(db,{...identity,uid:'android-'+identity.uid},input,now,true);
-    }
-    return ensureAccount(db, identity, input, now, true);
+    const key=String(input.newLicense===true ? '' : input.licenseKey || identity.driverKey || '').trim().toUpperCase();
+    if(key && (key.length>100 || /[\/\\\u0000-\u001f]/.test(key)))throw problem('라이선스 키가 올바르지 않습니다.');
+    return db.runTransaction(async tx=>{
+        await assertNotBlocked(db,tx,key,phone,device);
+        const accounts=await tx.get(db.collection('billing_accounts'));
+        let license={}, profile={}, binding={}, owner, ref, selectedKey=key;
+        if(key){
+            const [l,p,b]=await Promise.all(['licenses','driver_profiles','billing_license_bindings'].map(c=>tx.get(db.collection(c).doc(key))));
+            license=l.data() || {};profile=p.data() || {};binding=b.data() || {};
+            const candidates=accounts.docs.filter(d=>d.data().licenseKey===key && d.data().deletedAt==null);
+            if(candidates.length>1)throw problem('이 키의 결제 연결을 확인해 주세요.',409);
+            const saved=binding.uid ? accounts.docs.find(d=>d.id===binding.uid) : candidates[0];
+            owner=saved?.data();ref=saved?.ref;
+            if(binding.uid && (!owner || owner.deletedAt!=null || owner.licenseKey!==key))throw problem('결제 소유자 연결 정보를 확인해 주세요.',409);
+            if(license.billingUid && license.billingUid!==ref?.id)throw problem('이 키의 결제 소유자 연결을 확인해 주세요.',409);
+            if(!l.exists && !owner)throw problem('등록되지 않은 라이선스 키입니다.',404);
+            if(['suspended','revoked','upgraded'].includes(license.status) || ['suspended','revoked','upgraded'].includes(profile.status) || license.type==='dispatch')throw problem('접속이 제한된 이용권입니다.',403);
+            const session=identity.driverKey===key && identity.driverSessionId && license.driverSessionId===identity.driverSessionId &&
+                license.driverUid===identity.uid && license.deviceId===device && identity.driverDeviceId===device && phoneDigits(license.phone)===phoneDigits(phone);
+            if(identity.driverKey===key && !session)throw problem('접속이 해제되었습니다. 전화번호를 다시 인증해 주세요.',401);
+            const age=Math.floor(now/1000)-identity.auth_time;
+            if(!session && !(owner?.checkoutUid===identity.uid && owner?.checkoutDevice===device && owner?.checkoutUntil>now) &&
+                (!Number.isFinite(age)||age < -30||age>300))throw problem('이 키로 구매하려면 전화번호를 다시 인증해 주세요.',401);
+        }else{
+            const saved=accounts.docs.find(d=>d.data().checkoutUid===identity.uid && d.data().checkoutDevice===device &&
+                d.data().checkoutUntil>now && d.data().keyScoped===true && !d.data().access?.active && d.data().deletedAt==null);
+            owner=saved?.data();ref=saved?.ref;selectedKey=owner?.licenseKey || '';
+        }
+        const web=license.webManaged || profile.webManaged || binding.provider==='toss' || owner?.webManaged || owner?.pendingWebOrder || owner?.webHistory?.length;
+        const manual=key && license.type && license.type!=='trial' && !license.billingManaged && isActive(license,new Date(now+9*3600000).toISOString().slice(0,10),now) && !binding.uid;
+        if(web || manual)return {...owner,licenseKey:key,canPurchase:false,reason:web?'웹에서 구매한 이용권 또는 주문이 연결되어 있습니다. 기존 웹 결제 경로에서 확인해 주세요.':'현재 사용 중인 기존 이용권의 만료일은 '+(license.expireDate || '')+'입니다. 남은 기간을 확인해 주세요.'};
+        if(!selectedKey){
+            for(let i=0;i<10;i++){
+                const candidate=randomBytes(8).toString('hex').toUpperCase();
+                const reserved=await Promise.all(['licenses','driver_profiles','billing_license_bindings'].map(c=>tx.get(db.collection(c).doc(candidate))));
+                if(!reserved.some(d=>d.exists)&&!accounts.docs.some(d=>d.data().licenseKey===candidate)){selectedKey=candidate;break;}
+            }
+            if(!selectedKey)throw problem('이용권 생성에 실패했습니다.',503);
+        }
+        if(!owner){
+            const uid='license-'+selectedKey;ref=db.collection('billing_accounts').doc(uid);
+            if((await tx.get(ref)).exists)throw problem('이 키의 결제 연결을 확인해 주세요.',409);
+            owner={uid,licenseKey:selectedKey,rcUserId:'dp_android_'+randomUUID(),createdAt:now,keyScoped:true};
+        }
+        const result={...owner,uid:ref.id,checkoutUid:identity.uid,checkoutDevice:device,checkoutUntil:now+30*60*1000,
+            notificationPhone:phone,phone:owner.phone || phone};
+        tx.set(ref,result);
+        tx.set(db.collection('billing_customer_ids').doc(result.rcUserId),{uid:ref.id});
+        tx.set(db.collection('billing_license_bindings').doc(selectedKey),{...binding,uid:ref.id,rcUserId:result.rcUserId});
+        return {...result,canPurchase:true,reason:''};
+    });
 }
 async function ensureAccount(db, identity, input, now, android = false) {
     const phone = verifiedPhone(identity), device = deviceId(input.deviceId), ref = db.collection('billing_accounts').doc(identity.uid);
@@ -224,22 +246,28 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
         const bindingRef = db.collection('billing_license_bindings').doc(account.licenseKey);
         const [licenseSnap, profileSnap, binding, lock, blocked, allLicenses] = await Promise.all([
             tx.get(licenseRef), tx.get(profileRef), tx.get(bindingRef), tx.get(lockRef),
-            device ? assertNotBlocked(db, tx, account.licenseKey, account.phone, device) : Promise.resolve(null), tx.get(db.collection('licenses'))]);
+            assertNotBlocked(db, tx, account.licenseKey, '', device), tx.get(db.collection('licenses'))]);
         const license = licenseSnap.data() || {}, profile = profileSnap.data() || {};
         if (license.webManaged || profile.webManaged || binding.data()?.provider === 'toss') {
             return {active:false,valid:false,msg:'웹 이용권을 다시 확인해 주세요.'};
         }
         if (binding.exists && binding.data().uid !== uid) throw problem('이용권 소유자가 다릅니다.',403);
-        if (!license.driverSessionId && (license.phone && phoneDigits(license.phone) !== phoneDigits(account.phone) || profile.phone && phoneDigits(profile.phone) !== phoneDigits(account.phone))) throw problem('이용권 전화번호가 변경되었습니다. 고객센터에 문의해 주세요.',409);
         if (license.routeOwnerId && profile.routeOwnerId && license.routeOwnerId !== profile.routeOwnerId) throw problem('계정 소유자 정보를 확인해 주세요.',409);
-        if (device && (license.deviceId || profile.deviceId) && (license.deviceId || profile.deviceId) !== device) throw problem('다른 기기에 연결된 계정입니다.',409);
+        if(account.keyScoped && entitlement.active && !entitlement.transactionId)throw problem('결제 식별자를 확인하지 못했습니다. 잠시 후 기존 구매 확인을 눌러 주세요.',502);
+        let transactionRef;
+        if(entitlement.active && entitlement.transactionId){
+            transactionRef=db.collection('billing_purchase_bindings').doc(createHash('sha256').update(entitlement.transactionId).digest('hex'));
+            const original=(await tx.get(transactionRef)).data();
+            const owners=await tx.get(db.collection('billing_accounts'));
+            if(original && original.uid!==uid || owners.docs.some(d=>d.data().licenseKey!==account.licenseKey && d.data().access?.transactionId===entitlement.transactionId))
+                throw problem('이 구매는 다른 라이선스 키에 연결되어 있습니다. 원래 키에서 기존 구매를 확인해 주세요.',409);
+        }
         // Prevent old concurrent REST responses from rolling back newer subscription state.
         const latest = (account.billingSnapshotAt || 0) > entitlement.snapshotAt ? account.access : entitlement;
         if (['suspended','revoked'].includes(license.status) || ['suspended','revoked'].includes(profile.status)) return {active:false,valid:false,msg:'접속이 제한된 계정입니다.'};
         if (latest.active && !binding.exists) {
             if (license.type === 'dispatch') throw problem('관제 계정은 구독으로 변경할 수 없습니다.',409);
             if (license.type !== 'trial' && licenseSnap.exists && isActive(license,new Date(now+9*3600000).toISOString().slice(0,10),now)) throw problem('기존 이용권이 남아 있습니다. 고객센터에 문의해 주세요.',409);
-            if (allLicenses.docs.some(doc => doc.id !== account.licenseKey && phoneDigits(doc.data().phone) === phoneDigits(account.phone) && doc.data().type !== 'trial' && isActive(doc.data(),new Date(now+9*3600000).toISOString().slice(0,10),now))) throw problem('같은 번호에 다른 이용권이 등록되었습니다.',409);
         }
         const active = latest.active === true && latest.expiresAt > now;
         if (active || binding.exists || license.adminExpiresAt > now) {
@@ -247,12 +275,13 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
             const expiresAt = effectivePeriod(license, active ? latest.expiresAt : Math.min(latest.expiresAt || now,now), now).expiresAt;
             const effectiveActive = expiresAt > now;
             const expireDate = new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
-            const data = { phone: license.driverSessionId ? license.phone : account.phone, routeOwnerId, deviceId: license.driverSessionId ? license.deviceId : device || license.deviceId || profile.deviceId || '',
+            const data = { phone: license.phone || '', routeOwnerId, deviceId: license.deviceId || profile.deviceId || '',
                 type:'regular', isTrial:false, status:effectiveActive?'active':'expired', billingManaged:true, billingUid:uid,
                 expiresAt, expireDate, subscriptionProduct:latest.productId || '', subscriptionSandbox:latest.sandbox === true };
             tx.set(licenseRef,{...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now});
             tx.set(profileRef,{...profile,...data,key:account.licenseKey,allowTms:profile.allowTms ?? license.allowTms ?? true});
             tx.set(bindingRef,{uid,rcUserId:account.rcUserId});
+            if(transactionRef)tx.set(transactionRef,{licenseKey:account.licenseKey,uid,transactionId:entitlement.transactionId});
             tx.set(lockRef,{revision:(lock.data()?.revision || 0)+1,updatedAt:now});
             tx.set(ref,{...account,access:{...latest,active},billingSnapshotAt:latest.snapshotAt,lastSyncAt:now});
             return {active:effectiveActive,valid:effectiveActive,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expireDate,expiresAt,
