@@ -233,7 +233,12 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
             callback?.('DEVICE_CHANGED','다른 기기에서 로그인하여 이 기기의 접속이 해제되었습니다.'); return;
         }
         onUpdateCallback?.(data);
-    }, error => console.warn('라이선스 상태 연결 오류:',error));
+    }, error => {
+        if (stopped) return;
+        if (error.code === 'permission-denied' || error.code === 'unauthenticated') {
+            callback?.('DEVICE_CHANGED','다른 사용자로 로그인했거나 접속 권한이 해제되었습니다. 다시 로그인해 주세요.');
+        } else console.warn('라이선스 상태 연결 오류:',error);
+    });
     return () => { stopped=true; unsubscribe(); };
 }
 
@@ -288,7 +293,7 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
     const cleanPhone = String(myPhone || '').startsWith('+82') ? '0' + digits.slice(2) : digits;
     const cleanKeyOnly = (myKey || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
     const seen = new Set(), pending = new Map(), subscriptions = [], messageQueries = [];
-    let stopped = false, linkedKey = null;
+    let stopped = false, linkedKey = null, inboxOwner = '', inboxStop = null;
     const drain = () => {
         if (stopped) return;
         pending.forEach((msg, id) => {
@@ -308,6 +313,7 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
     if (myKey) subscriptions.push(onSnapshot(doc(db, 'licenses', myKey), snapshot => {
         if (stopped) return;
         linkedKey = snapshot.exists() ? snapshot.data().dispatchKey || '' : '';
+        subscribeInbox(snapshot.exists() ? snapshot.data().routeOwnerId || '' : '');
         drain();
     }, error => console.warn('회사 메시지 연결 확인 실패:', error)));
     const receive = snapshot => {
@@ -318,12 +324,14 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
         });
         drain();
     };
-    const subscribe = (field, value) => {
-        const q = query(collection(db, 'dispatch_messages'), where(field, 'array-contains', value));
+    function subscribeInbox(owner) {
+        if (owner === inboxOwner) return;
+        inboxStop?.(); inboxStop=null; inboxOwner=owner; pending.clear(); messageQueries.length=0;
+        if (!owner) return;
+        const q = collection(db, 'dispatch_inboxes', 'driver_' + owner, 'messages');
         messageQueries.push(q);
-        subscriptions.push(onSnapshot(q, receive, error => console.warn('메시지 수신 연결 실패:', error)));
-    };
-    if (myKey) subscribe('targetLicenseKeys', myKey);
+        inboxStop=onSnapshot(q,receive,error=>console.warn('메시지 수신 연결 실패:',error));
+    }
 
     let refreshing = null;
     const refresh = () => {
@@ -333,6 +341,7 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
             const license = await getDoc(doc(db, 'licenses', myKey));
             if (stopped) return;
             linkedKey = license.exists() ? license.data().dispatchKey || '' : '';
+            subscribeInbox(license.exists() ? license.data().routeOwnerId || '' : '');
             for (const q of messageQueries) {
                 const snapshot = await getDocs(q);
                 if (stopped) return;
@@ -351,7 +360,7 @@ export function startDispatchMessageListener(myDeviceId, myPhone, myKey, onMessa
     const timer = typeof setInterval === 'function' ? setInterval(resume, 60000) : null;
     if (typeof getDoc === 'function' && typeof getDocs === 'function') resume();
     return () => {
-        stopped = true; subscriptions.forEach(stop => stop()); pending.clear();
+        stopped = true; subscriptions.forEach(stop => stop()); inboxStop?.(); pending.clear();
         if (currentMessageRefresh === refresh) currentMessageRefresh = null;
         if (timer !== null) clearInterval(timer);
         if (typeof document !== 'undefined') document.removeEventListener('visibilitychange', resume);

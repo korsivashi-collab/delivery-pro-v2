@@ -1,6 +1,6 @@
 // js/admin-dispatch-msg.js
 
-import { db, auth, dispatchAccessRequest, requestDispatchSignupSms, dispatchSignupToken } from "./admin-api.js";
+import { db, auth, dispatchAccessRequest, sendAdminNotice, prepareDispatchNoticeInbox, requestDispatchSignupSms, dispatchSignupToken } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { selectLatestOwnedRoute } from "./route-owner.js";
 import { playBeepSound, refreshDispatchSoundButton } from "./admin-utils.js";
@@ -14,6 +14,7 @@ function isReceivedMessage(msg) {
     if (!key) return false;
     if (msg.senderType === 'DRIVER') return msg.targetDispatchKey === key;
     if (msg.senderKey !== 'MASTER' && msg.senderType !== 'MASTER') return false;
+    if (msg.privateInbox === true) return true;
     const normalize = value => String(value || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
     const token = sessionStorage.getItem('deliveryProSessionToken');
     const phone = String((state.allLicenses || []).find(l => l.key === key)?.phone || '').replace(/\D/g,'');
@@ -122,7 +123,7 @@ export async function sendDispatchMessage() {
     btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 전송 중...';
 
     try {
-        await dispatchAccessRequest('sendDispatchMessage', selected.map(lic => lic.key), {content:text});
+        await sendAdminNotice(selected.map(lic => lic.key), text);
         alert(`[회사 알림 발송 완료]\n${targets.length}명에게 보낼 알림을 저장했습니다. 연결된 기사 화면에서 수신합니다.`);
         textarea.value = ''; updateMessageCharCount(); setMessageBox('sent');
     } catch (e) { 
@@ -135,7 +136,7 @@ export async function sendDispatchMessage() {
 export async function deleteDispatchMessage(msgId) {
     if (!state.allDispatchMessages.some(msg => msg.id === msgId && isSentMessage(msg))) return;
     if (!confirm("이 발송 알림 기록을 삭제하시겠습니까?")) return;
-    try { await deleteDoc(doc(db, "dispatch_messages", msgId)); } catch (e) { alert("삭제 오류: " + e.message); }
+    try { await dispatchAccessRequest('deleteDispatchMessage', [], {messageId:msgId}); } catch (e) { alert("삭제 오류: " + e.message); }
 }
 
 export function renderMessageFeed() {
@@ -288,9 +289,10 @@ export async function exportDispatchMessages(scope = 'messages') {
     if (!master && !key) return;
     try {
         const source = collection(db, 'dispatch_messages');
-        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key)), query(source,where('targetLicenseKeys','array-contains',key))];
+        const inboxId=master ? '' : await prepareDispatchNoticeInbox(key);
+        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key)), collection(db, 'dispatch_inboxes', inboxId, 'messages')];
         const records = new Map();
-        for (const q of queries) (await getDocs(q)).forEach(d => records.set(d.id,d.data()));
+        for (const [index,q] of queries.entries()) (await getDocs(q)).forEach(d => records.set(d.id,{...d.data(),...(!master && index===2 ? {privateInbox:true} : {})}));
         const from = new Date(start+'T00:00:00').getTime();
         const until = new Date(end+'T00:00:00'); until.setDate(until.getDate()+1);
         const targetPhone = String((state.allLicenses || []).find(l => l.key === key)?.phone || '').replace(/\D/g, '');
@@ -298,7 +300,7 @@ export async function exportDispatchMessages(scope = 'messages') {
         const normalize = value => String(value || '').toUpperCase().replace(/^(PRO|TRIAL|CTRL)-/i, '');
         const incoming = m => m.senderType === 'DRIVER' ? m.targetDispatchKey === key :
             (m.senderKey === 'MASTER' || m.senderType === 'MASTER') &&
-            ((m.targetDeviceIds || []).some(v => normalize(v) === normalize(key) || v === sessionToken) ||
+            (m.privateInbox === true || (m.targetDeviceIds || []).some(v => normalize(v) === normalize(key) || v === sessionToken) ||
              targetPhone && (m.targetPhones || []).some(p => String(p).replace(/\D/g, '') === targetPhone));
         const messages = [...records.values()].filter(m => (master || m.senderKey === key || incoming(m)) &&
             (scope !== 'inbox' || incoming(m)) && (scope !== 'sent' || isSentMessage(m)) && m.createdAt >= from && m.createdAt < until.getTime()).sort((a,b)=>a.createdAt-b.createdAt);

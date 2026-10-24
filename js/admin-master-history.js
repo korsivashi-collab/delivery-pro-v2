@@ -1,6 +1,6 @@
 // js/admin-master-history.js
 
-import { db } from "./admin-api.js";
+import { db, sendAdminNotice } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -137,29 +137,9 @@ export async function sendHistoryNoticeToSelected() {
     const btn = document.getElementById('btn-send-history-notice');
     if (btn) { btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 발송 중...'; }
 
-    const targetDeviceIds = [];
-    const targetPhones = [];
-    state.historySelectedAccountKeys.forEach(key => {
-        const lic = state.allLicenses.find(l => l.key === key);
-        targetDeviceIds.push(key);
-        if (lic) {
-            if (lic.deviceId) targetDeviceIds.push(lic.deviceId);
-            if (lic.phone) targetPhones.push(lic.phone);
-        }
-    });
-
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-    const dateStr = getLocalDateString(now);
-
+    const recipients = Array.from(state.historySelectedAccountKeys);
     try {
-        await addDoc(collection(db, "dispatch_messages"), {
-            senderKey: "MASTER", senderType: "MASTER", senderTitle: "운영사 알림",
-            targetLicenseKeys: Array.from(state.historySelectedAccountKeys),
-            targetDeviceIds: Array.from(new Set(targetDeviceIds)),
-            targetPhones: Array.from(new Set(targetPhones)),
-            content: content, createdAt: now.getTime(), dateStr: dateStr, timeStr: timeStr, acknowledged: []
-        });
+        await sendAdminNotice(recipients, content);
         alert(`총 ${state.historySelectedAccountKeys.size}개 계정에 [운영사 알림]이 성공적으로 전송되었습니다.`);
         if (inputEl) inputEl.value = '';
         toggleHistoryNoticeMode(false);

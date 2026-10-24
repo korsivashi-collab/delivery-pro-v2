@@ -4,7 +4,7 @@ let dispatchSessionWatchUnsubscribe=null;
 let stopDataSync = () => {};
 // js/admin-app.js
 
-import { db, auth, signInWithCustomToken, requestMasterSms, resetMasterSms, prepareDispatchAccess } from "./admin-api.js";
+import { db, auth, signInWithCustomToken, requestMasterSms, resetMasterSms, prepareDispatchAccess, prepareDispatchNoticeInbox } from "./admin-api.js";
 // 🌟 where 임포트 추가 완료
 import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
@@ -696,11 +696,10 @@ window.initMasterDataSync = function() {
     const messageSource = collection(db, 'dispatch_messages');
     const messageQueries = isMaster ? [messageSource] : currentKey ? [
         query(messageSource, where('senderKey', '==', currentKey)),
-        query(messageSource, where('targetDispatchKey', '==', currentKey)),
-        query(messageSource, where('targetLicenseKeys', 'array-contains', currentKey))
+        query(messageSource, where('targetDispatchKey', '==', currentKey))
     ] : [];
-    messageQueries.forEach((q, index) => watch(q, snapshot => {
-        const bucket = []; snapshot.forEach(d => bucket.push({id:d.id,...d.data()}));
+    const subscribeMessages = (q, index) => watch(q, snapshot => {
+        const bucket = []; snapshot.forEach(d => bucket.push({id:d.id,...d.data(),...(!isMaster && index===2 ? {privateInbox:true} : {})}));
         messageBuckets.set(index,bucket);
         const merged = new Map();
         messageBuckets.forEach(rows => rows.forEach(row => merged.set(row.id,row)));
@@ -708,7 +707,11 @@ window.initMasterDataSync = function() {
         if (typeof renderMessageFeed === 'function') renderMessageFeed();
         if (typeof checkDispatchInboxNotifications === 'function') checkDispatchInboxNotifications();
         if (typeof renderMasterNoticeHistoryList === 'function') renderMasterNoticeHistoryList();
-    }));
+    });
+    messageQueries.forEach(subscribeMessages);
+    if (!isMaster && currentKey) prepareDispatchNoticeInbox(currentKey).then(inboxId => {
+        if (!stopped) subscribeMessages(collection(db,'dispatch_inboxes',inboxId,'messages'),2);
+    }).catch(reportError);
 
     // 🌟 7. 템플릿 실시간 동기화 (권한별 제한 쿼리 및 공용 템플릿 일치)
     const templatesQuery = isMaster 

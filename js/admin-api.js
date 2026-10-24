@@ -119,3 +119,29 @@ export async function prepareDispatchAccess(keys) {
     }
     return owners;
 }
+
+const pendingNotices = new Map();
+export async function sendAdminNotice(keys, content) {
+    const recipients = [...new Set(keys)].sort();
+    if (!recipients.length) throw new Error('수신자를 선택해 주세요.');
+    const signature = JSON.stringify([auth.currentUser?.uid, recipients, content]);
+    let pending = pendingNotices.get(signature);
+    if (!pending) {
+        if (pendingNotices.size >= 20) pendingNotices.delete(pendingNotices.keys().next().value);
+        pending = {id:crypto.randomUUID(),sent:0}; pendingNotices.set(signature,pending);
+    }
+    try {
+        for (let i=pending.sent; i<recipients.length; i+=400) {
+            await dispatchAccessRequest('sendDispatchMessage', recipients.slice(i,i+400), {content,messageId:pending.id+'-'+Math.floor(i/400)});
+            pending.sent = Math.min(i+400,recipients.length);
+        }
+        pendingNotices.delete(signature);
+        return {sent:recipients.length};
+    } catch (error) {
+        throw new Error((pending.sent ? pending.sent+'명에게 발송했습니다. 같은 대상과 내용으로 다시 누르면 남은 대상부터 재시도합니다. ' : '') + error.message);
+    }
+}
+
+export async function prepareDispatchNoticeInbox(key) {
+    return (await dispatchAccessRequest('prepareNoticeInbox', [key])).inboxId;
+}

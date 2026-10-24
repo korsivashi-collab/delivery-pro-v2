@@ -30,6 +30,12 @@ export function reconcileMasterLicensePhones() {
                     console.warn('전화번호 자동 보완: 서로 다른 번호·소유권 또는 잘못된 번호는 관리자 수정이 필요합니다.', result);
                 }
             } while (result.hasMore);
+            let inboxResult, cursor='';
+            do {
+                inboxResult = await saveMasterLicenses({action:'migrateNoticeInboxes',cursor});
+                cursor=inboxResult.cursor;
+                if (inboxResult.skipped) console.warn('이전 알림 중 삭제·재발급되었거나 소유권 확인이 필요한 수신자가 있습니다.');
+            } while(inboxResult.hasMore);
             return result;
         })().catch(() => {
             console.warn('전화번호 자동 보완 실패: 마스터 재접속 또는 수정 저장으로 재시도해 주세요.');
