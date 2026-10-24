@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { timingSafeEqual } = require('node:crypto');
 const { problem, assertDriverSession, assertNotBlocked } = require('../server/license-integrity.cjs');
-const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
+const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAndroidAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
 function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
         !!env.REVENUECAT_SECRET_API_KEY?.trim() && (env.REVENUECAT_WEBHOOK_AUTH || '').length >= 32;
@@ -58,7 +58,7 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
                 if (!ready()) throw problem('구독 서비스를 준비하고 있습니다.',503);
                 return reply(200,await sync(db,binding.uid));
             }
-            const account=await measure('account',()=>ensureAccount(db,identity,input,now()));
+            const account=await measure('account',()=>ensureAndroidAccount(db,identity,input,now()));
             if(input.licenseKey&&input.licenseKey!==account.licenseKey)throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
             if(input.action==='sync'&&account.webManaged){
                 const service=require('./payment-confirm.js').createService({sdk,env,fetchImpl,now});
