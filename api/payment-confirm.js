@@ -2,7 +2,7 @@ const admin=require('firebase-admin');
 const {randomUUID,createHmac}=require('node:crypto');
 const {isDeepStrictEqual}=require('node:util');
 const {verifiedPhone,deviceId,ensureAccount,requestTiming}=require('../server/billing.cjs');
-const {problem,phoneDigits}=require('../server/license-integrity.cjs');
+const {problem,phoneDigits,effectivePeriod}=require('../server/license-integrity.cjs');
 const PRICES=Object.freeze({1:9900,3:28215,6:53460,12:100980});
 function addMonths(stamp,months){
  const local=new Date(stamp+9*3600000),year=local.getUTCFullYear(),month=local.getUTCMonth();
@@ -11,7 +11,7 @@ function addMonths(stamp,months){
  return end.getTime()-9*3600000;
 }
 function legacyExpiry(data){if(Number.isFinite(data.expiresAt))return data.expiresAt;const m=/^(\d{4})[.-](\d{2})[.-](\d{2})$/.exec(data.expireDate||'');return m?Date.UTC(+m[1],+m[2]-1,+m[3]+1)-9*3600000-1:0;}
-function result(account,license,now){const expiresAt=account.webExpiresAt||0;return {active:expiresAt>now&&!['suspended','revoked'].includes(license.status),valid:expiresAt>now&&!['suspended','revoked'].includes(license.status),status:license.status,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'),routeOwnerId:license.routeOwnerId,dispatchKey:license.dispatchKey||'',allowTms:license.allowTms??true,msg:expiresAt>now?'':'이용기간이 만료되었습니다.'};}
+function result(account,license,now){const expiresAt=effectivePeriod(license,account.webExpiresAt,now).expiresAt;return {active:expiresAt>now&&!['suspended','revoked'].includes(license.status),valid:expiresAt>now&&!['suspended','revoked'].includes(license.status),status:license.status,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'),routeOwnerId:license.routeOwnerId,dispatchKey:license.dispatchKey||'',allowTms:license.allowTms??true,msg:expiresAt>now?'':'이용기간이 만료되었습니다.'};}
 function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}){
  const ready=()=>/^(test|live)_(gck|ck)_/.test(env.TOSS_CLIENT_KEY||'')&&/^(test|live)_(gsk|sk)_/.test(env.TOSS_SECRET_KEY||'')&&(env.TOSS_CLIENT_KEY.startsWith('test_')===env.TOSS_SECRET_KEY.startsWith('test_'))&&(env.WEB_PAYMENT_ENABLED==='true')&&(!env.TOSS_CLIENT_KEY.startsWith('test_')||env.WEB_PAYMENT_ALLOW_TEST==='true');
  async function provider(path,body,id){const response=await fetchImpl('https://api.tosspayments.com/v1/payments'+path,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(env.TOSS_SECRET_KEY+':').toString('base64'),'Content-Type':'application/json',...(id?{'Idempotency-Key':id}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data;try{data=await response.json();}catch{throw problem('결제 상태를 확인하지 못했습니다. 재결제하지 말고 다시 확인해 주세요.',502);}return {ok:response.ok,data};}
@@ -34,6 +34,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   for(const payment of payments){const old=history.find(x=>x.orderId===payment.orderId);if(!old)throw problem('결제 이력을 찾을 수 없습니다.',409);old.cancelled=old.cancelled===true||payment.status!=='DONE'||payment.balanceAmount!==old.amount;}
   let expiresAt=account.webBaseExpiresAt||0;for(const entry of history)if(!entry.cancelled)expiresAt=addMonths(Math.max(expiresAt,entry.approvedAt),entry.months);
   const data={phone:license.driverSessionId?license.phone:account.phone,key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:license.driverSessionId?license.deviceId:device||license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:cancellation&&['suspended','revoked'].includes(license.status)?license.status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
+  Object.assign(data,effectivePeriod(license,expiresAt,now()));
   let changed=false;
   const saveChanged=(ref,before,after)=>{if(!isDeepStrictEqual(before,after)){tx.set(ref,after);changed=true;}};
   if(cancellation)saveChanged(cancelRef,cancelOrder,{...cancelOrder,cancellation:cancelOrder.cancellation||{status:'CANCELED',at:now(),by:cancellation.by,reason:cancellation.reason},method:cancellation.payment.method||cancelOrder.method||null});
