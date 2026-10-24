@@ -5,6 +5,25 @@ const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensure
 function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
         !!env.REVENUECAT_SECRET_API_KEY?.trim() && (env.REVENUECAT_WEBHOOK_AUTH || '').length >= 32;
+    async function verifyUnused({account,orders}) {
+        const denied=()=>problem('이전 결제의 미사용 여부를 확인하지 못했습니다. 기존 연결은 유지됩니다.',409);
+        if(!ready())throw denied();
+        const response=await fetchImpl('https://api.revenuecat.com/v1/subscribers/'+encodeURIComponent(account.rcUserId),{
+            headers:{Authorization:'Bearer '+env.REVENUECAT_SECRET_API_KEY},signal:AbortSignal.timeout(15000)});
+        if(!response.ok)throw denied();
+        const payload=await response.json(),s=payload.subscriber;
+        if(!s||!Number.isFinite(payload.request_date_ms)||Math.abs(now()-payload.request_date_ms)>120000||s.original_purchase_date||
+            !['subscriptions','non_subscriptions','entitlements'].every(k=>s[k]&&typeof s[k]==='object'&&!Array.isArray(s[k])&&Object.keys(s[k]).length===0))throw denied();
+        for(const order of orders){
+            const secret=env.TOSS_SECRET_KEY||'';
+            if(!/^(test|live)_(gsk|sk)_/.test(secret)||secret.startsWith('test_')!==order.test)throw denied();
+            const r=await fetchImpl('https://api.tosspayments.com/v1/payments/orders/'+encodeURIComponent(order.id),{
+                headers:{Authorization:'Basic '+Buffer.from(secret+':').toString('base64')},signal:AbortSignal.timeout(15000)});
+            const data=await r.json();
+            // A timeout, wrong credential, or any actual payment is not proof of non-use.
+            if(r.status!==404||data.code!=='NOT_FOUND_PAYMENT')throw denied();
+        }
+    }
     async function sync(db,uid,device=null) {
         const account = (await db.collection('billing_accounts').doc(uid).get()).data();
         if (!account) throw problem('구독 계정을 찾을 수 없습니다.',404);
@@ -58,7 +77,7 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
                 if (!ready()) throw problem('구독 서비스를 준비하고 있습니다.',503);
                 return reply(200,await sync(db,binding.uid));
             }
-            const account=await measure('account',()=>ensureAndroidAccount(db,identity,input,now()));
+            const account=await measure('account',()=>ensureAndroidAccount(db,identity,input,now(),verifyUnused));
             if(input.licenseKey&&input.licenseKey!==account.licenseKey)throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
             if(input.action==='sync'&&account.webManaged){
                 const service=require('./payment-confirm.js').createService({sdk,env,fetchImpl,now});
