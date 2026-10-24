@@ -45,7 +45,7 @@ async function claimDevice(sdk, req, input, stamp) {
             if (testLogin) identity.uid = 'test-driver-' + createHash('sha256').update(actualKey).digest('hex');
         }
         if (actualKey !== key) await assertNotBlocked(db, tx, actualKey, phone, deviceId, blockedSnapshot);
-        if (data.type === 'dispatch' || !isActive(data, new Date(stamp + 9 * 3600000).toISOString().slice(0,10), stamp)) {
+        if (input.action !== 'release-driver' && (data.type === 'dispatch' || !isActive(data, new Date(stamp + 9 * 3600000).toISOString().slice(0,10), stamp))) {
             throw problem('사용이 정지되었거나 이용기간이 만료된 계정입니다.', 403);
         }
         const sameBinding = data.deviceId === deviceId && phoneDigits(data.phone) === phoneDigits(phone) && (!data.driverUid || data.driverUid === identity.uid);
@@ -53,7 +53,7 @@ async function claimDevice(sdk, req, input, stamp) {
         if (resume && !sameSession && !(sameBinding && !data.driverSessionId)) throw problem('다른 기기에서 로그인했거나 인증이 만료되었습니다. 다시 인증해 주세요.', 401);
         if (input.action === 'release-driver') {
             if (!sameSession) throw problem('이미 해제된 접속입니다.',401);
-            const released={deviceId:'',driverUid:'',driverSessionId:randomUUID()};
+            const released={phone:'',deviceId:'',driverUid:'',driverSessionId:randomUUID()};
             tx.set(db.collection('licenses').doc(actualKey),released,{merge:true});
             tx.set(db.collection('driver_profiles').doc(actualKey),released,{merge:true});
             return {valid:true,released:true};

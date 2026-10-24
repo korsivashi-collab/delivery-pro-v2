@@ -62,12 +62,12 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
             if(input.licenseKey&&input.licenseKey!==account.licenseKey)throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
             if(input.action==='sync'&&account.webManaged){
                 const service=require('./payment-confirm.js').createService({sdk,env,fetchImpl,now});
-                return reply(200,await service.syncWeb(db,identity.uid,device,measure));
+                return reply(200,await service.syncWeb(db,account.uid,device,measure));
             }
             if(!ready())throw problem('구독 서비스를 준비하고 있습니다. 잠시 후 다시 확인해 주세요.',503);
             if(input.action==='session')return reply(200,{appUserId:account.rcUserId,canPurchase:account.canPurchase,reason:account.reason});
             if(!account.canPurchase)return reply(200,{active:false,valid:false,msg:account.reason});
-            return reply(200,await measure('play_sync',()=>sync(db,identity.uid,device)));
+            return reply(200,await measure('play_sync',()=>sync(db,account.uid,device)));
         }catch(error){return reply(error.status || 500,{error:error.status?error.message:'구독 확인 중 오류가 발생했습니다. 잠시 후 다시 확인해 주세요.'});}
     };
 }
