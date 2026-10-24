@@ -50,7 +50,7 @@ function renderPrices(){
 }
 const el=id=>subscriptionDialog.querySelector('#'+id);
 const normalized=phone=>String(phone||'').replace(/^\+82/,'0').replace(/\D/g,'');
-const accountInput=()=>({deviceId:getOrCreateDeviceId(),...(localStorage.getItem('deliveryProKey')?{licenseKey:localStorage.getItem('deliveryProKey')}:{})});
+const accountInput=()=>({deviceId:getOrCreateDeviceId(),...(el('billing-key').value.trim()?{licenseKey:el('billing-key').value.trim().toUpperCase()}:{newLicense:true})});
 function message(text){el('subscription-status').textContent=text;el('subscription-status').hidden=!text;}
 function stopTimer(){clearInterval(timer);timer=null;}
 function refreshButtons(){
@@ -77,6 +77,7 @@ async function connectPurchases(){
     await checkIdentity();
     await loadPurchases();
     const session=await billingRequest('session',accountInput(),identity.uid);
+    if(session.licenseKey)el('billing-key').value=session.licenseKey;
     // Do not initialize the store or restore a purchase onto an ineligible account.
     if(!session.canPurchase)return session;
     if(!sdkUser){await Purchases.configure({apiKey:config.publicKey,appUserID:session.appUserId,pendingTransactionsForPrepaidPlansEnabled:true});sdkUser=session.appUserId;}
@@ -120,7 +121,7 @@ async function prepareAccount(){
     refreshButtons();
 }
 async function syncAccess(){await checkIdentity();const result=await billingRequest('sync',accountInput(),identity.uid);
-    if(!result.valid){message('활성 구독을 확인하지 못했습니다. Google Play 결제 상태를 확인한 뒤 구매 복원을 다시 눌러 주세요.');return;}
+    if(!result.valid){message(result.msg?.includes('다른 라이선스') ? result.msg : '활성 구독을 확인하지 못했습니다. Google Play 결제 상태를 확인한 뒤 구매 복원을 다시 눌러 주세요.');return;}
     canPurchase=false;
     const sms=result.licenseSms==='accepted'?'문자 메시지로 라이선스 키가 발송됩니다. 라이선스 키로 로그인을 진행해 주세요.':
         '문자 발송을 확인하지 못했습니다. 아래 라이선스 키로 로그인을 진행해 주세요.';
@@ -165,6 +166,7 @@ function buildDialog(){
     @media(max-width:390px){#subscription-modal{padding:18px}#subscription-modal .billing-monthly{font-size:19px}#subscription-modal .billing-card-body{padding-right:10px;gap:6px}#subscription-modal .billing-total strong{font-size:15px}}
     </style>
     <div class="billing-hero"><h3>배송 준비는 간편하게,<br>이용 요금은 합리적으로.</h3><p>매일의 배송을 함께하는 배송경로PRO.<br>오래 이용할수록 더 알뜰하게 시작하세요.</p><div class="billing-benefits"><span>주문서 스캔</span><span>배송 경로 최적화</span><span>배송 목록 관리</span></div></div>
+    <label id="billing-key-group" class="block text-sm font-bold mt-4">라이선스 키 (기존 이용권 연장)<input id="billing-key" maxlength="100" class="mt-2 w-full rounded-xl border p-3" placeholder="기존 키 입력 · 첫 구매는 비워 두세요"><span class="billing-note">만료된 키도 입력할 수 있습니다. 입력한 키에 구매 기간이 반영됩니다.</span></label>
     <section id="billing-auth" class="mt-4"><label class="block text-sm font-bold">휴대폰 번호<input id="billing-phone" type="tel" autocomplete="tel" maxlength="20" class="mt-2 w-full rounded-xl border p-3" placeholder="010-1234-5678"></label><button id="billing-send" type="button" class="mt-2 rounded-xl border px-4 py-2">인증번호 받기</button>
     <div id="billing-code-group" class="hidden mt-3"><label>인증번호 <span id="billing-timer"></span><input id="billing-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="mt-2 w-full rounded-xl border p-3"></label><button id="billing-confirm" type="button" class="mt-2 rounded-xl bg-blue-600 px-4 py-2 text-white">전화번호 인증</button></div></section>
     <div id="billing-secondary-actions" class="billing-secondary-actions"><button id="billing-continue" type="button" class="hidden">상품 다시 확인</button><button id="billing-restore" type="button" aria-describedby="billing-restore-hint">기존 구매 확인</button></div><p id="billing-restore-hint" class="billing-restore-hint">이미 결제했는데 이용권이 확인되지 않을 때 사용하세요. 새 결제나 기간 연장은 진행하지 않습니다.</p>
@@ -177,11 +179,12 @@ function buildDialog(){
     <button id="billing-buy" type="button" class="mt-4 w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:bg-slate-300">Google Play로 이용권 구매</button>
     <div class="mt-4 flex flex-wrap justify-center gap-4 text-xs"><a id="billing-manage" href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer" class="underline">구독 관리</a><a href="terms.html" class="underline">이용약관</a><a href="privacy.html" class="underline">개인정보처리방침</a></div>`;
     // Keep the offer visible before asking the customer to verify their phone.
-    el('billing-renewal').after(el('billing-auth'),el('billing-secondary-actions'),el('billing-restore-hint'));
+    el('billing-renewal').after(el('billing-key-group'),el('billing-auth'),el('billing-secondary-actions'),el('billing-restore-hint'));
     document.body.appendChild(subscriptionDialog);
     subscriptionDialog.querySelectorAll('[data-close]').forEach(button=>button.onclick=()=>subscriptionDialog.close());
     subscriptionDialog.addEventListener('cancel',event=>{if(busy)event.preventDefault();});
     subscriptionDialog.addEventListener('close',()=>{version++;stopTimer();previousFocus?.focus();});
+    el('billing-key').oninput=()=>{canPurchase=false;packages.clear();message('전화번호 인증 후 상품 다시 확인을 눌러 주세요.');refreshButtons();};
     el('billing-phone').oninput=()=>{identity=null;confirmation=null;canPurchase=false;packages.clear();stopTimer();el('billing-code-group').classList.add('hidden');refreshButtons();};
     subscriptionDialog.querySelectorAll('[name="subscription-months"]').forEach(input=>input.onchange=()=>{selectedMonths=Number(input.value);refreshButtons();});
     el('billing-send').onclick=()=>work(async()=>{
@@ -219,12 +222,13 @@ function buildDialog(){
         purchasing=true;refreshButtons();message('기존 구매를 확인하고 있습니다.');await Purchases.restorePurchases();await syncAccess();
     });
 }
-export async function openSubscriptionModal(){
+export async function openSubscriptionModal(renewalKey){
     if(subscriptionDialog?.open)return;if(!subscriptionDialog)buildDialog();
+    el('billing-key').value=typeof renewalKey==='string'?renewalKey:localStorage.getItem('deliveryProKey')||document.getElementById('license-input')?.value?.trim()||'';
     previousFocus=document.activeElement;el('billing-result-close').hidden=true;subscriptionDialog.showModal();version++;const operation=version;
     config=null;identity=null;confirmation=null;packages.clear();canPurchase=false;stopTimer();
     el('billing-code-group').classList.add('hidden');el('billing-continue').classList.add('hidden');refreshButtons();
-    for(const id of ['billing-auth','billing-secondary-actions','billing-restore','billing-restore-hint','billing-manage','billing-renewal'])el(id).hidden=!isAndroid();
+    for(const id of ['billing-key-group','billing-auth','billing-secondary-actions','billing-restore','billing-restore-hint','billing-manage','billing-renewal'])el(id).hidden=!isAndroid();
     el('billing-reauth').hidden=true;el('billing-verified-phone').hidden=true;
     el('billing-buy').textContent=isAndroid()?'Google Play로 이용권 구매':window.deliveryProPeriodCheckout?'이용권 구매하기':'결제 준비 중';
     if(!isAndroid()){message('');return;}
@@ -240,6 +244,6 @@ export async function openSubscriptionModal(){
     });
 }
 
-export function openLicenseRenewal(){
-    return openSubscriptionModal();
+export function openLicenseRenewal(key){
+    return openSubscriptionModal(key);
 }

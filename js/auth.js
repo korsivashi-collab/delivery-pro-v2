@@ -381,12 +381,24 @@ function scheduleLicenseExpiry(data) {
     if (!expiry) return;
     const check = () => {
         if (Date.now() < expiry) { licenseExpiryTimer = setTimeout(check, Math.min(expiry-Date.now(),2147483647)); return; }
+        const expiredKey=localStorage.getItem('deliveryProKey');
         clearAuthStorage();
         document.getElementById('main-app')?.classList.add('hidden');
         document.getElementById('auth-screen')?.classList.remove('hidden');
-        showSmsMessage('이용기간이 만료되었습니다.');
+        showLicenseRenewal(expiredKey);
     };
     licenseExpiryTimer = setTimeout(check, Math.max(0,Math.min(expiry-Date.now(),2147483647)));
+}
+
+function showLicenseRenewal(key,msg='이용기간이 만료되었습니다.') {
+    const input=document.getElementById('license-input');if(input)input.value=key;
+    const message=document.getElementById('auth-message');
+    if(!message)return;
+    message.textContent=msg+' ';
+    const button=document.createElement('button');button.type='button';button.textContent='이용권 구매';
+    button.className='underline font-bold';
+    button.onclick=async()=>{const {openLicenseRenewal}=await import('./subscriptions.js');await openLicenseRenewal(key);};
+    message.appendChild(button);
 }
 
 function applyVerifiedLogin(result) {
@@ -494,7 +506,8 @@ async function restoreSavedAuth() {
         if (version !== serviceVersion) return;
         if (result.valid) { applyVerifiedLogin(result); return; }
         if (!result.isOffline) clearAuthStorage();
-        showSmsMessage(result.msg);
+        if(result.renewable)showLicenseRenewal(result.actualKey,result.msg);
+        else showSmsMessage(result.msg);
     }
     document.getElementById('main-app')?.classList.add('hidden');
     document.getElementById('auth-screen')?.classList.remove('hidden');
@@ -630,6 +643,8 @@ export async function verifyLicense() {
         }
         if (res && res.valid) {
             applyVerifiedLogin(res);
+        } else if(res?.renewable) {
+            showLicenseRenewal(res.actualKey,res.msg);
         } else {
             if (msgEl) msgEl.innerText = res?.isOffline
                 ? '휴대폰 확인은 완료되었지만 이용권 서버에 연결하지 못했습니다. 잠시 후 [인증하고 시작하기]를 다시 눌러 주세요.'
