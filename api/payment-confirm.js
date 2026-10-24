@@ -3,7 +3,7 @@ const {randomUUID,createHmac}=require('node:crypto');
 const {isDeepStrictEqual}=require('node:util');
 const {verifiedPhone,deviceId,ensureAccount,requestTiming}=require('../server/billing.cjs');
 const {problem,phoneDigits,effectivePeriod,withoutDriverConnection,releaseInactiveDriverConnections}=require('../server/license-integrity.cjs');
-const PRICES=Object.freeze({1:9900,3:28215,6:53460,12:100980});
+const PRICES=Object.freeze({1:9900,3:28809,6:55242,12:100980});
 function addMonths(stamp,months){
  const local=new Date(stamp+9*3600000),year=local.getUTCFullYear(),month=local.getUTCMonth();
  const end=new Date(Date.UTC(year,month+months,1,local.getUTCHours(),local.getUTCMinutes(),local.getUTCSeconds(),local.getUTCMilliseconds()));
