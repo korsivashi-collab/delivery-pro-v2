@@ -98,3 +98,24 @@ export function generateSecureKey() {
     }
     return `${p1}-${p2}`;
 }
+
+// The server checks the current tenant and session for every operational action.
+export async function dispatchAccessRequest(action, keys, extra = {}) {
+    await auth.authStateReady();
+    if (!auth.currentUser) requireAdminSession();
+    const response = await fetch('/api/admin-license-save', {
+        method: 'POST', headers: {'Content-Type':'application/json', Authorization:'Bearer ' + await auth.currentUser.getIdToken()},
+        body: JSON.stringify({...extra, action, keys, sessionToken:sessionStorage.getItem('deliveryProSessionToken') || ''})
+    });
+    const result = await response.json();
+    if (response.status === 401) requireAdminSession();
+    if (!response.ok) throw new Error(result.error || '접근 권한 확인에 실패했습니다.');
+    return result;
+}
+export async function prepareDispatchAccess(keys) {
+    const unique = [...new Set(keys.filter(Boolean))], owners = {};
+    for (let i = 0; i < unique.length; i += 50) {
+        Object.assign(owners, (await dispatchAccessRequest('prepareAccess', unique.slice(i, i + 50))).owners);
+    }
+    return owners;
+}

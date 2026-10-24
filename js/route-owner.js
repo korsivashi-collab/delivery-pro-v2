@@ -1,23 +1,12 @@
-import { doc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, getDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // 라이선스 키/전화번호와 독립적이며, 라이선스 이름 변경 시에도 유지합니다.
 export async function ensureRouteOwner(db, licenseKey, expectedDeviceId = null, phone = null) {
-    const licenseRef = doc(db, 'licenses', licenseKey);
-    const newOwnerId = crypto.randomUUID();
-    return runTransaction(db, async transaction => {
-        const snapshot = await transaction.get(licenseRef);
-        if (!snapshot.exists()) throw new Error('라이선스가 존재하지 않습니다.');
-        const license = snapshot.data();
-        if (expectedDeviceId && license.deviceId && license.deviceId !== expectedDeviceId) {
-            throw new Error('다른 기기에 등록된 라이선스입니다.');
-        }
-        const routeOwnerId = license.routeOwnerId || newOwnerId;
-        const changes = { routeOwnerId };
-        if (expectedDeviceId) changes.deviceId = expectedDeviceId;
-        if (phone !== null) changes.phone = phone;
-        transaction.update(licenseRef, changes);
-        return routeOwnerId;
-    });
+    const snapshot = await getDoc(doc(db, 'licenses', licenseKey));
+    const license = snapshot.data();
+    if (!license || (expectedDeviceId && license.deviceId && license.deviceId !== expectedDeviceId)) throw new Error('기사 기기 연결을 다시 확인해 주세요.');
+    if (!license.routeOwnerId) throw new Error('기사 데이터 접근 준비 후 다시 시도해 주세요.');
+    return license.routeOwnerId;
 }
 
 // 빈 최신 경로도 비교하여 완료/취소 전의 오래된 경로가 부활하지 않게 합니다.

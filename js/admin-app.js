@@ -1,9 +1,10 @@
 import {signOut} from 'https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js';
 let dispatchLogoutPending=false;
 let dispatchSessionWatchUnsubscribe=null;
+let stopDataSync = () => {};
 // js/admin-app.js
 
-import { db, auth, signInWithCustomToken, requestMasterSms, resetMasterSms } from "./admin-api.js";
+import { db, auth, signInWithCustomToken, requestMasterSms, resetMasterSms, prepareDispatchAccess } from "./admin-api.js";
 // 🌟 where 임포트 추가 완료
 import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
@@ -510,9 +511,54 @@ window.initMasterDataSync = function() {
     // 🌟 [수정점] currentKey를 상위 스코프로 끌어올려 ReferenceError 원천 차단
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
 
+    stopDataSync();
+    let stopped = false, ownerVersion = 0, ownerSignature = '', retryTimer;
+    const subscriptions = [], ownerSubscriptions = [];
+    const reportError = error => {
+        if (stopped) return;
+        console.error('관리 데이터 동기화 실패:', error);
+        if (!reportError.shown) { reportError.shown = true; alert('일부 데이터 접근 권한을 확인하지 못했습니다. 로그인 상태와 서버 배포를 확인한 뒤 새로고침해 주세요.'); }
+    };
+    const watch = (source, callback) => {
+        const off = onSnapshot(source, snapshot => { if (!stopped) callback(snapshot); }, reportError);
+        subscriptions.push(off); return off;
+    };
+    stopDataSync = () => { stopped = true; ownerVersion++; clearTimeout(retryTimer); subscriptions.forEach(off => off()); ownerSubscriptions.forEach(off => off()); };
+    dispatchSessionWatchUnsubscribe = stopDataSync;
+    const asSnapshot = rows => ({forEach: callback => rows.forEach(callback)});
+    const syncOwners = async () => {
+        if (isMaster || stopped) return;
+        const drivers = state.allLicenses.filter(l => l.type !== 'dispatch' && l.dispatchKey === currentKey);
+        const signature = JSON.stringify(drivers.map(l => [l.id, l.routeOwnerId, l.deviceId]).sort());
+        if (signature === ownerSignature) return;
+        ownerSignature = signature;
+        const version = ++ownerVersion;
+        ownerSubscriptions.splice(0).forEach(off => off());
+        routesChanged(asSnapshot([])); completionsChanged(asSnapshot([]));
+        if (!drivers.length) return;
+        try {
+            const owners = await prepareDispatchAccess(drivers.map(l => l.id));
+            if (stopped || version !== ownerVersion) return;
+            for (const [name, callback] of [['routes', routesChanged], ['completions', completionsChanged]]) {
+                const buckets = new Map();
+                for (const owner of new Set(Object.values(owners))) {
+                    const off = onSnapshot(query(collection(db, name), where('routeOwnerId', '==', owner)), snapshot => {
+                        if (stopped || version !== ownerVersion) return;
+                        const rows = []; snapshot.forEach(d => rows.push(d)); buckets.set(owner, rows);
+                        callback(asSnapshot([...buckets.values()].flat()));
+                    }, reportError);
+                    ownerSubscriptions.push(off);
+                }
+            }
+        } catch (error) {
+            if (stopped || version !== ownerVersion) return;
+            reportError(error); ownerSignature = '';
+            retryTimer = setTimeout(syncOwners, 10000);
+        }
+    };
+
     // 1. 라이선스 실시간 동기화
-    if(!isMaster&&dispatchSessionWatchUnsubscribe)dispatchSessionWatchUnsubscribe();
-    const licenseWatchUnsubscribe=onSnapshot(collection(db, "licenses"), (snapshot) => {
+    const licensesChanged = (snapshot) => {
         if(sessionStorage.getItem('deliveryProRole')==='DISPATCH'&&dispatchLogoutPending)return;
         state.allLicenses = [];
         snapshot.forEach(docSnap => { state.allLicenses.push({ id: docSnap.id, ...docSnap.data() }); });
@@ -565,12 +611,11 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
-    });
-
-    if(!isMaster)dispatchSessionWatchUnsubscribe=licenseWatchUnsubscribe;
+        void syncOwners();
+    };
 
     // 2. 접속 제한(블랙리스트) 기기 실시간 동기화
-    onSnapshot(collection(db, "blocked_devices"), (snapshot) => {
+    if (isMaster) watch(collection(db, "blocked_devices"), (snapshot) => {
         state.allBlockedDevices = [];
         snapshot.forEach(docSnap => { state.allBlockedDevices.push({ id: docSnap.id, ...docSnap.data() }); });
         const countBlockedEl = document.getElementById('count-blocked');
@@ -580,7 +625,7 @@ window.initMasterDataSync = function() {
     });
 
     // 3. 메모 실시간 동기화
-    onSnapshot(collection(db, "memos"), (snapshot) => {
+    watch(collection(db, "memos"), (snapshot) => {
         state.allMemos = [];
         snapshot.forEach(docSnap => { state.allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
         const countMemosEl = document.getElementById('count-memos');
@@ -590,7 +635,7 @@ window.initMasterDataSync = function() {
     });
 
     // 4. 경로(Routes) 실시간 동기화
-    onSnapshot(collection(db, "routes"), (snapshot) => {
+    const routesChanged = (snapshot) => {
         state.activeRoutes = {};
         snapshot.forEach(docSnap => { state.activeRoutes[docSnap.id] = docSnap.data(); });
 
@@ -611,12 +656,13 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
-    });
+    };
 
     // 5. 배송 완료 실시간 동기화
-    onSnapshot(query(collection(db, "completions"), orderBy("completedAt", "asc")), (snapshot) => {
+    const completionsChanged = (snapshot) => {
         state.allCompletions = [];
         snapshot.forEach(docSnap => { state.allCompletions.push({ id: docSnap.id, ...docSnap.data() }); });
+        state.allCompletions.sort((a,b) => a.completedAt - b.completedAt);
 
         if (!isMaster && typeof renderSidebar === 'function') renderSidebar();
         if (!isMaster && state.selectedDeviceId && state.dispatchNavState === 'DELIVERY' && typeof drawDriverOnMap === 'function') {
@@ -631,7 +677,19 @@ window.initMasterDataSync = function() {
             if (typeof renderDispatchDriverList === 'function') renderDispatchDriverList();
             if (typeof renderDispatchDriverDetail === 'function') renderDispatchDriverDetail();
         }
-    });
+    };
+    if (isMaster) {
+        watch(collection(db, 'licenses'), licensesChanged);
+        watch(collection(db, 'routes'), routesChanged);
+        watch(query(collection(db, 'completions'), orderBy('completedAt', 'asc')), completionsChanged);
+    } else if (currentKey) {
+        let own = null, linked = null;
+        const mergeLicenses = () => { if (own !== null && linked !== null) licensesChanged(asSnapshot([...own, ...linked])); };
+        watch(doc(db, 'licenses', currentKey), snapshot => { own = snapshot.exists() ? [snapshot] : []; mergeLicenses(); });
+        watch(query(collection(db, 'licenses'), where('dispatchKey', '==', currentKey)), snapshot => {
+            linked = []; snapshot.forEach(d => { if (d.id !== currentKey) linked.push(d); }); mergeLicenses();
+        });
+    }
 
     // 6. 메시지 실시간 동기화
     const messageBuckets = new Map();
@@ -639,9 +697,9 @@ window.initMasterDataSync = function() {
     const messageQueries = isMaster ? [messageSource] : currentKey ? [
         query(messageSource, where('senderKey', '==', currentKey)),
         query(messageSource, where('targetDispatchKey', '==', currentKey)),
-        query(messageSource, where('senderKey', '==', 'MASTER'))
+        query(messageSource, where('targetLicenseKeys', 'array-contains', currentKey))
     ] : [];
-    messageQueries.forEach((q, index) => onSnapshot(q, snapshot => {
+    messageQueries.forEach((q, index) => watch(q, snapshot => {
         const bucket = []; snapshot.forEach(d => bucket.push({id:d.id,...d.data()}));
         messageBuckets.set(index,bucket);
         const merged = new Map();
@@ -659,7 +717,7 @@ window.initMasterDataSync = function() {
             ? query(collection(db, "dispatch_templates"), where("dispatchKey", "in", [currentKey, "MASTER", "SYSTEM"]))
             : query(collection(db, "dispatch_templates"), where("dispatchKey", "in", ["MASTER", "SYSTEM"])));
 
-    onSnapshot(templatesQuery, (snapshot) => {
+    watch(templatesQuery, (snapshot) => {
         state.allDispatchTemplates = [];
         snapshot.forEach(docSnap => { state.allDispatchTemplates.push({ id: docSnap.id, ...docSnap.data() }); });
         if (typeof renderCustomTemplates === 'function') renderCustomTemplates();

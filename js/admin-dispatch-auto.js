@@ -2,7 +2,7 @@ import { dispatchNavigationAddress, dispatchOrderReady } from "./address.js";
 import { ensureRouteOwner } from './route-owner.js';
 // js/admin-dispatch-auto.js
 
-import { db } from "./admin-api.js";
+import { db, prepareDispatchAccess } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc, getDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -469,6 +469,7 @@ export async function revertAutoDispatch(options = {}) {
             // 화면 목록이 오래되었거나 MASTER가 전체 계정을 보고 있어도 현재 연결만 처리합니다.
             const licenseSnapshot = await getDoc(doc(db, 'licenses', driver.key));
             if (!licenseSnapshot.exists() || licenseSnapshot.data().dispatchKey !== dispatchKey || licenseSnapshot.data().type === 'dispatch') continue;
+            await prepareDispatchAccess([driver.key]);
             const routeOwnerId = await ensureRouteOwner(db, driver.key);
             const resetId = crypto.randomUUID();
             const owned = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
@@ -484,7 +485,9 @@ export async function revertAutoDispatch(options = {}) {
             // Include old key document IDs as well as the current device.
             for (const id of new Set([driver.deviceId, driver.key].filter(Boolean))) {
                 const ref = doc(db, 'routes', id);
-                const existing = await getDoc(ref);
+                let existing;
+                try { existing = await getDoc(ref); }
+                catch (error) { if (error.code === 'permission-denied') continue; throw error; }
                 if (existing.exists() && existing.data().routeOwnerId && existing.data().routeOwnerId !== routeOwnerId) continue;
                 if (existing.exists()) endpointRoutes[id] = existing.data();
                 documents.set(id, ref);
@@ -780,6 +783,7 @@ export async function sendRoutesToDrivers() {
                 items: ord.items || (ord.itemName ? [{ name: ord.itemName, qty: ord.qty || 1, unit: ord.unit || '' }] : [])
             }));
 
+            await prepareDispatchAccess([matchedLic.key]);
             const routeOwnerId = await ensureRouteOwner(db, matchedLic.key);
             const previousRoutes = await getDocs(query(collection(db, 'routes'), where('routeOwnerId', '==', routeOwnerId)));
             let routeRevision = nowTs;
@@ -823,7 +827,7 @@ export async function sendRoutesToDrivers() {
                 updatedAt: routeRevision
             };
 
-            await setDoc(doc(db, "routes", devId), routePayload, { merge: true });
+            await setDoc(doc(db, "routes", devId), routePayload);
             if (orderedDestinations !== destinations) {
                 const sourceOrders = new Map(destinations.map((destination, i) => [destination, orders[i]]));
                 orderedDestinations.forEach(destination => {

@@ -157,11 +157,10 @@ export async function firebaseUploadDeliveryPhoto(file, deviceId, operationId = 
 
 // Non-login settings helpers use the canonical account; login never calls this path.
 async function findDriverLicense(key) {
-    for (const candidate of [...new Set([key, `PRO-${key}`, `TRIAL-${key}`])]) {
-        const snapshot = await getDoc(doc(db,'licenses',candidate));
-        if (snapshot.exists()) return {snapshot,isProfile:false};
-    }
-    return null;
+    const claims = await auth.currentUser?.getIdTokenResult();
+    const canonical = claims?.claims?.driverKey || key;
+    const snapshot = await getDoc(doc(db, 'licenses', canonical));
+    return snapshot.exists() ? {snapshot,isProfile:false} : null;
 }
 
 // 2. 라이선스 검증
@@ -414,15 +413,7 @@ export async function firebaseStartTrial(phone, deviceId) {
     if (!user || verifiedDigits !== '82' + national.slice(1)) {
         return { valid: false, msg: '전화번호 [인증요청]을 진행해 주세요.' };
     }
-    const variants = [formattedPhone, national, '+82' + national.slice(1), '+82 10-' + national.slice(3, 7) + '-' + national.slice(7)];
-    // 화면 안내용 사전 조회. 최종 중복 판정과 발급은 서버에서 같은 트랜잭션으로 수행합니다.
-    const snapshots = await Promise.all(['licenses', 'driver_profiles'].map(name =>
-        getDocs(query(collection(db, name), where('phone', 'in', variants)))));
-    if (snapshots.some(snapshot => !snapshot.empty)) {
-        return { valid: false, msg: '이미 가입 또는 무료 체험 이력이 있는 휴대폰 번호입니다. 정식 라이선스를 이용해 주세요.' };
-    }
-    const deviceSnapshot = await getDocs(query(collection(db, 'licenses'), where('deviceId', '==', deviceId), where('type', '==', 'trial')));
-    if (!deviceSnapshot.empty) return { valid: false, msg: '이미 무료 체험을 사용하신 기기입니다. 정식 라이선스를 이용해 주세요.' };
+    // The SMS-authenticated server checks phone/device history atomically.
     const token = await user.getIdToken();
     const response = await apiFetch(isSalesTrialEntry() ? '/api/start-trial-month' : '/api/start-trial', {
         method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
@@ -559,6 +550,12 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 if (remote?.routeOwnerId === routeOwnerId && Number.isFinite(remote.updatedAt) &&
                     remote.updatedAt > payload.updatedAt) return false;
                 transaction.set(routeRef, payload);
+                return true;
+            }).catch(async error => {
+                if (error.code !== 'permission-denied') throw error;
+                if (state.getRouteOwnerId() !== routeOwnerId || state.getRouteUpdatedAt() !== revision) return false;
+                // Writes still require the current driver/device; never read the previous account's payload.
+                await setDoc(routeRef, payload);
                 return true;
             });
         });

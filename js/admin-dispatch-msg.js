@@ -1,6 +1,6 @@
 // js/admin-dispatch-msg.js
 
-import { db, auth, requestDispatchSignupSms, dispatchSignupToken } from "./admin-api.js";
+import { db, auth, dispatchAccessRequest, requestDispatchSignupSms, dispatchSignupToken } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { selectLatestOwnedRoute } from "./route-owner.js";
 import { playBeepSound, refreshDispatchSoundButton } from "./admin-utils.js";
@@ -122,23 +122,7 @@ export async function sendDispatchMessage() {
     btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 전송 중...';
 
     try {
-        const now = new Date();
-        const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-        const dateStr = getLocalDateString(now);
-
-        const targetPhones = [];
-        targets.forEach(tId => {
-            const lic = state.allLicenses.find(l => (l.deviceId && l.deviceId === tId) || l.key === tId);
-            if (lic && lic.phone) targetPhones.push(lic.phone);
-            else targetPhones.push(tId);
-        });
-
-        await addDoc(collection(db, "dispatch_messages"), {
-            senderKey: dispatchKey, senderType: "DISPATCH", senderTitle: "회사 알림", 
-            targetLicenseKeys: selected.map(lic => lic.key), targetDeviceIds: [...new Set([...targets, ...selected.map(lic => lic.key)])], targetPhones: targetPhones, content: text,
-            createdAt: now.getTime(), dateStr: dateStr, timeStr: timeStr, acknowledged: []
-        });
-        
+        await dispatchAccessRequest('sendDispatchMessage', selected.map(lic => lic.key), {content:text});
         alert(`[회사 알림 발송 완료]\n${targets.length}명에게 보낼 알림을 저장했습니다. 연결된 기사 화면에서 수신합니다.`);
         textarea.value = ''; updateMessageCharCount(); setMessageBox('sent');
     } catch (e) { 
@@ -304,7 +288,7 @@ export async function exportDispatchMessages(scope = 'messages') {
     if (!master && !key) return;
     try {
         const source = collection(db, 'dispatch_messages');
-        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key)), query(source,where('senderKey','==','MASTER'))];
+        const queries = master ? [source] : [query(source, where('senderKey','==',key)), query(source,where('targetDispatchKey','==',key)), query(source,where('targetLicenseKeys','array-contains',key))];
         const records = new Map();
         for (const q of queries) (await getDocs(q)).forEach(d => records.set(d.id,d.data()));
         const from = new Date(start+'T00:00:00').getTime();

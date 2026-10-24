@@ -1,6 +1,6 @@
 // js/admin-dispatch-core.js
 
-import { db, connectDispatchDriver } from "./admin-api.js";
+import { db, connectDispatchDriver, dispatchAccessRequest } from "./admin-api.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { selectLatestOwnedRoute } from "./route-owner.js";
 import { map } from "./admin-map.js";
@@ -436,11 +436,7 @@ export function clearSelectedDriver() {
 export async function removeOrUnlinkDriver(devId, key) {
     if (!confirm(`[${key}] 기사와의 관제 연결을 해제하시겠습니까?`)) return;
     try { 
-        await updateDoc(doc(db, "licenses", key), { dispatchKey: "" }); 
-        try {
-            await deleteDoc(doc(db, "routes", devId));
-            if (key && key !== devId) await deleteDoc(doc(db, "routes", key));
-        } catch(err){}
+        await dispatchAccessRequest('unlinkDispatchDriver', [key]);
         alert("연결이 해제되었습니다."); 
     } catch (e) { 
         alert("오류: " + e.message); 

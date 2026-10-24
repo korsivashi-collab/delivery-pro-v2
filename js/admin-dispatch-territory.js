@@ -2,7 +2,7 @@ import { classifyCompletionOwnership, getDriverRouteData } from './admin-dispatc
 import { getLocalDateString } from './admin-state.js';
 // js/admin-dispatch-territory.js
 
-import { db } from "./admin-api.js";
+import { db, prepareDispatchAccess } from "./admin-api.js";
 import { state } from "./admin-state.js";
 import { map } from "./admin-map.js";
 import { getAddressFromCoords } from "./admin-utils.js";
@@ -228,6 +228,10 @@ export async function focusDriverLocationOnMap(devId) {
             showFallbackLocation(devId);
         }
     };
+
+    try { await prepareDispatchAccess([targetKey]); }
+    catch (error) { noResponse(); console.warn('위치 권한 확인 실패:', error); return; }
+    if (!isCurrent()) return;
 
     // 초기 조회가 느려도 요청 전송 및 응답 대기는 진행한다.
     const loadInitial = async () => {
