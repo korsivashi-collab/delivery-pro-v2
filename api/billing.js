@@ -6,22 +6,39 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
         !!env.REVENUECAT_SECRET_API_KEY?.trim() && (env.REVENUECAT_WEBHOOK_AUTH || '').length >= 32;
     async function verifyUnused({account,orders}) {
-        const denied=()=>problem('이전 결제의 미사용 여부를 확인하지 못했습니다. 기존 연결은 유지됩니다.',409);
-        if(!ready())throw denied();
-        const response=await fetchImpl('https://api.revenuecat.com/v1/subscribers/'+encodeURIComponent(account.rcUserId),{
-            headers:{Authorization:'Bearer '+env.REVENUECAT_SECRET_API_KEY},signal:AbortSignal.timeout(15000)});
-        if(!response.ok)throw denied();
-        const payload=await response.json(),s=payload.subscriber;
-        if(!s||!Number.isFinite(payload.request_date_ms)||Math.abs(now()-payload.request_date_ms)>120000||s.original_purchase_date||
-            !['subscriptions','non_subscriptions','entitlements'].every(k=>s[k]&&typeof s[k]==='object'&&!Array.isArray(s[k])&&Object.keys(s[k]).length===0))throw denied();
+        // Only fixed diagnostic labels/statuses reach the app. Never expose
+        // upstream bodies, keys, customer IDs or order identifiers.
+        const denied=(code,message)=>problem('['+code+'] '+message+' 기존 연결은 유지됩니다.',409);
+        const httpStatus=r=>Number.isInteger(r.status)&&r.status>=100&&r.status<=599?r.status:0;
+        async function request(stage,url,headers){
+            try{return await fetchImpl(url,{headers,signal:AbortSignal.timeout(15000)});}
+            catch{throw denied(stage+'_NETWORK',stage==='RC'?'RevenueCat 조회 연결 실패 또는 시간 초과입니다.':'토스 주문 조회 연결 실패 또는 시간 초과입니다.');}
+        }
+        async function json(stage,response){
+            try{return await response.json();}
+            catch{throw denied(stage+'_JSON','결제 조회 응답을 해석하지 못했습니다.');}
+        }
+        if(!ready())throw denied('RC_CONFIG','RevenueCat 서버 설정 확인이 필요합니다.');
+        const response=await request('RC','https://api.revenuecat.com/v1/subscribers/'+encodeURIComponent(account.rcUserId),{
+            Authorization:'Bearer '+env.REVENUECAT_SECRET_API_KEY});
+        if(!response.ok)throw denied('RC_HTTP_'+httpStatus(response),'RevenueCat 고객 조회가 거절되었습니다.');
+        const payload=await json('RC',response),s=payload?.subscriber;
+        if(!s||!Number.isFinite(payload?.request_date_ms))throw denied('RC_FORMAT','RevenueCat 응답에 필요한 정보가 없습니다.');
+        if(Math.abs(now()-payload.request_date_ms)>120000)throw denied('RC_STALE','RevenueCat 조회 응답 시간이 유효하지 않습니다.');
+        const fields=['subscriptions','non_subscriptions','entitlements'];
+        if(!fields.every(k=>s[k]&&typeof s[k]==='object'&&!Array.isArray(s[k])))throw denied('RC_FORMAT','RevenueCat 구매 목록 형식을 확인하지 못했습니다.');
+        if(s.original_purchase_date||fields.some(k=>Object.keys(s[k]).length>0))throw denied('RC_HISTORY','RevenueCat에 구매 또는 이용권 기록이 있어 자동 연결을 중단했습니다.');
         for(const order of orders){
             const secret=env.TOSS_SECRET_KEY||'';
-            if(!/^(test|live)_(gsk|sk)_/.test(secret)||secret.startsWith('test_')!==order.test)throw denied();
-            const r=await fetchImpl('https://api.tosspayments.com/v1/payments/orders/'+encodeURIComponent(order.id),{
-                headers:{Authorization:'Basic '+Buffer.from(secret+':').toString('base64')},signal:AbortSignal.timeout(15000)});
-            const data=await r.json();
+            if(!/^(test|live)_(gsk|sk)_/.test(secret))throw denied('TOSS_CONFIG','토스 조회용 서버 키 설정 확인이 필요합니다.');
+            if(secret.startsWith('test_')!==order.test)throw denied('TOSS_MODE','이전 주문과 토스 조회 키의 테스트·운영 환경이 다릅니다.');
+            const r=await request('TOSS','https://api.tosspayments.com/v1/payments/orders/'+encodeURIComponent(order.id),{
+                Authorization:'Basic '+Buffer.from(secret+':').toString('base64')});
+            const data=await json('TOSS',r);
             // A timeout, wrong credential, or any actual payment is not proof of non-use.
-            if(r.status!==404||data.code!=='NOT_FOUND_PAYMENT')throw denied();
+            if(r.status>=200&&r.status<300)throw denied('TOSS_RECORD','토스에 결제 정보가 있어 상태 확인이 필요합니다.');
+            if(r.status!==404)throw denied('TOSS_HTTP_'+httpStatus(r),'토스 주문 조회가 거절되거나 실패했습니다.');
+            if(data?.code!=='NOT_FOUND_PAYMENT')throw denied('TOSS_NOT_FOUND_UNCONFIRMED','토스의 조회 결과를 미결제 확인으로 판단할 수 없습니다.');
         }
     }
     async function sync(db,uid,device=null) {
