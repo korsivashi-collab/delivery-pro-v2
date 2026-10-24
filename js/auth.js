@@ -18,7 +18,8 @@ import {
     firebaseSendSmsVerification,
     firebaseConfirmSmsCode,
     refreshDriverBilling,
-    releaseInactiveDriverConnection
+    releaseInactiveDriverConnection,
+    syncScanUsage
 } from './api.js';
 import { 
     saveMessageToLocalHistory, 
@@ -474,6 +475,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     // Yield a paint before starting independent data subscriptions and billing work.
     deferredServices = setTimeout(() => {
         if (version !== serviceVersion) return;
+        syncScanUsage(true).catch(error => console.warn(error.message));
         applyGpsPreference();
         // [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
         if (typeof syncMyParkingMemosFromServer === 'function') {

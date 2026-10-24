@@ -49,6 +49,40 @@ auth.languageCode = 'ko';
 const db = getFirestore(app);
 const storage = getStorage(app);
 
+export async function getDriverIdToken() {
+    await auth.authStateReady();
+    if (!auth.currentUser) throw new Error('로그인 후 스캔해 주세요.');
+    return auth.currentUser.getIdToken();
+}
+
+// Account ownership survives key renames and is independent of the current phone/device.
+export function getLocalScanUsage() {
+    const owner = state.getRouteOwnerId(), month = new Date().toISOString().slice(0,7);
+    let saved;
+    try { saved = JSON.parse(localStorage.getItem('deliveryProScanData:' + owner) || 'null'); } catch (_) {}
+    return {month,count:saved?.month === month && Number.isSafeInteger(saved.count) && saved.count >= 0 ? saved.count : 0};
+}
+export function saveLocalScanUsage(usage) {
+    const owner = state.getRouteOwnerId();
+    if (!owner) return;
+    localStorage.setItem('deliveryProScanData:' + owner,JSON.stringify(usage));
+}
+export async function syncScanUsage(readOnly = false) {
+    const owner = state.getRouteOwnerId();
+    if (!owner) return;
+    const usage = getLocalScanUsage();
+    const response = await apiFetch('/api/scan',{method:'POST',
+        headers:{'Content-Type':'application/json',Authorization:'Bearer ' + await getDriverIdToken()},
+        body:JSON.stringify({action:readOnly ? 'get-usage' : 'sync-usage',routeOwnerId:owner,...usage})});
+    const result = await response.json();
+    if (!response.ok || !/^\d{4}-\d{2}$/.test(result.usage?.month || '') || !Number.isSafeInteger(result.usage?.count) || result.usage.count < 0) throw new Error('스캔 사용량을 동기화하지 못했습니다.');
+    if (state.getRouteOwnerId() !== owner) return;
+    const latest = getLocalScanUsage();
+    const count = Math.max(result.usage.count,latest.month === result.usage.month ? latest.count : 0);
+    saveLocalScanUsage({month:result.usage.month,count});
+    return {month:result.usage.month,count};
+}
+
 // 기사 웹·앱 SMS는 SENS로 검증하고 기존 Firebase 계정 세션을 연결합니다.
 export async function firebaseSendSmsVerification(phoneNumber, containerId = 'recaptcha-container', options = {}) {
     try {

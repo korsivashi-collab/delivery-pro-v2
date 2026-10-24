@@ -7,7 +7,7 @@ import { openSubscriptionModal, openLicenseRenewal } from './subscriptions.js';
 
 import { initCompletionQueue, excludeLocallyCompleted } from './completion-queue.js';
 import { calculateOptimizedRoute } from './optimizer.js';
-import { saveRouteToFirestore, fetchActiveRouteOnce, sendOfficeMessage, isSalesTrialEntry } from './api.js';
+import { saveRouteToFirestore, fetchActiveRouteOnce, sendOfficeMessage, isSalesTrialEntry, syncScanUsage } from './api.js';
 import { showLoading, hideLoading, initResponsiveViewport } from './utils.js';
 import { geocodeAddress } from './kakao.js';
 import { state, destinationIdArgument, hasValidDeliveryCoordinates } from './state.js';
@@ -405,6 +405,7 @@ export async function optimizeRouteAction() {
         const deviceId = getOrCreateDeviceId();
         const phone = localStorage.getItem('deliveryProUserPhone') || "";
         saveRouteToFirestore(deviceId, phone, destinations);
+        syncScanUsage().catch(error => console.warn(error.message));
         
         setTimeout(() => { 
             const mainContainer = document.querySelector('main'); 

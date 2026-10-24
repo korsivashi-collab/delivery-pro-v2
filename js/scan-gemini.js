@@ -1,11 +1,16 @@
 import { withRequestDeadline } from './utils.js';
 import { apiFetch } from './native-platform.js';
 import { normalizeDeliveryBaseAddress } from './address.js';
+import { getDriverIdToken } from './api.js';
 
 export const GEMINI_SCAN_MODEL = 'gemini-3.1-flash-lite';
 export const GEMINI_SCAN_TIMEOUT_MS = 60000;
 const LIMITS = { storeName: 160, address: 600, phone: 80 };
-function scanError(code) { return Object.assign(new Error('명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.'), { code }); }
+function scanError(code) {
+    const message = ['GEMINI_AUTH_REQUIRED','GEMINI_LICENSE_REQUIRED'].includes(code)
+        ? '로그인 상태와 이용권을 확인한 뒤 다시 스캔해 주세요.' : '명세서 정보를 인식하지 못했습니다. 다시 촬영해 주세요.';
+    return Object.assign(new Error(message), { code });
+}
 export function normalizeGeminiFields(value) {
     if (!value || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).length !== 3 ||
         !Object.keys(value).every(key => Object.prototype.hasOwnProperty.call(LIMITS, key))) throw scanError('GEMINI_SCHEMA_ERROR');
@@ -41,7 +46,7 @@ export function buildGeminiDestination(fields, coords, id, displayNumber, addres
 }
 export async function performGeminiScan(image, { signal } = {}) {
     return withRequestDeadline(async requestSignal => {
-        const response = await apiFetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        const response = await apiFetch('/api/scan', { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization:'Bearer ' + await getDriverIdToken() },
             body: JSON.stringify(image), signal: requestSignal });
         let data;
         try { data = await response.json(); } catch (_) { throw scanError('GEMINI_SCHEMA_ERROR'); }

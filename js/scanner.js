@@ -9,7 +9,7 @@ import { toBase64_SafeCompress, showLoading, hideLoading, withRequestDeadline, g
 import { geocodeAddress } from './kakao.js';
 import { state, hasValidDeliveryCoordinates } from './state.js';
 import { getOrCreateDeviceId } from './auth.js';
-import { saveRouteToFirestore } from './api.js';
+import { saveRouteToFirestore, getLocalScanUsage, saveLocalScanUsage } from './api.js';
 
 const MAX_MONTHLY_SCANS = 1250; 
 const SCAN_COOLDOWN_MS = 1000;
@@ -20,18 +20,15 @@ let idCounter = Date.now();
 // ==========================================
 export function checkScanLimit() {
     const now = Date.now();
-    const currentMonth = new Date().toISOString().slice(0, 7);
-    const lastScanTime = localStorage.getItem('deliveryProLastScanTime');
+    const cooldownKey = 'deliveryProLastScanTime:' + state.getRouteOwnerId();
+    const lastScanTime = localStorage.getItem(cooldownKey);
     
     if (lastScanTime && (now - parseInt(lastScanTime) < SCAN_COOLDOWN_MS)) { 
         alert("1초 후 다시 스캔해주세요."); 
         return false; 
     }
     
-    let scanData = JSON.parse(localStorage.getItem('deliveryProScanData') || '{"month": "", "count": 0}');
-    if (scanData.month !== currentMonth) { 
-        scanData = { month: currentMonth, count: 0 }; 
-    }
+    const scanData = getLocalScanUsage();
     
     if (scanData.count >= MAX_MONTHLY_SCANS) { 
         alert(`⚠️ 월간 최대 스캔 한도(${MAX_MONTHLY_SCANS}장) 초과.`); 
@@ -39,8 +36,8 @@ export function checkScanLimit() {
     }
     
     scanData.count++;
-    localStorage.setItem('deliveryProScanData', JSON.stringify(scanData));
-    localStorage.setItem('deliveryProLastScanTime', now.toString());
+    saveLocalScanUsage(scanData);
+    localStorage.setItem(cooldownKey, now.toString());
     
     return true;
 }
