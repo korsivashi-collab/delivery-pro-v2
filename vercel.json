@@ -1,4 +1,10 @@
 {
+  "crons": [
+    {
+      "path": "/api/memos",
+      "schedule": "0 19 * * *"
+    }
+  ],
   "functions": {
     "api/*.js": {
       "maxDuration": 60,
