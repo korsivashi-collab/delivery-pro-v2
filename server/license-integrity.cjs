@@ -66,6 +66,44 @@ function isActive(data, today, now) {
     return true;
 }
 
+// Contact/device fields are a temporary driver connection, never license ownership.
+function withoutDriverConnection(record) {
+    const clean={...record};
+    for(const field of ['phone','deviceId','driverUid','driverSessionId','deviceChangedAt'])delete clean[field];
+    return clean;
+}
+async function releaseInactiveDriverConnections(db,now=Date.now(),key=null) {
+    const today=new Date(now+9*3600000).toISOString().slice(0,10);
+    return db.runTransaction(async tx=>{
+        const licenses=key ? await Promise.all([key,'PRO-'+key,'TRIAL-'+key].map(k=>tx.get(db.collection('licenses').doc(k)))) :
+            (await tx.get(db.collection('licenses'))).docs;
+        const blocked=(await tx.get(db.collection('blocked_devices'))).docs;
+        const profileSnapshots=key ? await Promise.all(licenses.filter(s=>s.exists).map(s=>tx.get(db.collection('driver_profiles').doc(s.id)))) :
+            (await tx.get(db.collection('driver_profiles'))).docs;
+        const profileMap=new Map(profileSnapshots.map(s=>[s.id,s]));
+        const hasConnection=data=>data && ['phone','deviceId','driverUid','driverSessionId','deviceChangedAt'].some(f=>Object.hasOwn(data,f));
+        const candidates=licenses.filter(s=>s.exists && s.data().type!=='dispatch' &&
+            (hasConnection(s.data()) || hasConnection(profileMap.get(s.id)?.data())) && (!isActive(s.data(),today,now) || blocked.some(b=>{
+            const d=b.data(),license=s.data();
+            return [b.id,d.key,d.licenseKey,d.licenseId].includes(s.id) || license.phone &&
+                [b.id,d.phone,d.phoneNumber].filter(Boolean).some(p=>phoneDigits(p)===phoneDigits(license.phone));
+        }))).slice(0,200);
+        const profiles=candidates.map(s=>profileMap.get(s.id));
+        let changed=0;
+        for(let i=0;i<candidates.length;i++){
+            const l=candidates[i],p=profiles[i],data=l.data();
+            let wrote=false;
+            for(const doc of [l,p])if(doc?.exists && ['phone','deviceId','driverUid','driverSessionId','deviceChangedAt'].some(f=>Object.hasOwn(doc.data(),f))){
+                const clean=withoutDriverConnection(doc.data());
+                if(data.status==='active' && !isActive(data,today,now))clean.status='expired';
+                tx.set(doc.ref,clean);wrote=true;
+            }
+            if(wrote)changed++;
+        }
+        return {ok:true,changed,hasMore:!key && candidates.length===200};
+    });
+}
+
 // Block-list failures propagate; an unavailable list must never grant access.
 async function assertNotBlocked(db, reader, key, phone, device, existingSnapshot = null) {
     const collection = db.collection('blocked_devices');
@@ -163,7 +201,7 @@ async function saveLicenses(db, request, now = Date.now()) {
                 profiles.delete(payload.key);
             }
             if (account) {
-                const currentPhone = licenses.get(origKey).driverSessionId ? licenses.get(origKey).phone : account.phone;
+                const currentPhone = licenses.get(origKey).phone || '';
                 if (payload.phone && phoneDigits(payload.phone) !== phoneDigits(currentPhone)) throw problem('결제 계정의 인증된 휴대폰 번호는 변경할 수 없습니다.', 409);
                 payload.phone = normalizePhone(currentPhone);
                 if (payload.type !== (licenses.get(origKey).type || 'regular')) throw problem('결제 계정의 유형은 변경할 수 없습니다.', 409);
@@ -221,6 +259,9 @@ async function saveLicenses(db, request, now = Date.now()) {
             if (license.driverUid === '' && license.driverSessionId) Object.assign(profile,
                 {deviceId:license.deviceId, driverUid:'', driverSessionId:license.driverSessionId});
             if (previousProfile.type) profile.type = payload.type;
+            if(license.type!=='dispatch' && !isActive(license,today,now)){
+                for(const record of [license,profile])for(const field of ['phone','deviceId','driverUid','driverSessionId','deviceChangedAt'])delete record[field];
+            }
             if (previous.phone && phoneDigits(previous.phone) === digits && previous.phone !== payload.phone) memoPhones.add(previous.phone);
             changed.push({ payload, license, profile, hasProfile: payload.type !== 'dispatch' || profiles.has(origKey) });
         }
@@ -282,6 +323,7 @@ async function saveLicenses(db, request, now = Date.now()) {
 }
 
 async function repairLicensePhones(db, now = Date.now()) {
+    await releaseInactiveDriverConnections(db,now);
     const lockRef = db.collection('admin_license_controls').doc('phone_integrity');
     return db.runTransaction(async tx => {
         const lock = await tx.get(lockRef);
@@ -294,6 +336,7 @@ async function repairLicensePhones(db, now = Date.now()) {
         const writes = [];
         for (const snapshot of licensesSnap.docs) {
             const license = snapshot.data(), profile = profiles.get(snapshot.id);
+            if(license.type!=='dispatch' && !isActive(license,new Date(now+9*3600000).toISOString().slice(0,10),now))continue;
             if (license.type === 'dispatch' && !profile) continue;
             if (license.routeOwnerId && profile?.routeOwnerId && license.routeOwnerId !== profile.routeOwnerId) {
                 conflicts.push(snapshot.id); continue;
@@ -425,4 +468,4 @@ function effectivePeriod(license, paidExpiresAt, now) {
     const status = ['suspended','revoked'].includes(license.status) ? license.status : expiresAt > now ? 'active' : 'expired';
     return { expiresAt, expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'), status };
 }
-module.exports = { effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
+module.exports = { withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };

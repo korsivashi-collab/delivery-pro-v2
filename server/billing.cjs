@@ -1,5 +1,5 @@
 const { randomUUID, randomBytes, createHash } = require('node:crypto');
-const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked, effectivePeriod } = require('./license-integrity.cjs');
+const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked, effectivePeriod, withoutDriverConnection, releaseInactiveDriverConnections } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
 // Request-local durations only: no tokens, phone numbers, keys or payment data.
@@ -79,6 +79,7 @@ async function ensureAndroidAccount(db, identity, input, now) {
     const phone=verifiedPhone(identity), device=deviceId(input.deviceId);
     const key=String(input.newLicense===true ? '' : input.licenseKey || identity.driverKey || '').trim().toUpperCase();
     if(key && (key.length>100 || /[\/\\\u0000-\u001f]/.test(key)))throw problem('라이선스 키가 올바르지 않습니다.');
+    if(key)await releaseInactiveDriverConnections(db,now,key);
     return db.runTransaction(async tx=>{
         await assertNotBlocked(db,tx,key,phone,device);
         const accounts=await tx.get(db.collection('billing_accounts'));
@@ -96,7 +97,7 @@ async function ensureAndroidAccount(db, identity, input, now) {
             if(['suspended','revoked','upgraded'].includes(license.status) || ['suspended','revoked','upgraded'].includes(profile.status) || license.type==='dispatch')throw problem('접속이 제한된 이용권입니다.',403);
             const session=identity.driverKey===key && identity.driverSessionId && license.driverSessionId===identity.driverSessionId &&
                 license.driverUid===identity.uid && license.deviceId===device && identity.driverDeviceId===device && phoneDigits(license.phone)===phoneDigits(phone);
-            if(identity.driverKey===key && !session)throw problem('접속이 해제되었습니다. 전화번호를 다시 인증해 주세요.',401);
+            if(identity.driverKey===key && !session && isActive(license,new Date(now+9*3600000).toISOString().slice(0,10),now))throw problem('접속이 해제되었습니다. 전화번호를 다시 인증해 주세요.',401);
             const age=Math.floor(now/1000)-identity.auth_time;
             if(!session && !(owner?.checkoutUid===identity.uid && owner?.checkoutDevice===device && owner?.checkoutUntil>now) &&
                 (!Number.isFinite(age)||age < -30||age>300))throw problem('이 키로 구매하려면 전화번호를 다시 인증해 주세요.',401);
@@ -235,6 +236,7 @@ async function ensureAccount(db, identity, input, now, android = false) {
 }
 async function applyPurchase(db, uid, entitlement, now, device = null, expectedCustomer = null) {
     const ref = db.collection('billing_accounts').doc(uid), lockRef = db.collection('admin_license_controls').doc('phone_integrity');
+    const known=(await ref.get()).data();if(known?.licenseKey)await releaseInactiveDriverConnections(db,now,known.licenseKey);
     return db.runTransaction(async tx => {
         const accountSnap = await tx.get(ref), account = accountSnap.data();
         if (!account) throw problem('구독 계정을 찾을 수 없습니다.',404);
@@ -278,8 +280,8 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
             const data = { phone: license.phone || '', routeOwnerId, deviceId: license.deviceId || profile.deviceId || '',
                 type:'regular', isTrial:false, status:effectiveActive?'active':'expired', billingManaged:true, billingUid:uid,
                 expiresAt, expireDate, subscriptionProduct:latest.productId || '', subscriptionSandbox:latest.sandbox === true };
-            tx.set(licenseRef,{...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now});
-            tx.set(profileRef,{...profile,...data,key:account.licenseKey,allowTms:profile.allowTms ?? license.allowTms ?? true});
+            tx.set(licenseRef,effectiveActive?{...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now}:withoutDriverConnection({...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now}));
+            tx.set(profileRef,effectiveActive?{...profile,...data,key:account.licenseKey,allowTms:profile.allowTms ?? license.allowTms ?? true}:withoutDriverConnection({...profile,...data,key:account.licenseKey,allowTms:profile.allowTms ?? license.allowTms ?? true}));
             tx.set(bindingRef,{uid,rcUserId:account.rcUserId});
             if(transactionRef)tx.set(transactionRef,{licenseKey:account.licenseKey,uid,transactionId:entitlement.transactionId});
             tx.set(lockRef,{revision:(lock.data()?.revision || 0)+1,updatedAt:now});
