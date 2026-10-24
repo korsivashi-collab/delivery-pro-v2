@@ -43,7 +43,13 @@ function evaluatePurchase(payload, now, allowSandbox = false) {
         .filter(purchase => purchase.expiresAt > now).sort((a,b) => b.expiresAt-a.expiresAt)[0];
     return valid ? { ...valid, active: true, snapshotAt: payload.request_date_ms } : empty;
 }
-async function ensureAccount(db, identity, input, now) {
+// The web checkout uses the default path unchanged. Only the Android API opts
+// into explicit driver-session selection and deterministic legacy lookup.
+async function ensureAndroidAccount(db, identity, input, now) {
+    if(identity?.testDriverSession === true)throw problem('구매 전 실제 휴대폰 인증이 필요합니다.',403);
+    return ensureAccount(db, identity, input, now, true);
+}
+async function ensureAccount(db, identity, input, now, android = false) {
     const phone = verifiedPhone(identity), device = deviceId(input.deviceId), ref = db.collection('billing_accounts').doc(identity.uid);
     const lockRef = db.collection('admin_license_controls').doc('phone_integrity');
     return db.runTransaction(async tx => {
@@ -59,9 +65,39 @@ async function ensureAccount(db, identity, input, now) {
         // Keep the license scan: legacy phone formats and duplicate active accounts must still be checked.
         const profiles = !account || migrate ? await tx.get(db.collection('driver_profiles')) : {docs:[]};
         const matched = licenses.docs.filter(doc => phoneDigits(doc.data().phone) === phoneDigits(phone));
-        const current = account ? licenses.docs.find(doc => doc.id === account.licenseKey) :
+        let current = account ? licenses.docs.find(doc => doc.id === account.licenseKey) :
             matched.find(doc => doc.data().type !== 'dispatch' && !['revoked','upgraded'].includes(doc.data().status)) ||
             profiles.docs.find(doc => phoneDigits(doc.data().phone) === phoneDigits(phone) && !['revoked','upgraded'].includes(doc.data().status));
+        if (android) {
+            const key = identity.driverKey;
+            if (key) {
+                // Verify the signed session against the canonical server record.
+                // Expiry alone must not prevent buying a new prepaid period.
+                const loggedIn = licenses.docs.find(doc => doc.id === key), data = loggedIn?.data();
+                if (!data || !identity.driverSessionId || data.driverSessionId !== identity.driverSessionId ||
+                    data.driverUid !== identity.uid || data.deviceId !== device || identity.driverDeviceId !== device ||
+                    phoneDigits(data.phone) !== phoneDigits(phone)) throw problem('로그인 연결이 변경되었습니다. 휴대폰 인증 후 다시 로그인해 주세요.', 401);
+                if (input.licenseKey && input.licenseKey !== key) throw problem('로그인한 이용권과 요청한 이용권이 다릅니다.', 403);
+                if (['suspended','revoked','upgraded'].includes(data.status) || data.type === 'dispatch') throw problem('접속이 제한된 이용권입니다.',403);
+                if (account && account.licenseKey !== key) throw problem('로그인 이용권과 기존 결제 연결이 다릅니다. 고객센터에 연결 확인을 요청해 주세요.',409);
+                current = loggedIn;
+            } else if (!account) {
+                const candidates = matched.filter(doc => doc.data().type !== 'dispatch' && !['suspended','revoked','upgraded'].includes(doc.data().status));
+                const activePaid = candidates.filter(doc => doc.data().type !== 'trial' && isActive(doc.data(),new Date(now+9*3600000).toISOString().slice(0,10),now));
+                const activeTrial = candidates.filter(doc => doc.data().type === 'trial' && isActive(doc.data(),new Date(now+9*3600000).toISOString().slice(0,10),now));
+                const choices = activePaid.length ? activePaid : activeTrial.length ? activeTrial : candidates;
+                if (choices.length > 1) throw problem('같은 번호의 이용권 연결을 확인해야 합니다. 고객센터에 문의해 주세요.',409);
+                current = choices[0] || current;
+            }
+            if (input.licenseKey && input.licenseKey !== current?.id) throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
+            if (current) {
+                const binding = await tx.get(db.collection('billing_license_bindings').doc(current.id));
+                const data = current.data();
+                if (binding.exists && binding.data().uid !== identity.uid || data.billingUid && data.billingUid !== identity.uid || data.driverUid && data.driverUid !== identity.uid) {
+                    throw problem('이용권 소유자 정보를 확인해 주세요.',403);
+                }
+            }
+        }
         if (matched.some(doc => doc.data().type === 'dispatch')) throw problem('관제 계정은 기사 앱 구독으로 변경할 수 없습니다.', 409);
         if (matched.some(doc => doc.id !== current?.id && doc.data().type !== 'trial' && isActive(doc.data(), new Date(now+9*3600000).toISOString().slice(0,10), now))) {
             throw problem('같은 번호에 다른 이용권이 있습니다. 고객센터에 문의해 주세요.', 409);
@@ -104,7 +140,12 @@ async function ensureAccount(db, identity, input, now) {
             tx.create(db.collection('billing_customer_ids').doc(result.rcUserId), { uid: identity.uid });
             tx.set(lockRef, { revision: (lock.data()?.revision || 0)+1, updatedAt: now });
         }
-        return { ...result, canPurchase: !activeManual, reason: activeManual ? account?.webManaged ? '웹 기간권 계정입니다. Google Play 구독으로 전환하려면 고객센터에 문의해 주세요.' : '현재 이용권 또는 진행 중인 주문이 있습니다. 확인 후 다시 요청하거나 고객센터에 문의해 주세요.' : '' };
+        const reason = activeManual ? account?.webManaged ? '웹 기간권 계정입니다. Google Play 구독으로 전환하려면 고객센터에 문의해 주세요.' : '현재 이용권 또는 진행 중인 주문이 있습니다. 확인 후 다시 요청하거나 고객센터에 문의해 주세요.' : '';
+        const androidReason = activeManual ? account?.webManaged || current?.data().webManaged
+            ? '웹에서 구매한 이용권이 연결되어 있습니다. 기존 이용권과 이용기간은 유지됩니다. Google Play 결제 전환은 고객센터에서 확인해 주세요.'
+            : account?.pendingWebUntil > now ? '진행 중인 결제 주문이 있습니다. 기존 결제 결과부터 확인해 주세요.'
+            : '현재 사용 중인 기존 이용권'+(current?.data().expireDate?'의 만료일은 '+current.data().expireDate+'입니다.':'이 있습니다.')+' 남은 기간의 중복 결제를 막기 위해 Google Play 구매를 제한합니다.' : '';
+        return { ...result, canPurchase: !activeManual, reason: android ? androidReason : reason };
     });
 }
 async function applyPurchase(db, uid, entitlement, now, device = null, expectedCustomer = null) {
@@ -155,4 +196,4 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
         return {active:false,valid:false,msg:'확인된 Google Play 구독이 없습니다.'};
     });
 }
-module.exports = { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, applyPurchase, requestTiming };
+module.exports = { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAccount, ensureAndroidAccount, applyPurchase, requestTiming };
