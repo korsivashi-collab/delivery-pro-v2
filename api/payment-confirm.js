@@ -2,7 +2,7 @@ const admin=require('firebase-admin');
 const {randomUUID,createHmac}=require('node:crypto');
 const {isDeepStrictEqual}=require('node:util');
 const {verifiedPhone,deviceId,ensureAccount,requestTiming}=require('../server/billing.cjs');
-const {problem,phoneDigits,effectivePeriod}=require('../server/license-integrity.cjs');
+const {problem,phoneDigits,effectivePeriod,withoutDriverConnection,releaseInactiveDriverConnections}=require('../server/license-integrity.cjs');
 const PRICES=Object.freeze({1:9900,3:28215,6:53460,12:100980});
 function addMonths(stamp,months){
  const local=new Date(stamp+9*3600000),year=local.getUTCFullYear(),month=local.getUTCMonth();
@@ -16,7 +16,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
  const ready=()=>/^(test|live)_(gck|ck)_/.test(env.TOSS_CLIENT_KEY||'')&&/^(test|live)_(gsk|sk)_/.test(env.TOSS_SECRET_KEY||'')&&(env.TOSS_CLIENT_KEY.startsWith('test_')===env.TOSS_SECRET_KEY.startsWith('test_'))&&(env.WEB_PAYMENT_ENABLED==='true')&&(!env.TOSS_CLIENT_KEY.startsWith('test_')||env.WEB_PAYMENT_ALLOW_TEST==='true');
  async function provider(path,body,id){const response=await fetchImpl('https://api.tosspayments.com/v1/payments'+path,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(env.TOSS_SECRET_KEY+':').toString('base64'),'Content-Type':'application/json',...(id?{'Idempotency-Key':id}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data;try{data=await response.json();}catch{throw problem('결제 상태를 확인하지 못했습니다. 재결제하지 말고 다시 확인해 주세요.',502);}return {ok:response.ok,data};}
  function validate(payment,order){if(payment.orderId!==order.orderId||payment.totalAmount!==order.amount||payment.currency!=='KRW'||payment.paymentKey!==order.paymentKey||!Number.isFinite(Date.parse(payment.approvedAt)))throw problem('결제 금액 또는 주문 정보가 일치하지 않습니다.',409);}
- async function reconcile(db,uid,payments=[],device=null,cancellation=null,expectedCustomer=null){return db.runTransaction(async tx=>{
+ async function reconcile(db,uid,payments=[],device=null,cancellation=null,expectedCustomer=null){const known=(await db.collection('billing_accounts').doc(uid).get()).data();if(known?.licenseKey)await releaseInactiveDriverConnections(db,now(),known.licenseKey);return db.runTransaction(async tx=>{
   const accountRef=db.collection('billing_accounts').doc(uid),account=(await tx.get(accountRef)).data();if(!account)throw problem('계정을 찾을 수 없습니다.',404);if(account.deletedAt!=null)throw problem('삭제된 결제 계정입니다.',410);
   if(expectedCustomer && account.rcUserId!==expectedCustomer)throw problem('계정이 변경되었습니다. 다시 확인해 주세요.',409);
   const licenseRef=db.collection('licenses').doc(account.licenseKey),profileRef=db.collection('driver_profiles').doc(account.licenseKey),lockRef=db.collection('admin_license_controls').doc('phone_integrity');
@@ -33,12 +33,13 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   const history=(account.webHistory||[]).map(x=>({...x}));
   for(const payment of payments){const old=history.find(x=>x.orderId===payment.orderId);if(!old)throw problem('결제 이력을 찾을 수 없습니다.',409);old.cancelled=old.cancelled===true||payment.status!=='DONE'||payment.balanceAmount!==old.amount;}
   let expiresAt=account.webBaseExpiresAt||0;for(const entry of history)if(!entry.cancelled)expiresAt=addMonths(Math.max(expiresAt,entry.approvedAt),entry.months);
-  const data={phone:license.driverSessionId?license.phone:account.phone,key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:license.driverSessionId?license.deviceId:device||license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:cancellation&&['suspended','revoked'].includes(license.status)?license.status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
+  const data={phone:license.phone||'',key:account.licenseKey,routeOwnerId:license.routeOwnerId||profile.routeOwnerId||randomUUID(),deviceId:license.deviceId||profile.deviceId||'',billingManaged:true,webManaged:true,billingUid:uid,type:'regular',status:cancellation&&['suspended','revoked'].includes(license.status)?license.status:expiresAt>now()?'active':'expired',expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.')};
   Object.assign(data,effectivePeriod(license,expiresAt,now()));
+  if(data.status!=='active')for(const field of ['phone','deviceId','driverUid','driverSessionId','deviceChangedAt'])delete data[field];
   let changed=false;
   const saveChanged=(ref,before,after)=>{if(!isDeepStrictEqual(before,after)){tx.set(ref,after);changed=true;}};
   if(cancellation)saveChanged(cancelRef,cancelOrder,{...cancelOrder,cancellation:cancelOrder.cancellation||{status:'CANCELED',at:now(),by:cancellation.by,reason:cancellation.reason},method:cancellation.payment.method||cancelOrder.method||null});
-  saveChanged(licenseRef,l.data(),{...license,...data,isPro:true});saveChanged(profileRef,p.data(),{...profile,...data,allowTms:profile.allowTms??license.allowTms??true});
+  saveChanged(licenseRef,l.data(),data.status==='active'?{...license,...data,isPro:true}:withoutDriverConnection({...license,...data,isPro:true}));saveChanged(profileRef,p.data(),data.status==='active'?{...profile,...data,allowTms:profile.allowTms??license.allowTms??true}:withoutDriverConnection({...profile,...data,allowTms:profile.allowTms??license.allowTms??true}));
   const updated={...account,webHistory:history,webExpiresAt:expiresAt,webManaged:true};saveChanged(accountRef,account,updated);saveChanged(bindingRef,binding.data(),{uid,provider:'toss'});
   if(changed)tx.set(lockRef,{revision:(lock.data()?.revision||0)+1,updatedAt:now()});
   return result(updated,{...license,...profile,...data,dispatchKey:license.dispatchKey||''},now());

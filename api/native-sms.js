@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { randomInt, randomUUID, createHmac, createHash, timingSafeEqual } = require('node:crypto');
 const { assertTrialEligible } = require('../server/trial-registration.cjs');
-const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('../server/license-integrity.cjs');
+const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked, releaseInactiveDriverConnections } = require('../server/license-integrity.cjs');
 
 // Phone identity owns memos; a replaceable session owns access to a license.
 async function claimDevice(sdk, req, input, stamp) {
@@ -22,7 +22,9 @@ async function claimDevice(sdk, req, input, stamp) {
     if (!key || key.length > 100 || /[\/\u0000-\u001f]/.test(key) ||
         typeof deviceId !== 'string' || !/^[a-zA-Z0-9_-]{1,160}$/.test(deviceId)) throw problem('로그인 정보가 올바르지 않습니다.');
     if (input.phone && phoneDigits(input.phone) !== phoneDigits(phone)) throw problem('인증된 휴대폰 번호가 다릅니다.', 403);
-    const db = sdk.firestore(), resume = input.action === 'resume-driver';
+    const db = sdk.firestore();
+    await releaseInactiveDriverConnections(db,stamp,key);
+    const resume = input.action === 'resume-driver';
     const result = await db.runTransaction(async tx => {
         const [exact, blockedSnapshot] = await Promise.all([
             tx.get(db.collection('licenses').doc(key)),
@@ -107,11 +109,26 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
         const contact = '010-7650-7542';
         const supportNotice = `고객센터 ${contact}로 문의해 주세요.`;
 
+        // Scheduler-only sweep: a secret is required, including when none is configured.
+        if(req.method==='GET'){
+            const secret=env.CRON_SECRET,provided=/^Bearer (.+)$/.exec(req.headers?.authorization||'')?.[1];
+            if(!secret || secret.length<32 || !provided || Buffer.byteLength(secret)!==Buffer.byteLength(provided) || !timingSafeEqual(Buffer.from(secret),Buffer.from(provided)))return res.status(401).json({error:'허용되지 않은 요청입니다.'});
+            try{
+                if(!sdk.apps.length)sdk.initializeApp({credential:sdk.credential.cert({projectId:env.FIREBASE_PROJECT_ID,clientEmail:env.FIREBASE_CLIENT_EMAIL,privateKey:env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')})});
+                return res.status(200).json(await releaseInactiveDriverConnections(sdk.firestore(),now()));
+            }catch{return res.status(500).json({error:'만료 접속 정보 정리에 실패했습니다.'});}
+        }
         if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
         try {
             let input;
             try { input = typeof req.body === 'string' ? JSON.parse(req.body) : req.body; }
             catch (_) { throw problem('인증 요청이 올바르지 않습니다.'); }
+            if(input?.action==='release-inactive'){
+                const key=typeof input.key==='string'?input.key.trim().toUpperCase():'';
+                if(!key || key.length>100 || /[\/\\\u0000-\u001f]/.test(key))throw problem('라이선스 키가 올바르지 않습니다.');
+                if(!sdk.apps.length)sdk.initializeApp({credential:sdk.credential.cert({projectId:env.FIREBASE_PROJECT_ID,clientEmail:env.FIREBASE_CLIENT_EMAIL,privateKey:env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')})});
+                return res.status(200).json(await releaseInactiveDriverConnections(sdk.firestore(),now(),key));
+            }
             if (['claim-device', 'login-driver', 'resume-driver', 'release-driver', 'login-test-driver'].includes(input?.action)) {
                 if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({ projectId: env.FIREBASE_PROJECT_ID,
                     clientEmail: env.FIREBASE_CLIENT_EMAIL, privateKey: env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n') }) });
