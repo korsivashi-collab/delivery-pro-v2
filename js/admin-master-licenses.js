@@ -652,10 +652,10 @@ async function showAccountPayments(key) {
         }
         const phone=document.getElementById('edit-phone-input');
         if(!phone.value && data.phone) phone.value=normalizeMasterPhone(data.phone);
-        phone.readOnly=true;document.getElementById('edit-expire-input').readOnly=true;
+        phone.readOnly=true;document.getElementById('edit-expire-input').readOnly=false;
         box.textContent='결제 정보 · '+data.provider;
         const note=document.createElement('p');
-        note.textContent='각 주문은 전액 취소할 수 있습니다. 취소한 주문의 이용기간을 제외해 만료일을 다시 계산합니다. 인증된 휴대폰·만료일은 직접 변경하지 않습니다. 결제 이력은 보존됩니다. 남은 이용기간이 없으면 계정을 삭제할 수 있으며, 계정 정지는 환불이 아닙니다. 표시 상태는 최근 확인 기준입니다.';
+        note.textContent='각 주문은 전액 취소할 수 있습니다. 취소한 주문의 결제 기간은 제외됩니다. 관리자가 저장한 이용기간은 별도로 유지되며, 유효한 결제 기간이 더 길면 그 기간을 적용합니다. 정상 운행과 만료일을 선택한 뒤 수정 저장해 주세요. 인증된 휴대폰 번호는 변경할 수 없습니다. 결제 이력은 보존됩니다. 남은 이용기간이 없으면 계정을 삭제할 수 있으며, 계정 정지는 환불이 아닙니다. 표시 상태는 최근 확인 기준입니다.';
         box.append(note);
         for(const p of data.payments){
             const card=document.createElement('div');card.style.cssText='margin-top:12px;padding:14px;background:#f8fafc;border:1px solid #e2e8f0;border-radius:10px;overflow-wrap:anywhere';
