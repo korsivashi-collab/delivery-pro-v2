@@ -60,7 +60,9 @@ async function ensureAccount(db, identity, input, now, android = false) {
         const restarting = previous?.deletedAt != null;
         const account = restarting ? null : previous;
         if (account && phoneDigits(account.phone) !== phoneDigits(phone)) throw problem('구독 계정의 인증 번호가 변경되었습니다. 고객센터에 문의해 주세요.', 409);
-        const migrate=account && /^PLAY-[0-9A-F]{32}$/.test(account.licenseKey);
+        // Android keeps the signed login key stable, including legacy PLAY keys.
+        // The existing web migration path is unchanged.
+        const migrate=!android && account && /^PLAY-[0-9A-F]{32}$/.test(account.licenseKey);
         // Existing accounts use their fixed key. Profiles are needed only for legacy lookup/migration.
         // Keep the license scan: legacy phone formats and duplicate active accounts must still be checked.
         const profiles = !account || migrate ? await tx.get(db.collection('driver_profiles')) : {docs:[]};
@@ -181,7 +183,7 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
             const expiresAt = active ? latest.expiresAt : Math.min(latest.expiresAt || now,now);
             const expireDate = new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
             const data = { phone: license.driverSessionId ? license.phone : account.phone, routeOwnerId, deviceId: license.driverSessionId ? license.deviceId : device || license.deviceId || profile.deviceId || '',
-                type:'regular', status:active?'active':'expired', billingManaged:true, billingUid:uid,
+                type:'regular', isTrial:false, status:active?'active':'expired', billingManaged:true, billingUid:uid,
                 expiresAt, expireDate, subscriptionProduct:latest.productId || '', subscriptionSandbox:latest.sandbox === true };
             tx.set(licenseRef,{...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now});
             tx.set(profileRef,{...profile,...data,key:account.licenseKey,allowTms:profile.allowTms ?? license.allowTms ?? true});
