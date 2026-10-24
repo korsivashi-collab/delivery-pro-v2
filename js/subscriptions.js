@@ -4,7 +4,7 @@ import * as billingAuth from './auth.js';
 // Older web deployments do not export the Android billing helpers yet.
 // Optional billing must never prevent the main application from starting.
 const { billingRequest, getBillingIdentity, firebaseSendSmsVerification, firebaseConfirmSmsCode } = billingApi;
-const { getOrCreateDeviceId, activatePurchasedLicense } = billingAuth;
+const { getOrCreateDeviceId } = billingAuth;
 
 let subscriptionDialog, previousFocus, version=0, busy=false, purchasing=false;
 let config, identity, confirmation, requestedPhone='', deadline=0, timer=null, sdkUser=null;
@@ -121,7 +121,12 @@ async function prepareAccount(){
 }
 async function syncAccess(){await checkIdentity();const result=await billingRequest('sync',accountInput(),identity.uid);
     if(!result.valid){message('활성 구독을 확인하지 못했습니다. Google Play 결제 상태를 확인한 뒤 구매 복원을 다시 눌러 주세요.');return;}
-    await activatePurchasedLicense(result);subscriptionDialog.close();}
+    canPurchase=false;
+    const sms=result.licenseSms==='accepted'?'문자 메시지로 라이선스 키가 발송됩니다. 라이선스 키로 로그인을 진행해 주세요.':
+        '문자 발송을 확인하지 못했습니다. 아래 라이선스 키로 로그인을 진행해 주세요.';
+    message('구매가 완료되었습니다. '+sms+' 라이선스 키: '+result.actualKey+
+        ' / 사용기한: '+result.expireDate+' · 이 창을 닫고 키 입력 후 전화번호 인증으로 로그인해 주세요.');
+    refreshButtons();}
 function buildDialog(){
     subscriptionDialog=document.createElement('dialog');subscriptionDialog.id='subscription-modal';
     subscriptionDialog.className='w-[calc(100%_-_2rem)] max-h-[90dvh] overflow-y-auto rounded-3xl p-6 bg-white text-slate-900 shadow-2xl backdrop:bg-black/60';
@@ -158,7 +163,7 @@ function buildDialog(){
     <section id="billing-auth" class="mt-4"><label class="block text-sm font-bold">휴대폰 번호<input id="billing-phone" type="tel" autocomplete="tel" maxlength="20" class="mt-2 w-full rounded-xl border p-3" placeholder="010-1234-5678"></label><button id="billing-send" type="button" class="mt-2 rounded-xl border px-4 py-2">인증번호 받기</button>
     <div id="billing-code-group" class="hidden mt-3"><label>인증번호 <span id="billing-timer"></span><input id="billing-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="mt-2 w-full rounded-xl border p-3"></label><button id="billing-confirm" type="button" class="mt-2 rounded-xl bg-blue-600 px-4 py-2 text-white">전화번호 인증</button></div></section>
     <button id="billing-continue" type="button" class="mt-3 rounded-xl border px-4 py-2 hidden">인증된 번호로 상품 확인</button>
-    <button id="billing-reauth" type="button" class="mt-3 rounded-xl border px-4 py-2" hidden>계정 다시 인증</button>
+    <p id="billing-verified-phone" class="mt-3 text-sm" hidden></p><button id="billing-reauth" type="button" class="mt-3 rounded-xl border px-4 py-2" hidden>전화번호 변경</button>
     <fieldset class="billing-plans"><legend>나에게 맞는 이용 기간</legend>${visiblePlans().map(plan=>`<label class="billing-card"><input type="radio" name="subscription-months" id="plan-${plan.months}" value="${plan.months}" ${plan.months===1?'checked':''}><span class="billing-card-body"><span><b>${plan.label}</b><span id="plan-badge-${plan.months}" class="billing-badge"></span><span id="plan-monthly-${plan.months}" class="billing-monthly"></span><span id="plan-saving-${plan.months}" class="billing-saving"></span></span><span class="billing-total">${plan.months}개월 총액<del id="plan-original-${plan.months}"></del><strong id="plan-price-${plan.months}"></strong></span></span></label>`).join('')}</fieldset>
     <div id="billing-summary" class="billing-summary"></div><p id="billing-price-note" class="billing-note"></p>
     <p id="billing-renewal" class="billing-note">선택한 기간의 요금을 한 번에 선불 결제합니다. 자동 갱신이나 자동결제는 없습니다. 계속 이용하려면 이용권을 추가 구매해 주세요. 기간 연장은 Google Play에서 확인된 만료일을 기준으로 반영됩니다.</p>
@@ -186,14 +191,14 @@ function buildDialog(){
         if(!confirmation||Date.now()>=deadline||normalized(requestedPhone)!==normalized(el('billing-phone').value))throw new Error('인증번호를 다시 요청해 주세요.');
         const operation=version;const user=await firebaseConfirmSmsCode(confirmation,el('billing-code').value.trim());if(operation!==version)return;
         if(normalized(user.phoneNumber)!==normalized(requestedPhone))throw new Error('인증된 번호가 입력한 번호와 다릅니다.');
-        identity=await getBillingIdentity();confirmation=null;stopTimer();el('billing-code-group').classList.add('hidden');el('billing-auth').hidden=true;await prepareAccount();
+        identity=await getBillingIdentity();confirmation=null;stopTimer();el('billing-code-group').classList.add('hidden');el('billing-auth').hidden=true;el('billing-verified-phone').textContent='인증된 전화번호: '+identity.phone;el('billing-verified-phone').hidden=false;el('billing-reauth').hidden=false;await prepareAccount();
     });
     el('billing-continue').onclick=()=>work(prepareAccount);
     el('billing-reauth').onclick=()=>{
         if(busy)return;
         identity=null;canPurchase=false;packages.clear();confirmation=null;stopTimer();
         el('billing-auth').hidden=false;el('billing-code-group').classList.add('hidden');
-        el('billing-continue').classList.add('hidden');el('billing-reauth').hidden=true;
+        el('billing-continue').classList.add('hidden');el('billing-reauth').hidden=true;el('billing-verified-phone').hidden=true;
         message('전화번호 인증 후 구매를 진행해 주세요.');refreshButtons();
     };
     el('billing-buy').onclick=()=>work(async()=>{
@@ -215,17 +220,17 @@ export async function openSubscriptionModal(){
     config=null;identity=null;confirmation=null;packages.clear();canPurchase=false;stopTimer();
     el('billing-code-group').classList.add('hidden');el('billing-continue').classList.add('hidden');refreshButtons();
     for(const id of ['billing-auth','billing-restore','billing-manage','billing-renewal'])el(id).hidden=!isAndroid();
-    el('billing-reauth').hidden=true;
+    el('billing-reauth').hidden=true;el('billing-verified-phone').hidden=true;
     el('billing-buy').textContent=isAndroid()?'Google Play로 이용권 구매':window.deliveryProPeriodCheckout?'이용권 구매하기':'결제 준비 중';
     if(!isAndroid()){message('');return;}
     await work(async()=>{
-        if([billingRequest,getBillingIdentity,getOrCreateDeviceId,activatePurchasedLicense].some(fn=>typeof fn!=='function')){
+        if([billingRequest,getBillingIdentity,getOrCreateDeviceId].some(fn=>typeof fn!=='function')){
             message('결제 기능 업데이트가 필요합니다. 앱을 최신 버전으로 업데이트해 주세요.');return;
         }
         message('구독 서비스를 확인하고 있습니다.');const loaded=await billingRequest('config');if(operation!==version)return;config=loaded;
         if(!config.enabled){message('구독 서비스를 준비하고 있습니다. 현재 결제는 진행되지 않습니다.');return;}
         identity=await getBillingIdentity();
-        if(identity?.phone){el('billing-phone').value=identity.phone;el('billing-auth').hidden=true;el('billing-reauth').hidden=false;el('billing-continue').classList.remove('hidden');el('billing-continue').textContent='상품 다시 확인';message('인증된 계정의 상품을 확인하고 있습니다.');await prepareAccount();}
+        if(identity?.phone){el('billing-verified-phone').textContent='인증된 전화번호: '+identity.phone;el('billing-verified-phone').hidden=false;el('billing-phone').value=identity.phone;el('billing-auth').hidden=true;el('billing-reauth').hidden=false;el('billing-continue').classList.remove('hidden');el('billing-continue').textContent='상품 다시 확인';message('인증된 계정의 상품을 확인하고 있습니다.');await prepareAccount();}
         else{identity=null;el('billing-phone').value=localStorage.getItem('deliveryProUserPhone')||'';message('전화번호 인증 후 구매를 진행해 주세요.');}
     });
 }
