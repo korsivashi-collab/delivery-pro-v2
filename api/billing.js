@@ -38,7 +38,11 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
             // A timeout, wrong credential, or any actual payment is not proof of non-use.
             if(r.status>=200&&r.status<300)throw denied('TOSS_RECORD','토스에 결제 정보가 있어 상태 확인이 필요합니다.');
             if(r.status!==404)throw denied('TOSS_HTTP_'+httpStatus(r),'토스 주문 조회가 거절되거나 실패했습니다.');
-            if(data?.code!=='NOT_FOUND_PAYMENT')throw denied('TOSS_NOT_FOUND_UNCONFIRMED','토스의 조회 결과를 미결제 확인으로 판단할 수 없습니다.');
+            if(data?.code!=='NOT_FOUND_PAYMENT'){
+                const known=['NOT_FOUND','NOT_FOUND_PAYMENT_SESSION','NOT_FOUND_MERCHANT','NOT_FOUND_MERCHANT_INTEGRATION','NOT_FOUND_HTTP_METHOD'];
+                const detail=known.includes(data?.code)?data.code:'UNKNOWN_CODE';
+                throw denied('TOSS_NOT_FOUND_UNCONFIRMED','토스 주문 조회 응답: HTTP 404 / '+detail+'. 미결제 여부를 확정하지 못했습니다.');
+            }
         }
     }
     async function sync(db,uid,device=null) {
