@@ -3,6 +3,7 @@
 import { db } from "./admin-api.js";
 import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state } from "./admin-state.js";
+import { escapeMemoHtml } from './address.js';
 import { doc, deleteDoc } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
 // ==========================================
@@ -116,15 +117,15 @@ export function renderMemosTable(memos) {
             <td class="py-3 px-3 font-bold text-gray-400 text-center">${start + idx + 1}</td>
             <td class="py-3 px-3 text-center whitespace-nowrap">
                 <span class="font-black text-gray-800 text-xs flex items-center justify-center gap-1">
-                    <i class="fa-solid fa-user-pen text-blue-500 text-[10px]"></i>${authorDisplay}
+                    <i class="fa-solid fa-user-pen text-blue-500 text-[10px]"></i>${escapeMemoHtml(authorDisplay)}
                 </span>
             </td>
-            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate" title="${m.address || ''}">${m.address || '-'}</td>
-            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate" title="${m.memo || ''}">${m.memo || '-'}</td>
-            <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap text-center">${m.time || '-'}</td>
-            <td class="py-3 px-3 text-center font-bold text-blue-600">${m.likes || 0}</td>
+            <td class="py-3 px-3 font-black text-gray-900 max-w-[220px] truncate" title="${escapeMemoHtml(m.address || '')}">${escapeMemoHtml(m.address || '-')}</td>
+            <td class="py-3 px-3 font-bold text-gray-700 max-w-[340px] truncate" title="${escapeMemoHtml(m.memo || '')}">${escapeMemoHtml(m.memo || '-')}</td>
+            <td class="py-3 px-3 text-gray-400 font-medium whitespace-nowrap text-center">${escapeMemoHtml(m.time || '-')}</td>
+            <td class="py-3 px-3 text-center font-bold text-blue-600">${escapeMemoHtml(m.likes || 0)}</td>
             <td class="py-3 px-3 text-center whitespace-nowrap">
-                <button onclick="window.deleteParkingMemo('${m.id}')" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95 hover:bg-red-100 transition">삭제</button>
+                <button onclick="window.deleteParkingMemo(${escapeMemoHtml(JSON.stringify(String(m.id)))})" class="px-2.5 py-1 bg-red-50 text-red-600 font-bold rounded-lg text-[11px] shadow-sm active:scale-95 hover:bg-red-100 transition">삭제</button>
             </td>
         </tr>
     `;

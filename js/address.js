@@ -1,4 +1,10 @@
 // Normalize an already recognized delivery address, not document text.
+// Keep user-written memo/address text literal inside HTML text and quoted attributes.
+export function escapeMemoHtml(value) {
+    return String(value ?? '').replace(/[&<>"']/g, character =>
+        ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'})[character]);
+}
+
 // Stored on the source document itself: one indexed array query discovers a customer's driver.
 export function trackingLookupKeys(date, items, owner = '') {
     const day = String(date || '').split('-').map((v,i) => i ? v.padStart(2,'0') : v).join('-');

@@ -20,6 +20,7 @@ import { getPureAddress, showLoading, hideLoading } from './utils.js';
 import { state } from './state.js';
 import { getOrCreateDeviceId } from './auth.js';
 import { updateContributionStats } from './support.js';
+import { escapeMemoHtml } from './address.js';
 
 let batchMemosCache = {};
 const memoCacheLoadedAt = new Map();
@@ -148,7 +149,7 @@ export function renderMemoPreview(dest, personalMemos = null) {
             let rawText = memoText.replace(/\[.*?\]/g, '').trim();
             
             if (tags.length > 0) {
-                tagsEl.innerHTML = tags.map(t => `<span class="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0">${t}</span>`).join(''); 
+                tagsEl.innerHTML = tags.map(t => `<span class="bg-gray-100 text-gray-600 border border-gray-200 text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0">${escapeMemoHtml(t)}</span>`).join('');
                 tagsEl.classList.remove('hidden');
             } else { 
                 tagsEl.classList.add('hidden'); 
@@ -156,7 +157,7 @@ export function renderMemoPreview(dest, personalMemos = null) {
             }
             
             if (rawText) { 
-                previewEl.innerHTML = `<i class="fa-solid fa-circle-info text-blue-500 mr-1"></i><span class="font-bold">주차정보:</span> <span class="text-gray-700">${rawText}</span>`; 
+                previewEl.innerHTML = `<i class="fa-solid fa-circle-info text-blue-500 mr-1"></i><span class="font-bold">주차정보:</span> <span class="text-gray-700">${escapeMemoHtml(rawText)}</span>`;
                 previewEl.classList.remove('hidden');
             } else { 
                 previewEl.classList.add('hidden'); 
@@ -170,7 +171,7 @@ export function renderMemoPreview(dest, personalMemos = null) {
     if (personalPreviewEl) {
         const personalMemo = personalMemos ? (personalMemos[pureAddr] || '') : getPersonalMemo(pureAddr);
         if (personalMemo) {
-            personalPreviewEl.innerHTML = `<i class="fa-solid fa-shield-halved text-emerald-600 mr-1"></i><span class="font-bold text-emerald-800">개인메모:</span> <span class="text-gray-800 font-semibold">${personalMemo}</span>`;
+            personalPreviewEl.innerHTML = `<i class="fa-solid fa-shield-halved text-emerald-600 mr-1"></i><span class="font-bold text-emerald-800">개인메모:</span> <span class="text-gray-800 font-semibold">${escapeMemoHtml(personalMemo)}</span>`;
             personalPreviewEl.classList.remove('hidden');
         } else {
             personalPreviewEl.classList.add('hidden');
@@ -350,13 +351,13 @@ export async function openMemoModal(id) {
                 html += `
                 <div class="bg-white border ${isMyMemo ? 'border-blue-300 ring-1 ring-blue-200' : 'border-gray-200'} rounded-xl p-3 shadow-sm relative overflow-hidden">
                     ${idx === 0 ? '<div class="absolute top-0 left-0 w-1 h-full bg-yellow-400"></div>' : ''}
-                    <div class="text-[12px] text-gray-800 font-bold whitespace-pre-line leading-relaxed mb-2 pl-1">${crownHtml}${m.memo} ${myBadge}</div>
+                    <div class="text-[12px] text-gray-800 font-bold whitespace-pre-line leading-relaxed mb-2 pl-1">${crownHtml}${escapeMemoHtml(m.memo)} ${myBadge}</div>
                     <div class="flex justify-between items-center border-t border-gray-100 pt-2 mt-2">
-                        <span class="text-[9px] text-gray-400">${m.time}</span>
+                        <span class="text-[9px] text-gray-400">${escapeMemoHtml(m.time)}</span>
                         <div class="flex items-center gap-1.5">
                             ${isMyMemo ? `<button type="button" data-delete-memo="${encodeURIComponent(m.id)}" aria-label="내 공용메모 삭제" class="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg font-bold px-3" style="min-width:48px;min-height:44px">삭제</button>` : ''}
-                            <button onclick="likeMemo('${m.id}')" class="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1 rounded-lg font-bold border border-blue-100 active:scale-95 transition"><i class="fa-solid fa-thumbs-up mr-0.5"></i> ${m.likes || 0}</button>
-                            <button onclick="reportMemo('${m.id}')" class="text-[10px] text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-500 px-2 py-1 rounded-lg border border-gray-100 active:scale-95 transition">🚨 신고</button>
+                            <button onclick="likeMemo(${escapeMemoHtml(JSON.stringify(String(m.id)))})" class="text-[10px] bg-blue-50 hover:bg-blue-100 text-blue-600 px-2 py-1 rounded-lg font-bold border border-blue-100 active:scale-95 transition"><i class="fa-solid fa-thumbs-up mr-0.5"></i> ${escapeMemoHtml(m.likes || 0)}</button>
+                            <button onclick="reportMemo(${escapeMemoHtml(JSON.stringify(String(m.id)))})" class="text-[10px] text-gray-400 bg-gray-50 hover:bg-red-50 hover:text-red-500 px-2 py-1 rounded-lg border border-gray-100 active:scale-95 transition">🚨 신고</button>
                         </div>
                     </div>
                 </div>`;

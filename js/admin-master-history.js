@@ -5,6 +5,7 @@ import { PAGE_SIZE_MASTER, renderPaginationControls } from "./admin-ui.js";
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
 import { doc, getDoc, updateDoc, deleteDoc, addDoc, collection } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { deleteLicense } from "./admin-master-licenses.js";
+import { escapeMemoHtml } from './address.js';
 
 // ==========================================
 // 1. 계정 / 내역 조회 및 운영사 알림 발송 모듈
@@ -493,14 +494,14 @@ export function renderAccountHistoryView() {
                 html += `
                 <div class="border border-yellow-200 rounded-2xl overflow-hidden bg-white shadow-xs mb-2.5">
                     <div onclick="document.getElementById('${mFolderId}').classList.toggle('hidden')" class="bg-yellow-50 hover:bg-yellow-100/70 p-3.5 flex justify-between items-center cursor-pointer transition select-none">
-                        <span class="font-black text-xs text-yellow-950 flex items-center gap-2"><i class="fa-regular fa-calendar-days text-yellow-600"></i> ${dKey} 등록 메모<span class="bg-yellow-200 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full">${mList.length}건 등록</span></span>
+                        <span class="font-black text-xs text-yellow-950 flex items-center gap-2"><i class="fa-regular fa-calendar-days text-yellow-600"></i> ${escapeMemoHtml(dKey)} 등록 메모<span class="bg-yellow-200 text-yellow-900 text-[10px] font-black px-2 py-0.5 rounded-full">${mList.length}건 등록</span></span>
                         <div class="flex items-center gap-2"><span class="text-[11px] text-yellow-700 font-bold">어느 주소에 어떤 내용인지 펼치기/접기</span><i class="fa-solid fa-chevron-down text-yellow-600 text-xs"></i></div>
                     </div>
                     <div id="${mFolderId}" class="hidden p-3 bg-slate-50 border-t border-yellow-100 space-y-2">
                         ${mList.map(m => `
                         <div class="p-3 bg-white border border-gray-200 rounded-xl flex flex-col gap-1.5 shadow-xs">
-                            <div class="flex justify-between items-center text-xs"><span class="font-black text-gray-900 flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-red-500 text-[11px]"></i> ${m.address}</span><span class="text-[10px] font-mono text-gray-400">${m.time || ''}</span></div>
-                            <p class="bg-yellow-50/50 p-2.5 rounded-lg border border-yellow-100 text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${m.memo}</p>
+                            <div class="flex justify-between items-center text-xs"><span class="font-black text-gray-900 flex items-center gap-1.5"><i class="fa-solid fa-location-dot text-red-500 text-[11px]"></i> ${escapeMemoHtml(m.address)}</span><span class="text-[10px] font-mono text-gray-400">${escapeMemoHtml(m.time || '')}</span></div>
+                            <p class="bg-yellow-50/50 p-2.5 rounded-lg border border-yellow-100 text-xs font-bold text-gray-800 whitespace-pre-line leading-relaxed">${escapeMemoHtml(m.memo)}</p>
                         </div>`).join('')}
                     </div>
                 </div>`;
