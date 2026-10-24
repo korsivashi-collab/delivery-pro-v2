@@ -17,7 +17,8 @@ import {
     listenToActiveRoutes,
     firebaseSendSmsVerification,
     firebaseConfirmSmsCode,
-    refreshDriverBilling
+    refreshDriverBilling,
+    releaseInactiveDriverConnection
 } from './api.js';
 import { 
     saveMessageToLocalHistory, 
@@ -354,13 +355,15 @@ export function unlockApp() {
 export function startLicenseRealtimeWatcher(key) {
     if (licenseWatcherUnsub) licenseWatcherUnsub();
     licenseWatcherUnsub = watchLicenseStatus(key, (status, msg) => {
-        alert(`⚠️ [라이선스 알림]\n${msg}`);
+        if(['SUSPENDED','EXPIRED'].includes(status))releaseInactiveDriverConnection(key).catch(error=>console.warn(error.message));
+        if(status!=='EXPIRED')alert(`⚠️ [라이선스 알림]\n${msg}`);
         clearAuthStorage();
         const mainApp = document.getElementById('main-app');
         const authScreen = document.getElementById('auth-screen');
         if (mainApp) { mainApp.classList.add('hidden'); mainApp.classList.remove('flex'); }
         if (authScreen) authScreen.classList.remove('hidden');
-        window.location.reload();
+        if(status==='EXPIRED')showLicenseRenewal(key);
+        else window.location.reload();
     }, (docData) => {
         const linkedKey = docData.dispatchKey || '';
         localStorage.setItem('deliveryProDispatchKey', linkedKey);
@@ -382,6 +385,7 @@ function scheduleLicenseExpiry(data) {
     const check = () => {
         if (Date.now() < expiry) { licenseExpiryTimer = setTimeout(check, Math.min(expiry-Date.now(),2147483647)); return; }
         const expiredKey=localStorage.getItem('deliveryProKey');
+        if(expiredKey)releaseInactiveDriverConnection(expiredKey).catch(error=>console.warn(error.message));
         clearAuthStorage();
         document.getElementById('main-app')?.classList.add('hidden');
         document.getElementById('auth-screen')?.classList.remove('hidden');

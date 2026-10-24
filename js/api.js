@@ -179,6 +179,13 @@ export async function firebaseLoginTestLicense(key, phone, deviceId) {
     return result;
 }
 
+export async function releaseInactiveDriverConnection(key) {
+    if(!key)return;
+    const response=await apiFetch('/api/native-sms',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({action:'release-inactive',key}),keepalive:true});
+    if(!response.ok)throw new Error('만료된 접속 정보 정리를 확인하지 못했습니다.');
+    return response.json();
+}
+
 export async function firebaseVerifyLicense(key, phone, deviceId, options = {}) {
     try {
         await auth.authStateReady();
@@ -214,17 +221,17 @@ export function watchLicenseStatus(key, callback, onUpdateCallback) {
         if (snapshot.metadata?.hasPendingWrites || snapshot.metadata?.fromCache) return;
         if (!snapshot.exists()) { callback?.('DELETED','라이선스가 삭제되거나 변경되었습니다.'); return; }
         const data = snapshot.data();
-        if (data.deviceId !== expectedDevice || expectedSession && data.driverSessionId !== expectedSession) {
-            callback?.('DEVICE_CHANGED','다른 기기에서 로그인하여 이 기기의 접속이 해제되었습니다.'); return;
-        }
-        if (['suspended','revoked','expired','upgraded'].includes(data.status)) {
+        if (['suspended','revoked','upgraded'].includes(data.status)) {
             callback?.('SUSPENDED','사용이 제한된 계정입니다.'); return;
         }
         const today = new Date(Date.now()+9*3600000).toISOString().slice(0,10).replace(/-/g,'');
         const expiry = String(data.expireDate || '').replace(/\D/g,'');
         const expiresAt = typeof data.expiresAt?.toMillis === 'function' ? data.expiresAt.toMillis() : Number(data.expiresAt);
-        if (expiry && expiry < today || expiresAt > 0 && expiresAt <= Date.now()) {
+        if (data.status==='expired' || expiry && expiry < today || expiresAt > 0 && expiresAt <= Date.now()) {
             callback?.('EXPIRED','이용기간이 만료되었습니다.'); return;
+        }
+        if (data.deviceId !== expectedDevice || expectedSession && data.driverSessionId !== expectedSession) {
+            callback?.('DEVICE_CHANGED','다른 기기에서 로그인하여 이 기기의 접속이 해제되었습니다.'); return;
         }
         onUpdateCallback?.(data);
     }, error => console.warn('라이선스 상태 연결 오류:',error));

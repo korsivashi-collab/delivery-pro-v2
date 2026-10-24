@@ -65,7 +65,10 @@ function refreshButtons(){
     renderPrices();
 }
 async function work(callback){if(busy)return;busy=true;refreshButtons();try{await callback();}
-    catch(error){if(error?.userCancelled||String(error?.code)==='1')message('구매를 취소했습니다.');
+    catch(error){if(/이 키로 구매하려면 전화번호를 다시 인증|접속이 해제되었습니다/.test(error?.message||'')){
+        identity=null;canPurchase=false;packages.clear();el('billing-auth').hidden=false;el('billing-reauth').hidden=true;
+        el('billing-continue').classList.add('hidden');message('전화번호 인증 후 기존 이용권을 연장해 주세요.');
+    }else if(error?.userCancelled||String(error?.code)==='1')message('구매를 취소했습니다.');
         else if(String(error?.code)==='20'){canPurchase=false;message('결제 승인을 기다리고 있습니다. 승인 후 구매 복원으로 확인해 주세요.');}
         else message(error.message||'구독 처리에 실패했습니다. 구매를 반복하지 말고 구매 복원으로 확인해 주세요.');}
     finally{busy=false;purchasing=false;refreshButtons();}}

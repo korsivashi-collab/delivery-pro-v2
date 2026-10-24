@@ -10,8 +10,17 @@ import { doc, setDoc, getDoc, updateDoc, deleteDoc } from "https://www.gstatic.c
 let generatingLicense = false;
 let savingLicenseEdit = false;
 let licensePhoneRepairPromise = null;
+let inactiveCleanupTimer = null;
 
 export function reconcileMasterLicensePhones() {
+    if(!inactiveCleanupTimer && globalThis.setInterval){
+        inactiveCleanupTimer=setInterval(async()=>{
+            if(sessionStorage.getItem('deliveryProRole')!=='MASTER')return;
+            try{let result;do{result=await saveMasterLicenses({action:'releaseInactive'});}while(result.hasMore && result.changed>0);}
+            catch(error){console.warn('만료 접속 정보 정리 실패:',error.message);}
+        },60000);
+    }
+
     if (!licensePhoneRepairPromise) {
         licensePhoneRepairPromise = (async () => {
             let result;
@@ -242,6 +251,7 @@ export async function addBlockedDeviceFromModal() {
             createdAt: Date.now()
         });
 
+        await saveMasterLicenses({action:'releaseInactive'});
         alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n라이선스 키 또는 인증된 전화번호가 일치하면 접속이 거부됩니다.`);
         if (inputId) inputId.value = '';
         if (inputMemo) inputMemo.value = '';
@@ -328,6 +338,7 @@ export async function addBlockedDevice() {
             createdAt: Date.now()
         });
 
+        await saveMasterLicenses({action:'releaseInactive'});
         alert(`[접속 제한 등록 완료]\n\n차단 대상: ${devId}\n\n라이선스 키 또는 인증된 전화번호가 일치하면 접속이 거부됩니다.`);
         if (inputEl) inputEl.value = '';
         if (memoEl) memoEl.value = '';
