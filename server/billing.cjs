@@ -47,7 +47,35 @@ function evaluatePurchase(payload, now, allowSandbox = false) {
 // into explicit driver-session selection and deterministic legacy lookup.
 async function ensureAndroidAccount(db, identity, input, now) {
     if(identity?.testDriverSession === true)throw problem('구매 전 실제 휴대폰 인증이 필요합니다.',403);
-    // Customer/order ownership is immutable from the Android purchase flow.
+    const phone=verifiedPhone(identity), device=deviceId(input.deviceId);
+    if(identity.driverKey) {
+        const selected=await db.runTransaction(async tx=>{
+            const key=identity.driverKey, license=(await tx.get(db.collection('licenses').doc(key))).data();
+            if(!license || !identity.driverSessionId || license.driverSessionId!==identity.driverSessionId ||
+                license.driverUid!==identity.uid || license.deviceId!==device || identity.driverDeviceId!==device ||
+                phoneDigits(license.phone)!==phoneDigits(phone)) throw problem('접속이 해제되었습니다. 다시 인증해 주세요.',401);
+            if(input.licenseKey && input.licenseKey!==key)throw problem('로그인한 이용권과 요청한 이용권이 다릅니다.',403);
+            if(['suspended','revoked','upgraded'].includes(license.status))throw problem('접속이 제한된 이용권입니다.',403);
+            await assertNotBlocked(db,tx,key,phone,device);
+            const binding=(await tx.get(db.collection('billing_license_bindings').doc(key))).data();
+            if(!binding?.uid)return null;
+            const owner=(await tx.get(db.collection('billing_accounts').doc(binding.uid))).data();
+            if(!owner || owner.deletedAt!=null || owner.licenseKey!==key)throw problem('결제 소유자 연결 정보를 확인해 주세요.',409);
+            // A verified driver uses the company key; purchaser identity remains on its orders.
+            return {...owner,uid:binding.uid,canPurchase:!owner.webManaged && !owner.pendingWebOrder && !owner.webHistory?.length,
+                reason:owner.webManaged?'웹 이용권의 사용 기간은 유지됩니다.':owner.pendingWebOrder || owner.webHistory?.length?'이 키에 연결된 웹 주문을 확인해 주세요.':''};
+        });
+        if(selected)return selected;
+    }
+    // Keep expired, orphaned web reservations in their original ledger. New app registration
+    // uses a separate customer and never cancels or reassigns the web order.
+    const old=(await db.collection('billing_accounts').doc(identity.uid).get()).data();
+    if(!identity.driverKey && old && !old.deletedAt && old.pendingWebOrder &&
+        !(old.pendingWebUntil>now) && !old.webManaged && !old.webHistory?.length && !old.access?.active && !input.licenseKey) {
+        const [license,profile]=await Promise.all(['licenses','driver_profiles'].map(c=>db.collection(c).doc(old.licenseKey).get()));
+        if(!license.exists && !profile.exists)
+            return ensureAccount(db,{...identity,uid:'android-'+identity.uid},input,now,true);
+    }
     return ensureAccount(db, identity, input, now, true);
 }
 async function ensureAccount(db, identity, input, now, android = false) {
