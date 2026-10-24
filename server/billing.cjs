@@ -1,4 +1,5 @@
 const { randomUUID, randomBytes } = require('node:crypto');
+const { isDeepStrictEqual } = require('node:util');
 const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
@@ -45,9 +46,60 @@ function evaluatePurchase(payload, now, allowSandbox = false) {
 }
 // The web checkout uses the default path unchanged. Only the Android API opts
 // into explicit driver-session selection and deterministic legacy lookup.
-async function ensureAndroidAccount(db, identity, input, now) {
+async function ensureAndroidAccount(db, identity, input, now, verifyUnused = null) {
     if(identity?.testDriverSession === true)throw problem('구매 전 실제 휴대폰 인증이 필요합니다.',403);
-    return ensureAccount(db, identity, input, now, true);
+    try { return await ensureAccount(db, identity, input, now, true); }
+    catch (error) {
+        if (!verifyUnused || !['로그인 이용권과 기존 결제 연결이 다릅니다. 고객센터에 연결 확인을 요청해 주세요.',
+            '구독 계정과 이용권이 일치하지 않습니다.'].includes(error.message)) throw error;
+        await reconnectUnusedAndroidAccount(db, identity, input, now, verifyUnused);
+        return ensureAccount(db, identity, input, now, true);
+    }
+}
+// Only an unused reservation with no old license can be moved. Preserve the
+// customer ID and every order; never move paid ownership or merge two licenses.
+async function reconnectUnusedAndroidAccount(db, identity, input, now, verifyUnused) {
+    const phone=verifiedPhone(identity), device=deviceId(input.deviceId), key=identity.driverKey || input.licenseKey;
+    const deny=()=>problem('기존 결제 이력 또는 이용권 연결 확인이 필요합니다. 기존 데이터는 변경하지 않았습니다.',409);
+    if(typeof key!=='string'||!key||key.includes('/')||key.length>200)throw deny();
+    const ref=db.collection('billing_accounts').doc(identity.uid),lockRef=db.collection('admin_license_controls').doc('phone_integrity');
+    async function inspect(tx) {
+        const [saved,licenses,profiles,bindings,accounts,orders,lock]=await Promise.all([
+            tx.get(ref),tx.get(db.collection('licenses')),tx.get(db.collection('driver_profiles')),
+            tx.get(db.collection('billing_license_bindings')),tx.get(db.collection('billing_accounts')),
+            tx.get(db.collection('payment_orders').where('uid','==',identity.uid)),tx.get(lockRef)]);
+        const a=saved.data(),target=licenses.docs.find(d=>d.id===key)?.data();
+        await assertNotBlocked(db,tx,key,phone,device);
+        if(!a||a.deletedAt!=null||a.licenseKey===key||!a.rcUserId||a.uid!==identity.uid||phoneDigits(a.phone)!==phoneDigits(phone))throw deny();
+        await assertNotBlocked(db,tx,a.licenseKey,phone,device);
+        if(!target||target.driverUid!==identity.uid||!target.driverSessionId||target.deviceId!==device||phoneDigits(target.phone)!==phoneDigits(phone))
+            throw problem('로그인한 이용권의 소유자 정보를 확인해 주세요.',403);
+        if(['suspended','revoked','upgraded'].includes(target.status)||target.type==='dispatch'||target.billingManaged||target.billingUid)throw deny();
+        if(identity.driverKey&&(identity.driverKey!==key||identity.driverSessionId!==target.driverSessionId||identity.driverDeviceId!==device))throw deny();
+        if(input.licenseKey&&input.licenseKey!==key)throw deny();
+        const profile=profiles.docs.find(d=>d.id===key)?.data();
+        if(profile&&(profile.billingManaged||profile.billingUid||profile.routeOwnerId&&target.routeOwnerId&&profile.routeOwnerId!==target.routeOwnerId))throw deny();
+        if([...licenses.docs,...profiles.docs].some(d=>d.id===a.licenseKey)||bindings.docs.some(d=>d.id===a.licenseKey||d.id===key)||
+            accounts.docs.some(d=>d.id!==identity.uid&&d.data().deletedAt==null&&[key,a.licenseKey].includes(d.data().licenseKey)))throw deny();
+        if(licenses.docs.some(d=>d.id!==key&&phoneDigits(d.data().phone)===phoneDigits(phone)&&
+            (d.data().type==='dispatch'||isActive(d.data(),new Date(now+9*3600000).toISOString().slice(0,10),now))))throw deny();
+        if(a.webManaged||a.webHistory?.length||a.webExpiresAt||a.webBaseExpiresAt||a.access?.active||a.access?.expiresAt||a.access?.productId||a.pendingWebUntil>now)throw deny();
+        const rows=orders.docs.map(d=>({id:d.id,...d.data()})).sort((x,y)=>x.id.localeCompare(y.id));
+        if(rows.length>20||a.pendingWebOrder&&!rows.some(o=>o.id===a.pendingWebOrder))throw deny();
+        if(rows.some(o=>o.licenseKey!==a.licenseKey||o.status!=='created'||o.paymentKey||o.approvedAt||o.cancellation||
+            typeof o.test!=='boolean'||!Number.isFinite(o.createdAt)||now-o.createdAt<86400000))throw deny();
+        return {account:a,orders:rows,revision:lock.data()?.revision||0};
+    }
+    const before=await db.runTransaction(inspect);
+    await verifyUnused(before);
+    await db.runTransaction(async tx=>{
+        const current=await inspect(tx);
+        if(!isDeepStrictEqual(before,current))throw problem('확인 중 계정 상태가 바뀌었습니다. 다시 확인해 주세요.',409);
+        tx.set(db.collection('admin_license_controls').doc('billing-reconnect-'+before.account.rcUserId),{
+            previousAccount:before.account,licenseKey:key,uid:identity.uid,verifiedAt:now,reason:'unused-reservation'});
+        tx.set(ref,{...before.account,licenseKey:key,previousLicenseKey:before.account.licenseKey,pendingWebOrder:null,pendingWebUntil:0,reconnectedAt:now});
+        tx.set(lockRef,{revision:current.revision+1,updatedAt:now});
+    });
 }
 async function ensureAccount(db, identity, input, now, android = false) {
     const phone = verifiedPhone(identity), device = deviceId(input.deviceId), ref = db.collection('billing_accounts').doc(identity.uid);
