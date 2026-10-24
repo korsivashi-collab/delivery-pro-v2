@@ -11,6 +11,20 @@ function phoneOf(value) {
     if (phone.startsWith('82')) phone = '0' + phone.slice(2);
     return /^010\d{8}$/.test(phone) ? phone : '';
 }
+function trackingLookupKeys(date, items, owner = '') {
+    const day = String(date || '').split('-').map((v,i) => i ? v.padStart(2,'0') : v).join('-');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+    const keys = new Set(owner ? [JSON.stringify([day,'owner',owner])] : []);
+    for (const item of items || []) {
+        let phone = String(item?.customerPhone || item?.phone || '').replace(/\D/g,'');
+        if (phone.startsWith('82')) phone = '0' + phone.slice(2);
+        if (/^010\d{8}$/.test(phone)) keys.add(JSON.stringify([day,'phone',phone]));
+        const order = String(item?.orderNo || '').trim().replace(/\s+/g,' ');
+        if (order) keys.add(JSON.stringify([day,'order',order]));
+    }
+    return [...keys];
+}
+
 function addressOf(item) {
     const address = clean(item.fullAddress || item.address), prefix = '[' + clean(item.storeName) + ']';
     return address.startsWith(prefix) ? address.slice(prefix.length).trim() : address;
@@ -145,16 +159,45 @@ function projectTracking(publication, phone, liveRoutes) {
             return { address: stop.address, orders: stop.orders, status, sequence, completedAt: completedTime(stop.ids), route: routeList };
         }) };
 }
-async function livePublications(db, date, now) {
+// All customer reads start with indexed discovery; there is no whole-day fallback scan.
+function lookupKey(date, lookup) {
+    const phone = phoneOf(lookup);
+    return JSON.stringify([date,phone ? 'phone' : 'order',phone || clean(lookup)]);
+}
+async function ownerCompletions(db, owners, date) {
     const start = Date.parse(date + 'T00:00:00+09:00');
-    const [licenses, orders, routeDocs, completionDocs] = await Promise.all([
-        db.collection('licenses').get(), db.collection('dispatch_orders').where('date', '==', date).get(),
-        db.collection('routes').where('updatedAt', '>=', start).where('updatedAt', '<', start + DAY).get(),
-        db.collection('completions').where('completedAt', '>=', start).where('completedAt', '<', start + DAY).get()
+    const snapshots = await Promise.all(owners.map(owner => db.collection('completions')
+        .where('trackingLookupKeys','array-contains',JSON.stringify([date,'owner',owner])).get()));
+    return snapshots.flatMap((s,i) => s.docs.map(d => d.data()).filter(r =>
+        r.routeOwnerId === owners[i] && r.completedAt >= start && r.completedAt < start + DAY));
+}
+async function livePublications(db, date, now, lookup, expandPhone = true) {
+    const start = Date.parse(date + 'T00:00:00+09:00'), key = lookupKey(date,lookup);
+    const phone = phoneOf(lookup), matches = item => phone ? phoneOf(item.customerPhone || item.phone) === phone : clean(item.orderNo) === clean(lookup);
+    const [foundRoutes, orders, foundCompletions] = await Promise.all(
+        ['routes','dispatch_orders','completions'].map(name => db.collection(name).where('trackingLookupKeys','array-contains',key).get()));
+    const owners = new Set(foundRoutes.docs.map(d => d.data().routeOwnerId));
+    for (const d of foundCompletions.docs) if (matches(d.data())) owners.add(d.data().routeOwnerId);
+    owners.delete(undefined); owners.delete('');
+    const assignedKeys = new Set(orders.docs.flatMap(d => (d.data().orders || []).filter(matches).map(o => o.assignedDriver)).filter(Boolean));
+    const [ownerLicenses, assignedLicenses] = await Promise.all([
+        Promise.all([...owners].map(owner => db.collection('licenses').where('routeOwnerId','==',owner).get())),
+        Promise.all([...assignedKeys].map(key => db.collection('licenses').doc(key).get()))
     ]);
-    const allLicenses = licenses.docs.map(d => ({ ...d.data(), key: d.id }));
-    const routes = routeDocs.docs.map(d => ({ ...d.data(), documentId: d.id }));
-    const completions = completionDocs.docs.map(d => d.data()).sort((a,b)=>a.completedAt-b.completedAt);
+    const driverMap = new Map([...ownerLicenses.flatMap(s => s.docs),...assignedLicenses]
+        .filter(d => d.exists).map(d => [d.id,{...d.data(),key:d.id}]));
+    const companyKeys = new Set([...driverMap.values()].map(d => d.dispatchKey).filter(Boolean));
+    for (const d of orders.docs) if ((d.data().orders || []).some(matches)) companyKeys.add(d.data().dispatchKey || d.id.slice(date.length + 1));
+    const companies = await Promise.all([...companyKeys].filter(Boolean).map(key => db.collection('licenses').doc(key).get()));
+    const allLicenses = [...driverMap.values(),...companies.filter(d => d.exists).map(d => ({...d.data(),key:d.id}))];
+    const activeCompanies = new Set(allLicenses.filter(l => l.type === 'dispatch' && isActive(l,dayOf(now),now)).map(l => l.key));
+    const selectedOwners = [...new Set([...driverMap.values()].filter(d => activeCompanies.has(d.dispatchKey)).map(d => d.routeOwnerId).filter(Boolean))];
+    const [routeDocs, completions] = await Promise.all([
+        Promise.all(selectedOwners.map(owner => db.collection('routes').where('routeOwnerId','==',owner).get())),
+        ownerCompletions(db,selectedOwners,date)
+    ]);
+    const routes = routeDocs.flatMap(s => s.docs.map(d => ({...d.data(),documentId:d.id})));
+    completions.sort((a,b) => a.completedAt - b.completedAt);
     const publications = [];
     for (const company of allLicenses.filter(l => l.type === 'dispatch' && isActive(l, dayOf(now), now))) {
         const drivers = allLicenses.filter(l => l.type !== 'dispatch' && l.dispatchKey === company.key && l.routeOwnerId);
@@ -189,7 +232,18 @@ async function livePublications(db, date, now) {
         publications.push({ ...snapshot, completionStates, completionTimes, dispatchKey: company.key, company: clean(company.companyName || company.name) || '배송업체',
             date, expiresAt: start + 8 * DAY });
     }
-    return { publications, routes };
+    const index = {publications,routes};
+    if (!phone && expandPhone) {
+        // An order search still shows all of that customer's stops in the matching companies.
+        const matched = publications.flatMap(p => p.stops.filter(s => s.orders.includes(clean(lookup))).map(s => ({company:p.dispatchKey,phone:s.phone})));
+        if (matched.length) {
+            lookupPublicData(index,clean(lookup),now); // Preserve ambiguous-order rejection before expanding.
+            const expanded = await livePublications(db,date,now,matched[0].phone,false);
+            const allowed = new Set(matched.map(m => m.company));
+            return {...expanded,publications:expanded.publications.filter(p => allowed.has(p.dispatchKey))};
+        }
+    }
+    return index;
 }
 function lookupPublicData(index, lookup, now) {
     const phone = phoneOf(lookup);
@@ -207,7 +261,7 @@ function lookupPublicData(index, lookup, now) {
 }
 function createHandler(sdk = admin) {
     const cache = new Map();
-    let liveIndex = null;
+    const searchCache = new Map();
     return async function handler(req, res) {
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
@@ -231,11 +285,13 @@ function createHandler(sdk = admin) {
                 const date = String(req.body.date || dayOf(now)), start = Date.parse(date + 'T00:00:00+09:00');
                 if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(start) || dayOf(start) !== date || Math.abs(start - now) > 7 * DAY)
                     throw problem('배송일은 오늘 기준 7일 이내로 선택해 주세요.');
-                if (!liveIndex || liveIndex.date !== date || liveIndex.until <= now) {
-                    const data = await livePublications(db, date, now);
-                    liveIndex = { date, until: now + 30000, data };
-                }
-                return res.status(200).json(lookupPublicData(liveIndex.data, lookup, now));
+                const searchKey = lookupKey(date,lookup), cached = searchCache.get(searchKey);
+                if (cached && cached.until > now) return res.status(200).json(cached.data);
+                const index = await livePublications(db,date,now,lookup);
+                const data = lookupPublicData(index,clean(lookup),now);
+                if (searchCache.size >= 500) searchCache.delete(searchCache.keys().next().value);
+                searchCache.set(searchKey,{until:now + 30000,data});
+                return res.status(200).json(data);
             }
             if (lookupRequest) {
                 const cached = cache.get(code);
@@ -252,13 +308,12 @@ function createHandler(sdk = admin) {
                 const licenseDocs = await Promise.all(keys.map(key => db.collection('licenses').doc(key).get()));
                 if (licenseDocs.some((d, i) => d.data()?.dispatchKey !== publication.dispatchKey || d.data()?.routeOwnerId !== publication.plans[keys[i]].owner))
                     throw problem('배송 담당 정보가 변경되었습니다. 배송업체에 확인해 주세요.', 404);
-                const dayStart = Date.parse(publication.date + 'T00:00:00+09:00');
-                const [snapshots, completionDocs] = await Promise.all([
+                const [snapshots, completions] = await Promise.all([
                     Promise.all(keys.map(key => db.collection('routes').where('routeOwnerId', '==', publication.plans[key].owner).get())),
-                    db.collection('completions').where('completedAt', '>=', dayStart).where('completedAt', '<', dayStart + DAY).get()
+                    ownerCompletions(db,[...new Set(keys.map(key => publication.plans[key].owner))],publication.date)
                 ]);
                 const completionTimes = {};
-                for (const record of completionDocs.docs.map(d=>d.data()).sort((a,b)=>a.completedAt-b.completedAt)) {
+                for (const record of completions.sort((a,b)=>a.completedAt-b.completedAt)) {
                     const key = keys.find(key=>publication.plans[key].owner === record.routeOwnerId);
                     if (!key || record.destinationId == null) continue;
                     const completed = ['배송 완료','완료','직접 전달','사진 완료','문 앞','주방'].includes(record.tag) || /^기타\s*:/.test(record.tag || '');
@@ -330,3 +385,40 @@ module.exports.createHandler = createHandler;
 module.exports.snapshotFor = snapshotFor;
 module.exports.projectTracking = projectTracking;
 module.exports.lookupPublicData = lookupPublicData;
+
+// Explicit one-time maintenance for existing records. Never called by customer requests.
+function trackingKeysForDocument(collection, data) {
+    if (collection === 'dispatch_orders') return trackingLookupKeys(data.date,data.orders);
+    if (collection === 'completions') return Number.isFinite(data.completedAt)
+        ? trackingLookupKeys(dayOf(data.completedAt),[data],data.routeOwnerId) : [];
+    if (!Number.isFinite(data.updatedAt)) return [];
+    return data.cleared ? [] : trackingLookupKeys(routeDay(data),[...(data.destinations || []),
+        ...(data.routePlan?.deliveries || []).map(entry => entry.item)],data.routeOwnerId);
+}
+async function reindexTracking(db) {
+    const counts = {};
+    for (const name of ['routes','dispatch_orders','completions']) {
+        const snapshot = await db.collection(name).get(); let changed = 0;
+        for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
+            const batch = db.batch(); let writes = 0;
+            for (const d of snapshot.docs.slice(offset,offset + 400)) {
+                const data = d.data(), keys = trackingKeysForDocument(name,data);
+                if (JSON.stringify(data.trackingLookupKeys) === JSON.stringify(keys)) continue;
+                batch.update(d.ref,{trackingLookupKeys:keys}); writes++; changed++;
+            }
+            if (writes) await batch.commit();
+        }
+        counts[name] = changed;
+    }
+    return counts;
+}
+module.exports.trackingLookupKeys = trackingLookupKeys;
+module.exports.trackingKeysForDocument = trackingKeysForDocument;
+module.exports.reindexTracking = reindexTracking;
+if (require.main === module && process.argv.includes('--reindex-tracking')) {
+    if (!admin.apps.length) admin.initializeApp({credential:admin.credential.cert({
+        projectId:process.env.FIREBASE_PROJECT_ID,clientEmail:process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey:process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')
+    })});
+    reindexTracking(admin.firestore()).then(counts => console.log(counts)).catch(error => {console.error(error.message);process.exitCode = 1;});
+}
