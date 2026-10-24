@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const {createHash} = require('node:crypto');
+const {createHash,timingSafeEqual,randomUUID} = require('node:crypto');
 const {verifiedPhone} = require('../server/billing.cjs');
 const {problem,phoneDigits} = require('../server/license-integrity.cjs');
 
@@ -12,9 +12,67 @@ function phoneVariants(phone) {
  return [...new Set([digits,formatted,'+82'+digits.slice(1),formatted.replace(/-/g,' '),
   '+82 '+formatted.slice(1),'+82 '+formatted.slice(1).replace(/-/g,' '),'+82-'+formatted.slice(1)])];
 }
-function createHandler(sdk=admin) {
+function hasInternetAddress(value) {
+ if(typeof value!=='string')return false;
+ const text=value.normalize('NFKC').replace(/[\u200b-\u200d\ufeff]/g,'').replace(/[。｡]/g,'.');
+ if(/\b(?:https?|ftp):\/\/|\bwww\.|\b(?:javascript|data|file):/i.test(text))return true;
+ // A hostname needs a letter-only TLD (or an IDN TLD); heights such as 2.2m are not domains.
+ if(/(?:^|[^\p{L}\p{N}_@.-])(?:[\p{L}\p{N}](?:[\p{L}\p{N}-]*[\p{L}\p{N}])?\.)+(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59}|한국|닷컴|닷넷)(?![\p{L}\p{N}-])/iu.test(text))return true;
+ return [...text.matchAll(/(?:^|[^\p{L}\p{N}.])((?:\d{1,3}\.){3}\d{1,3})(?![\p{L}\p{N}.])/gu)]
+  .some(m=>m[1].split('.').every(n=>Number(n)<=255));
+}
+const urlMemo = data => hasInternetAddress(data?.memo) || hasInternetAddress(data?.address);
+async function cleanupUrlMemos(db, now=()=>Date.now()) {
+ const started=now(), day=new Date(started+9*3600000).toISOString().slice(0,10), runId=randomUUID();
+ const statusRef=db.collection('maintenance_jobs').doc('memo-url-cleanup');
+ const acquired=await db.runTransaction(async tx=>{
+  const data=(await tx.get(statusRef)).data() || {};
+  if(data.completedDay===day || data.lockUntil>started)return null;
+  const cursor=typeof data.cursor==='string'?data.cursor:null;
+  tx.set(statusRef,{runId,lockUntil:started+60000,cursor,startedAt:started},{merge:true});return {cursor};
+ });
+ if(!acquired)return {skipped:true};
+ let cursor=acquired.cursor,scanned=0,deleted=0,complete=false;
+ const progress=async values=>db.runTransaction(async tx=>{
+  if((await tx.get(statusRef)).data()?.runId!==runId)throw Error('Cleanup lease ended');
+  tx.set(statusRef,values,{merge:true});
+ });
+ try {
+  do {
+   let query=db.collection('memos').orderBy(admin.firestore.FieldPath.documentId()).limit(200);
+   if(cursor)query=query.startAfter(cursor);
+   const page=await query.get();
+   if(page.empty){complete=true;break;}
+   const candidates=page.docs.filter(d=>urlMemo(d.data()));
+   if(candidates.length)deleted+=await db.runTransaction(async tx=>{
+    // Recheck current content so a concurrently corrected ordinary memo is preserved.
+    const latest=await Promise.all(candidates.map(d=>tx.get(d.ref)));let count=0;
+    for(const d of latest)if(d.exists && urlMemo(d.data())){tx.delete(d.ref);count++;}
+    return count;
+   });
+   scanned+=page.size;cursor=page.docs.at(-1).id;
+   complete=page.size<200;
+   await progress({cursor:complete?null:cursor,scanned,deleted});
+  } while(!complete && now()-started<45000);
+  await progress({cursor:complete?null:cursor,runId:null,lockUntil:0,finishedAt:now(),scanned,deleted,complete,
+   ...(complete?{completedDay:day}:{})});
+  return {scanned,deleted,complete};
+ } catch(error) {
+  await progress({runId:null,lockUntil:0,failedAt:now()}).catch(()=>{});throw error;
+ }
+}
+function createHandler(sdk=admin,env=process.env) {
  return async (req,res)=>{
   res.setHeader('Cache-Control','no-store');
+  if(req.method==='GET'){
+   const secret=env.CRON_SECRET,provided=/^Bearer (.+)$/.exec(req.headers?.authorization||'')?.[1];
+   if(typeof secret!=='string'||secret.length<32||!provided||Buffer.byteLength(secret)!==Buffer.byteLength(provided)||!timingSafeEqual(Buffer.from(secret),Buffer.from(provided)))return res.status(401).json({error:'허용되지 않은 요청입니다.'});
+   try{
+    if(!sdk.apps.length)sdk.initializeApp({credential:sdk.credential.cert({projectId:env.FIREBASE_PROJECT_ID,clientEmail:env.FIREBASE_CLIENT_EMAIL,privateKey:env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')})});
+    const result=await cleanupUrlMemos(sdk.firestore());
+    console.info('[memo URL cleanup]',result);return res.status(200).json(result);
+   }catch{return res.status(500).json({error:'공용 메모 자동 정리에 실패했습니다.'});}
+  }
   if(req.method!=='POST')return res.status(405).json({error:'POST 요청만 가능합니다.'});
   try {
    if(!sdk.apps.length)sdk.initializeApp({credential:sdk.credential.cert({projectId:process.env.FIREBASE_PROJECT_ID,clientEmail:process.env.FIREBASE_CLIENT_EMAIL,privateKey:process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g,'\n')})});
@@ -79,3 +137,4 @@ function createHandler(sdk=admin) {
  };
 }
 module.exports=createHandler();module.exports.createHandler=createHandler;
+module.exports.hasInternetAddress=hasInternetAddress;module.exports.cleanupUrlMemos=cleanupUrlMemos;
