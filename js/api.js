@@ -2,6 +2,7 @@ import { state } from './state.js';
 import { isNativeApp, apiFetch } from './native-platform.js';
 import { sendNativePhoneVerification } from './native-phone-auth.js';
 import { selectLatestOwnedRoute } from './route-owner.js';
+import { trackingLookupKeys } from './address.js';
 // js/api.js
 // =================================================================
 // [배송 경로 PRO] 백엔드 Firebase Firestore / Storage 통신 전담 모듈 (통로 충돌 완벽 방어)
@@ -581,6 +582,10 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 items: d.items || []
             }))
         };
+        const trackingDate = payload.routePlan?.ownerId === routeOwnerId && payload.routePlan.date
+            ? payload.routePlan.date : new Date(payload.updatedAt + 9 * 3600000).toISOString().slice(0,10);
+        payload.trackingLookupKeys = trackingLookupKeys(trackingDate,
+            [...payload.destinations, ...(payload.routePlan?.deliveries || []).map(entry => entry.item)],routeOwnerId);
         // Serialize this device's writes so a slow older request cannot finish last.
         const previous = routeSaveTasks.get(revisionKey) || Promise.resolve();
         const task = previous.catch(() => {}).then(async () => {
@@ -639,6 +644,8 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             hasPhoto: !!photoUrl,
             photoUrl: photoUrl || "",
             completedAt: now.getTime(),
+            trackingLookupKeys: trackingLookupKeys(new Date(now.getTime() + 9 * 3600000).toISOString().slice(0,10),
+                [{...item,customerPhone:item.phone}],ownership.routeOwnerId),
             // Date는 SDK에서 Firestore Timestamp로 저장됩니다. 큐 재시도에도 만료일 고정.
             expireAt: new Date(now.getTime() + 14 * 24 * 60 * 60 * 1000),
             timeString: timeStr

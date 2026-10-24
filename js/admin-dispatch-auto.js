@@ -1,4 +1,4 @@
-import { dispatchNavigationAddress, dispatchOrderReady } from "./address.js";
+import { dispatchNavigationAddress, dispatchOrderReady, trackingLookupKeys } from "./address.js";
 import { ensureRouteOwner } from './route-owner.js';
 // js/admin-dispatch-auto.js
 
@@ -831,6 +831,8 @@ export async function sendRoutesToDrivers() {
                 dispatchDate: document.getElementById('dispatch-assign-date')?.value || getLocalDateString(),
                 updatedAt: routeRevision
             };
+            // Tracking follows routeDay's existing rule for routes without an optimized plan.
+            routePayload.trackingLookupKeys = trackingLookupKeys(new Date(routeRevision + 9 * 3600000).toISOString().slice(0,10),orderedDestinations,routeOwnerId);
 
             await setDoc(doc(db, "routes", routeOwnerId), routePayload);
             if (orderedDestinations !== destinations) {

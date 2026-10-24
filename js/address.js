@@ -1,4 +1,19 @@
 // Normalize an already recognized delivery address, not document text.
+// Stored on the source document itself: one indexed array query discovers a customer's driver.
+export function trackingLookupKeys(date, items, owner = '') {
+    const day = String(date || '').split('-').map((v,i) => i ? v.padStart(2,'0') : v).join('-');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(day)) return [];
+    const keys = new Set(owner ? [JSON.stringify([day,'owner',owner])] : []);
+    for (const item of items || []) {
+        let phone = String(item?.customerPhone || item?.phone || '').replace(/\D/g,'');
+        if (phone.startsWith('82')) phone = '0' + phone.slice(2);
+        if (/^010\d{8}$/.test(phone)) keys.add(JSON.stringify([day,'phone',phone]));
+        const order = String(item?.orderNo || '').trim().replace(/\s+/g,' ');
+        if (order) keys.add(JSON.stringify([day,'order',order]));
+    }
+    return [...keys];
+}
+
 // Dispatch keeps the original separately; only navigation/search addresses use this rule.
 export function dispatchNavigationAddress(value) {
     return typeof value === 'string'

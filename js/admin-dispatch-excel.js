@@ -2,7 +2,7 @@
 
 import { db } from "./admin-api.js";
 import { state, todayStr } from "./admin-state.js";
-import { dispatchNavigationAddress, dispatchOrderReady } from "./address.js";
+import { dispatchNavigationAddress, dispatchOrderReady, trackingLookupKeys } from "./address.js";
 import { processSinglePdfFile, batchGeocodePdfList } from "./admin-dispatch-pdf.js";
 import { doc, setDoc, getDoc, deleteDoc, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 
@@ -140,6 +140,7 @@ export async function autoSaveExcelToFirebase() {
                 date: dateVal,
                 dispatchKey: dispatchKey,
                 orders,
+                trackingLookupKeys: trackingLookupKeys(dateVal,orders),
                 createdAt,
                 expireAt: new Date(createdAt + 14 * 24 * 60 * 60 * 1000),
                 updatedAt: now
