@@ -592,8 +592,8 @@ window.initMasterDataSync = function() {
         if (typeof renderModalBlockedDevices === 'function') renderModalBlockedDevices();
     });
 
-    // 3. 메모 실시간 동기화
-    watch(collection(db, "memos"), (snapshot) => {
+    // 3. 공용 메모 통합 관리는 마스터 전용. 일반 관제에서는 구독하지 않습니다.
+    if (isMaster) watch(collection(db, "memos"), (snapshot) => {
         state.allMemos = [];
         snapshot.forEach(docSnap => { state.allMemos.push({ id: docSnap.id, ...docSnap.data() }); });
         const countMemosEl = document.getElementById('count-memos');
