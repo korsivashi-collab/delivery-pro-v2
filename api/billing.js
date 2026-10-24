@@ -1,7 +1,53 @@
 const admin = require('firebase-admin');
-const { timingSafeEqual } = require('node:crypto');
+const { timingSafeEqual, createHmac, createHash } = require('node:crypto');
 const { problem, assertDriverSession, assertNotBlocked } = require('../server/license-integrity.cjs');
 const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, purchaseDiagnosis, evaluatePurchase, ensureAndroidAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
+
+async function sendPlayLicenseSms(db,uid,customer,purchase,{env,fetchImpl,stamp}) {
+    const [access,secret,serviceId]=['NCP_ACCESS_KEY','NCP_SECRET_KEY','NCP_SENS_SERVICE_ID'].map(k=>env[k]?.trim());
+    if(!access||!secret||!/^ncp:sms:[a-z]{2}:\d+:[A-Za-z0-9_-]+$/.test(serviceId||''))return 'unavailable';
+    const notificationId=createHash('sha256').update(JSON.stringify([customer,purchase.productId,purchase.transactionId||'',purchase.expiresAt])).digest('hex');
+    const ref=db.collection('billing_purchase_notifications').doc(notificationId);
+    const claim=await db.runTransaction(async tx=>{
+        const account=(await tx.get(db.collection('billing_accounts').doc(uid))).data();
+        const saved=(await tx.get(ref)).data();
+        if(!account || account.deletedAt!=null || account.rcUserId!==customer || account.webManaged ||
+            !account.access?.active || account.access.expiresAt<=stamp || !purchase.active)return {status:'unavailable'};
+        const license=(await tx.get(db.collection('licenses').doc(account.licenseKey))).data();
+        if(!license || license.billingUid!==uid || license.webManaged ||
+            ['suspended','revoked'].includes(license.status))return {status:'unavailable'};
+        if(saved)return {status:saved.status};
+        const to=String(account.phone||'').replace(/\D/g,'');
+        if(!/^010\d{8}$/.test(to))return {status:'unavailable'};
+        tx.create(ref,{uid,licenseKey:account.licenseKey,status:'sending',requestedAt:stamp});
+        return {send:true,to,key:account.licenseKey,expireDate:license.expireDate};
+    });
+    if(!claim.send)return claim.status;
+    let status='unknown',requestId=null;
+    try {
+        const uri=`/sms/v2/services/${serviceId}/messages`,timestamp=String(stamp);
+        const signature=createHmac('sha256',secret).update(`POST ${uri}
+${timestamp}
+${access}`).digest('base64');
+        const response=await fetchImpl('https://sens.apigw.ntruss.com'+uri,{method:'POST',signal:AbortSignal.timeout(10000),
+            headers:{'Content-Type':'application/json','x-ncp-apigw-timestamp':timestamp,'x-ncp-iam-access-key':access,'x-ncp-apigw-signature-v2':signature},
+            body:JSON.stringify({type:'LMS',contentType:'COMM',countryCode:'82',from:'01083294575',subject:'배송경로PRO 이용권 안내',
+                content:`[배송경로PRO 이용권 안내]
+결제가 완료되었습니다.
+라이선스 키: ${claim.key}
+사용기한: ${claim.expireDate}
+위 키로 전화번호 인증 후 로그인해 주세요.`,
+                messages:[{to:claim.to}]})});
+        const data=await response.json();status=response.ok&&String(data.statusCode)==='202'?'accepted':'failed';
+        requestId=typeof data.requestId==='string'?data.requestId:null;
+    } catch {}
+    await db.runTransaction(async tx=>{
+        const saved=(await tx.get(ref)).data();
+        if(saved)tx.set(ref,{...saved,status,requestId,updatedAt:stamp});
+    });
+    return status;
+}
+
 function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
         !!env.REVENUECAT_SECRET_API_KEY?.trim() && (env.REVENUECAT_WEBHOOK_AUTH || '').length >= 32;
@@ -15,7 +61,8 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
         if (!Number.isFinite(payload.request_date_ms) || Math.abs(stamp-payload.request_date_ms)>120000) throw problem('구독 확인 응답이 오래되었습니다. 다시 확인해 주세요.',502);
         const allowSandbox=env.REVENUECAT_ALLOW_SANDBOX==='true';
         const diagnosis=purchaseDiagnosis(payload,stamp,allowSandbox);
-        const result=await applyPurchase(db,uid,evaluatePurchase(payload,stamp,allowSandbox),stamp,device,account.rcUserId);
+        const purchase=evaluatePurchase(payload,stamp,allowSandbox);
+        const result=await applyPurchase(db,uid,purchase,stamp,device,account.rcUserId);
         // Keep diagnostics separate from ownership and paid access. A read-only summary survives expiry.
         await db.runTransaction(async tx=>{
             const ref=db.collection('billing_accounts').doc(uid), current=(await tx.get(ref)).data();
@@ -23,6 +70,10 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
                 !(current.purchaseDiagnosis?.checkedAt>stamp))
                 tx.set(ref,{...current,purchaseDiagnosis:diagnosis});
         });
+        if(result.valid && purchase.active) {
+            try { result.licenseSms=await sendPlayLicenseSms(db,uid,account.rcUserId,purchase,{env,fetchImpl,stamp}); }
+            catch { result.licenseSms='unknown'; }
+        }
         return result;
     }
     return async(req,res)=>{
@@ -82,3 +133,5 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
     };
 }
 module.exports=createHandler();module.exports.createHandler=createHandler;
+
+module.exports.sendPlayLicenseSms=sendPlayLicenseSms;
