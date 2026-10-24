@@ -194,7 +194,7 @@ function buildDialog(){
         identity=null;canPurchase=false;packages.clear();confirmation=null;stopTimer();
         el('billing-auth').hidden=false;el('billing-code-group').classList.add('hidden');
         el('billing-continue').classList.add('hidden');el('billing-reauth').hidden=true;
-        message('현재 이용권에 등록된 휴대폰 번호를 인증해 주세요.');refreshButtons();
+        message('전화번호 인증 후 구매를 진행해 주세요.');refreshButtons();
     };
     el('billing-buy').onclick=()=>work(async()=>{
         if(!isAndroid()){document.dispatchEvent(new CustomEvent('deliverypro:period-checkout',{detail:{months:selectedMonths}}));return;}
@@ -226,7 +226,7 @@ export async function openSubscriptionModal(){
         if(!config.enabled){message('구독 서비스를 준비하고 있습니다. 현재 결제는 진행되지 않습니다.');return;}
         identity=await getBillingIdentity();
         if(identity?.phone){el('billing-phone').value=identity.phone;el('billing-auth').hidden=true;el('billing-reauth').hidden=false;el('billing-continue').classList.remove('hidden');el('billing-continue').textContent='상품 다시 확인';message('인증된 계정의 상품을 확인하고 있습니다.');await prepareAccount();}
-        else{identity=null;el('billing-phone').value=localStorage.getItem('deliveryProUserPhone')||'';message('휴대폰 인증 후 구독 상품을 확인할 수 있습니다.');}
+        else{identity=null;el('billing-phone').value=localStorage.getItem('deliveryProUserPhone')||'';message('전화번호 인증 후 구매를 진행해 주세요.');}
     });
 }
 
