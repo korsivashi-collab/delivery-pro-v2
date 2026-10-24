@@ -16,6 +16,7 @@ async function loadPurchases(){
     catch{throw new Error('결제 기능을 불러오지 못했습니다. 앱을 최신 버전으로 업데이트한 뒤 다시 시도해 주세요.');}
 }
 const plans=[{months:1,id:'monthly',label:'1개월',discount:0},
+    {months:3,id:'quarterly',label:'3개월',discount:0},
     {months:6,id:'halfyearly',label:'6개월',discount:5},{months:12,id:'yearly',label:'12개월',discount:10}];
 const webPlans=[{months:1,label:'1개월',discount:0},{months:3,label:'3개월',discount:5},
     {months:6,label:'6개월',discount:10},{months:12,label:'12개월',discount:15}];
@@ -38,13 +39,13 @@ function renderPrices(){
         el('plan-price-'+plan.months).textContent=preview?won(total):product?.priceString||'준비 중';
         el('plan-monthly-'+plan.months).textContent=Number.isFinite(total)&&(preview||product?.currencyCode)?'월 '+money(total/plan.months):'가격 확인 대기';
         el('plan-original-'+plan.months).textContent=saving>0?money(regular):'';
-        el('plan-saving-'+plan.months).textContent=saving>0?money(saving)+' 절약':'한 달씩 가볍게 시작';
+        el('plan-saving-'+plan.months).textContent=saving>0?money(saving)+' 절약':plan.months===1?'한 달씩 가볍게 시작':'선택한 기간을 한 번에 결제';
         el('plan-badge-'+plan.months).textContent=percent>0?percent+'% 할인':'기본 요금';
         el('plan-'+plan.months).disabled=busy||(actual&&!product);
     }
     const chosen=visiblePlans().find(plan=>plan.months===selectedMonths);
     if(!chosen)return;
-    el('billing-summary').textContent=chosen.label+' 총 '+el('plan-price-'+selectedMonths).textContent+(actual?' 결제 · '+chosen.label+'마다 자동 갱신':' · 부가세 포함 금액');
+    el('billing-summary').textContent=chosen.label+' 총 '+el('plan-price-'+selectedMonths).textContent+(isAndroid()?' · 선불 · 자동결제 없음':' · 부가세 포함 금액');
     el('billing-price-note').textContent=actual?'월 환산 금액은 비교용입니다. 선택한 기간의 총액이 한 번에 결제됩니다. 할인은 1개월 상품을 같은 기간 이용한 금액 대비입니다.':'월 9,900원(부가세 포함) 기준입니다. 월 환산 금액은 비교용이며, 선택한 기간의 총액을 한 번에 결제합니다.';
 }
 const el=id=>subscriptionDialog.querySelector('#'+id);
@@ -75,7 +76,7 @@ async function connectPurchases(){
     await checkIdentity();
     await loadPurchases();
     const session=await billingRequest('session',{deviceId:getOrCreateDeviceId()},identity.uid);
-    if(!sdkUser){await Purchases.configure({apiKey:config.publicKey,appUserID:session.appUserId});sdkUser=session.appUserId;}
+    if(!sdkUser){await Purchases.configure({apiKey:config.publicKey,appUserID:session.appUserId,pendingTransactionsForPrepaidPlansEnabled:true});sdkUser=session.appUserId;}
     else if(sdkUser!==session.appUserId){await Purchases.logIn({appUserID:session.appUserId});sdkUser=session.appUserId;}
     return session;
 }
@@ -86,19 +87,27 @@ async function prepareAccount(){
     const offering=offerings.all?.[config.offeringId];packages.clear();
     for(const pkg of offering?.availablePackages||[]){
         const plan=plans.find(plan=>pkg.product?.identifier==='delivery_pro:'+plan.id);
-        // Current launch products are base plans without introductory offers.
+        // Select an explicit prepaid base plan; never let SDK default-offer selection
+        // silently turn this fixed-period purchase into an auto-renewing purchase.
         const expectedPeriod=plan&&({1:['P1M'],3:['P3M'],6:['P6M'],12:['P1Y','P12M']}[plan.months]);
-        if(plan&&expectedPeriod.includes(pkg.product.subscriptionPeriod)&&pkg.product.priceString&&!(pkg.product.defaultOption?.pricingPhases?.length>1))packages.set(plan.months,pkg);
+        const option=plan&&[...(pkg.product.subscriptionOptions||[]),pkg.product.defaultOption].find(option=>
+            option?.id===plan.id&&option.storeProductId===pkg.product.identifier&&option.isBasePlan===true&&option.isPrepaid===true&&
+            expectedPeriod.includes(option.billingPeriod?.iso8601)&&option.pricingPhases?.length===1&&option.pricingPhases[0].recurrenceMode===3);
+        const price=option?.fullPricePhase?.price;
+        if(option&&Number.isFinite(price?.amountMicros)&&price.amountMicros>0&&price.formatted&&price.currencyCode){
+            packages.set(plan.months,{...pkg,prepaidOption:option,product:{...pkg.product,
+                price:price.amountMicros/1000000,priceString:price.formatted,currencyCode:price.currencyCode}});
+        }
     }
     if(!packages.has(selectedMonths))selectedMonths=plans.find(plan=>packages.has(plan.months))?.months||1;
     el('plan-'+selectedMonths).checked=true;
     const access=await billingRequest('sync',{deviceId:getOrCreateDeviceId()},identity.uid);
     if(currentVersion!==version)return;
-    canPurchase=session.canPurchase&&!access.active;
-    if(access.active)message('이용 중인 구독이 있습니다. 구독 관리는 Google Play에서 진행해 주세요.');
-    else if(!session.canPurchase)message(session.reason);
+    canPurchase=session.canPurchase;
+    if(!session.canPurchase)message(session.reason);
     else if(!packages.size)message('구독 상품을 준비하고 있습니다. 잠시 후 다시 확인해 주세요.');
-    else message('기간과 총 결제금액을 확인한 후 구독을 신청해 주세요.');
+    else if(access.active)message('사용 중인 이용권이 있습니다. 추가 결제 시 연장되는 만료일을 Google Play 결제창에서 확인해 주세요.');
+    else message('기간과 총 결제금액을 확인한 후 선불 이용권을 구매해 주세요.');
     refreshButtons();
 }
 async function syncAccess(){await checkIdentity();const result=await billingRequest('sync',{deviceId:getOrCreateDeviceId()},identity.uid);
@@ -142,9 +151,9 @@ function buildDialog(){
     <button id="billing-continue" type="button" class="mt-3 rounded-xl border px-4 py-2 hidden">인증된 번호로 상품 확인</button>
     <fieldset class="billing-plans"><legend>나에게 맞는 이용 기간</legend>${visiblePlans().map(plan=>`<label class="billing-card"><input type="radio" name="subscription-months" id="plan-${plan.months}" value="${plan.months}" ${plan.months===1?'checked':''}><span class="billing-card-body"><span><b>${plan.label}</b><span id="plan-badge-${plan.months}" class="billing-badge"></span><span id="plan-monthly-${plan.months}" class="billing-monthly"></span><span id="plan-saving-${plan.months}" class="billing-saving"></span></span><span class="billing-total">${plan.months}개월 총액<del id="plan-original-${plan.months}"></del><strong id="plan-price-${plan.months}"></strong></span></span></label>`).join('')}</fieldset>
     <div id="billing-summary" class="billing-summary"></div><p id="billing-price-note" class="billing-note"></p>
-    <p id="billing-renewal" class="billing-note">해지 전까지 선택한 기간마다 자동 갱신됩니다. 다음 결제를 원하지 않으면 Google Play에서 구독을 취소해 주세요. 취소 후에도 결제한 이용기간까지 사용할 수 있습니다.</p>
+    <p id="billing-renewal" class="billing-note">선택한 기간의 요금을 한 번에 선불 결제합니다. 자동 갱신이나 자동결제는 없습니다. 계속 이용하려면 이용권을 추가 구매해 주세요. 기간 연장은 Google Play에서 확인된 만료일을 기준으로 반영됩니다.</p>
     <p id="subscription-status" role="status" class="mt-4 whitespace-pre-line rounded-xl bg-blue-50 p-3 text-sm text-blue-800"></p>
-    <button id="billing-buy" type="button" class="mt-4 w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:bg-slate-300">Google Play로 구독하기</button>
+    <button id="billing-buy" type="button" class="mt-4 w-full rounded-xl bg-blue-600 py-3 font-bold text-white disabled:bg-slate-300">Google Play로 이용권 구매</button>
     <button id="billing-restore" type="button" class="mt-3 w-full rounded-xl border py-3">구매 복원</button>
     <div class="mt-4 flex flex-wrap justify-center gap-4 text-xs"><a id="billing-manage" href="https://play.google.com/store/account/subscriptions" target="_blank" rel="noopener noreferrer" class="underline">구독 관리</a><a href="terms.html" class="underline">이용약관</a><a href="privacy.html" class="underline">개인정보처리방침</a></div>`;
     // Keep the offer visible before asking the customer to verify their phone.
@@ -175,8 +184,8 @@ function buildDialog(){
         if(!canPurchase||!packages.has(selectedMonths))throw new Error('구독 상품을 먼저 확인해 주세요.');
         await checkIdentity();const session=await billingRequest('session',{deviceId:getOrCreateDeviceId()},identity.uid);
         if(!session.canPurchase||session.appUserId!==sdkUser)throw new Error(session.reason||'구독 계정을 다시 확인해 주세요.');
-        purchasing=true;refreshButtons();message('Google Play 결제창에서 금액과 구독 조건을 확인해 주세요.');
-        await Purchases.purchasePackage({aPackage:packages.get(selectedMonths)});canPurchase=false;message('구매 결과를 확인하고 있습니다.');await syncAccess();
+        purchasing=true;refreshButtons();message('Google Play 결제창에서 선불 금액과 이용기간을 확인해 주세요.');
+        await Purchases.purchaseSubscriptionOption({subscriptionOption:packages.get(selectedMonths).prepaidOption});canPurchase=false;message('구매 결과를 확인하고 있습니다.');await syncAccess();
     });
     el('billing-restore').onclick=()=>work(async()=>{
         await connectPurchases();await checkIdentity();
@@ -189,7 +198,7 @@ export async function openSubscriptionModal(){
     config=null;identity=null;confirmation=null;packages.clear();canPurchase=false;stopTimer();
     el('billing-code-group').classList.add('hidden');el('billing-continue').classList.add('hidden');refreshButtons();
     for(const id of ['billing-auth','billing-restore','billing-manage','billing-renewal'])el(id).hidden=!isAndroid();
-    el('billing-buy').textContent=isAndroid()?'Google Play로 구독하기':window.deliveryProPeriodCheckout?'이용권 구매하기':'결제 준비 중';
+    el('billing-buy').textContent=isAndroid()?'Google Play로 이용권 구매':window.deliveryProPeriodCheckout?'이용권 구매하기':'결제 준비 중';
     if(!isAndroid()){message('');return;}
     await work(async()=>{
         if([billingRequest,getBillingIdentity,getOrCreateDeviceId,activatePurchasedLicense].some(fn=>typeof fn!=='function')){
@@ -204,9 +213,5 @@ export async function openSubscriptionModal(){
 }
 
 export function openLicenseRenewal(){
-    if(isAndroid()){
-        window.open('https://play.google.com/store/account/subscriptions','_blank','noopener,noreferrer');
-        return;
-    }
     return openSubscriptionModal();
 }
