@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { timingSafeEqual } = require('node:crypto');
 const { problem, assertDriverSession, assertNotBlocked } = require('../server/license-integrity.cjs');
-const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, evaluatePurchase, ensureAndroidAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
+const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, purchaseDiagnosis, evaluatePurchase, ensureAndroidAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
 function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
     const ready = () => /^goog_[A-Za-z0-9]+$/.test(env.REVENUECAT_ANDROID_PUBLIC_KEY || '') &&
         !!env.REVENUECAT_SECRET_API_KEY?.trim() && (env.REVENUECAT_WEBHOOK_AUTH || '').length >= 32;
@@ -13,7 +13,17 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
         if (!response.ok) throw problem('구독 확인 서버에 연결하지 못했습니다. 구매를 반복하지 말고 구매 복원을 눌러 주세요.',502);
         const payload=await response.json(),stamp=now();
         if (!Number.isFinite(payload.request_date_ms) || Math.abs(stamp-payload.request_date_ms)>120000) throw problem('구독 확인 응답이 오래되었습니다. 다시 확인해 주세요.',502);
-        return applyPurchase(db,uid,evaluatePurchase(payload,stamp,env.REVENUECAT_ALLOW_SANDBOX==='true'),stamp,device,account.rcUserId);
+        const allowSandbox=env.REVENUECAT_ALLOW_SANDBOX==='true';
+        const diagnosis=purchaseDiagnosis(payload,stamp,allowSandbox);
+        const result=await applyPurchase(db,uid,evaluatePurchase(payload,stamp,allowSandbox),stamp,device,account.rcUserId);
+        // Keep diagnostics separate from ownership and paid access. A read-only summary survives expiry.
+        await db.runTransaction(async tx=>{
+            const ref=db.collection('billing_accounts').doc(uid), current=(await tx.get(ref)).data();
+            if(current && current.deletedAt==null && current.rcUserId===account.rcUserId &&
+                !(current.purchaseDiagnosis?.checkedAt>stamp))
+                tx.set(ref,{...current,purchaseDiagnosis:diagnosis});
+        });
+        return result;
     }
     return async(req,res)=>{
         const timing=requestTiming(res), measure=timing.measure;
