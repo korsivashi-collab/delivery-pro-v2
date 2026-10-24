@@ -860,16 +860,16 @@ export async function logout() {
     resetGpsPreferenceSession();
     
     const currentKey = localStorage.getItem('deliveryProKey');
-    // Stop the watcher before deliberately releasing this device on the server.
-    clearAuthStorage();
     if (currentKey && typeof firebaseClearDeviceData === 'function') {
         try {
             await firebaseClearDeviceData(currentKey);
         } catch (e) {
-            console.error("서버 초기화 중 오류 발생:", e);
+            alert('접속 해제를 완료하지 못했습니다. 인터넷 연결을 확인한 뒤 로그아웃을 다시 눌러 주세요.');
+            return;
         }
     }
-    
+    clearAuthStorage();
+    localStorage.removeItem('deliveryProDeviceId');
     window.location.reload();
 }
 

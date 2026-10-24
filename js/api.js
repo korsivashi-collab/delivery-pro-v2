@@ -31,7 +31,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from "https://www.gstati
 
 import {
     getAuth,
-    signInWithCustomToken
+    signInWithCustomToken, signOut
 } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-auth.js";
 
 const firebaseConfig = {
@@ -641,11 +641,12 @@ export async function deleteCompletionFromFirestore(docId, operationId = null, r
 export async function firebaseClearDeviceData(key) {
     await auth.authStateReady();
     const user=auth.currentUser;
-    if (!key || !user) return;
+    if (!key || !user) throw new Error('접속 인증을 확인할 수 없습니다.');
     const response=await apiFetch('/api/native-sms',{method:'POST',
         headers:{'Content-Type':'application/json',Authorization:'Bearer '+await user.getIdToken()},
         body:JSON.stringify({action:'release-driver',key,deviceId:localStorage.getItem('deliveryProDeviceId')})});
     if (!response.ok) throw new Error('서버 접속 해제를 확인하지 못했습니다.');
+    await signOut(auth);
 }
 
 // 9. TMS(관제) 연결 허용/차단 상태 제어 함수
