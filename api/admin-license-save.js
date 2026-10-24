@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const { dispatchAccessAction, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, releaseInactiveDriverConnections } = require('../server/license-integrity.cjs');
+const { migrateNoticeInboxes, dispatchAccessAction, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, releaseInactiveDriverConnections } = require('../server/license-integrity.cjs');
 
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
@@ -17,12 +17,13 @@ module.exports = async function handler(req, res) {
         let identity;
         try { identity = await admin.auth().verifyIdToken(token, true); }
         catch (_) { return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' }); }
-        if (['prepareAccess', 'sendDispatchMessage', 'unlinkDispatchDriver'].includes(req.body?.action)) return res.status(200).json(await dispatchAccessAction(admin.firestore(), identity, req.body));
+        if (['prepareAccess', 'prepareNoticeInbox', 'sendDispatchMessage', 'deleteDispatchMessage', 'unlinkDispatchDriver'].includes(req.body?.action)) return res.status(200).json(await dispatchAccessAction(admin.firestore(), identity, req.body));
         if(req.body?.action==='linkDispatchDriver') return res.status(200).json(await linkDispatchDriver(admin.firestore(),identity,req.body));
         if (identity.role !== 'MASTER') return res.status(403).json({ error: '마스터 관리자만 계정을 저장할 수 있습니다.' });
         if (identity.masterSmsVerified !== true || !(identity.masterSessionExpiresAt > Date.now() / 1000)) {
             return res.status(403).json({ error: '마스터 SMS 인증이 필요합니다. 다시 로그인해 주세요.' });
         }
+        if (req.body?.action === 'migrateNoticeInboxes') return res.status(200).json(await migrateNoticeInboxes(admin.firestore(), req.body));
         if(req.body?.action==='releaseInactive')return res.status(200).json(await releaseInactiveDriverConnections(admin.firestore()));
         if(['smsWallet','adjustSmsCredits'].includes(req.body?.action)) return res.status(200).json(await require('./dispatch-payment.js').createService().execute(admin.firestore(),identity,{...req.body,dispatchKey:req.body.key,action:req.body.action==='smsWallet'?'wallet':'adjust'}));
         if(req.body?.action==='cancelPayment') return res.status(200).json(await require('./payment-confirm.js').createService().cancelPayment(admin.firestore(),req.body,identity.uid));
