@@ -45,7 +45,7 @@ function snapshotFor(orders, drivers, routes, date) {
             slots.get(groupKey).push(id);
         }
         plans[key] = { owner: driver.routeOwnerId, name: clean(driver.name) || '담당 기사',
-            routeId: route.routePlan?.routeId || '', slots: [...slots.values()], updatedAt: route.updatedAt };
+            routeId: route.routePlan?.routeId || '', slots: [...slots.values()].map(ids => ({ ids })), updatedAt: route.updatedAt };
         for (const item of items) {
             const matches = rows.slice(0, originalCount).map((o, index) => ({ o, index })).filter(({ o }) =>
                 String(o.assignedDriver || '') === key && (clean(item.orderNo) && clean(o.orderNo)
@@ -105,7 +105,9 @@ function projectTracking(publication, phone, liveRoutes) {
                 : statuses.every(s => s === 'cancelled') ? 'cancelled'
                 : statuses.includes('checking') ? 'checking' : statuses.some(s => s === 'completed' || s === 'cancelled') ? 'partial' : 'pending';
             // Reflect re-optimization/additional stops while keeping completed orders grouped.
-            let slots = plan.slots;
+            // Firestore stores each group as an object; arrays cannot directly contain arrays.
+            const savedSlots = plan.slots.map(group => group.ids);
+            let slots = savedSlots;
             if (samePlan && Array.isArray(route.routePlan?.orderIds)) {
                 const groupForId = new Map();
                 for (const group of publication.stops.filter(s => s.driver === stop.driver))
@@ -114,7 +116,7 @@ function projectTracking(publication, phone, liveRoutes) {
                     const phone = phoneOf(item.phone), address = addressOf(item);
                     if (phone && address) groupForId.set(String(item.id), JSON.stringify([phone, address]));
                 }
-                const ordered = [...new Set([...route.routePlan.orderIds.map(String), ...routeItems(route).map(d => String(d.id)), ...plan.slots.flat()])];
+                const ordered = [...new Set([...route.routePlan.orderIds.map(String), ...routeItems(route).map(d => String(d.id)), ...savedSlots.flat()])];
                 const grouped = new Map();
                 for (const id of ordered) {
                     const key = groupForId.get(id) || 'id:' + id;
