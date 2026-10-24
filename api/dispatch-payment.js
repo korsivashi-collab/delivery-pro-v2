@@ -1,7 +1,7 @@
 // Dispatch commerce is isolated from phone-authenticated driver purchases.
 const admin = require('firebase-admin');
 const {randomUUID,randomBytes} = require('node:crypto');
-const {problem,phoneDigits,assertNotBlocked} = require('../server/license-integrity.cjs');
+const {problem,phoneDigits,assertNotBlocked,assertDispatchSession} = require('../server/license-integrity.cjs');
 const {verifiedPhone} = require('../server/billing.cjs');
 const {addMonths} = require('./payment-confirm.js');
 const dateOf = n => new Date(n + 9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
@@ -76,8 +76,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   if(l?.type!=='dispatch')throw problem('관제 계정을 찾을 수 없습니다.',404);
   if(master)return;
   if(identity.role!=='DISPATCH'||identity.uid!==input.dispatchKey)throw problem('본인 관제 계정으로 로그인해 주세요.',403);
-  const sessions=l.activeSessions?.length?l.activeSessions:l.currentSessionToken?[l.currentSessionToken]:[];
-  if(!sessions.includes(input.sessionToken))throw problem('관제 접속이 해제되었습니다. 다시 로그인해 주세요.',401);
+  assertDispatchSession(l,identity);
   if(['suspended','revoked'].includes(l.status))throw problem('이용 제한 계정입니다.',403);
  }
  async function context(db,identity,input) {

@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const crypto = require('node:crypto');
-const { isActive, problem } = require('../server/license-integrity.cjs');
+const { isActive, problem, assertDispatchSession } = require('../server/license-integrity.cjs');
 
 // Public clients receive a projection, never Firestore documents or driver contact data.
 const DAY = 86400000;
@@ -283,8 +283,7 @@ function createHandler(sdk = admin) {
             if (!Array.isArray(body.phones) || !body.phones.length || body.phones.length > 1000 || body.phones.some(p => !phoneOf(p))) throw problem('선택한 수신번호를 확인해 주세요.');
             const account = (await db.collection('licenses').doc(dispatchKey).get()).data();
             if (account?.type !== 'dispatch' || !isActive(account, dayOf(now), now)) throw problem('사용 중인 관제 이용권이 필요합니다.', 403);
-            const sessions = Array.isArray(account.activeSessions) && account.activeSessions.length ? account.activeSessions : account.currentSessionToken ? [account.currentSessionToken] : [];
-            if (!master && (!sessions.length || !sessions.includes(body.sessionToken))) throw problem('관제 접속이 해제되었습니다. 다시 로그인해 주세요.', 401);
+            if (!master) assertDispatchSession(account, identity);
             const [licenseSnapshot, orderDoc] = await Promise.all([
                 db.collection('licenses').where('dispatchKey', '==', dispatchKey).get(),
                 db.collection('dispatch_orders').doc(`${date}_${dispatchKey}`).get()

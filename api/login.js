@@ -1,4 +1,6 @@
 const admin = require('firebase-admin');
+const {randomUUID} = require('node:crypto');
+const {registerDispatchSession, releaseDispatchSession} = require('../server/license-integrity.cjs');
 
 // Vercel 환경 변수에서 비공개 키를 불러와 파이어베이스에 한 번만 연결합니다.
 if (!admin.apps.length) {
@@ -19,6 +21,17 @@ module.exports = async function handler(req, res) {
   // 웹에서 POST 방식으로 키를 받아옵니다.
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
   res.setHeader('Cache-Control', 'no-store');
+
+  if (req.body?.action === 'logout-dispatch') {
+    try {
+      const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+      if (!bearer) return res.status(401).json({error:'관제 로그인이 필요합니다.'});
+      const identity = await admin.auth().verifyIdToken(bearer, true);
+      return res.status(200).json(await releaseDispatchSession(db, identity));
+    } catch (error) {
+      return res.status(error.status || 401).json({error:error.status ? error.message : '관제 인증을 확인해 주세요.'});
+    }
+  }
   
   const { key } = req.body || {};
   if (typeof key !== 'string' || !key.trim() || key.length > 200 || key.includes('/')) {
@@ -55,7 +68,7 @@ module.exports = async function handler(req, res) {
     if (!licDoc.exists) licDoc = await db.collection('licenses').doc(`CTRL-${searchKey}`).get();
 
     if (licDoc.exists) {
-      const data = licDoc.data();
+      let data = licDoc.data();
 
       // [상태 검증 1] 정지 및 회수 상태 즉시 차단
       if (data.status === 'suspended' || data.status === 'revoked') {
@@ -94,19 +107,26 @@ module.exports = async function handler(req, res) {
       }
       
       // 관제(DISPATCH) 또는 기사 토큰 발행
-      const token = await admin.auth().createCustomToken(licDoc.id, { role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER' });
+      const dispatchSessionId = data.type === 'dispatch' ? randomUUID() : null;
+      const token = await admin.auth().createCustomToken(licDoc.id, {
+        role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER',
+        ...(dispatchSessionId ? {dispatchSessionId} : {})
+      });
+      if (dispatchSessionId) data = await registerDispatchSession(db, licDoc.id, dispatchSessionId);
       
       // 실제 조회된 문서 ID(licDoc.id)를 licenseId로 명시 반환하여 프론트엔드 finalKey/FIFO 일치 보장
       return res.status(200).json({ 
         token, 
         role: data.type === 'dispatch' ? 'DISPATCH' : 'DRIVER', 
         licenseId: licDoc.id, 
+        ...(dispatchSessionId ? {dispatchSessionId} : {}),
         data: { ...data, id: licDoc.id } 
       });
     }
 
     return res.status(401).json({ error: 'invalid' });
   } catch (error) {
+    if (error.status) return res.status(error.status).json({error:error.message});
     console.error('로그인 에러:', error);
     return res.status(500).json({ error: '서버 에러가 발생했습니다.' });
   }
