@@ -45,8 +45,11 @@ async function claimDevice(sdk, req, input, stamp) {
             if (testLogin) identity.uid = 'test-driver-' + createHash('sha256').update(actualKey).digest('hex');
         }
         if (actualKey !== key) await assertNotBlocked(db, tx, actualKey, phone, deviceId, blockedSnapshot);
-        if (input.action !== 'release-driver' && (data.type === 'dispatch' || !isActive(data, new Date(stamp + 9 * 3600000).toISOString().slice(0,10), stamp))) {
-            throw problem('사용이 정지되었거나 이용기간이 만료된 계정입니다.', 403);
+        if (input.action !== 'release-driver') {
+            if(data.type==='dispatch' || ['suspended','revoked','upgraded'].includes(data.status))throw problem('사용이 정지된 라이선스입니다. 관리자에게 문의해 주세요.',403);
+            if(testSession && !isActive(data,new Date(stamp+9*3600000).toISOString().slice(0,10),stamp))throw problem('이용기간이 만료되었습니다.',403);
+            if(!isActive(data,new Date(stamp+9*3600000).toISOString().slice(0,10),stamp))
+                return {valid:false,renewable:!testSession,actualKey,msg:'이용기간이 만료되었습니다. 이용권 구매 후 같은 키로 로그인해 주세요.'};
         }
         const sameBinding = data.deviceId === deviceId && phoneDigits(data.phone) === phoneDigits(phone) && (!data.driverUid || data.driverUid === identity.uid);
         const sameSession = sameBinding && data.driverSessionId && identity.driverSessionId === data.driverSessionId && identity.driverKey === actualKey && identity.driverDeviceId === deviceId;

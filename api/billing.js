@@ -1,7 +1,7 @@
 const admin = require('firebase-admin');
 const { timingSafeEqual, createHmac, createHash } = require('node:crypto');
 const { problem, assertDriverSession, assertNotBlocked } = require('../server/license-integrity.cjs');
-const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, purchaseDiagnosis, evaluatePurchase, ensureAndroidAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
+const { ENTITLEMENT, PRODUCTS, verifiedPhone, deviceId, purchaseDiagnosis, evaluatePurchase, ensureAccount, ensureAndroidAccount, applyPurchase, requestTiming } = require('../server/billing.cjs');
 
 async function sendPlayLicenseSms(db,uid,customer,purchase,{env,fetchImpl,stamp}) {
     const [access,secret,serviceId]=['NCP_ACCESS_KEY','NCP_SECRET_KEY','NCP_SENS_SERVICE_ID'].map(k=>env[k]?.trim());
@@ -17,7 +17,7 @@ async function sendPlayLicenseSms(db,uid,customer,purchase,{env,fetchImpl,stamp}
         if(!license || license.billingUid!==uid || license.webManaged ||
             ['suspended','revoked'].includes(license.status))return {status:'unavailable'};
         if(saved)return {status:saved.status};
-        const to=String(account.phone||'').replace(/\D/g,'');
+        const to=String(account.notificationPhone||account.phone||'').replace(/\D/g,'');
         if(!/^010\d{8}$/.test(to))return {status:'unavailable'};
         tx.create(ref,{uid,licenseKey:account.licenseKey,status:'sending',requestedAt:stamp});
         return {send:true,to,key:account.licenseKey,expireDate:license.expireDate};
@@ -54,14 +54,36 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
     async function sync(db,uid,device=null) {
         const account = (await db.collection('billing_accounts').doc(uid).get()).data();
         if (!account) throw problem('구독 계정을 찾을 수 없습니다.',404);
-        const response=await fetchImpl('https://api.revenuecat.com/v1/subscribers/'+encodeURIComponent(account.rcUserId),{
-            headers:{Authorization:'Bearer '+env.REVENUECAT_SECRET_API_KEY,'Content-Type':'application/json'},signal:AbortSignal.timeout(15000)});
-        if (!response.ok) throw problem('구독 확인 서버에 연결하지 못했습니다. 구매를 반복하지 말고 구매 복원을 눌러 주세요.',502);
-        const payload=await response.json(),stamp=now();
-        if (!Number.isFinite(payload.request_date_ms) || Math.abs(stamp-payload.request_date_ms)>120000) throw problem('구독 확인 응답이 오래되었습니다. 다시 확인해 주세요.',502);
-        const allowSandbox=env.REVENUECAT_ALLOW_SANDBOX==='true';
+        async function readCustomer(customer){
+            const response=await fetchImpl('https://api.revenuecat.com/v1/subscribers/'+encodeURIComponent(customer),{
+                headers:{Authorization:'Bearer '+env.REVENUECAT_SECRET_API_KEY,'Content-Type':'application/json'},signal:AbortSignal.timeout(15000)});
+            if(!response.ok)throw problem('구독 확인 서버에 연결하지 못했습니다. 기존 구매 확인을 눌러 주세요.',502);
+            const data=await response.json();
+            if(!Number.isFinite(data.request_date_ms)||Math.abs(now()-data.request_date_ms)>120000)throw problem('구독 확인 응답이 오래되었습니다. 다시 확인해 주세요.',502);
+            return data;
+        }
+        const allowSandbox=env.REVENUECAT_ALLOW_SANDBOX==='true', stamp=now();
+        let payload=await readCustomer(account.rcUserId),purchase=evaluatePurchase(payload,stamp,allowSandbox);
+        const receiptRef=id=>db.collection('billing_purchase_bindings').doc(createHash('sha256').update(id).digest('hex'));
+        // RevenueCat may transfer a receipt on restore. Our original key ownership stays fixed.
+        if(!purchase.active && account.receiptCustomerId && account.receiptCustomerId!==account.rcUserId){
+            const transferred=await readCustomer(account.receiptCustomerId),candidate=evaluatePurchase(transferred,stamp,allowSandbox);
+            const binding=candidate.transactionId ? (await receiptRef(candidate.transactionId).get()).data() : null;
+            if(binding?.uid===uid){payload=transferred;purchase=candidate;}
+        }
+        if(purchase.active && purchase.transactionId){
+            const binding=(await receiptRef(purchase.transactionId).get()).data();
+            if(binding && binding.uid!==uid){
+                const original=await db.runTransaction(async tx=>{
+                    const ref=db.collection('billing_accounts').doc(binding.uid),saved=(await tx.get(ref)).data();
+                    if(!saved || saved.deletedAt!=null)return null;
+                    tx.set(ref,{...saved,receiptCustomerId:account.rcUserId});return saved;
+                });
+                if(original)await applyPurchase(db,binding.uid,purchase,stamp,null,original.rcUserId);
+                return {valid:false,active:false,msg:'이 구매는 다른 라이선스 키에 연결되어 있습니다. 원래 키로 기존 구매를 확인해 주세요.'};
+            }
+        }
         const diagnosis=purchaseDiagnosis(payload,stamp,allowSandbox);
-        const purchase=evaluatePurchase(payload,stamp,allowSandbox);
         const result=await applyPurchase(db,uid,purchase,stamp,device,account.rcUserId);
         // Keep diagnostics separate from ownership and paid access. A read-only summary survives expiry.
         await db.runTransaction(async tx=>{
@@ -119,6 +141,15 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
                 if (!ready()) throw problem('구독 서비스를 준비하고 있습니다.',503);
                 return reply(200,await sync(db,binding.uid));
             }
+            // Preserve the existing web buyer's sync path; Android key selection is independent.
+            if(input.action==='sync' && input.newLicense!==true){
+                const webOwner=(await db.collection('billing_accounts').doc(identity.uid).get()).data();
+                if(webOwner?.webManaged && (!input.licenseKey || input.licenseKey===webOwner.licenseKey)){
+                    await ensureAccount(db,identity,input,now());
+                    const service=require('./payment-confirm.js').createService({sdk,env,fetchImpl,now});
+                    return reply(200,await service.syncWeb(db,identity.uid,device,measure));
+                }
+            }
             const account=await measure('account',()=>ensureAndroidAccount(db,identity,input,now()));
             if(input.licenseKey&&input.licenseKey!==account.licenseKey)throw problem('구독 계정과 이용권이 일치하지 않습니다.',403);
             if(input.action==='sync'&&account.webManaged){
@@ -126,7 +157,7 @@ function createHandler({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
                 return reply(200,await service.syncWeb(db,account.uid,device,measure));
             }
             if(!ready())throw problem('구독 서비스를 준비하고 있습니다. 잠시 후 다시 확인해 주세요.',503);
-            if(input.action==='session')return reply(200,{appUserId:account.rcUserId,canPurchase:account.canPurchase,reason:account.reason});
+            if(input.action==='session')return reply(200,{licenseKey:account.licenseKey,appUserId:account.rcUserId,canPurchase:account.canPurchase,reason:account.reason});
             if(!account.canPurchase)return reply(200,{active:false,valid:false,msg:account.reason});
             return reply(200,await measure('play_sync',()=>sync(db,account.uid,device)));
         }catch(error){return reply(error.status || 500,{error:error.status?error.message:'구독 확인 중 오류가 발생했습니다. 잠시 후 다시 확인해 주세요.'});}
