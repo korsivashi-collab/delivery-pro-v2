@@ -462,10 +462,70 @@ async function linkDispatchDriver(db, identity, request, now = Date.now()) {
     });
 }
 
+// Server-owned indexes authorize legacy owner/device documents without exposing all licenses.
+async function dispatchAccessAction(db, identity, request, now = Date.now()) {
+    const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
+    if (!master && identity?.role !== 'DISPATCH') throw problem('관제 로그인이 필요합니다.', 403);
+    const keys = [...new Set((Array.isArray(request.keys) ? request.keys : []).map(validateKey))];
+    if (!keys.length || (request.action !== 'sendDispatchMessage' && keys.length > 50)) throw problem('기사 계정을 1~50개씩 선택해 주세요.');
+    const today = new Date(now + 9 * 3600000).toISOString().slice(0, 10);
+    return db.runTransaction(async tx => {
+        if (!master) {
+            const dispatcher = (await tx.get(db.collection('licenses').doc(identity.uid))).data();
+            if (dispatcher?.type !== 'dispatch' || !isActive(dispatcher, today, now)) throw problem('관제 이용권을 확인해 주세요.', 403);
+            const sessions = dispatcher.activeSessions?.length ? dispatcher.activeSessions : [dispatcher.currentSessionToken].filter(Boolean);
+            if (sessions.length && !sessions.includes(request.sessionToken)) throw problem('관제 접속이 해제되었습니다.', 401);
+        }
+        const drivers = await Promise.all(keys.map(key => tx.get(db.collection('licenses').doc(key))));
+        for (const d of drivers) {
+            if (!d.exists || d.data().type === 'dispatch' || (!master && d.data().dispatchKey !== identity.uid)) throw problem('연결된 기사만 처리할 수 있습니다.', 403);
+        }
+        if (request.action === 'sendDispatchMessage') {
+            const content = String(request.content || '').trim();
+            if (!content || content.length > 300) throw problem('메시지는 1~300자로 입력해 주세요.');
+            const date = new Date(now + 9 * 3600000).toISOString();
+            tx.set(db.collection('dispatch_messages').doc(), {
+                senderKey: master ? 'MASTER' : identity.uid, senderType: master ? 'MASTER' : 'DISPATCH',
+                senderTitle: master ? '운영사 알림' : '회사 알림', targetLicenseKeys: keys,
+                targetDeviceIds: [...new Set(drivers.flatMap(d => [d.id, d.data().deviceId].filter(Boolean)))],
+                targetPhones: drivers.map(d => d.data().phone || '').filter(Boolean), content,
+                createdAt: now, dateStr: date.slice(0, 10), timeStr: date.slice(11, 16), acknowledged: []
+            });
+            return { success: true };
+        }
+        if (request.action === 'unlinkDispatchDriver') {
+            if (keys.length !== 1) throw problem('기사를 한 명씩 해제해 주세요.');
+            const d = drivers[0], driver = d.data();
+            const profile = await tx.get(db.collection('driver_profiles').doc(d.id));
+            const routes = driver.routeOwnerId ? await tx.get(db.collection('routes').where('routeOwnerId', '==', driver.routeOwnerId)) : { docs: [] };
+            for (const r of routes.docs) if ([driver.deviceId, d.id].includes(r.id)) tx.delete(r.ref);
+            tx.update(d.ref, { dispatchKey: '' });
+            if (profile.exists) tx.update(profile.ref, { dispatchKey: '' });
+            return { success: true };
+        }
+        if (request.action !== 'prepareAccess') throw problem('지원하지 않는 작업입니다.');
+        const owners = drivers.map(d => d.data().routeOwnerId || randomUUID());
+        if (new Set(owners).size !== owners.length) throw problem('기사 소유권이 중복되어 관리자 확인이 필요합니다.', 409);
+        const mappings = await Promise.all(owners.map(owner => tx.get(db.collection('access_owners').doc(owner))));
+        const prior = await Promise.all(mappings.map(m => m.exists && !keys.includes(m.data().licenseKey)
+            ? tx.get(db.collection('licenses').doc(m.data().licenseKey)) : Promise.resolve(null)));
+        for (let i = 0; i < drivers.length; i++) {
+            const d = drivers[i], owner = owners[i];
+            if (prior[i]?.exists && prior[i].data().routeOwnerId === owner) throw problem('기사 소유권이 중복되어 관리자 확인이 필요합니다.', 409);
+            if (!d.data().routeOwnerId) tx.update(d.ref, { routeOwnerId: owner });
+            if (mappings[i].data()?.licenseKey !== d.id) tx.set(db.collection('access_owners').doc(owner), { licenseKey: d.id });
+            for (const id of new Set([d.id, d.data().deviceId].filter(Boolean))) {
+                tx.set(db.collection('access_devices').doc(id), { licenseKey: d.id, routeOwnerId: owner });
+            }
+        }
+        return { success: true, owners: Object.fromEntries(drivers.map((d, i) => [d.id, owners[i]])) };
+    });
+}
+
 // Administrator grants are independent of provider payment history and cancellation arithmetic.
 function effectivePeriod(license, paidExpiresAt, now) {
     const expiresAt = Math.max(paidExpiresAt || 0, Number.isFinite(license.adminExpiresAt) ? license.adminExpiresAt : 0);
     const status = ['suspended','revoked'].includes(license.status) ? license.status : expiresAt > now ? 'active' : 'expired';
     return { expiresAt, expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'), status };
 }
-module.exports = { withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
+module.exports = { dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
