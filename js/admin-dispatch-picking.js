@@ -13,7 +13,7 @@ export const pickingModalState = {
 
 function getPickingDriverKey(identifier) {
     if (!identifier) return '';
-    const lic = (state.allLicenses || []).find(l => l.key === identifier || l.deviceId === identifier);
+    const lic = (state.allLicenses || []).find(l => l.routeOwnerId === identifier) || (state.allLicenses || []).find(l => l.key === identifier) || (state.allLicenses || []).find(l => l.deviceId === identifier);
     return lic?.key || lic?.deviceId || identifier;
 }
 
@@ -21,13 +21,13 @@ function getPickingDriverKey(identifier) {
 function getDriverAssignedOrders(driverIdentifier) {
     if (!driverIdentifier || !state.parsedExcelList || state.parsedExcelList.length === 0) return [];
 
-    const matchedLic = (state.allLicenses || []).find(l => 
-        l.key === driverIdentifier || 
-        l.deviceId === driverIdentifier
-    );
+    const matchedLic = (state.allLicenses || []).find(l => l.routeOwnerId === driverIdentifier) ||
+        (state.allLicenses || []).find(l => l.key === driverIdentifier) ||
+        (state.allLicenses || []).find(l => l.deviceId === driverIdentifier);
 
     const validKeys = new Set([driverIdentifier]);
     if (matchedLic) {
+        if (matchedLic.routeOwnerId) validKeys.add(matchedLic.routeOwnerId);
         if (matchedLic.key) validKeys.add(matchedLic.key);
         if (matchedLic.deviceId) validKeys.add(matchedLic.deviceId);
     }
@@ -133,7 +133,7 @@ export function renderPickingDriverList(uniqueDrivers) {
 
     uniqueDrivers.forEach(d => {
         const orderCount = getDriverAssignedOrders(d).length;
-        const license = (state.allLicenses || []).find(l => l.key === d || l.deviceId === d);
+        const license = (state.allLicenses || []).find(l => l.routeOwnerId === d) || (state.allLicenses || []).find(l => l.key === d) || (state.allLicenses || []).find(l => l.deviceId === d);
         const display = escapePickingHtml(license?.phone || d);
         const isChecked = pickingModalState.selectedDrivers.has(d) && orderCount > 0;
         if (orderCount > 0) selectableCount++;

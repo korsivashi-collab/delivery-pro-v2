@@ -75,6 +75,8 @@ function getDbInstance() {
 // ==========================================
 export async function reportGpsToFirestore(lat, lng, force = false, requestedAt = null, request = null) {
     const session = gpsSession;
+    const routeOwnerId = state.getRouteOwnerId();
+    if (!routeOwnerId) return false;
     if (!canTrackGps()) return false;
     // 수동 요청을 수신한 뒤에는 새 일반 보고가 먼저 전송되지 않도록 한다.
     if (!force && hasPendingForcedGpsRequest()) return false;
@@ -106,20 +108,20 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     } catch (error) { console.error('GPS 보고 준비 오류:', error); return false; }
     if (!deviceId || !db) return false;
     // A successful ordinary report made after this request already answers it.
-    if (!request && force && requestedAt !== null && lastUploadedDevice === deviceId && lastUploadedAt >= requestedAt) return true;
+    if (!request && force && requestedAt !== null && lastUploadedDevice === routeOwnerId + '|' + deviceId && lastUploadedAt >= requestedAt) return true;
     // Multiple forced callers may have awaited the same earlier write.
     if (reportInFlight) return reportGpsToFirestore(lat, lng, force, requestedAt, request);
     reportInFlight = Promise.resolve().then(async () => {
         try {
             // SDK에 넘기기 전 예약된 일반 보고도 수동 요청에 우선권을 양보한다.
-            if (session !== gpsSession || !canTrackGps()) return false;
+            if (session !== gpsSession || !canTrackGps() || state.getRouteOwnerId() !== routeOwnerId) return false;
             if (!force && hasPendingForcedGpsRequest()) return false;
-            await setDoc(doc(db, 'gps_reports', deviceId), {
-                deviceId, phone, lat, lng, updatedAt: now, requestId: request?.requestId || null
+            await setDoc(doc(db, 'gps_reports', routeOwnerId), {
+                routeOwnerId, deviceId, phone, lat, lng, updatedAt: now, requestId: request?.requestId || null
             }, { merge: true });
             lastReportTime = Date.now();
             lastUploadedAt = now;
-            lastUploadedDevice = deviceId;
+            lastUploadedDevice = routeOwnerId + '|' + deviceId;
             reportFailures = 0;
             reportRetryAfter = 0;
             return true;
@@ -135,7 +137,7 @@ export async function reportGpsToFirestore(lat, lng, force = false, requestedAt 
     return reportInFlight;
 }
 
-// Device and license documents carry the same requestId (or legacy requestedAt).
+// Each account has one request document, independent of its current phone/device/key.
 async function handleGpsRequest(snap, identity, deviceId) {
     if (!canTrackGps() || identity !== requestListenerIdentity || document.visibilityState === 'hidden' || navigator.onLine === false || !snap.exists()) return false;
     const data = snap.data();
@@ -175,7 +177,8 @@ function listenToGpsRequests() {
     if (!canTrackGps() || document.visibilityState === 'hidden') return;
     const deviceId = getOrCreateDeviceId ? getOrCreateDeviceId() : localStorage.getItem('deliveryProDeviceId');
     const licKey = localStorage.getItem('deliveryProKey');
-    const identity = deviceId + '|' + (licKey || '');
+    const routeOwnerId = state.getRouteOwnerId();
+    const identity = routeOwnerId + '|' + deviceId + '|' + (licKey || '');
     if (identity !== requestListenerIdentity) {
         if (unsubRequestDevice) unsubRequestDevice();
         if (unsubRequestKey) unsubRequestKey();
@@ -183,7 +186,7 @@ function listenToGpsRequests() {
         requestListenerIdentity = identity;
     }
     const db = getDbInstance();
-    if (!db) {
+    if (!db || !routeOwnerId) {
         if (gpsRequestRetryTimer === null) {
             gpsRequestRetryTimer = setTimeout(() => {
                 gpsRequestRetryTimer = null;
@@ -198,10 +201,7 @@ function listenToGpsRequests() {
     }
     const handle = snap => handleGpsRequest(snap, identity, deviceId);
     if (deviceId && !unsubRequestDevice) {
-        try { unsubRequestDevice = onSnapshot(doc(db, 'gps_requests', deviceId), handle); } catch (error) { console.warn('GPS 요청 구독 실패:', error); }
-    }
-    if (licKey && licKey !== deviceId && !unsubRequestKey) {
-        try { unsubRequestKey = onSnapshot(doc(db, 'gps_requests', licKey), handle); } catch (error) { console.warn('GPS 요청 구독 실패:', error); }
+        try { unsubRequestDevice = onSnapshot(doc(db, 'gps_requests', routeOwnerId), handle); } catch (error) { console.warn('GPS 요청 구독 실패:', error); }
     }
 }
 

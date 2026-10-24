@@ -68,7 +68,7 @@ export function renderMessageSidebar() {
     
     let html = `<div class="space-y-2">`;
     visibleLicenses.forEach(lic => {
-        const devId = lic.deviceId || lic.key;
+        const devId = lic.routeOwnerId || lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         const isChecked = state.selectedMessageDrivers.has(devId);
         
@@ -95,7 +95,7 @@ export function toggleMessageDriver(devId) {
 export function toggleAllMessageSelection() {
     const visibleLicenses = window.getFilteredVisibleDrivers();
     if (state.selectedMessageDrivers.size === visibleLicenses.length) state.selectedMessageDrivers.clear();
-    else visibleLicenses.forEach(lic => state.selectedMessageDrivers.add(lic.deviceId || lic.key));
+    else visibleLicenses.forEach(lic => state.selectedMessageDrivers.add(lic.routeOwnerId || lic.deviceId || lic.key));
     renderMessageSidebar();
 }
 
@@ -116,8 +116,8 @@ export async function sendDispatchMessage() {
     if (!text) { alert("전송할 회사 알림 내용을 입력해 주세요."); textarea.focus(); return; }
 
     const dispatchKey = sessionStorage.getItem('deliveryProDispatchKey') || 'MASTER';
-    const selected = window.getFilteredVisibleDrivers().filter(lic => state.selectedMessageDrivers.has(lic.deviceId || lic.key));
-    const targets = selected.map(lic => lic.deviceId || lic.key);
+    const selected = window.getFilteredVisibleDrivers().filter(lic => state.selectedMessageDrivers.has(lic.routeOwnerId || lic.deviceId || lic.key));
+    const targets = selected.map(lic => lic.routeOwnerId || lic.deviceId || lic.key);
     if (!targets.length) { alert('현재 연결된 기사를 다시 선택해 주세요.'); return; }
     if (text.length > 300) { alert('메시지는 300자까지 전송할 수 있습니다.'); return; }
     btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 전송 중...';

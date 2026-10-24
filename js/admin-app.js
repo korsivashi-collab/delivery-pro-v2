@@ -6,7 +6,7 @@ let stopDataSync = () => {};
 
 import { db, auth, signInWithCustomToken, requestMasterSms, resetMasterSms, prepareDispatchAccess, prepareDispatchNoticeInbox } from "./admin-api.js";
 // 🌟 where 임포트 추가 완료
-import { doc, getDoc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where, runTransaction } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
+import { doc, onSnapshot, collection, query, orderBy, limit, updateDoc, deleteDoc, where } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
 import { initKakaoMap, focusMapPosition } from "./admin-map.js";
 import { state, todayStr, getLocalDateString } from "./admin-state.js";
 import { renderPaginationControls } from "./admin-ui.js";
@@ -384,25 +384,11 @@ window.handleSingleKeyLogin = async function() {
             const licData = result.data;
             const finalKey = result.licenseId || (licData && licData.id) || keyInput.toUpperCase();
 
-            const maxSessions = parseInt(licData.maxSessions) || (licData.isPro ? 2 : 1);
-            let activeSessions = Array.isArray(licData.activeSessions) ? [...licData.activeSessions] : [];
-            
-            if (activeSessions.length === 0 && licData.currentSessionToken) {
-                activeSessions.push(licData.currentSessionToken);
+            const newSessionToken = result.dispatchSessionId;
+            if (!newSessionToken) {
+                await signOut(auth);
+                throw new Error('관제 접속 서버 업데이트를 확인해 주세요.');
             }
-
-            const newSessionToken = 'SES-' + Math.random().toString(36).substring(2, 10);
-            
-            while (activeSessions.length >= maxSessions) {
-                activeSessions.shift();
-            }
-            activeSessions.push(newSessionToken);
-
-            await updateDoc(doc(db, "licenses", finalKey), { 
-                currentSessionToken: newSessionToken,
-                activeSessions: activeSessions,
-                lastLoginAt: Date.now()
-            });
 
             sessionStorage.setItem('deliveryProRole', 'DISPATCH');
             sessionStorage.setItem('deliveryProDispatchKey', finalKey);
@@ -435,30 +421,12 @@ window.systemLogout = async function() {
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
     
-    if (currentKey && localToken && !localToken.startsWith('MONITOR-')) {
+    if (isDispatchLogout && currentKey && localToken && !localToken.startsWith('MONITOR-') && auth.currentUser) {
         try {
-            const licRef = doc(db, "licenses", currentKey);
-            if(isDispatchLogout){
-                await runTransaction(db,async transaction=>{
-                    const snapshot=await transaction.get(licRef);
-                    if(!snapshot.exists())return;
-                    const data=snapshot.data();
-                    const sessions=Array.isArray(data.activeSessions)?data.activeSessions:(data.currentSessionToken?[data.currentSessionToken]:[]);
-                    const remaining=sessions.filter(value=>value!==localToken);
-                    const changes={activeSessions:remaining};
-                    if(data.currentSessionToken===localToken)changes.currentSessionToken=remaining[remaining.length-1]||'';
-                    transaction.update(licRef,changes);
-                });
-            }else{
-            const licSnap = await getDoc(licRef);
-            if (licSnap.exists()) {
-                const data = licSnap.data();
-                if (Array.isArray(data.activeSessions)) {
-                    const filtered = data.activeSessions.filter(s => s !== localToken);
-                    await updateDoc(licRef, { activeSessions: filtered });
-                }
-            }
-            }
+            const response = await fetch('/api/login', {method:'POST',
+                headers:{'Content-Type':'application/json', Authorization:'Bearer ' + await auth.currentUser.getIdToken()},
+                body:JSON.stringify({action:'logout-dispatch'})});
+            if (!response.ok) console.warn('서버 접속 해제 확인 실패:', response.status);
         } catch (e) {
             console.warn("로그아웃 세션 해제 중 오류:", e);
         }
@@ -519,8 +487,8 @@ window.initMasterDataSync = function() {
         console.error('관리 데이터 동기화 실패:', error);
         if (!reportError.shown) { reportError.shown = true; alert('일부 데이터 접근 권한을 확인하지 못했습니다. 로그인 상태와 서버 배포를 확인한 뒤 새로고침해 주세요.'); }
     };
-    const watch = (source, callback) => {
-        const off = onSnapshot(source, snapshot => { if (!stopped) callback(snapshot); }, reportError);
+    const watch = (source, callback, onError = reportError) => {
+        const off = onSnapshot(source, snapshot => { if (!stopped) callback(snapshot); }, onError);
         subscriptions.push(off); return off;
     };
     stopDataSync = () => { stopped = true; ownerVersion++; clearTimeout(retryTimer); subscriptions.forEach(off => off()); ownerSubscriptions.forEach(off => off()); };
@@ -529,7 +497,7 @@ window.initMasterDataSync = function() {
     const syncOwners = async () => {
         if (isMaster || stopped) return;
         const drivers = state.allLicenses.filter(l => l.type !== 'dispatch' && l.dispatchKey === currentKey);
-        const signature = JSON.stringify(drivers.map(l => [l.id, l.routeOwnerId, l.deviceId]).sort());
+        const signature = JSON.stringify(drivers.map(l => [l.id, l.routeOwnerId]).sort());
         if (signature === ownerSignature) return;
         ownerSignature = signature;
         const version = ++ownerVersion;
@@ -586,7 +554,7 @@ window.initMasterDataSync = function() {
                     ? myAccount.activeSessions 
                     : (myAccount.currentSessionToken ? [myAccount.currentSessionToken] : []);
                 
-                if (activeSessions.length > 0 && !activeSessions.includes(localToken)) {
+                if (!activeSessions.includes(localToken)) {
                     alert(`⚠️ 다른 PC에서 로그인하여 동시 접속 허용 회선 수(${maxAllowed}대)를 초과했습니다.\n시스템 보안을 위해 현재 창이 자동 로그아웃됩니다.`);
                     window.systemLogout();
                     return;
@@ -685,7 +653,11 @@ window.initMasterDataSync = function() {
     } else if (currentKey) {
         let own = null, linked = null;
         const mergeLicenses = () => { if (own !== null && linked !== null) licensesChanged(asSnapshot([...own, ...linked])); };
-        watch(doc(db, 'licenses', currentKey), snapshot => { own = snapshot.exists() ? [snapshot] : []; mergeLicenses(); });
+        watch(doc(db, 'licenses', currentKey), snapshot => { own = snapshot.exists() ? [snapshot] : []; mergeLicenses(); }, error => {
+            if (stopped) return;
+            if (['permission-denied', 'unauthenticated'].includes(error.code)) window.systemLogout();
+            else reportError(error);
+        });
         watch(query(collection(db, 'licenses'), where('dispatchKey', '==', currentKey)), snapshot => {
             linked = []; snapshot.forEach(d => { if (d.id !== currentKey) linked.push(d); }); mergeLicenses();
         });

@@ -241,7 +241,7 @@ export function renderDriverListView() {
 
     let html = '';
     visibleLicenses.forEach((lic, driverIndex) => {
-        const devId = lic.deviceId || lic.key;
+        const devId = lic.routeOwnerId || lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         
         // 🌟 기사별 정밀 활성 동선 조회
@@ -286,7 +286,7 @@ export function setDispatchDetailTab(tab) {
 export function renderDriverDetailView(devId) {
     const headerEl = document.getElementById('sidebar-header');
     const contentEl = document.getElementById('sidebar-content');
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    const matchedLic = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => l.key === devId) || state.allLicenses.find(l => l.deviceId === devId);
     const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
     const phone = licObj.phone || licObj.key || '기사';
 
@@ -452,7 +452,7 @@ export function drawAllDeliveryRoutes() {
     state.showAllDeliveryRoutes = true;
     if (!map) return;
     const group = { bounds: new kakao.maps.LatLngBounds(), points: 0 };
-    getFilteredVisibleDrivers().forEach((lic, index) => drawDriverOnMap(lic.deviceId || lic.key, { color: routeColors[index % routeColors.length], group }));
+    getFilteredVisibleDrivers().forEach((lic, index) => drawDriverOnMap(lic.routeOwnerId || lic.deviceId || lic.key, { color: routeColors[index % routeColors.length], group }));
     if (group.points) map.setBounds(group.bounds);
     let notice = document.getElementById('all-route-notice');
     if (!notice) {
@@ -474,7 +474,7 @@ window.drawAllDeliveryRoutes = drawAllDeliveryRoutes;
 
 export function drawDriverOnMap(devId, overview = null) {
     if (!overview) forceClearMap();
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    const matchedLic = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => l.key === devId) || state.allLicenses.find(l => l.deviceId === devId);
     const licObj = matchedLic || { deviceId: devId, key: devId, phone: devId };
 
     if (!map) return;

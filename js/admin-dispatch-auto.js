@@ -151,7 +151,7 @@ export const autoDispatchState = {
 export function toggleAllDispatchDrivers(isChecked) {
     const drivers = getFilteredVisibleDrivers();
     if (isChecked) {
-        drivers.forEach(d => autoDispatchState.selectedDrivers.add(d.deviceId || d.key));
+        drivers.forEach(d => autoDispatchState.selectedDrivers.add(d.routeOwnerId || d.deviceId || d.key));
     } else {
         autoDispatchState.selectedDrivers.clear();
     }
@@ -169,7 +169,7 @@ export function renderDispatchDriverList() {
     const drivers = getFilteredVisibleDrivers();
     
     if (!autoDispatchState.isInit && drivers.length > 0) {
-        drivers.forEach(d => autoDispatchState.selectedDrivers.add(d.deviceId || d.key));
+        drivers.forEach(d => autoDispatchState.selectedDrivers.add(d.routeOwnerId || d.deviceId || d.key));
         autoDispatchState.isInit = true;
     }
 
@@ -187,10 +187,24 @@ export function renderDispatchDriverList() {
     if (!autoDispatchState.weights || Object.keys(autoDispatchState.weights).length === 0) {
         autoDispatchState.weights = loadSavedDriverWeights();
     }
+    // Preserve existing local weights only when the old alias identifies exactly one account.
+    let weightsChanged = false;
+    for (const driver of drivers) {
+        const legacyId = driver.deviceId || driver.key;
+        if (!driver.routeOwnerId || legacyId === driver.routeOwnerId ||
+            Object.hasOwn(autoDispatchState.weights, driver.routeOwnerId) ||
+            !Number.isFinite(autoDispatchState.weights[legacyId]) ||
+            drivers.filter(d => (d.deviceId || d.key) === legacyId).length !== 1 ||
+            drivers.some(d => d.routeOwnerId === legacyId)) continue;
+        autoDispatchState.weights[driver.routeOwnerId] = autoDispatchState.weights[legacyId];
+        delete autoDispatchState.weights[legacyId];
+        weightsChanged = true;
+    }
+    if (weightsChanged) saveDriverWeights(autoDispatchState.weights);
     
     let html = '';
     drivers.forEach((d) => {
-        const devId = d.deviceId || d.key; 
+        const devId = d.routeOwnerId || d.deviceId || d.key; 
         const phoneDisplay = d.phone || d.key;
         const licKey = d.key || '';
         const tLat = d.territoryLat || ''; 
@@ -325,7 +339,7 @@ export function renderDispatchDriverDetail() {
         return;
     }
 
-    const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+    const targetLic = state.allLicenses.find(l => l.routeOwnerId === state.selectedDispatchDriverId) || state.allLicenses.find(l => l.key === state.selectedDispatchDriverId) || state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId);
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
     let assignedItems = (state.parsedExcelList || []).filter(item => 
         item.assignedDriver && (
@@ -477,21 +491,11 @@ export async function revertAutoDispatch(options = {}) {
             const endpointRoutes = {};
             let revision = Date.now();
             owned.forEach(snapshot => {
-                documents.set(snapshot.id, snapshot.ref);
                 const data = snapshot.data();
                 endpointRoutes[snapshot.id] = data;
                 if (Number.isFinite(data.updatedAt)) revision = Math.max(revision, data.updatedAt + 1);
             });
-            // Include old key document IDs as well as the current device.
-            for (const id of new Set([driver.deviceId, driver.key].filter(Boolean))) {
-                const ref = doc(db, 'routes', id);
-                let existing;
-                try { existing = await getDoc(ref); }
-                catch (error) { if (error.code === 'permission-denied') continue; throw error; }
-                if (existing.exists() && existing.data().routeOwnerId && existing.data().routeOwnerId !== routeOwnerId) continue;
-                if (existing.exists()) endpointRoutes[id] = existing.data();
-                documents.set(id, ref);
-            }
+            documents.set(routeOwnerId, doc(db, 'routes', routeOwnerId));
             if (documents.size > 500) throw new Error('기사 동선 문서 수가 한 번에 처리 가능한 범위를 초과했습니다.');
             // 배정 취소는 배송 목록만 초기화합니다. 기사가 선택한 종료 설정은 재배정에도 유지합니다.
             const endLocation = resolveDriverEndLocation({ ...driver, routeOwnerId }, endpointRoutes) ||
@@ -500,7 +504,7 @@ export async function revertAutoDispatch(options = {}) {
             const emptyRoutes = [];
             for (const [id, ref] of documents) {
                 const emptyRoute = {
-                    routeOwnerId, resetId, deviceId: id, phone: driver.phone || '',
+                    routeOwnerId, resetId, deviceId: licenseSnapshot.data().deviceId || driver.key, phone: driver.phone || '',
                     dispatchDate: selectedDate,
                     dispatchKey,
                     destinations: [], routePlan: null, startSelected: false, startLocation: null,
@@ -566,7 +570,7 @@ export async function runAutoDispatchAlgorithm() {
     }
     
     const activeDrivers = getFilteredVisibleDrivers().filter(d => 
-        autoDispatchState.selectedDrivers.has(d.deviceId || d.key)
+        autoDispatchState.selectedDrivers.has(d.routeOwnerId || d.deviceId || d.key)
     );
     
     if (activeDrivers.length === 0) {
@@ -713,7 +717,7 @@ export async function sendRoutesToDrivers() {
     const visibleDrivers = getFilteredVisibleDrivers();
 
     const selectedDriverList = visibleDrivers.filter(d => 
-        autoDispatchState.selectedDrivers.has(d.deviceId || d.key)
+        autoDispatchState.selectedDrivers.has(d.routeOwnerId || d.deviceId || d.key)
     );
 
     if (selectedDriverList.length === 0) {
@@ -725,7 +729,7 @@ export async function sendRoutesToDrivers() {
     selectedDriverList.forEach(d => {
         const dName = d.key;
         const dKey = d.key;
-        const devId = d.deviceId || d.key;
+        const devId = d.routeOwnerId || d.deviceId || d.key;
 
         const orders = state.parsedExcelList.filter(o => 
             o.assignedDriver && (o.assignedDriver === dName || o.assignedDriver === dKey || o.assignedDriver === devId)
@@ -799,9 +803,10 @@ export async function sendRoutesToDrivers() {
                 }
             });
             // 소유자 ID 도입 전 기기 문서도 자동할당 때 사용한 동일한 설정을 유지합니다.
-            if (Object.keys(ownedRoutes).length === 0 && state.activeRoutes?.[devId] &&
-                !state.activeRoutes[devId].routeOwnerId) {
-                ownedRoutes[devId] = state.activeRoutes[devId];
+            const legacyDeviceId = matchedLic.deviceId || matchedLic.key;
+            if (Object.keys(ownedRoutes).length === 0 && state.activeRoutes?.[legacyDeviceId] &&
+                !state.activeRoutes[legacyDeviceId].routeOwnerId) {
+                ownedRoutes[legacyDeviceId] = state.activeRoutes[legacyDeviceId];
             }
             const endLocation = resolveDriverEndLocation(
                 { ...matchedLic, routeOwnerId }, ownedRoutes, companyBase
@@ -816,8 +821,8 @@ export async function sendRoutesToDrivers() {
             const routePayload = {
                 routeOwnerId,
                 resetId, cleared: false,
-                deviceId: devId,
-                phone: matchedLic.phone || devId,
+                deviceId: matchedLic.deviceId || matchedLic.key,
+                phone: matchedLic.phone || matchedLic.key,
                 dispatchKey: matchedLic.dispatchKey || sessionStorage.getItem('deliveryProDispatchKey') || '',
                 destinations: orderedDestinations,
                 startSelected: true, startLocation: orderedDestinations[0],
@@ -827,7 +832,7 @@ export async function sendRoutesToDrivers() {
                 updatedAt: routeRevision
             };
 
-            await setDoc(doc(db, "routes", devId), routePayload);
+            await setDoc(doc(db, "routes", routeOwnerId), routePayload);
             if (orderedDestinations !== destinations) {
                 const sourceOrders = new Map(destinations.map((destination, i) => [destination, orders[i]]));
                 orderedDestinations.forEach(destination => {
@@ -841,7 +846,7 @@ export async function sendRoutesToDrivers() {
             }
 
             // 🌟 중복 방지: devId 외에 남아있던 구형 식별자 문서(key)는 자동 정리하여 옛날 9건 부활 차단
-            const otherKeys = [matchedLic.key].filter(k => k && k !== devId);
+            const otherKeys = [matchedLic.key, matchedLic.deviceId].filter(k => k && k !== routeOwnerId);
             for (const ok of otherKeys) {
                 try {
                     const legacyRef = doc(db, "routes", ok);
@@ -853,7 +858,7 @@ export async function sendRoutesToDrivers() {
             }
 
             // 🌟 실시간 로컬 상태 즉시 갱신
-            state.activeRoutes[devId] = routePayload;
+            state.activeRoutes[routeOwnerId] = routePayload;
             successCount++;
         }
 
@@ -888,7 +893,7 @@ export function printSelectedDriverItemList() {
         return;
     }
 
-    const targetLic = state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId || l.key === state.selectedDispatchDriverId);
+    const targetLic = state.allLicenses.find(l => l.routeOwnerId === state.selectedDispatchDriverId) || state.allLicenses.find(l => l.key === state.selectedDispatchDriverId) || state.allLicenses.find(l => l.deviceId === state.selectedDispatchDriverId);
     const driverName = targetLic ? (targetLic.phone || targetLic.key) : state.selectedDispatchDriverId;
     const assignedItems = state.parsedExcelList.filter(item => item.assignedDriver === (targetLic?.key || state.selectedDispatchDriverId));
 

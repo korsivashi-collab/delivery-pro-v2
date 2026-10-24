@@ -37,12 +37,12 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
 
     let totalWeights = 0;
     activeDrivers.forEach(d => {
-        const devId = d.deviceId || d.key;
+        const devId = d.routeOwnerId || d.deviceId || d.key;
         totalWeights += (weights[devId] || 0);
     });
 
     let driverStats = activeDrivers.map(d => {
-        const devId = d.deviceId || d.key;
+        const devId = d.routeOwnerId || d.deviceId || d.key;
         const w = weights[devId] || 0;
 
         // 가중치에 따른 물량 Cap 조정
@@ -57,7 +57,7 @@ export function calculateDriverCapacities(activeDrivers, totalOrders, weights = 
         return {
             devId,
             key: d.key || devId,
-            phone: d.phone || devId,
+            phone: d.phone || d.key || '기사',
             exactCap,
             targetCap: Math.floor(exactCap),
             remainder: exactCap - Math.floor(exactCap),
@@ -263,7 +263,7 @@ function executeCountBaselineDispatch({ targetOrders, activeDrivers, weights = {
     // 4. 출발 기준은 유지하고, 기사 종료 설정이 없을 때만 회사 복귀를 적용합니다.
     driverStats.forEach(ds => {
         if (ds.assignedOrders.length > 0) {
-            const driver = activeDrivers.find(d => (d.deviceId || d.key) === ds.devId);
+            const driver = activeDrivers.find(d => (d.routeOwnerId || d.deviceId || d.key) === ds.devId);
             ds.endLocation = resolveDriverEndLocation(driver, activeRoutes, { lat: baseLat, lng: baseLng, address: companyBase?.address || '' });
             ds.assignedOrders = optimizeRoute2Opt(ds.assignedOrders, { lat: baseLat, lng: baseLng }, ds.endLocation);
         }
@@ -306,7 +306,7 @@ function refineDispatch(options) {
     if (!result.success) return result;
 
     // 계산 순서는 입력 기사 순서로 고정합니다. 기존 건수 배정의 정렬은 바꾸지 않습니다.
-    const stats = options.activeDrivers.map(driver => result.driverStats.find(ds => ds.devId === (driver.deviceId || driver.key)));
+    const stats = options.activeDrivers.map(driver => result.driverStats.find(ds => ds.devId === (driver.routeOwnerId || driver.deviceId || driver.key)));
     const index = new Map(orders.map((order, i) => [order, i]));
     const base = { lat: Number(options.companyBase.lat), lng: Number(options.companyBase.lng) };
     const ends = stats.map((ds, d) => ds.endLocation || resolveDriverEndLocation(options.activeDrivers[d], options.activeRoutes, options.companyBase));

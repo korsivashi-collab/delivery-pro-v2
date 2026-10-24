@@ -73,13 +73,13 @@ export function inspectDriverRoute(devId, dateStr) {
         return;
     }
 
-    const matched = state.allLicenses.find(l => 
+    const matched = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => 
         l.deviceId === devId || 
         l.key === devId || 
         (l.phone && l.phone === devId) ||
         (l.phone && devId.includes(l.phone))
     );
-    const targetDevId = matched ? (matched.deviceId || matched.key) : devId;
+    const targetDevId = matched ? (matched.routeOwnerId || matched.deviceId || matched.key) : devId;
 
     setDispatchMode('DELIVERY', true);
 
@@ -292,7 +292,7 @@ export function handleGlobalSearch(query, isNewSearch = true) {
                     tag: c.tag || '전달완료',
                     driverPhone: driverPhone, 
                     customerPhone: customerPhone,
-                    devId: c.deviceId, 
+                    devId: c.routeOwnerId || c.deviceId, 
                     lat: c.lat, 
                     lng: c.lng, 
                     photoUrl: c.photoUrl || '',

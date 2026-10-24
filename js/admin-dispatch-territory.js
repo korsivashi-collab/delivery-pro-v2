@@ -82,7 +82,7 @@ export function renderLocationSidebar() {
 
     let html = `<div class="space-y-2.5">`;
     visibleLicenses.forEach(lic => {
-        const devId = lic.deviceId || lic.key;
+        const devId = lic.routeOwnerId || lic.deviceId || lic.key;
         const phone = lic.phone || '연락처 미등록';
         const driver = getDriverRouteData(lic, getLocalDateString());
         const driverComps = state.allCompletions.filter(c => classifyCompletionOwnership(c, lic) === 'owned').sort((a,b) => b.completedAt - a.completedAt);
@@ -151,14 +151,15 @@ function formatLocationReportTime(updatedAt) {
 }
 
 export async function focusDriverLocationOnMap(devId) {
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    const matchedLic = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => l.key === devId) || state.allLicenses.find(l => l.deviceId === devId);
     const phoneName = matchedLic?.phone || '기사님';
     const targetDevId = matchedLic?.deviceId || devId;
     const targetKey = matchedLic?.key || devId;
+    const targetIdentity = matchedLic?.routeOwnerId || targetKey;
 
     if (!map) return;
     cancelLocationRequest();
-    if (window.currentLocationOverlay?.locationDeviceId !== targetDevId) closeCurrentLocationOverlay(false);
+    if (window.currentLocationOverlay?.locationDeviceId !== targetIdentity) closeCurrentLocationOverlay(false);
     const request = { id: createLocationRequestId(), cancelled: false, done: false, succeeded: false, unsubscribe: null, timer: null };
     activeLocationRequest = request;
     const isCurrent = () => activeLocationRequest === request && !request.cancelled;
@@ -194,7 +195,7 @@ export async function focusDriverLocationOnMap(devId) {
                 <div class="absolute left-1/2 -bottom-2 -translate-x-1/2 w-0 h-0 border-x-8 border-x-transparent border-t-8 border-t-emerald-400"></div>
             </div>`;
         window.currentLocationOverlay = new kakao.maps.CustomOverlay({ position: pos, content: overlayContainer, zIndex: 100 });
-        window.currentLocationOverlay.locationDeviceId = targetDevId;
+        window.currentLocationOverlay.locationDeviceId = targetIdentity;
         displayedOverlay = window.currentLocationOverlay;
         const renderedOverlay = displayedOverlay;
         window.currentLocationOverlay.setMap(map); 
@@ -229,16 +230,18 @@ export async function focusDriverLocationOnMap(devId) {
         }
     };
 
-    try { await prepareDispatchAccess([targetKey]); }
+    let routeOwnerId;
+    try {
+        const owners = await prepareDispatchAccess([targetKey]);
+        routeOwnerId = owners[targetKey] || matchedLic?.routeOwnerId;
+        if (!routeOwnerId) throw new Error('기사 데이터 연결을 확인해 주세요.');
+    }
     catch (error) { noResponse(); console.warn('위치 권한 확인 실패:', error); return; }
     if (!isCurrent()) return;
 
     // 초기 조회가 느려도 요청 전송 및 응답 대기는 진행한다.
     const loadInitial = async () => {
-        let snap = await getDoc(doc(db, "gps_reports", targetDevId));
-        if (!snap.exists() && targetKey !== targetDevId) {
-            snap = await getDoc(doc(db, "gps_reports", targetKey));
-        }
+        const snap = await getDoc(doc(db, "gps_reports", routeOwnerId));
 
         if (isCurrent() && !request.succeeded && snap.exists()) {
             const data = snap.data();
@@ -252,7 +255,7 @@ export async function focusDriverLocationOnMap(devId) {
 
     updateLocationStatus('현재 위치 확인 중');
     try {
-        const unsubscribe = onSnapshot(doc(db, "gps_reports", targetDevId), (snap) => {
+        const unsubscribe = onSnapshot(doc(db, "gps_reports", routeOwnerId), (snap) => {
             if (!isCurrent() || request.done || !snap.exists()) return;
             const data = snap.data();
             if (data.requestId === request.id && data.lat && data.lng) {
@@ -269,17 +272,14 @@ export async function focusDriverLocationOnMap(devId) {
     // 전송 승인 대기도 포함한다. 오프라인 setDoc이 대기해도 UI는 10초 후 종료한다.
     request.timer = setTimeout(noResponse, 10000);
     const requestedAt = Date.now();
-    const ids = targetKey === targetDevId ? [targetDevId] : [targetDevId, targetKey];
-    for (const deviceId of ids) {
-        Promise.resolve().then(() => {
-            if (!isCurrent() || request.done) return;
-            return setDoc(doc(db, "gps_requests", deviceId), { requestId: request.id, deviceId, requestedAt });
-        }).catch(error => console.warn('위치 확인 요청 저장 실패:', error));
-    }
+    Promise.resolve().then(() => {
+        if (!isCurrent() || request.done) return;
+        return setDoc(doc(db, "gps_requests", routeOwnerId), { requestId: request.id, routeOwnerId, deviceId:targetDevId, requestedAt });
+    }).catch(error => console.warn('위치 확인 요청 저장 실패:', error));
 }
 
 export async function showFallbackLocation(devId) {
-    const matchedLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    const matchedLic = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => l.key === devId) || state.allLicenses.find(l => l.deviceId === devId);
     if (!matchedLic) return;
     const driver = getDriverRouteData(matchedLic, getLocalDateString());
     let lat = null, lng = null, timeStr = '', knownAddress = null, locationLabel = '마지막 배송 기록 위치';
@@ -348,7 +348,7 @@ export function drawAllDriversOnMap() {
     let hasPoints = false;
     
     visibleLicenses.forEach(lic => {
-        const devId = lic.deviceId || lic.key; 
+        const devId = lic.routeOwnerId || lic.deviceId || lic.key; 
         const driver = getDriverRouteData(lic, getLocalDateString());
         let pos = null;
         const driverComps = state.allCompletions.filter(c => classifyCompletionOwnership(c, lic) === 'owned').sort((a,b) => b.completedAt - a.completedAt);
@@ -437,7 +437,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
     const searchInput = document.getElementById('territory-address-search');
     if (searchInput) searchInput.value = '';
     
-    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    const targetLic = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => l.key === devId) || state.allLicenses.find(l => l.deviceId === devId);
     currentTerritorySize = targetLic?.territorySize || 100;
     const sizeDisp = document.getElementById('modal-territory-size-display');
     if (sizeDisp) sizeDisp.innerText = currentTerritorySize + '%';
@@ -497,7 +497,7 @@ export function openDriverTerritoryModal(devId, phone, lat, lng, scale) {
         
         const allDrivers = window.getFilteredVisibleDrivers();
         allDrivers.forEach(d => {
-            const dId = d.deviceId || d.key;
+            const dId = d.routeOwnerId || d.deviceId || d.key;
             if (dId === devId) return; 
             if (d.territoryLat && d.territoryLng) {
                 const pos = new kakao.maps.LatLng(d.territoryLat, d.territoryLng);
@@ -645,7 +645,7 @@ export async function saveDriverTerritory() {
 
     if (!lat || !lng) { alert("지도에 핀을 찍어 배송 권역의 중심을 설정해주세요."); return; }
 
-    const targetLic = state.allLicenses.find(l => l.deviceId === devId || l.key === devId);
+    const targetLic = state.allLicenses.find(l => l.routeOwnerId === devId) || state.allLicenses.find(l => l.key === devId) || state.allLicenses.find(l => l.deviceId === devId);
     if (!targetLic) return;
 
     try {

@@ -522,7 +522,7 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
             routeSaveRevisions.delete(routeSaveRevisions.keys().next().value);
         }
         routeSaveRevisions.set(revisionKey, revision);
-        const routeRef = doc(db, "routes", deviceId);
+        const routeRef = doc(db, "routes", routeOwnerId);
         const payload = {
             routeOwnerId,
             resetId: state.getRouteResetId(),
@@ -559,12 +559,6 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 if (remote?.routeOwnerId === routeOwnerId && Number.isFinite(remote.updatedAt) &&
                     remote.updatedAt > payload.updatedAt) return false;
                 transaction.set(routeRef, payload);
-                return true;
-            }).catch(async error => {
-                if (error.code !== 'permission-denied') throw error;
-                if (state.getRouteOwnerId() !== routeOwnerId || state.getRouteUpdatedAt() !== revision) return false;
-                // Writes still require the current driver/device; never read the previous account's payload.
-                await setDoc(routeRef, payload);
                 return true;
             });
         });
