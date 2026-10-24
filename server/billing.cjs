@@ -67,6 +67,7 @@ function evaluatePurchase(payload, now, allowSandbox = false) {
         purchase.refunded_at == null && typeof purchase.is_sandbox === 'boolean' && (!purchase.is_sandbox || allowSandbox));
     const entitlementExpiry = Math.max(Date.parse(entitlement.expires_date) || 0, Date.parse(entitlement.grace_period_expires_date) || 0);
     const valid = candidates.map(([id, purchase]) => ({ productId: canonicalProduct(id,purchase.product_plan_identifier), sandbox: purchase.is_sandbox,
+        ...(typeof purchase.store_transaction_id==='string'?{transactionId:purchase.store_transaction_id}:{}),
         expiresAt: Math.min(entitlementExpiry, Math.max(Date.parse(purchase.expires_date) || 0, Date.parse(purchase.grace_period_expires_date) || 0)) }))
         .filter(purchase => purchase.expiresAt > now).sort((a,b) => b.expiresAt-a.expiresAt)[0];
     return valid ? { ...valid, active: true, snapshotAt: payload.request_date_ms } : empty;
