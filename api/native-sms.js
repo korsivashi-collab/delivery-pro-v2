@@ -150,15 +150,12 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                     throw problem('30일 무료 체험 신청이 종료되었습니다.',410);
                 }
                 const requestId = randomUUID(), code = String(randomInt(0, 1000000)).padStart(6, '0');
-                // Vercel supplies x-forwarded-for. Global + phone caps remain authoritative even if IP changes.
-                const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim().slice(0, 100);
-                const date = new Date(stamp + 9 * 3600000).toISOString(), day = date.slice(0, 10), month = date.slice(0, 7);
+                // Before account creation, the normalized phone identifies the recipient.
+                // Shared IPs, devices and total service traffic do not consume another phone's allowance.
+                const day = new Date(stamp + 9 * 3600000).toISOString().slice(0, 10);
                 const specs = [
-                    { id: 'global', limits: { day: 100, month: 2000 } },
-                    { id: hash('phone-rate:' + digits), limits: { hour: 5, day: 20 } },
-                    { id: hash('ip-rate:' + ip), limits: { hour: 20, day: 100 } }
+                    { id: hash('phone-rate:' + digits), limits: { hour: 5, day: 20 } }
                 ];
-                if (isTrial) specs.push({id:hash('trial-device-rate:'+String(input.deviceId || '')),limits:{hour:5,day:10}});
                 const refs = specs.map(spec => db.collection('native_sms_limits').doc(spec.id));
                 await db.runTransaction(async tx => {
                     if (isTrial) await assertTrialEligible(db, tx, digits, input.deviceId);
@@ -167,7 +164,7 @@ function createHandler({ sdk = admin, env = process.env, fetchImpl = (...args) =
                     const updates = specs.map((spec, index) => {
                         const previous = limits[index].data() || {}, next = {};
                         for (const [period, maximum] of Object.entries(spec.limits)) {
-                            const bucket = period === 'hour' ? Math.floor(stamp / 3600000) : period === 'day' ? day : month;
+                            const bucket = period === 'hour' ? Math.floor(stamp / 3600000) : day;
                             const count = previous[period]?.bucket === bucket ? previous[period].count : 0;
                             if (count >= maximum) throw problem('문자 인증 발송 한도를 초과했습니다. 잠시 후 다시 시도해 주세요.', 429);
                             next[period] = { bucket, count: count + 1 };
