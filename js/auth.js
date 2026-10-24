@@ -391,14 +391,53 @@ function scheduleLicenseExpiry(data) {
 }
 
 function showLicenseRenewal(key,msg='이용기간이 만료되었습니다.') {
-    const input=document.getElementById('license-input');if(input)input.value=key;
+    const input=document.getElementById('license-input');if(input)input.value=key || '';
+    showSmsMessage(msg);
+    if(!key)return;
+    const previousFocus=document.activeElement;
+    const old=document.getElementById('license-renewal-dialog');if(old){old.close();old.remove();}
+    const dialog=document.createElement('dialog');dialog.id='license-renewal-dialog';
+    dialog.setAttribute('aria-labelledby','license-renewal-title');
+    dialog.setAttribute('aria-describedby','license-renewal-description');
+    dialog.innerHTML=`<style>
+    #license-renewal-dialog{box-sizing:border-box;width:calc(100% - 32px);max-width:384px;max-height:calc(100dvh - 32px);overflow:auto;margin:auto;padding:24px;border:1px solid #f1f5f9;border-top:4px solid #10b981;border-radius:24px;background:#fff;color:#0f172a;font-family:inherit;box-shadow:0 25px 50px -12px #0004}
+    #license-renewal-dialog::backdrop{background:#0009;backdrop-filter:blur(4px)}
+    #license-renewal-dialog *{box-sizing:border-box}
+    #license-renewal-dialog h3{display:flex;align-items:center;gap:8px;margin:0 0 12px;font-size:20px;line-height:1.4;font-weight:900}
+    #license-renewal-dialog p{margin:0;font-size:13px;line-height:1.75;color:#64748b;font-weight:600;word-break:keep-all}
+    #license-renewal-dialog .renewal-warning{color:#dc2626;font-size:15px;font-weight:800;margin-bottom:8px}
+    #license-renewal-dialog .renewal-key{margin-top:16px;padding:12px 14px;border-radius:12px;background:#f8fafc;font-size:12px;color:#64748b}
+    #license-renewal-dialog .renewal-key strong{display:block;color:#334155;font-family:monospace;font-size:15px;margin-top:4px;overflow-wrap:anywhere}
+    #license-renewal-dialog .renewal-actions{display:flex;gap:10px;margin-top:20px}
+    #license-renewal-dialog button{border:0;border-radius:12px;min-height:52px;padding:14px 10px;font-family:inherit;font-size:14px;line-height:1.4;font-weight:700;cursor:pointer}
+    #license-renewal-dialog button:focus-visible{outline:3px solid #0f172a;outline-offset:3px}
+    #license-renewal-dialog button:disabled{opacity:.6;cursor:wait}
+    </style>
+    <h3 id="license-renewal-title"><span aria-hidden="true" style="color:#dc2626">!</span> 이용기간 만료 안내</h3>
+    <p class="renewal-warning">이용권의 사용기간이 만료되었습니다.</p>
+    <p id="license-renewal-description">계속 이용하시려면 아래 버튼을 눌러<br>기존 이용권의 사용기간을 연장해 주세요.</p>
+    <div class="renewal-key">연장할 라이선스 키<strong id="license-renewal-key"></strong></div>
+    <div class="renewal-actions"><button type="button" data-renewal-cancel style="flex:1;background:#f1f5f9;color:#334155">취소</button><button type="button" data-renewal-buy autofocus style="flex:1.5;background:#059669;color:white;box-shadow:0 4px 6px #0002">이용권 연장 구매</button></div>`;
+    dialog.querySelector('#license-renewal-key').textContent=key;
+    const openPurchase=async()=>{
+        const button=dialog.querySelector('[data-renewal-buy]');button.disabled=true;
+        try{
+            const {openLicenseRenewal}=await import('./subscriptions.js');
+            dialog.close();await openLicenseRenewal(key);
+        }catch(error){showSmsMessage(error?.message || '구매창을 열지 못했습니다. 다시 시도해 주세요.');}
+        finally{button.disabled=false;}
+    };
+    dialog.querySelector('[data-renewal-buy]').onclick=openPurchase;
+    dialog.querySelector('[data-renewal-cancel]').onclick=()=>dialog.close();
+    dialog.addEventListener('close',()=>{dialog.remove();if(!document.querySelector('dialog[open]'))previousFocus?.focus();},{once:true});
+    // Keep a full-size entry available after dismissing the centered notice.
     const message=document.getElementById('auth-message');
-    if(!message)return;
-    message.textContent=msg+' ';
-    const button=document.createElement('button');button.type='button';button.textContent='이용권 구매';
-    button.className='underline font-bold';
-    button.onclick=async()=>{const {openLicenseRenewal}=await import('./subscriptions.js');await openLicenseRenewal(key);};
-    message.appendChild(button);
+    if(message){
+        const button=document.createElement('button');button.type='button';button.textContent='이용권 연장 구매';
+        button.style.cssText='display:block;width:100%;min-height:52px;margin-top:12px;padding:14px;border:0;border-radius:12px;background:#059669;color:white;font-size:15px;font-weight:800;cursor:pointer';
+        button.onclick=()=>showLicenseRenewal(key,msg);message.appendChild(button);
+    }
+    document.body.appendChild(dialog);dialog.showModal();
 }
 
 function applyVerifiedLogin(result) {
