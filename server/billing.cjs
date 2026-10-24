@@ -1,5 +1,5 @@
 const { randomUUID, randomBytes } = require('node:crypto');
-const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked } = require('./license-integrity.cjs');
+const { normalizePhone, phoneDigits, problem, isActive, assertNotBlocked, effectivePeriod } = require('./license-integrity.cjs');
 const ENTITLEMENT = 'delivery_pro';
 const PRODUCTS = ['delivery_pro:monthly','delivery_pro:quarterly','delivery_pro:halfyearly','delivery_pro:yearly'];
 // Request-local durations only: no tokens, phone numbers, keys or payment data.
@@ -185,21 +185,22 @@ async function applyPurchase(db, uid, entitlement, now, device = null, expectedC
             if (allLicenses.docs.some(doc => doc.id !== account.licenseKey && phoneDigits(doc.data().phone) === phoneDigits(account.phone) && doc.data().type !== 'trial' && isActive(doc.data(),new Date(now+9*3600000).toISOString().slice(0,10),now))) throw problem('같은 번호에 다른 이용권이 등록되었습니다.',409);
         }
         const active = latest.active === true && latest.expiresAt > now;
-        if (active || binding.exists) {
+        if (active || binding.exists || license.adminExpiresAt > now) {
             const routeOwnerId = license.routeOwnerId || profile.routeOwnerId || randomUUID();
-            const expiresAt = active ? latest.expiresAt : Math.min(latest.expiresAt || now,now);
+            const expiresAt = effectivePeriod(license, active ? latest.expiresAt : Math.min(latest.expiresAt || now,now), now).expiresAt;
+            const effectiveActive = expiresAt > now;
             const expireDate = new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
             const data = { phone: license.driverSessionId ? license.phone : account.phone, routeOwnerId, deviceId: license.driverSessionId ? license.deviceId : device || license.deviceId || profile.deviceId || '',
-                type:'regular', isTrial:false, status:active?'active':'expired', billingManaged:true, billingUid:uid,
+                type:'regular', isTrial:false, status:effectiveActive?'active':'expired', billingManaged:true, billingUid:uid,
                 expiresAt, expireDate, subscriptionProduct:latest.productId || '', subscriptionSandbox:latest.sandbox === true };
             tx.set(licenseRef,{...license,...data,key:account.licenseKey,dispatchKey:license.dispatchKey || '',isPro:true,createdAt:license.createdAt || now});
             tx.set(profileRef,{...profile,...data,key:account.licenseKey,allowTms:profile.allowTms ?? license.allowTms ?? true});
             tx.set(bindingRef,{uid,rcUserId:account.rcUserId});
             tx.set(lockRef,{revision:(lock.data()?.revision || 0)+1,updatedAt:now});
             tx.set(ref,{...account,access:{...latest,active},billingSnapshotAt:latest.snapshotAt,lastSyncAt:now});
-            return {active,valid:active,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expireDate,expiresAt,
+            return {active:effectiveActive,valid:effectiveActive,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expireDate,expiresAt,
                 routeOwnerId,dispatchKey:license.dispatchKey || '',allowTms:profile.allowTms ?? license.allowTms ?? true,
-                msg:active?'':'구독 이용기간이 만료되었습니다. 구독을 확인해 주세요.'};
+                msg:effectiveActive?'':'구독 이용기간이 만료되었습니다. 구독을 확인해 주세요.'};
         }
         tx.set(ref,{...account,access:latest,billingSnapshotAt:latest.snapshotAt,lastSyncAt:now});
         return {active:false,valid:false,msg:'확인된 Google Play 구독이 없습니다.'};

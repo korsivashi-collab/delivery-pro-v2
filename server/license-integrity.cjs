@@ -166,7 +166,7 @@ async function saveLicenses(db, request, now = Date.now()) {
                 const currentPhone = licenses.get(origKey).driverSessionId ? licenses.get(origKey).phone : account.phone;
                 if (payload.phone && phoneDigits(payload.phone) !== phoneDigits(currentPhone)) throw problem('결제 계정의 인증된 휴대폰 번호는 변경할 수 없습니다.', 409);
                 payload.phone = normalizePhone(currentPhone);
-                if (payload.type !== (licenses.get(origKey).type || 'regular') || payload.expireDate !== licenses.get(origKey).expireDate) throw problem('결제 계정의 유형·만료일은 결제/취소 결과로 관리됩니다.', 409);
+                if (payload.type !== (licenses.get(origKey).type || 'regular')) throw problem('결제 계정의 유형은 변경할 수 없습니다.', 409);
                 if (renaming && payload.key.length > 8) throw problem('새 라이선스 키는 8자리 이하로 입력해 주세요.');
             }
             const digits = phoneDigits(payload.phone);
@@ -200,6 +200,11 @@ async function saveLicenses(db, request, now = Date.now()) {
             const license = { ...previous, ...payload, ...(account?{isPro:previous.isPro??true}:{}), routeOwnerId,
                 dispatchKey: previous.dispatchKey || '', createdAt: previous.createdAt ?? now + changed.length };
             if(previous.dispatchBillingId && Number.isFinite(previous.expiresAt)) license.expiresAt=Date.parse(payload.expireDate.replace(/\./g,'-')+'T23:59:59.999+09:00');
+            if (account && (payload.expireDate !== previous.expireDate || payload.status !== previous.status)) {
+                license.adminExpiresAt = Date.parse(payload.expireDate.replace(/\./g,'-')+'T23:59:59.999+09:00');
+                license.adminPeriodUpdatedAt = now;
+                Object.assign(license,effectivePeriod(license, account.webManaged ? account.webExpiresAt : account.access?.active ? account.access.expiresAt : 0, now));
+            }
             // Toggle/phone/key changes revoke any existing test session immediately.
             if (previous.testSmsBypass === true && (!payload.testSmsBypass || renaming ||
                 phoneDigits(previous.phone) !== phoneDigits(payload.phone))) {
@@ -209,6 +214,10 @@ async function saveLicenses(db, request, now = Date.now()) {
             const profile = { ...previousProfile, key: payload.key, phone: payload.phone,
                 deviceId: payload.deviceId, status: payload.status, expireDate: payload.expireDate,
                 routeOwnerId, allowTms: previousProfile.allowTms ?? previous.allowTms ?? true };
+            if (Number.isFinite(license.adminExpiresAt)) Object.assign(profile, {
+                adminExpiresAt:license.adminExpiresAt, adminPeriodUpdatedAt:license.adminPeriodUpdatedAt,
+                expiresAt:license.expiresAt, expireDate:license.expireDate, status:license.status
+            });
             if (license.driverUid === '' && license.driverSessionId) Object.assign(profile,
                 {deviceId:license.deviceId, driverUid:'', driverSessionId:license.driverSessionId});
             if (previousProfile.type) profile.type = payload.type;
@@ -410,4 +419,10 @@ async function linkDispatchDriver(db, identity, request, now = Date.now()) {
     });
 }
 
-module.exports = { normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
+// Administrator grants are independent of provider payment history and cancellation arithmetic.
+function effectivePeriod(license, paidExpiresAt, now) {
+    const expiresAt = Math.max(paidExpiresAt || 0, Number.isFinite(license.adminExpiresAt) ? license.adminExpiresAt : 0);
+    const status = ['suspended','revoked'].includes(license.status) ? license.status : expiresAt > now ? 'active' : 'expired';
+    return { expiresAt, expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'), status };
+}
+module.exports = { effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
