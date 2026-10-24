@@ -17,9 +17,9 @@ async function loadPurchases(){
 }
 const plans=[{months:1,id:'monthly',label:'1개월',discount:0},
     {months:3,id:'quarterly',label:'3개월',discount:0},
-    {months:6,id:'halfyearly',label:'6개월',discount:5},{months:12,id:'yearly',label:'12개월',discount:10}];
-const webPlans=[{months:1,label:'1개월',discount:0},{months:3,label:'3개월',discount:5},
-    {months:6,label:'6개월',discount:10},{months:12,label:'12개월',discount:15}];
+    {months:6,id:'halfyearly',label:'6개월',discount:5},{months:12,id:'yearly',label:'12개월',discount:12}];
+const webPlans=[{months:1,label:'1개월',discount:0},{months:3,label:'3개월',discount:3},
+    {months:6,label:'6개월',discount:7},{months:12,label:'12개월',discount:15}];
 const basePrice=9900;
 const isAndroid=()=>Capacitor.getPlatform()==='android';
 const visiblePlans=()=>isAndroid()?plans:webPlans;
