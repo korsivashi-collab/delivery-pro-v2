@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const { saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, releaseInactiveDriverConnections } = require('../server/license-integrity.cjs');
+const { dispatchAccessAction, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, releaseInactiveDriverConnections } = require('../server/license-integrity.cjs');
 
 module.exports = async function handler(req, res) {
     if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
@@ -17,6 +17,7 @@ module.exports = async function handler(req, res) {
         let identity;
         try { identity = await admin.auth().verifyIdToken(token, true); }
         catch (_) { return res.status(401).json({ error: '로그인이 만료되었습니다. 다시 로그인해 주세요.' }); }
+        if (['prepareAccess', 'sendDispatchMessage', 'unlinkDispatchDriver'].includes(req.body?.action)) return res.status(200).json(await dispatchAccessAction(admin.firestore(), identity, req.body));
         if(req.body?.action==='linkDispatchDriver') return res.status(200).json(await linkDispatchDriver(admin.firestore(),identity,req.body));
         if (identity.role !== 'MASTER') return res.status(403).json({ error: '마스터 관리자만 계정을 저장할 수 있습니다.' });
         if (identity.masterSmsVerified !== true || !(identity.masterSessionExpiresAt > Date.now() / 1000)) {
