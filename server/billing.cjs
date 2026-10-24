@@ -28,6 +28,14 @@ function deviceId(value) {
     if (typeof value !== 'string' || !/^[A-Za-z0-9_-]{1,200}$/.test(value)) throw problem('기기 정보가 올바르지 않습니다.');
     return value;
 }
+// RevenueCat v1 may return the Google subscription ID and base plan separately.
+function canonicalProduct(id, plan) {
+    if (typeof id !== 'string') return '';
+    const combined=id.includes(':')?id:typeof plan==='string'?id+':'+plan:'';
+    if (!PRODUCTS.includes(combined)) return '';
+    if (id.includes(':') && plan && plan!==id.split(':')[1]) return '';
+    return combined;
+}
 // A bounded summary of the server response; never store credentials or the raw receipt.
 function purchaseDiagnosis(payload, now, allowSandbox = false) {
     const subscriber=payload?.subscriber || {}, entitlement=subscriber.entitlements?.[ENTITLEMENT];
@@ -42,8 +50,8 @@ function purchaseDiagnosis(payload, now, allowSandbox = false) {
     let code='ACTIVE';
     if(!entitlement)code='ENTITLEMENT_MISSING';
     else if(!matching.length)code='SUBSCRIPTION_MISSING';
-    else if(!matching.some(p=>PRODUCTS.includes(p.productId)))code='PRODUCT_ID_UNRECOGNIZED';
-    else if(!matching.some(p=>PRODUCTS.includes(p.productId)&&p.store==='play_store'&&!p.refunded&&typeof p.sandbox==='boolean'&&(!p.sandbox||allowSandbox)))code='STORE_REFUND_OR_SANDBOX_REJECTED';
+    else if(!matching.some(p=>!!canonicalProduct(p.productId,p.productPlanId)))code='PRODUCT_ID_UNRECOGNIZED';
+    else if(!matching.some(p=>!!canonicalProduct(p.productId,p.productPlanId)&&p.store==='play_store'&&!p.refunded&&typeof p.sandbox==='boolean'&&(!p.sandbox||allowSandbox)))code='STORE_REFUND_OR_SANDBOX_REJECTED';
     else if(!evaluatePurchase(payload,now,allowSandbox).active)code='EXPIRED_OR_INVALID_EXPIRY';
     return {code,checkedAt:now,allowSandbox,entitlementProduct:String(product || '').slice(0,160),
         entitlementExpiresAt:Math.max(Date.parse(entitlement?.expires_date)||0,Date.parse(entitlement?.grace_period_expires_date)||0),subscriptions};
@@ -55,10 +63,10 @@ function evaluatePurchase(payload, now, allowSandbox = false) {
     if (!entitlement) return empty;
     const product = entitlement.product_identifier;
     const entries = Object.entries(subscriber.subscriptions || {}).filter(([id]) => id === product || id.split(':')[0] === product);
-    const candidates = entries.filter(([id, purchase]) => PRODUCTS.includes(id) && purchase.store === 'play_store' &&
+    const candidates = entries.filter(([id, purchase]) => canonicalProduct(id,purchase.product_plan_identifier) && purchase.store === 'play_store' &&
         purchase.refunded_at == null && typeof purchase.is_sandbox === 'boolean' && (!purchase.is_sandbox || allowSandbox));
     const entitlementExpiry = Math.max(Date.parse(entitlement.expires_date) || 0, Date.parse(entitlement.grace_period_expires_date) || 0);
-    const valid = candidates.map(([id, purchase]) => ({ productId: id, sandbox: purchase.is_sandbox,
+    const valid = candidates.map(([id, purchase]) => ({ productId: canonicalProduct(id,purchase.product_plan_identifier), sandbox: purchase.is_sandbox,
         expiresAt: Math.min(entitlementExpiry, Math.max(Date.parse(purchase.expires_date) || 0, Date.parse(purchase.grace_period_expires_date) || 0)) }))
         .filter(purchase => purchase.expiresAt > now).sort((a,b) => b.expiresAt-a.expiresAt)[0];
     return valid ? { ...valid, active: true, snapshotAt: payload.request_date_ms } : empty;
