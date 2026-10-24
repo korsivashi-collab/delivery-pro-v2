@@ -641,7 +641,15 @@ async function showAccountPayments(key) {
     try {
         const data=await saveMasterLicenses({action:'paymentInfo',key});
         if(document.getElementById('edit-orig-key').value!==key)return;
-        if(!data.managed){box.textContent='결제 연결 정보 없음';return;}
+        if(!data.managed){
+            box.textContent='이 이용권에 확정된 결제 연결 없음';
+            for(const c of data.connections||[]){
+                const note=document.createElement('p');note.style.whiteSpace='pre-line';
+                note.textContent=`동일 사용자 또는 전화번호의 ${c.state}\n연결 이용권: ${c.licenseKey}\n${c.sameLicense?'현재 이용권과 키 일치':'현재 이용권과 키 불일치 — 별도 확인 필요'}${c.pendingOrderId?'\n주문번호: '+c.pendingOrderId:''}\n조회만 수행했습니다. 주문·이용권은 변경되지 않습니다.`;
+                box.append(note);
+            }
+            return;
+        }
         const phone=document.getElementById('edit-phone-input');
         if(!phone.value && data.phone) phone.value=normalizeMasterPhone(data.phone);
         phone.readOnly=true;document.getElementById('edit-expire-input').readOnly=true;
