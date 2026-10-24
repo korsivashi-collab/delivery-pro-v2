@@ -31,7 +31,20 @@ module.exports = async function handler(req, res) {
             const db=admin.firestore(),license=(await db.collection('licenses').doc(key).get()).data();
             const binding=(await db.collection('billing_license_bindings').doc(key).get()).data();
             const uid=binding?.uid||license?.billingUid;
-            if(!uid)return res.status(200).json({managed:false,payments:[]});
+            if(!uid){
+                // A reservation is not a paid license. Show mismatches without
+                // assigning them to this license or offering a refund action.
+                const {phoneDigits}=require('../server/license-integrity.cjs');
+                const digits=phoneDigits(license?.phone);
+                const accounts=digits?await db.collection('billing_accounts').get():{docs:[]};
+                const connections=accounts.docs.filter(d=>d.data().deletedAt==null&&
+                    (d.id===license?.driverUid||digits&&phoneDigits(d.data().phone)===digits)).map(d=>{
+                    const a=d.data();return {licenseKey:a.licenseKey||'',sameLicense:a.licenseKey===key,
+                        state:a.webManaged?'웹 이용권':a.access?.active?'Play 이용권':a.pendingWebOrder?'웹 주문 예약':'결제 연결 예약',
+                        pendingOrderId:a.pendingWebOrder||null};
+                });
+                return res.status(200).json({managed:false,payments:[],connections});
+            }
             const account=(await db.collection('billing_accounts').doc(uid).get()).data()||{};
             const orders=await db.collection('payment_orders').where('uid','==',uid).get();
             const payments=orders.docs.filter(d=>d.data().licenseKey===key).map(d=>{const x=d.data();return {orderId:d.id,months:x.months,amount:x.amount,status:x.status,test:x.test===true,approvedAt:x.approvedAt||null,createdAt:x.createdAt,method:x.method||null,fullyCancelled:x.cancellation?.status==='CANCELED',cancelled:account.webHistory?.find(h=>h.orderId===d.id)?.cancelled===true};}).sort((a,b)=>(b.createdAt||0)-(a.createdAt||0));
