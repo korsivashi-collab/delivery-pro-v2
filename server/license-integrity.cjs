@@ -1,5 +1,41 @@
 const { randomUUID } = require('node:crypto');
 
+// A browser cannot restore its access by copying another browser's session ID.
+function assertDispatchSession(account, identity) {
+    if (identity?.role !== 'DISPATCH' || account?.type !== 'dispatch' ||
+        typeof identity.dispatchSessionId !== 'string' || !identity.dispatchSessionId ||
+        !Array.isArray(account.activeSessions) || !account.activeSessions.includes(identity.dispatchSessionId)) {
+        throw problem('관제 접속이 해제되었습니다. 다시 로그인해 주세요.', 401);
+    }
+}
+
+async function registerDispatchSession(db, key, sessionId, now = Date.now()) {
+    return db.runTransaction(async tx => {
+        const ref = db.collection('licenses').doc(key), snapshot = await tx.get(ref), account = snapshot.data();
+        const today = new Date(now + 9 * 3600000).toISOString().slice(0, 10);
+        if (account?.type !== 'dispatch' || !isActive(account, today, now)) throw problem('사용 중인 관제 이용권이 필요합니다.', 403);
+        const configured = Number(account.maxSessions);
+        const maximum = Number.isSafeInteger(configured) && configured > 0 ? configured : (account.isPro ? 2 : 1);
+        const sessions = Array.isArray(account.activeSessions) ? account.activeSessions : [];
+        const activeSessions = [...sessions.filter(id => typeof id === 'string' && id !== sessionId), sessionId].slice(-maximum);
+        const changes = {activeSessions, currentSessionToken:sessionId, lastLoginAt:now};
+        tx.update(ref, changes);
+        return {...account, ...changes};
+    });
+}
+
+async function releaseDispatchSession(db, identity) {
+    if (identity?.role !== 'DISPATCH' || !identity.uid || !identity.dispatchSessionId) throw problem('관제 로그인이 필요합니다.', 401);
+    return db.runTransaction(async tx => {
+        const ref = db.collection('licenses').doc(identity.uid), snapshot = await tx.get(ref), account = snapshot.data();
+        if (account?.type === 'dispatch') {
+            const activeSessions = (Array.isArray(account.activeSessions) ? account.activeSessions : []).filter(id => id !== identity.dispatchSessionId);
+            tx.update(ref, {activeSessions, currentSessionToken:activeSessions.at(-1) || ''});
+        }
+        return {success:true};
+    });
+}
+
 function problem(message, status = 400) {
     return Object.assign(new Error(message), { status });
 }
@@ -433,9 +469,7 @@ async function linkDispatchDriver(db, identity, request, now = Date.now()) {
         const dispatcher = licenses.docs.find(doc => doc.id === dispatchKey)?.data();
         if (dispatcher?.type !== 'dispatch' || !isActive(dispatcher, today, now)) throw problem('관제 이용권이 만료되었거나 사용할 수 없습니다.', 403);
         if (!master) {
-            const sessions = Array.isArray(dispatcher.activeSessions) && dispatcher.activeSessions.length ? dispatcher.activeSessions :
-                (dispatcher.currentSessionToken ? [dispatcher.currentSessionToken] : []);
-            if (sessions.length && !sessions.includes(request.sessionToken)) throw problem('관제 접속이 해제되었습니다. 다시 로그인해 주세요.', 401);
+            assertDispatchSession(dispatcher, identity);
         }
         const keys = [input, `TRIAL-${input}`, `PRO-${input}`];
         let target = licenses.docs.find(doc => keys.includes(doc.id) && doc.data().type !== 'dispatch');
@@ -462,7 +496,7 @@ async function linkDispatchDriver(db, identity, request, now = Date.now()) {
     });
 }
 
-// Server-owned indexes authorize legacy owner/device documents without exposing all licenses.
+// Server-owned owner indexes authorize linked accounts without device-ID authority.
 async function dispatchAccessAction(db, identity, request, now = Date.now()) {
     if (request.action === 'prepareNoticeInbox') return prepareNoticeInbox(db, identity, request, now);
     if (request.action === 'sendDispatchMessage') return sendPrivateNotice(db, identity, request, now);
@@ -476,8 +510,7 @@ async function dispatchAccessAction(db, identity, request, now = Date.now()) {
         if (!master) {
             const dispatcher = (await tx.get(db.collection('licenses').doc(identity.uid))).data();
             if (dispatcher?.type !== 'dispatch' || !isActive(dispatcher, today, now)) throw problem('관제 이용권을 확인해 주세요.', 403);
-            const sessions = dispatcher.activeSessions?.length ? dispatcher.activeSessions : [dispatcher.currentSessionToken].filter(Boolean);
-            if (sessions.length && !sessions.includes(request.sessionToken)) throw problem('관제 접속이 해제되었습니다.', 401);
+            assertDispatchSession(dispatcher, identity);
         }
         const drivers = await Promise.all(keys.map(key => tx.get(db.collection('licenses').doc(key))));
         for (const d of drivers) {
@@ -488,7 +521,7 @@ async function dispatchAccessAction(db, identity, request, now = Date.now()) {
             const d = drivers[0], driver = d.data();
             const profile = await tx.get(db.collection('driver_profiles').doc(d.id));
             const routes = driver.routeOwnerId ? await tx.get(db.collection('routes').where('routeOwnerId', '==', driver.routeOwnerId)) : { docs: [] };
-            for (const r of routes.docs) if ([driver.deviceId, d.id].includes(r.id)) tx.delete(r.ref);
+            for (const r of routes.docs) tx.delete(r.ref);
             tx.update(d.ref, { dispatchKey: '' });
             if (profile.exists) tx.update(profile.ref, { dispatchKey: '' });
             return { success: true };
@@ -504,9 +537,6 @@ async function dispatchAccessAction(db, identity, request, now = Date.now()) {
             if (prior[i]?.exists && prior[i].data().routeOwnerId === owner) throw problem('기사 소유권이 중복되어 관리자 확인이 필요합니다.', 409);
             if (!d.data().routeOwnerId) tx.update(d.ref, { routeOwnerId: owner });
             if (mappings[i].data()?.licenseKey !== d.id) tx.set(db.collection('access_owners').doc(owner), { licenseKey: d.id });
-            for (const id of new Set([d.id, d.data().deviceId].filter(Boolean))) {
-                tx.set(db.collection('access_devices').doc(id), { licenseKey: d.id, routeOwnerId: owner });
-            }
         }
         return { success: true, owners: Object.fromEntries(drivers.map((d, i) => [d.id, owners[i]])) };
     });
@@ -529,8 +559,7 @@ async function assertNoticeSender(db, tx, identity, request, now) {
     if (identity?.role !== 'DISPATCH') throw problem('관제 로그인이 필요합니다.', 403);
     const account = (await tx.get(db.collection('licenses').doc(identity.uid))).data();
     if (account?.type !== 'dispatch' || !isActive(account, new Date(now + 9*3600000).toISOString().slice(0,10), now)) throw problem('관제 이용권을 확인해 주세요.', 403);
-    const sessions = account.activeSessions?.length ? account.activeSessions : [account.currentSessionToken].filter(Boolean);
-    if (sessions.length && !sessions.includes(request.sessionToken)) throw problem('관제 접속이 해제되었습니다.', 401);
+    assertDispatchSession(account, identity);
     return identity.uid;
 }
 async function prepareNoticeInbox(db, identity, request, now) {
@@ -648,4 +677,4 @@ function effectivePeriod(license, paidExpiresAt, now) {
     const status = ['suspended','revoked'].includes(license.status) ? license.status : expiresAt > now ? 'active' : 'expired';
     return { expiresAt, expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'), status };
 }
-module.exports = { migrateNoticeInboxes, dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
+module.exports = { assertDispatchSession, registerDispatchSession, releaseDispatchSession, migrateNoticeInboxes, dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
