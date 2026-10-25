@@ -558,3 +558,32 @@ window.moveDestinationDown = moveDestinationDown;
 
 
 window.sendOfficeMessage = () => sendOfficeMessage();
+
+// Keep policy reading inside the app so closing restores the current screen.
+document.addEventListener('click', event => {
+    const link = event.target.closest?.('a[href]');
+    if (!link) return;
+    const url = new URL(link.href, location.href);
+    if (url.origin !== location.origin || !/^\/(terms|privacy|policy)\.html$/.test(url.pathname)) return;
+    event.preventDefault();
+    const previousFocus = document.activeElement;
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('aria-label', '서비스 정책');
+    dialog.style.cssText = 'padding:0;border:0;width:100%;max-width:100%;height:100%;max-height:100%;margin:0;background:#f8fafc;';
+    const frame = document.createElement('iframe');
+    frame.title = '서비스 정책 내용';
+    frame.src = url.href;
+    frame.style.cssText = 'display:block;border:0;width:100%;height:100%;';
+    dialog.append(frame);
+    const closeMessage = message => {
+        if (message.source === frame.contentWindow && message.origin === location.origin && message.data?.type === 'delivery-policy-close') dialog.close();
+    };
+    window.addEventListener('message', closeMessage);
+    dialog.addEventListener('close', () => {
+        window.removeEventListener('message', closeMessage);
+        dialog.remove();
+        if (previousFocus?.isConnected) previousFocus.focus();
+    }, {once:true});
+    document.body.append(dialog);
+    dialog.showModal();
+});
