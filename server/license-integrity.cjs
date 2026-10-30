@@ -111,11 +111,15 @@ function withoutDriverConnection(record) {
 async function releaseInactiveDriverConnections(db,now=Date.now(),key=null) {
     const today=new Date(now+9*3600000).toISOString().slice(0,10);
     return db.runTransaction(async tx=>{
-        const licenses=key ? await Promise.all([key,'PRO-'+key,'TRIAL-'+key].map(k=>tx.get(db.collection('licenses').doc(k)))) :
-            (await tx.get(db.collection('licenses'))).docs;
-        const blocked=(await tx.get(db.collection('blocked_devices'))).docs;
-        const profileSnapshots=key ? await Promise.all(licenses.filter(s=>s.exists).map(s=>tx.get(db.collection('driver_profiles').doc(s.id)))) :
-            (await tx.get(db.collection('driver_profiles'))).docs;
+        // All reads remain in the same transaction, but unrelated network reads overlap.
+        const keys=key ? [key,'PRO-'+key,'TRIAL-'+key] : null;
+        const licenseRead=keys ? Promise.all(keys.map(k=>tx.get(db.collection('licenses').doc(k)))) : tx.get(db.collection('licenses')).then(s=>s.docs);
+        const [licenses, blockedSnapshot, profileSnapshots]=await Promise.all([
+            licenseRead,
+            tx.get(db.collection('blocked_devices')),
+            keys ? licenseRead.then(rows=>Promise.all(rows.filter(s=>s.exists).map(s=>tx.get(db.collection('driver_profiles').doc(s.id))))) : tx.get(db.collection('driver_profiles')).then(s=>s.docs)
+        ]);
+        const blocked=blockedSnapshot.docs;
         const profileMap=new Map(profileSnapshots.map(s=>[s.id,s]));
         const hasConnection=data=>data && ['phone','deviceId','driverUid','driverSessionId','deviceChangedAt'].some(f=>Object.hasOwn(data,f));
         const candidates=licenses.filter(s=>s.exists && s.data().type!=='dispatch' &&
