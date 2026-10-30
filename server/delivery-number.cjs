@@ -1,25 +1,44 @@
 const admin = require('firebase-admin');
+const {randomInt}=require('node:crypto');
 const {assertDriverSession,assertDispatchSession,isActive,problem} = require('./license-integrity.cjs');
 const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function encodeNumber(value){
  let result='';for(let i=0;i<5;i++){result=alphabet[value%alphabet.length]+result;value=Math.floor(value/alphabet.length);}
  if(value)throw problem('배송번호 발급 범위를 초과했습니다.',503);return result;
 }
-async function allocate(db,scope,ids){
+async function allocate(db,scope,ids,draw=()=>randomInt(alphabet.length**5)){
  return db.runTransaction(async tx=>{
-  const counterRef=db.collection('delivery_number_registry').doc('_counter');
-  const refs=ids.map(id=>db.collection('delivery_number_registry').doc(id));
+  const registry=db.collection('delivery_number_registry'),counterRef=registry.doc('_counter');
+  const refs=ids.map(id=>registry.doc(id));
   const [counter,...records]=await Promise.all([tx.get(counterRef),...refs.map(ref=>tx.get(ref))]);
-  let next=counter.data()?.next||0;
+  const legacyNext=counter.data()?.next||0;
   for(const record of records)if(record.exists&&record.data().scope!==scope)throw problem('배송 등록 계정이 일치하지 않습니다.',403);
-  const result=records.map((record,index)=>{
-   if(record.exists)return {deliveryId:ids[index],deliveryNumber:record.data().number};
-   const number=encodeNumber(next++);tx.set(refs[index],{scope,number,createdAt:Date.now()});
-   return {deliveryId:ids[index],deliveryNumber:number};
-  });
-  tx.set(counterRef,{next});return result;
+  const chosen=new Set(),reservations=[];
+  const result=[];
+  for(let index=0;index<ids.length;index++){
+   if(records[index].exists){result.push({deliveryId:ids[index],deliveryNumber:records[index].data().number});continue;}
+   let number,reservation;
+   for(let attempt=0;attempt<100;attempt++){
+    const value=draw();
+    // Every value below the legacy counter was already issued sequentially.
+    if(value<legacyNext)continue;
+    const candidate=encodeNumber(value);if(chosen.has(candidate))continue;
+    const ref=registry.doc('number_'+candidate),existing=await tx.get(ref);
+    if(existing.exists)continue;
+    number=candidate;reservation=ref;chosen.add(number);break;
+   }
+   if(!number)throw problem('배송번호 발급이 지연되고 있습니다. 다시 시도해 주세요.',503);
+   reservations.push({index,ref:reservation,number});result.push({deliveryId:ids[index],deliveryNumber:number});
+  }
+  // No writes before all collision checks: Firestore requires reads before writes.
+  for(const entry of reservations){
+   tx.set(entry.ref,{deliveryId:ids[entry.index],scope});
+   tx.set(refs[entry.index],{scope,number:entry.number,createdAt:Date.now()});
+  }
+  return result;
  });
 }
+
 function createHandler(sdk=admin){return async(req,res)=>{
  res.setHeader('Cache-Control','no-store');
  try{
