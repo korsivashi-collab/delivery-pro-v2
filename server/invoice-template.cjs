@@ -119,6 +119,15 @@ async function render(bytes,plan,orders){
  const pdf=Buffer.from(await output.save()).toString('base64');if(pdf.length>4200000)throw problem('출력 파일이 큽니다. 선택 주문 수를 줄여 주세요.');return {pdf,pages:count,analysisCalls:0,llmCalls:0};
  }finally{await original.destroy();}
 }
+async function editableDocument(bytes,plan){
+ const doc=await openPdf(bytes);try{const page=await doc.getPage(1),e=await readEvidence(page),p=plan.pages[0],surface=await raster(page),ctx=surface.getContext('2d');
+ const inside=(w,r)=>{const x=(w.rect[0]+w.rect[2])/2,y=(w.rect[1]+w.rect[3])/2;return x>=r[0]&&x<=r[2]&&y>=r[1]&&y<=r[3];};
+ const regions=p.tables.map(t=>t.region),nodes=e.words.filter(w=>!p.fields.some(f=>inside(w,f.rect))&&!regions.some(r=>inside(w,r))).map((w,i)=>({id:'text'+i,text:w.text,rect:w.rect}));
+ for(const r of [...e.words.map(w=>w.rect),...p.fields.map(f=>f.rect),...regions.map(inner)]){ctx.fillStyle='white';ctx.fillRect(r[0]*2.5,(r[1]-.3)*2.5,(r[2]-r[0])*2.5,(r[3]-r[1]+.6)*2.5);}
+ ctx.strokeStyle='#555';ctx.lineWidth=.45*2.5;for(const c of e.cells){if(regions.some(r=>inside(c,r)))continue;const r=c.rect;ctx.strokeRect(r[0]*2.5,r[1]*2.5,(r[2]-r[0])*2.5,(r[3]-r[1])*2.5);}
+ return {width:p.bounds[2],height:p.bounds[3],background:surface.toBuffer('image/png').toString('base64'),nodes,fields:p.fields,tables:p.tables};
+ }finally{await doc.destroy();}
+}
 async function execute(db,key,body,options={}){
  const owner=hash(key),collection=db.collection('invoice_templates'),id=body.id;
  const sourceBytes=async(ref,data)=>{if(!Number.isInteger(data.partCount)||data.partCount<1||data.partCount>12)throw problem('저장 양식이 손상되었습니다. 원본을 다시 등록해 주세요.',409);const chunks=await Promise.all(Array.from({length:data.partCount},(_,i)=>ref.collection('source').doc(String(i)).get()));const bytes=Buffer.from(chunks.map(d=>d.data()?.data||'').join(''),'base64');if(hash(bytes)!==data.version)throw problem('저장 양식이 손상되었습니다. 원본을 다시 등록해 주세요.',409);return bytes;};
@@ -133,7 +142,9 @@ async function execute(db,key,body,options={}){
   catch(error){await ref.set({state:'failed',deleted:true,leaseUntil:0},{merge:true}).catch(()=>{});throw error;}
 
  }
- const data=await get();if(body.action==='delete'){await collection.doc(id).update({deleted:true,isDefault:false});return {ok:true};}
+ const data=await get();if(body.action==='save-document'){const edits=body.edits;if(!edits||typeof edits!=='object'||Array.isArray(edits)||Object.keys(edits).length>2000||Object.entries(edits).some(([k,v])=>!/^text\d+$/.test(k)||typeof v!=='string'||v.length>2000)||Buffer.byteLength(JSON.stringify(edits))>200000)throw problem('양식 수정 내용을 확인해 주세요.');await collection.doc(id).update({documentEdits:edits});return {ok:true};}
+ if(body.action==='document'){const bytes=await sourceBytes(collection.doc(id),data);return {document:await editableDocument(bytes,data.plan),edits:data.documentEdits||{}};}
+ if(body.action==='delete'){await collection.doc(id).update({deleted:true,isDefault:false});return {ok:true};}
  if(body.action==='rename'){const title=String(body.title||'').trim();if(!title||title.length>100)throw problem('양식 이름을 확인해 주세요.');await collection.doc(id).update({title});return {ok:true};}
  if(body.action==='default'){const docs=await collection.where('owner','==',owner).get(),batch=db.batch();docs.docs.forEach(d=>batch.update(d.ref,{isDefault:d.id===id}));await batch.commit();return {ok:true};}
  if(body.action!=='render'&&body.action!=='original')throw problem('지원하지 않는 양식 요청입니다.');const bytes=await sourceBytes(collection.doc(id),data);if(body.action==='original')return {pdf:bytes.toString('base64')};return render(bytes,data.plan,body.orders);
