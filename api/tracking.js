@@ -72,7 +72,8 @@ function snapshotFor(orders, drivers, routes, date) {
     }
     const groups = new Map();
     for (const row of rows) {
-        const phone = phoneOf(row.phone); if (!phone) continue;
+        const phone = phoneOf(row.phone);
+        if (!phone && !/^[A-Za-z0-9]{5}$/.test(row.deliveryNumber || '')) continue;
         const address = addressOf(row), number=/^[A-Za-z0-9]{5}$/.test(row.deliveryNumber||'')?row.deliveryNumber:'', key = JSON.stringify([phone, address, number]);
         if (!groups.has(key)) groups.set(key, { phone, address, deliveryNumber:number, orders: [], drivers: new Set(), ids: new Set(), invalid: false });
         const group = groups.get(key), driver = String(row.assignedDriver || '');
@@ -181,6 +182,7 @@ async function livePublications(db, date, now, lookup, expandPhone = true, seed 
         ['routes','dispatch_orders','completions'].map(name => db.collection(name).where('trackingLookupKeys','array-contains',key).get()));
     const owners = new Set(foundRoutes.docs.map(d => d.data().routeOwnerId));
     if(seed.owner)owners.add(seed.owner);
+    for (const owner of seed.owners || []) if (owner) owners.add(owner);
     if(seed.company){
         const stored=await db.collection('dispatch_orders').doc(`${date}_${seed.company}`).get();
         if(stored.exists)orders.docs.push(stored);
@@ -230,8 +232,11 @@ async function livePublications(db, date, now, lookup, expandPhone = true, seed 
                 (String(o.id ?? '') === id || clean(record.orderNo) && clean(o.orderNo) === clean(record.orderNo)));
             const active = route && routeItems(route).some(d => String(d.id) === id);
             if (active) continue;
-            if (match) match._destinationId = id;
-            else if (phoneOf(record.customerPhone)) rows.push({ phone: record.customerPhone, fullAddress: record.fullAddress || record.address,
+            // The driver need not wait for background number allocation. Resolve its stable ID on the server.
+            const number = record.deliveryNumber || (record.deliveryId && record.deliveryId === seed.deliveryId ? seed.number : '');
+            if (match) { match._destinationId = id; if (number) match.deliveryNumber = number; }
+            else if (phoneOf(record.customerPhone) || number) rows.push({ phone: record.customerPhone, fullAddress: record.fullAddress || record.address,
+                deliveryId: record.deliveryId || '', deliveryNumber: number || '',
                 orderNo: record.orderNo, assignedDriver: driver, _destinationId: id });
         }
         const snapshot = snapshotFor(rows, drivers, companyRoutes, date);
@@ -311,7 +316,7 @@ function createHandler(sdk = admin) {
                 if (!/^[A-Za-z0-9]{5}$/.test(lookup)) throw problem('5자리 배송번호를 입력해 주세요.');
                 const reservation=(await db.collection('delivery_number_registry').doc('number_'+lookup).get()).data();
                 if(reservation?.scope){
-                    const seed={};let date=dayOf(now);
+                    const seed={deliveryId:reservation.deliveryId,number:lookup};let date=dayOf(now);
                     if(reservation.scope.startsWith('route:'))seed.owner=reservation.scope.slice(6);
                     else if(reservation.scope.startsWith('driver:')){
                         const driver=(await db.collection('licenses').doc(reservation.scope.slice(7)).get()).data();seed.owner=driver?.routeOwnerId;
@@ -337,6 +342,16 @@ function createHandler(sdk = admin) {
                 if (!token || token.expiresAt <= now) throw problem('배송조회 기간이 끝났거나 사용할 수 없는 링크입니다.', 404);
                 const publication = (await db.collection('delivery_tracking_publications').doc(token.publication).get()).data();
                 if (!publication || publication.expiresAt <= now) throw problem('배송조회 기간이 끝났습니다.', 404);
+                if (token.deliveryNumber) {
+                    // Keep the original token, but project the current assignment within the issuing company.
+                    const reservation = (await db.collection('delivery_number_registry').doc('number_' + token.deliveryNumber).get()).data();
+                    const index = await livePublications(db, publication.date, now, token.deliveryNumber, false, {
+                        company: publication.dispatchKey, owners: Object.values(publication.plans).map(p => p.owner),
+                        number: token.deliveryNumber, deliveryId: reservation?.deliveryId
+                    });
+                    index.publications = index.publications.filter(p => p.dispatchKey === publication.dispatchKey);
+                    return res.status(200).json(lookupPublicData(index, token.deliveryNumber, now));
+                }
                 const customerStops = publication.stops.filter(s => s.phone === token.phone);
                 if (!token.deliveryNumber && phoneOf(lookup) !== token.phone && !customerStops.some(s => s.orders.some(order => order === lookup)))
                     throw problem('입력한 정보와 일치하는 배송이 없습니다. 주문할 때 등록한 전화번호 또는 주문번호를 확인해 주세요.', 404);
