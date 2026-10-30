@@ -566,7 +566,7 @@ const invoiceOwner=()=>sessionStorage.getItem('deliveryProDispatchKey')||'';
 export async function invoiceRequest(body){
     const owner=invoiceOwner();
     if(!owner||!auth.currentUser)throw Error('관제 계정으로 로그인해 주세요.');
-    const response=await fetch('/api/invoice-template',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify({...body,dispatchKey:owner}),signal:AbortSignal.timeout(58000)});
+    const response=await fetch('/api/invoice-template',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify({...body,dispatchKey:owner}),signal:AbortSignal.timeout(body.action==='register'?175000:58000)});
     const result=await response.json();
     if(owner!==invoiceOwner())throw Error('업체가 변경되었습니다. 다시 열어 주세요.');
     if(!response.ok)throw Error(result.error||'명세서를 처리하지 못했습니다.');return result;
