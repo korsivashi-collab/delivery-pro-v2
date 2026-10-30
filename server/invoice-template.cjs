@@ -123,8 +123,8 @@ async function editableDocument(bytes,plan){
  const doc=await openPdf(bytes);try{const page=await doc.getPage(1),e=await readEvidence(page),p=plan.pages[0],surface=await raster(page),ctx=surface.getContext('2d');
  const inside=(w,r)=>{const x=(w.rect[0]+w.rect[2])/2,y=(w.rect[1]+w.rect[3])/2;return x>=r[0]&&x<=r[2]&&y>=r[1]&&y<=r[3];};
  const regions=p.tables.map(t=>t.region),nodes=e.words.filter(w=>!p.fields.some(f=>inside(w,f.rect))&&!regions.some(r=>inside(w,r))).map((w,i)=>({id:'text'+i,text:w.text,rect:w.rect}));
- for(const r of [...e.words.map(w=>w.rect),...p.fields.map(f=>f.rect),...regions.map(inner)]){ctx.fillStyle='white';ctx.fillRect(r[0]*2.5,(r[1]-.3)*2.5,(r[2]-r[0])*2.5,(r[3]-r[1]+.6)*2.5);}
- ctx.strokeStyle='#555';ctx.lineWidth=.45*2.5;for(const c of e.cells){if(regions.some(r=>inside(c,r)))continue;const r=c.rect;ctx.strokeRect(r[0]*2.5,r[1]*2.5,(r[2]-r[0])*2.5,(r[3]-r[1])*2.5);}
+  for(const r of [...p.fields.map(f=>f.rect),...regions.map(inner)]){const x=Math.ceil(r[0]*2.5),y=Math.ceil(r[1]*2.5),pixels=ctx.getImageData(x+2,y+2,Math.max(1,Math.floor((r[2]-r[0])*2.5)-4),1).data,channels=[[],[],[]];for(let k=0;k<pixels.length;k+=4)for(let c=0;c<3;c++)channels[c].push(pixels[k+c]);const pixel=channels.map(a=>a.sort((a,b)=>a-b)[Math.floor(a.length*.75)]);ctx.fillStyle=`rgb(${pixel[0]},${pixel[1]},${pixel[2]})`;ctx.fillRect(r[0]*2.5,r[1]*2.5,(r[2]-r[0])*2.5,(r[3]-r[1])*2.5);}
+
  return {width:p.bounds[2],height:p.bounds[3],background:surface.toBuffer('image/png').toString('base64'),nodes,fields:p.fields,tables:p.tables};
  }finally{await doc.destroy();}
 }
@@ -142,7 +142,7 @@ async function execute(db,key,body,options={}){
   catch(error){await ref.set({state:'failed',deleted:true,leaseUntil:0},{merge:true}).catch(()=>{});throw error;}
 
  }
- const data=await get();if(body.action==='save-document'){const edits=body.edits;if(!edits||typeof edits!=='object'||Array.isArray(edits)||Object.keys(edits).length>2000||Object.entries(edits).some(([k,v])=>!/^text\d+$/.test(k)||typeof v!=='string'||v.length>2000)||Buffer.byteLength(JSON.stringify(edits))>200000)throw problem('양식 수정 내용을 확인해 주세요.');await collection.doc(id).update({documentEdits:edits});return {ok:true};}
+ const data=await get();if(body.action==='save-document'){const edits=body.edits;if(!edits||typeof edits!=='object'||Array.isArray(edits)||Object.keys(edits).length>2000||Object.entries(edits).some(([k,v])=>!/^(?:(?:text|field)\d+|cell\d+_[A-Za-z]+)$/.test(k)||typeof v!=='string'||v.length>2000)||Buffer.byteLength(JSON.stringify(edits))>200000)throw problem('양식 수정 내용을 확인해 주세요.');await collection.doc(id).update({documentEdits:edits});return {ok:true};}
  if(body.action==='document'){const bytes=await sourceBytes(collection.doc(id),data);return {document:await editableDocument(bytes,data.plan),edits:data.documentEdits||{}};}
  if(body.action==='delete'){await collection.doc(id).update({deleted:true,isDefault:false});return {ok:true};}
  if(body.action==='rename'){const title=String(body.title||'').trim();if(!title||title.length>100)throw problem('양식 이름을 확인해 주세요.');await collection.doc(id).update({title});return {ok:true};}
