@@ -13,6 +13,10 @@
   },
   "rewrites": [
     {
+      "source": "/api/delivery-number",
+      "destination": "/api/tracking?operation=delivery-number"
+    },
+    {
       "source": "/t",
       "destination": "/tracking.html"
     },
