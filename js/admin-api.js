@@ -96,7 +96,7 @@ export function generateSecureKey() {
         p1 += chars.charAt(Math.floor(Math.random() * chars.length));
         p2 += chars.charAt(Math.floor(Math.random() * chars.length));
     }
-    return `${p1}-${p2}`;
+    return `${p1}${p2}`;
 }
 
 // The server checks the current tenant and session for every operational action.

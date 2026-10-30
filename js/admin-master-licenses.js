@@ -382,7 +382,7 @@ function generateCustomLicenseKey(keyword = '') {
         fullChars += chars.charAt(Math.floor(Math.random() * chars.length));
     }
     fullChars = fullChars.slice(0, 8);
-    return `${fullChars.slice(0, 4)}-${fullChars.slice(4, 8)}`;
+    return fullChars;
 }
 
 function getUniqueLicenseKey(keyword) {
