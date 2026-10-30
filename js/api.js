@@ -680,9 +680,11 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             await runTransaction(db, async transaction => {
                 const operation = await transaction.get(operationRef);
                 if (operation.exists() && operation.data().action === 'delete') return;
-                const existing = await transaction.get(completionRef);
                 const payload = { ...data };
-                if (existing.exists()) {
+                // A new completion does not exist yet and cannot pass the owner-based read rule.
+                // Only an existing complete operation needs the immutable retry metadata.
+                const existing = operation.exists() ? await transaction.get(completionRef) : null;
+                if (existing?.exists()) {
                     // Keep immutable metadata on retries, including records written before this release.
                     const saved = existing.data();
                     for (const field of ['deliveryId', 'deliveryNumber']) {
