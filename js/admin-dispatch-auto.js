@@ -775,6 +775,8 @@ export async function sendRoutesToDrivers() {
 
             const destinations = orders.map((ord, idx) => ({
                 id: ord.id ?? crypto.randomUUID(),
+                deliveryId: ord.deliveryId || '',
+                deliveryNumber: ord.deliveryNumber || '',
                 displayNumber: ord.displayNumber || (idx + 1),
                 address: dispatchNavigationAddress(ord.fullAddress || ord.address || ''),
                 fullAddress: ord.fullAddress || ord.address || '',

@@ -1,6 +1,7 @@
 // js/admin-dispatch-excel.js
 
-import { db } from "./admin-api.js";
+import { db, auth } from "./admin-api.js";
+import { assignDeliveryNumbers } from './delivery-number.js';
 import { state, todayStr } from "./admin-state.js";
 import { dispatchNavigationAddress, dispatchOrderReady, trackingLookupKeys } from "./address.js";
 import { processSinglePdfFile, batchGeocodePdfList } from "./admin-dispatch-pdf.js";
@@ -198,6 +199,7 @@ export function renderExcelTable() {
                     ${driverSelectOptions}
                 </select>
                 ${courseBadge}
+                ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?`<span class="text-[10px] text-slate-500" title="배송번호">${item.deliveryNumber}</span>`:''}
             </div>
         `;
 
@@ -622,19 +624,23 @@ export async function handleExcelUpload(e) {
                     }
                     if (ord.address) ord.address = cleanAddress(ord.address);
                 });
-                state.parsedExcelList.push(...parsedPdfOrders);
                 newlyAddedList.push(...parsedPdfOrders);
             }
         } else {
             const parsedExcelOrders = await processSingleExcelFile(file);
             if (parsedExcelOrders && parsedExcelOrders.length > 0) {
-                state.parsedExcelList.push(...parsedExcelOrders);
                 newlyAddedList.push(...parsedExcelOrders);
             }
         }
     }
 
     if (newlyAddedList.length > 0) {
+        await assignDeliveryNumbers(newlyAddedList,async ids=>{
+            const response=await fetch('/api/delivery-number',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},
+                body:JSON.stringify({ids,dispatchKey:sessionStorage.getItem('deliveryProDispatchKey')})});
+            const result=await response.json();if(!response.ok)throw Error(result.error||'배송번호 발급 실패');return result;
+        });
+        state.parsedExcelList.push(...newlyAddedList);
         renderExcelTable(); 
         await batchGeocodeExcelList(newlyAddedList); 
         renderExcelTable(); 
@@ -644,7 +650,8 @@ export async function handleExcelUpload(e) {
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); 
     }
     e.target.value = '';
-    } finally { window.dispatchAddressBusy = false; }
+    } catch(error) { alert(error.message || '주문 등록에 실패했습니다. 다시 시도해 주세요.'); }
+    finally { window.dispatchAddressBusy = false; }
 }
 
 export function processSingleExcelFile(file) {

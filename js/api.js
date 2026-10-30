@@ -1,4 +1,5 @@
 import { state } from './state.js';
+import { assignDeliveryNumbers } from './delivery-number.js';
 import { isNativeApp, apiFetch } from './native-platform.js';
 import { sendNativePhoneVerification } from './native-phone-auth.js';
 import { selectLatestOwnedRoute } from './route-owner.js';
@@ -54,6 +55,14 @@ export async function getDriverIdToken() {
     await auth.authStateReady();
     if (!auth.currentUser) throw new Error('로그인 후 스캔해 주세요.');
     return auth.currentUser.getIdToken();
+}
+
+export async function registerDeliveryNumbers(items) {
+ return assignDeliveryNumbers(items,async ids=>{
+  const response=await apiFetch('/api/delivery-number',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await getDriverIdToken()},
+   body:JSON.stringify({ids,key:localStorage.getItem('deliveryProKey'),deviceId:localStorage.getItem('deliveryProDeviceId')})});
+  const result=await response.json();if(!response.ok)throw Error(result.error||'배송번호 발급 실패');return result;
+ });
 }
 
 // Account ownership survives key renames and is independent of the current phone/device.
@@ -570,6 +579,8 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
             updatedAt: state.getRouteUpdatedAt() || Date.now(),
             destinations: destinations.map(d => ({
                 id: d.id,
+                deliveryId: d.deliveryId || '',
+                deliveryNumber: d.deliveryNumber || '',
                 displayNumber: d.displayNumber || 0,
                 address: d.address || "",
                 fullAddress: d.fullAddress || d.address || "",

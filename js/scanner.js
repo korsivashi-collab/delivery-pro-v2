@@ -9,7 +9,7 @@ import { toBase64_SafeCompress, showLoading, hideLoading, withRequestDeadline, g
 import { geocodeAddress } from './kakao.js';
 import { state, hasValidDeliveryCoordinates } from './state.js';
 import { getOrCreateDeviceId } from './auth.js';
-import { saveRouteToFirestore, getLocalScanUsage, saveLocalScanUsage } from './api.js';
+import { saveRouteToFirestore, getLocalScanUsage, saveLocalScanUsage, registerDeliveryNumbers } from './api.js';
 
 const MAX_MONTHLY_SCANS = 1250; 
 const SCAN_COOLDOWN_MS = 1000;
@@ -362,8 +362,10 @@ export function initCameraScan() {
         scan.diagnostics.stage = 'save';
         const currentDests = state.getDestinations();
         const nextNum = currentDests.length > 0 ? Math.max(...currentDests.map(d => d.displayNumber)) + 1 : 1;
-        const added = state.addDestination(buildGeminiDestination({ ...fields, phone: extractedPhone },
-            coords, idCounter++, nextNum, manualAddress), { prepend: true });
+        const destination=buildGeminiDestination({ ...fields, phone: extractedPhone },coords,idCounter++,nextNum,manualAddress);
+        await registerDeliveryNumbers([destination]);
+        assertCurrent();
+        const added = state.addDestination(destination, { prepend: true });
         if (!state.saveActiveData()) { scan.diagnostics.errorCode = 'LOCAL_SAVE_FAILED'; return; }
         scan.diagnostics.deliveryAdded = true;
         if (typeof window.renderList === 'function') window.renderList();
