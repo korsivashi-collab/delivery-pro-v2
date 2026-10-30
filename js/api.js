@@ -233,7 +233,7 @@ export async function firebaseVerifyLicense(key, phone, deviceId, options = {}) 
             headers:{'Content-Type':'application/json', Authorization:'Bearer ' + await user.getIdToken()},
             body:JSON.stringify({action:options.resume ? 'resume-driver' : 'login-driver', key, phone, deviceId})});
         const result = await response.json();
-        if (!response.ok) return {valid:false, isOffline:response.status >= 500 || response.status === 429, requiresSms:response.status === 401, msg:result.error || '로그인을 확인할 수 없습니다.'};
+        if (!response.ok) return {valid:false, isOffline:response.status >= 500 || response.status === 429 || response.status === 408, requiresSms:response.status === 401, msg:result.error || '로그인을 확인할 수 없습니다.'};
         if (result.token) await signInWithCustomToken(auth, result.token);
         return result;
     } catch (error) {

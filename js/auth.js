@@ -276,6 +276,7 @@ export function getOrCreateDeviceId() {
 // ==========================================
 export function clearAuthStorage() {
     serviceVersion++;
+    clearTimeout(savedAuthRetry);
     clearTimeout(licenseExpiryTimer);
     clearTimeout(deferredServices);
     resetSmsSession();
@@ -299,6 +300,7 @@ export function clearAuthStorage() {
     localStorage.removeItem('deliveryProBillingManaged');
     localStorage.removeItem('deliveryProDriverSession');
     localStorage.removeItem('deliveryProExpiresAt');
+    localStorage.removeItem('deliveryProVerifiedLogin');
     localStorage.removeItem('deliveryPro_my_parking_memos');
 }
 
@@ -453,6 +455,8 @@ function applyVerifiedLogin(result) {
     localStorage.setItem('deliveryProExpiresAt', String(result.expiresAt || ''));
     localStorage.setItem('deliveryProBillingManaged', String(result.billingManaged === true));
     localStorage.setItem('deliveryProDriverSession', result.driverSessionId);
+    localStorage.setItem('deliveryProVerifiedLogin', JSON.stringify({key:result.actualKey,phone:result.phone,
+        deviceId:getOrCreateDeviceId(),session:result.driverSessionId,owner:result.routeOwnerId}));
     startActiveServices(getOrCreateDeviceId(), result.phone, result.actualKey, result.expireDate, result.dispatchKey, result.routeOwnerId, result.testSmsBypass === true);
     scheduleLicenseExpiry(result);
 }
@@ -463,7 +467,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
     for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
         try { unsubscribe?.(); } catch (_) {}
     }
-    state.activateRouteOwner(routeOwnerId);
+    if (state.getRouteOwnerId?.() !== routeOwnerId) state.activateRouteOwner(routeOwnerId);
     restoreGpsPreference(key);
     cachedRemoteRoutes = null;
     if (typeof window.renderList === 'function') window.renderList();
@@ -534,7 +538,9 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
 // 7. 자동 로그인 (부팅 시 기존 저장된 키 검증)
 // ==========================================
 let savedAuthAttempt = null;
+let savedAuthRetry = null;
 export async function checkSavedAuth() {
+    clearTimeout(savedAuthRetry);
     getOrCreateDeviceId();
     // Share only an in-flight check for this exact local session; never cache approval.
     const identity = JSON.stringify(['deliveryProKey', 'deliveryProUserPhone', 'deliveryProDeviceId', 'deliveryProDriverSession'].map(k => localStorage.getItem(k)));
@@ -557,10 +563,28 @@ async function restoreSavedAuth() {
     const inputKey = document.getElementById('license-input'), inputPhone = document.getElementById('auth-phone-input');
     if (inputKey && savedKey) inputKey.value = savedKey;
     if (inputPhone && savedPhone) inputPhone.value = savedPhone;
+    let cached;
+    try { cached = JSON.parse(localStorage.getItem('deliveryProVerifiedLogin') || 'null'); } catch {}
+    const fastRestore = savedKey && savedPhone && cached?.key === savedKey && cached.phone === savedPhone &&
+        cached.deviceId === deviceId && cached.session && cached.session === localStorage.getItem('deliveryProDriverSession') &&
+        typeof cached.owner === 'string' && cached.owner.length > 0;
+    if (fastRestore) {
+        if (state.getRouteOwnerId?.() !== cached.owner) state.activateRouteOwner(cached.owner);
+        window.renderList?.();
+        unlockApp();
+        document.getElementById('boot-screen')?.classList.add('hidden');
+    }
     if (savedKey) {
         const result = await firebaseVerifyLicense(savedKey, savedPhone, deviceId, {resume:true});
-        if (version !== serviceVersion) return;
+        if (version !== serviceVersion || localStorage.getItem('deliveryProKey') !== savedKey || localStorage.getItem('deliveryProUserPhone') !== savedPhone) return;
         if (result.valid) { applyVerifiedLogin(result); return; }
+        if (result.isOffline && fastRestore) {
+            console.warn('인증 서버 연결을 확인하지 못했습니다. 저장된 화면을 유지합니다.');
+            savedAuthRetry = setTimeout(() => {
+                if (version === serviceVersion) checkSavedAuth().catch(error => console.warn('백그라운드 인증 재시도 실패:', error.message));
+            }, 30000);
+            return;
+        }
         if (!result.isOffline) clearAuthStorage();
         if(result.renewable)showLicenseRenewal(result.actualKey,result.msg);
         else showSmsMessage(result.msg);
