@@ -73,8 +73,8 @@ function snapshotFor(orders, drivers, routes, date) {
     const groups = new Map();
     for (const row of rows) {
         const phone = phoneOf(row.phone); if (!phone) continue;
-        const address = addressOf(row), key = JSON.stringify([phone, address]);
-        if (!groups.has(key)) groups.set(key, { phone, address, orders: [], drivers: new Set(), ids: new Set(), invalid: false });
+        const address = addressOf(row), number=/^[A-Za-z0-9]{5}$/.test(row.deliveryNumber||'')?row.deliveryNumber:'', key = JSON.stringify([phone, address, number]);
+        if (!groups.has(key)) groups.set(key, { phone, address, deliveryNumber:number, orders: [], drivers: new Set(), ids: new Set(), invalid: false });
         const group = groups.get(key), driver = String(row.assignedDriver || '');
         group.orders.push(clean(row.orderNo)); group.drivers.add(driver);
         let id = row._destinationId;
@@ -87,12 +87,13 @@ function snapshotFor(orders, drivers, routes, date) {
         if (!address || !driver || !plans[driver] || !id) group.invalid = true;
     }
     const stops = [...groups.values()].map(g => ({ phone: g.phone, address: g.address,
+        ...(g.deliveryNumber ? {deliveryNumber:g.deliveryNumber} : {}),
         orders: [...new Set(g.orders.filter(Boolean))], driver: [...g.drivers][0], ids: [...g.ids],
         invalid: g.invalid || g.drivers.size !== 1 }));
     return { plans, stops };
 }
-function projectTracking(publication, phone, liveRoutes) {
-    const ownStops = publication.stops.filter(stop => stop.phone === phone);
+function projectTracking(publication, phone, liveRoutes, deliveryNumber = '') {
+    const ownStops = publication.stops.filter(stop => stop.phone === phone && (!deliveryNumber || stop.deliveryNumber === deliveryNumber));
     return { company: publication.company, date: publication.date, expiresAt: publication.expiresAt,
         updatedAt: Date.now(), stops: ownStops.map(stop => {
             const plan = publication.plans[stop.driver];
@@ -156,7 +157,7 @@ function projectTracking(publication, phone, liveRoutes) {
             // The first remaining delivery is the next destination in the saved route, not GPS evidence.
             const next = routeList.find(s => s.status !== 'completed' && s.status !== 'cancelled');
             if (next?.status === 'pending') next.status = 'moving';
-            return { address: stop.address, orders: stop.orders, status, sequence, completedAt: completedTime(stop.ids), route: routeList };
+            return { address: stop.address, orders: stop.orders, ...(stop.deliveryNumber?{deliveryNumber:stop.deliveryNumber}:{}), status, sequence, completedAt: completedTime(stop.ids), route: routeList };
         }) };
 }
 // All customer reads start with indexed discovery; there is no whole-day fallback scan.
@@ -275,7 +276,7 @@ function createHandler(sdk = admin) {
             if ((req.method === 'GET' || lookupRequest) && !publicSearch && !/^[A-Za-z0-9_-]{16}$/.test(code)) throw problem('올바른 배송조회 링크가 아닙니다.', 404);
             if (req.method === 'GET') throw problem('전화번호 또는 주문번호를 입력해 조회해 주세요.', 400);
             const lookup = lookupRequest ? String(req.body.lookup || '').trim() : '';
-            if (lookupRequest && (!lookup || lookup.length > 150)) throw problem('전화번호 또는 주문번호를 입력해 주세요.');
+            if (lookupRequest && ((publicSearch && !lookup) || lookup.length > 150)) throw problem('전화번호 또는 주문번호를 입력해 주세요.');
             if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({
                 projectId: process.env.FIREBASE_PROJECT_ID, clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
                 privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
@@ -296,14 +297,15 @@ function createHandler(sdk = admin) {
             if (lookupRequest) {
                 const cached = cache.get(code);
                 const token = (await db.collection('delivery_tracking_tokens').doc(code).get()).data();
+                if (!lookup && !token?.deliveryNumber) throw problem('전화번호 또는 주문번호를 입력해 주세요.');
                 if (!token || token.expiresAt <= now) throw problem('배송조회 기간이 끝났거나 사용할 수 없는 링크입니다.', 404);
                 const publication = (await db.collection('delivery_tracking_publications').doc(token.publication).get()).data();
                 if (!publication || publication.expiresAt <= now) throw problem('배송조회 기간이 끝났습니다.', 404);
                 const customerStops = publication.stops.filter(s => s.phone === token.phone);
-                if (phoneOf(lookup) !== token.phone && !customerStops.some(s => s.orders.some(order => order === lookup)))
+                if (!token.deliveryNumber && phoneOf(lookup) !== token.phone && !customerStops.some(s => s.orders.some(order => order === lookup)))
                     throw problem('입력한 정보와 일치하는 배송이 없습니다. 주문할 때 등록한 전화번호 또는 주문번호를 확인해 주세요.', 404);
                 if (cached && cached.until > now && cached.data.expiresAt > now) return res.status(200).json(cached.data);
-                const keys = [...new Set(publication.stops.filter(s => s.phone === token.phone).map(s => s.driver))];
+                const keys = [...new Set(publication.stops.filter(s => s.phone === token.phone && (!token.deliveryNumber || s.deliveryNumber === token.deliveryNumber)).map(s => s.driver))];
                 if (!keys.length) throw problem('배송 정보를 확인할 수 없습니다.', 404);
                 const licenseDocs = await Promise.all(keys.map(key => db.collection('licenses').doc(key).get()));
                 if (licenseDocs.some((d, i) => d.data()?.dispatchKey !== publication.dispatchKey || d.data()?.routeOwnerId !== publication.plans[keys[i]].owner))
@@ -320,7 +322,7 @@ function createHandler(sdk = admin) {
                     (completionTimes[key] ||= {})[String(record.destinationId)] = completed ? record.completedAt : null;
                 }
                 const routes = snapshots.flatMap(s => s.docs.map(d => ({ ...d.data(), documentId: d.id })));
-                const data = projectTracking({ ...publication, completionTimes }, token.phone, routes);
+                const data = projectTracking({ ...publication, completionTimes }, token.phone, routes, token.deliveryNumber || '');
                 if (cache.size >= 500) cache.delete(cache.keys().next().value);
                 cache.set(code, { until: now + 30000, data });
                 return res.status(200).json(data);
@@ -364,14 +366,18 @@ function createHandler(sdk = admin) {
             const publicationRef = db.collection('delivery_tracking_publications').doc(publicationId);
             // One shared immutable route snapshot keeps full route data out of each customer token.
             await db.runTransaction(async tx => { const old = await tx.get(publicationRef); if (!old.exists) tx.set(publicationRef, publication); });
-            const links = phones.map(phone => {
-                const code = crypto.createHmac('sha256', secret).update(JSON.stringify([publicationId, phone])).digest().subarray(0, 12).toString('base64url');
-                return { phone, code, url: `https://mtsk.co.kr/t/${code}` };
+            const links = phones.flatMap(phone => {
+                const numbers=[...new Set(snapshot.stops.filter(s=>s.phone===phone).map(s=>s.deliveryNumber||''))];
+                return numbers.map(deliveryNumber=>{
+                    const parts=deliveryNumber?[publicationId,phone,deliveryNumber]:[publicationId,phone];
+                    const code=crypto.createHmac('sha256',secret).update(JSON.stringify(parts)).digest().subarray(0,12).toString('base64url');
+                    return {phone,code,...(deliveryNumber?{deliveryNumber}:{}),url:`https://mtsk.co.kr/t/${code}`};
+                });
             });
             for (let offset = 0; offset < links.length; offset += 400) {
                 const batch = db.batch();
                 for (const link of links.slice(offset, offset + 400)) batch.set(db.collection('delivery_tracking_tokens').doc(link.code),
-                    { publication: publicationId, phone: link.phone, expiresAt: publication.expiresAt });
+                    { publication: publicationId, phone: link.phone, ...(link.deliveryNumber?{deliveryNumber:link.deliveryNumber}:{}), expiresAt: publication.expiresAt });
                 await batch.commit();
             }
             return res.status(200).json({ links, expiresAt: publication.expiresAt });
