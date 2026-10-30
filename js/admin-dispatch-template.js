@@ -542,10 +542,9 @@ export async function saveCurrentDocumentTemplate() {
         try{const forms=ensureBuiltInForm(),form=forms.find(f=>f.id==='BUILTIN-SIKBOM-V1');form.templateHtml=templateBuilderState.currentDocHtml||form.templateHtml;localStorage.setItem('deliveryPro_savedForms',JSON.stringify(forms));alert('식봄 기본양식을 저장했습니다.');}catch(e){alert(e.message);}return;
     }
     if (!templateBuilderState.activeTemplateId) { alert('먼저 양식 PDF를 등록해 주세요.'); return; }
-    const title = prompt('양식 이름', templateBuilderState.activeTemplateTitle);
-    if (!title?.trim()) return;
-    try { await invoiceRequest({action:'rename',id:templateBuilderState.activeTemplateId,title:title.trim()}); templateBuilderState.activeTemplateTitle=title.trim(); await window.loadSavedForms?.(); }
+    try { await invoiceRequest({action:'save-document',id:templateBuilderState.activeTemplateId,edits:templateBuilderState.documentEdits||{}});alert('문서 양식을 저장했습니다. 다른 주문에도 같은 양식이 적용됩니다.'); }
     catch(e) { alert(e.message); }
+
 }
 
 // ==========================================
@@ -576,7 +575,7 @@ export function showInvoiceProgress(message){
     document.getElementById('preview-placeholder')?.classList.add('hidden');
 }
 export function clearPdfTemplate(){
-    invoicePreviewVersion++;templateBuilderState.activeTemplateId=null;templateBuilderState.currentDocHtml='';
+    invoicePreviewVersion++;templateBuilderState.documentId=null;templateBuilderState.document=null;templateBuilderState.documentEdits={};templateBuilderState.activeTemplateId=null;templateBuilderState.currentDocHtml='';
     if(invoicePdfUrl){URL.revokeObjectURL(invoicePdfUrl);invoicePdfUrl=null;}
     showInvoiceProgress('양식 PDF를 등록하거나 저장된 양식을 선택해 주세요.');
 }
@@ -587,16 +586,10 @@ export async function previewPdfOrder(order){
     if(id==='BUILTIN-SIKBOM-V1'){
         invoicePreviewVersion++;const form=ensureBuiltInForm().find(f=>f.id===id);const base=templateBuilderState.currentDocHtml||form.templateHtml;templateBuilderState.currentDocHtml=base;renderEditableDocument(order?fillTemplateWithOrderData(base,order):base,!!order);return;
     }
-    const version=++invoicePreviewVersion;showInvoiceProgress(order?'주문 내용 적용 중…':'저장된 원본 양식 불러오는 중…');
-    const result=await invoiceRequest({action:order?'render':'original',id,...(order?{orders:[order]}:{})});
-    if(version!==invoicePreviewVersion||id!==templateBuilderState.activeTemplateId)return;
-    if(invoicePdfUrl)URL.revokeObjectURL(invoicePdfUrl);invoicePdfUrl=URL.createObjectURL(new Blob([pdfBytes(result.pdf)],{type:'application/pdf'}));
-    const wrapper=document.getElementById('doc-editor-wrapper');if(!wrapper)return;wrapper.replaceChildren();
-    const toolbar=document.createElement('div');toolbar.className='flex gap-3 items-center p-3 bg-white rounded-xl w-full';
-    const title=document.createElement('span');title.textContent=templateBuilderState.activeTemplateTitle+' · 원본 양식 유지';toolbar.appendChild(title);
-    const rename=document.createElement('button');rename.textContent='양식 이름 저장';rename.onclick=saveCurrentDocumentTemplate;toolbar.appendChild(rename);
-    const link=document.createElement('a');link.href=invoicePdfUrl;link.download=order?'주문서.pdf':'원본양식.pdf';link.textContent='PDF 저장';toolbar.appendChild(link);wrapper.appendChild(toolbar);
-    const frame=document.createElement('iframe');frame.title='주문서 PDF 미리보기';frame.src=invoicePdfUrl;frame.style.cssText='width:100%;height:78vh;border:0;background:white';wrapper.appendChild(frame);
+    const version=++invoicePreviewVersion;
+    if(templateBuilderState.documentId!==id){showInvoiceProgress('편집 양식 불러오는 중…');const result=await invoiceRequest({action:'document',id});if(version!==invoicePreviewVersion||id!==templateBuilderState.activeTemplateId)return;templateBuilderState.document=result.document;templateBuilderState.documentEdits=result.edits;templateBuilderState.documentId=id;}
+    renderCompanyDocument(order);
+
 }
 export async function printPdfOrders(orders){
     if(invoiceBusy)return;
@@ -606,18 +599,29 @@ export async function printPdfOrders(orders){
         const base=templateBuilderState.currentDocHtml||ensureBuiltInForm().find(f=>f.id===id).templateHtml;
         popup.document.open();popup.document.write('<!doctype html><html lang="ko"><meta charset="utf-8"><title>식봄 주문서 인쇄</title><style>@page{size:A4;margin:0}body{margin:0;font-family:Arial,"Malgun Gothic",sans-serif}.print-order{break-after:page}.print-order:last-child{break-after:auto}*{box-sizing:border-box}</style><body>'+orders.map((o,i)=>'<section class="print-order">'+fillTemplateWithOrderData(base,o,i)+'</section>').join('')+'</body></html>');popup.document.close();await popup.document.fonts?.ready;popup.focus();popup.print();return;
     }
-    if(!window.PDFLib){alert('PDF 출력 도구를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');return;}
-    invoiceBusy=true;invoicePrinting=true;invoicePreviewVersion++;
-    const buttons=['btn-batch-print','btn-batch-print-top'].map(id=>document.getElementById(id));buttons.forEach(b=>{if(b)b.disabled=true;});
-    // Open while still in the user gesture; failures never expose a partial print document.
-    const popup=window.open('about:blank','_blank');if(popup)popup.document.body.textContent='주문서를 준비하고 있습니다…';
-    try{
-        const documentPdf=await window.PDFLib.PDFDocument.create();
-        for(let i=0;i<orders.length;i+=10){showInvoiceProgress(`주문서 생성 중… ${i} / ${orders.length}건`);const result=await invoiceRequest({action:'render',id,orders:orders.slice(i,i+10)});const part=await window.PDFLib.PDFDocument.load(pdfBytes(result.pdf));const pages=await documentPdf.copyPages(part,part.getPageIndices());pages.forEach(p=>documentPdf.addPage(p));}
-        const url=URL.createObjectURL(new Blob([await documentPdf.save()],{type:'application/pdf'}));
-        if(popup)popup.location.href=url;else{const a=document.createElement('a');a.href=url;a.download='주문서-일괄.pdf';a.click();}
-        setTimeout(()=>URL.revokeObjectURL(url),600000);
-        invoicePrinting=false;await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex||0]);
-    }catch(e){popup?.close();showInvoiceProgress(e.message);alert(e.message);}
-    finally{invoiceBusy=false;invoicePrinting=false;buttons.forEach(b=>{if(b)b.disabled=false;});}
+    if(!templateBuilderState.document||templateBuilderState.documentId!==id){await previewPdfOrder(null);}
+    const popup=window.open('about:blank','_blank');if(!popup){alert('인쇄 창의 팝업을 허용해 주세요.');return;}
+    popup.document.write('<!doctype html><html lang="ko"><meta charset="utf-8"><title>주문서 일괄 출력</title><style>@page{size:A4;margin:0}body{margin:0;font-family:"Malgun Gothic",sans-serif}*{box-sizing:border-box}.company-document{break-after:page}.company-document:last-child{break-after:auto}tr{break-inside:avoid}</style><body>'+orders.map(o=>companyDocumentHtml(o,false)).join('')+'</body></html>');popup.document.close();
+    await Promise.all([...popup.document.images].map(img=>img.complete?Promise.resolve():new Promise(r=>{img.onload=r;img.onerror=r;})));await popup.document.fonts?.ready;
+    if([...popup.document.querySelectorAll('[data-item-region]')].some(n=>n.scrollHeight>n.clientHeight+2)){popup.close();alert('상품 내용이 양식의 출력 영역을 넘었습니다. 주문을 나누어 출력해 주세요.');return;}popup.focus();popup.print();
+
+}
+
+// Editable company document: static text is editable, order fields remain data bindings.
+const documentFieldNames={storeName:'상호명',buyerName:'구매자명',address:'배송지주소',phone:'연락처',bizNo:'사업자번호',date:'주문일자',deliveryNumber:'배송번호',qty:'총수량',total:'총액',memo:'배송요청사항',payMethod:'결제수단',shippingFee:'배송비'};
+function companyDocumentHtml(order,editing){
+ const d=templateBuilderState.document,edits=templateBuilderState.documentEdits||{},o=order?{...order,...order.invoiceValues}:null,date=String(o?.orderDate||o?.date||getLocalDateString());
+ const values=o?{...o,address:o.fullAddress||o.address||'',buyerName:o.buyerName||o.storeName||'',date,year:date.slice(0,4),yearShort:date.slice(2,4),month:date.slice(5,7),day:date.slice(8,10),deliveryNumberLabel:'배송번호 :'}:{};
+ const style=r=>`position:absolute;left:${r[0]}pt;top:${r[1]}pt;width:${r[2]-r[0]}pt;min-height:${r[3]-r[1]}pt;font-size:8pt;line-height:1.15;white-space:pre-wrap;overflow-wrap:anywhere;`;
+ let html=`<section class="company-document" style="position:relative;width:${d.width}pt;height:${d.height}pt;background:white"><img alt="" style="position:absolute;width:100%;height:100%;pointer-events:none" src="data:image/png;base64,${d.background}">`;
+ for(const n of d.nodes)html+=`<span data-document-text="${n.id}" contenteditable="${editing}" style="${style(n.rect)}font-size:8pt;white-space:pre;${editing?'outline:1px dotted #aaa;':''}">${escapeTemplateText(edits[n.id]??n.text)}</span>`;
+ for(const f of d.fields)html+=`<span style="${style(f.rect)}color:${o?'#111':'#2563eb'}">${escapeTemplateText(o?(values[f.key]??''):'{{'+(documentFieldNames[f.key]||f.key)+'}}')}</span>`;
+ for(const t of d.tables){const r=t.region,columns=Object.entries(t.rows[0]).sort((a,b)=>a[1][0]-b[1][0]),items=o?(o.items||[]):[{name:'{{상품명}}',qty:'{{수량}}',price:'{{단가}}',unit:'{{규격}}',total:'{{총액}}'}];html+=`<div data-item-region style="${style(r)}height:${r[3]-r[1]}pt"><table style="width:100%;border-collapse:collapse;table-layout:fixed;font-size:8pt"><colgroup>`+columns.map(([,c])=>`<col style="width:${(c[2]-c[0])/(r[2]-r[0])*100}%">`).join('')+'</colgroup><tbody>';
+ items.forEach((source,i)=>{const item={...source,...source.invoiceValues};html+='<tr>'+columns.map(([k])=>{const v=k==='no'?i+1:k==='unit'?item.unit||item.spec||'':k==='origin'?item.origin||item.manufacturer||'':['year','month','day'].includes(k)?values[k]:item[k]??'';return `<td style="border:.5pt solid #333;padding:2pt;vertical-align:top;overflow-wrap:anywhere">${escapeTemplateText(v)}</td>`;}).join('')+'</tr>';});html+='</tbody></table></div>';}
+ return html+'</section>';
+}
+function renderCompanyDocument(order){
+ const wrapper=document.getElementById('doc-editor-wrapper');if(!wrapper)return;wrapper.innerHTML='<div class="p-3 bg-white rounded-xl flex gap-3"><button id="company-edit">양식 편집</button><button id="company-preview">주문 미리보기</button><button id="company-save">양식 저장</button><span>점선 안 회사 정보·문구를 클릭하여 수정하세요. 파란 항목은 주문에서 자동 입력됩니다.</span></div>'+companyDocumentHtml(order,!order);
+ wrapper.querySelector('#company-edit').onclick=()=>renderCompanyDocument(null);wrapper.querySelector('#company-preview').onclick=()=>renderCompanyDocument(state.printReadyList?.[state.currentPreviewInvoiceIndex||0]);wrapper.querySelector('#company-save').onclick=saveCurrentDocumentTemplate;
+ wrapper.querySelectorAll('[data-document-text]').forEach(n=>n.addEventListener('input',()=>{templateBuilderState.documentEdits??={};templateBuilderState.documentEdits[n.dataset.documentText]=n.textContent;}));
 }
