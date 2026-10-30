@@ -360,7 +360,6 @@ export function renderDriverDetailView(devId) {
                     ? `<span class="font-bold text-gray-400 whitespace-normal break-words line-through decoration-emerald-500 decoration-2">${storeBadge}${d.fullAddress || d.address}<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span></span>` 
                     : `<span class="font-bold text-gray-900 whitespace-normal break-words">${storeBadge}${d.fullAddress || d.address}<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span></span>`;
                 
-                addressHtml += `<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span>`;
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
                 let statusBadge = isDone 
                     ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` 
