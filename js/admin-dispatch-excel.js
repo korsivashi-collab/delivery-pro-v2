@@ -258,6 +258,7 @@ export function processExcelData(jsonData, fileName = '') {
     if (!jsonData || jsonData.length === 0) return [];
 
     const orderMap = Object.create(null);
+    const invoiceTotalsByOrder = new Map();
 
     jsonData.forEach((row, rowIdx) => {
         const aliases = {address:'배송지',shippingaddress:'배송지',deliveryaddress:'배송지',recipient:'받는사람',
@@ -517,6 +518,7 @@ export function processExcelData(jsonData, fileName = '') {
             total: numTotal || total  
         };
 
+        if(invoiceGrandTotal!==''){const amounts=invoiceTotalsByOrder.get(orderKey)||[];amounts.push({total:Number(invoiceGrandTotal.replace(/,/g,'')),line:Number(String(price).replace(/,/g,''))*qty});invoiceTotalsByOrder.set(orderKey,amounts);}
         if (orderMap[orderKey]) {
             orderMap[orderKey].items.push(itemObj);
             orderMap[orderKey].qty += qty;
@@ -554,6 +556,13 @@ export function processExcelData(jsonData, fileName = '') {
         }
     });
 
+    // A source column may contain per-item amounts or the same order total on every row.
+    // Aggregate row amounts; preserve a repeated order-level total (including discounts).
+    for(const [key,amounts] of invoiceTotalsByOrder){
+        if(amounts.length>1&&amounts.every(a=>Number.isFinite(a.total))&&(new Set(amounts.map(a=>a.total)).size>1||amounts.every(a=>Math.abs(a.total-a.line)<.00001))){
+            orderMap[key].invoiceValues.total=String(Math.round(amounts.reduce((sum,a)=>sum+a.total,0)*100)/100);
+        }
+    }
     const groupedList = Object.values(orderMap);
     groupedList.forEach(order => {
         if (order.items.length > 1) {
