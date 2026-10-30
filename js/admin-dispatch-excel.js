@@ -1,7 +1,6 @@
 // js/admin-dispatch-excel.js
 
-import { db, auth } from "./admin-api.js";
-import { assignDeliveryNumbers } from './delivery-number.js';
+import { db } from "./admin-api.js";
 import { state, todayStr } from "./admin-state.js";
 import { dispatchNavigationAddress, dispatchOrderReady, trackingLookupKeys } from "./address.js";
 import { processSinglePdfFile, batchGeocodePdfList } from "./admin-dispatch-pdf.js";
@@ -228,7 +227,7 @@ export function renderExcelTable() {
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1 flex-wrap mb-0.5">
                             ${item.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200">${item.storeName}</span>` : ''}
-                            ${itemCountBadge}<span class="text-[11px] font-bold text-blue-700">배송번호 ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?item.deliveryNumber:'미발급'}</span>
+                            ${itemCountBadge}<span class="text-[11px] font-bold text-blue-700">배송번호 ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?item.deliveryNumber:'전송 시 부여'}</span>
                         </div>
                         <span class="text-xs text-gray-900 block font-bold">${item.fullAddress || item.address || '-'}${!dispatchOrderReady(item) ? '<span class="block text-red-600">주소·좌표 확인 필요</span>' : ''}</span>
                         ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
@@ -607,12 +606,16 @@ export async function handleExcelUpload(e) {
     if (!files || files.length === 0) return;
 
     window.dispatchAddressBusy = true;
+    const status=document.getElementById('dispatch-work-status'),text=document.getElementById('dispatch-work-text');
+    const progress=message=>{if(text)text.textContent=message;status?.classList.remove('hidden');};
+    progress('주문서 업로드 중…');
     try {
     if (!state.parsedExcelList) state.parsedExcelList = [];
     const newlyAddedList = [];
 
     for (let i = 0; i < files.length; i++) {
         const file = files[i];
+        progress(`주문서 읽는 중… ${i+1} / ${files.length}개 파일`);
         const isPdf = file.name.toLowerCase().endsWith('.pdf') || file.type === 'application/pdf';
 
         if (isPdf) {
@@ -635,23 +638,20 @@ export async function handleExcelUpload(e) {
     }
 
     if (newlyAddedList.length > 0) {
-        await assignDeliveryNumbers(newlyAddedList,async ids=>{
-            const response=await fetch('/api/delivery-number',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},
-                body:JSON.stringify({ids,dispatchKey:sessionStorage.getItem('deliveryProDispatchKey')})});
-            const result=await response.json();if(!response.ok)throw Error(result.error||'배송번호 발급 실패');return result;
-        });
         state.parsedExcelList.push(...newlyAddedList);
         renderExcelTable(); 
+        progress(`배송지 주소 확인 중… ${newlyAddedList.length}건`);
         await batchGeocodeExcelList(newlyAddedList); 
         renderExcelTable(); 
-        await autoSaveExcelToFirebase(); 
+        progress('주문서 저장 중…');
+        if(await autoSaveExcelToFirebase()===false)throw Error('주문서 저장에 실패했습니다. 다시 시도해 주세요.');
         alert(`[업로드 완료]\n총 ${files.length}개 파일에서 ${newlyAddedList.length}곳의 배송지 데이터가 등록되었습니다.\n(현재 총 누적: ${state.parsedExcelList.length}곳)`);
     } else { 
         alert(`업로드 완료.\n하지만 올바른 양식의 주문 데이터를 찾을 수 없어 추가된 항목이 없습니다.`); 
     }
     e.target.value = '';
     } catch(error) { alert(error.message || '주문 등록에 실패했습니다. 다시 시도해 주세요.'); }
-    finally { window.dispatchAddressBusy = false; }
+    finally { window.dispatchAddressBusy = false; status?.classList.add('hidden'); }
 }
 
 export function processSingleExcelFile(file) {

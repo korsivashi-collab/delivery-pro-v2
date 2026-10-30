@@ -1,8 +1,9 @@
+import { assignDeliveryNumbers } from './delivery-number.js';
 import { dispatchNavigationAddress, dispatchOrderReady, trackingLookupKeys } from "./address.js";
 import { ensureRouteOwner } from './route-owner.js';
 // js/admin-dispatch-auto.js
 
-import { db, prepareDispatchAccess } from "./admin-api.js";
+import { db, auth, prepareDispatchAccess } from "./admin-api.js";
 import { state, getLocalDateString } from "./admin-state.js";
 import { getFilteredVisibleDrivers, formatNumber, forceClearMap, renderSidebar, drawDriverOnMap } from "./admin-dispatch-core.js";
 import { doc, setDoc, deleteDoc, getDoc, getDocs, collection, query, where, writeBatch } from "https://www.gstatic.com/firebasejs/12.18.0/firebase-firestore.js";
@@ -401,7 +402,7 @@ export function renderDispatchDriverDetail() {
             <td class="font-bold text-gray-800 whitespace-normal break-keep" title="${tooltipAddress}">
                 ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
                 ${item.fullAddress || item.address || '-'}
-                <span class="block text-[11px] text-blue-700">배송번호 ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?item.deliveryNumber:'미발급'}</span>
+                <span class="block text-[11px] text-blue-700">배송번호 ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?item.deliveryNumber:'전송 시 부여'}</span>
                 ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
             </td>
             <td class="text-center w-36" onclick="event.stopPropagation()">
@@ -762,16 +763,27 @@ export async function sendRoutesToDrivers() {
     const btn = document.getElementById('btn-send-routes-to-drivers');
     if (btn) {
         btn.disabled = true;
-        btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 전송 중...';
+        btn.innerHTML = '<i class="fa-solid fa-hourglass-half fa-spin"></i><span>동선 전송 중<br><small>(배송번호 부여)</small></span>';
     }
 
+    const status=document.getElementById('dispatch-work-status'),statusText=document.getElementById('dispatch-work-text');
+    const progress=message=>{if(statusText)statusText.textContent=message;status?.classList.remove('hidden');};
     try {
         sendingRoutes = true;
+        progress('배송번호 부여 중…');
+        await assignDeliveryNumbers(Object.values(driverMap).flatMap(group=>group.orders),async ids=>{
+            const response=await fetch('/api/delivery-number',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},
+                body:JSON.stringify({ids,dispatchKey:sessionStorage.getItem('deliveryProDispatchKey')})});
+            const result=await response.json();if(!response.ok)throw Error(result.error||'배송번호 발급 실패');return result;
+        });
+        if(typeof window.autoSaveExcelToFirebase!=='function'||await window.autoSaveExcelToFirebase()===false)throw Error('배송번호 저장에 실패했습니다. 다시 전송해 주세요.');
+        window.renderExcelTable?.();window.renderDispatchDriverDetail?.();
         let successCount = 0;
         let reordered = false;
         const nowTs = Date.now();
 
         for (const devId of sendTargetDevIds) {
+            progress(`동선 전송 중… ${successCount+1} / ${sendTargetDevIds.length}명`);
             const { driver: matchedLic, orders } = driverMap[devId];
 
             const destinations = orders.map((ord, idx) => ({
@@ -882,9 +894,10 @@ export async function sendRoutesToDrivers() {
         alert("기사 앱 전송 중 오류 발생: " + e.message);
     } finally {
         sendingRoutes = false;
+        status?.classList.add('hidden');
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = '<i class="fa-solid fa-paper-plane text-sm"></i> 동선 전송';
+            btn.innerHTML = '<i class="fa-solid fa-hourglass-half"></i><span>동선 전송<br><small>(배송번호 부여)</small></span>';
         }
     }
 }
