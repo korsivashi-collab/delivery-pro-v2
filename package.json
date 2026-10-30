@@ -21,9 +21,15 @@
     "@capacitor/android": "8.4.3",
     "@capacitor/core": "8.4.3",
     "@capacitor/ios": "8.4.3",
-    "firebase-admin": "^12.0.0"
+    "@napi-rs/canvas": "0.1.80",
+    "@pdf-lib/fontkit": "1.1.1",
+    "@revenuecat/purchases-capacitor": "13.7.4",
+    "firebase-admin": "^12.0.0",
+    "pdf-lib": "1.17.1",
+    "pdfjs-dist": "5.4.296"
   },
   "devDependencies": {
-    "@capacitor/cli": "8.4.3"
+    "@capacitor/cli": "8.4.3",
+    "esbuild": "0.25.12"
   }
 }

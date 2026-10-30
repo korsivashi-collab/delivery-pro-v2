@@ -6,9 +6,54 @@
     }
   ],
   "functions": {
-    "api/*.js": {
+    "api/admin-license-save.js": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/billing.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/dispatch-payment.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/login.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/memos.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/native-auth-session.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/native-sms.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/optimize-llm.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/payment-confirm.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/scan.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/start-trial.js": {
+      "maxDuration": 60,
+      "memory": 1024
+    },
+    "api/tracking.js": {
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "{server/NanumGothic*,node_modules/pdfjs-dist/{standard_fonts,cmaps,legacy/build}/**/*,node_modules/@napi-rs/canvas*/**/*}"
     }
   },
   "rewrites": [
