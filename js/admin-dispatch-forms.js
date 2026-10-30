@@ -16,8 +16,8 @@ export async function loadSavedForms(){
  if(current!==owner){owner=current;forms=[];clearPdfTemplate();}
  forms=ensureBuiltInForm().filter(f=>f.id==='BUILTIN-SIKBOM-V1').map(f=>({...f,isDefault:true}));drawForms();
  if(!templateBuilderState.activeTemplateId)await applySavedForm(0);
- try{const result=await invoiceRequest({action:'list'});if(current!==account()||version!==generation)return;forms=[...forms.filter(f=>f.builtIn),...result.templates];if(result.templates.some(f=>f.isDefault))forms[0].isDefault=false;drawForms();
-  if(!templateBuilderState.activeTemplateId){const index=forms.findIndex(f=>f.isDefault);if(index>=0)await applySavedForm(index);}
+ try{const result=await invoiceRequest({action:'list'});if(current!==account()||version!==generation)return;forms=[...forms.filter(f=>f.builtIn),...result.templates];if(result.templates.some(f=>f.isDefault)&&localStorage.getItem('deliveryPro_invoiceDefault_'+owner)!=='builtin')forms[0].isDefault=false;else if(localStorage.getItem('deliveryPro_invoiceDefault_'+owner)==='builtin')forms.forEach(f=>f.isDefault=!!f.builtIn);drawForms();
+  if(!templateBuilderState.activeTemplateId||(templateBuilderState.activeTemplateId==='BUILTIN-SIKBOM-V1'&&localStorage.getItem('deliveryPro_invoiceDefault_'+owner)!=='builtin')){const index=forms.findIndex(f=>f.isDefault);if(index>=0)await applySavedForm(index);}
  }catch(e){if(version!==generation)return;drawForms();const list=document.getElementById('saved-forms-list');if(list){const note=document.createElement('p');note.className='text-xs mt-2';note.textContent='저장 양식 서버 연결 실패. 식봄 기본양식은 사용할 수 있습니다.';list.appendChild(note);}}
 }
 export async function applySavedForm(idx){
@@ -25,7 +25,7 @@ export async function applySavedForm(idx){
  templateBuilderState.activeTemplateId=form.id;templateBuilderState.activeTemplateTitle=form.title;templateBuilderState.currentDocHtml=form.builtIn?form.templateHtml:'';state.currentSelectedFormIndex=idx;drawForms();
  try{await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex||0]);}catch(e){alert(e.message);}
 }
-export async function setAsDefaultForm(idx){const form=forms[idx];if(!form||owner!==account())return;if(form.builtIn){forms.forEach(f=>f.isDefault=f.builtIn===true);drawForms();await applySavedForm(idx);return;}try{await invoiceRequest({action:'default',id:form.id});await loadSavedForms();}catch(e){alert(e.message);}}
+export async function setAsDefaultForm(idx){const form=forms[idx];if(!form||owner!==account())return;if(form.builtIn){localStorage.setItem('deliveryPro_invoiceDefault_'+owner,'builtin');forms.forEach(f=>f.isDefault=f.builtIn===true);drawForms();await applySavedForm(idx);return;}try{await invoiceRequest({action:'default',id:form.id});localStorage.setItem('deliveryPro_invoiceDefault_'+owner,'server');await loadSavedForms();}catch(e){alert(e.message);}}
 export async function deleteSavedForm(idx){const form=forms[idx];if(!form||owner!==account()||!confirm('['+form.title+'] 양식을 삭제하시겠습니까?'))return;try{await invoiceRequest({action:'delete',id:form.id});if(templateBuilderState.activeTemplateId===form.id)clearPdfTemplate();await loadSavedForms();}catch(e){alert(e.message);}}
 export function toggleSelectForm(idx){return applySavedForm(idx);}
 export function previewSavedForm(idx){return applySavedForm(idx);}
