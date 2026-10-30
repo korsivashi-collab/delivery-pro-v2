@@ -260,6 +260,19 @@ function lookupPublicData(index, lookup, now) {
         expiresAt: Math.min(...selected.map(p => p.expiresAt)), updatedAt: now,
         stops: results.flatMap((result, i) => result.stops.map(stop => ({ ...stop, companyName: selected[i].company }))) };
 }
+async function checkLookupRate(db, req, kind, now) {
+    const raw=req.headers?.['x-vercel-forwarded-for'] || req.headers?.['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown';
+    const ip=String(raw).split(',')[0].trim();
+    const id=crypto.createHash('sha256').update(ip).digest('hex');
+    const ref=db.collection('delivery_tracking_limits').doc(id);
+    const window=Math.floor(now/60000),limit=kind==='number'?30:120;
+    await db.runTransaction(async tx=>{
+        const previous=(await tx.get(ref)).data()||{},entry=previous[kind];
+        const count=entry?.window===window?entry.count:0;
+        if(count>=limit)throw problem('조회 요청이 많습니다. 잠시 후 다시 시도해 주세요.',429);
+        tx.set(ref,{...previous,[kind]:{window,count:count+1},expireAt:new Date(now+3600000)});
+    });
+}
 function createHandler(sdk = admin) {
     const numberHandler = require('../server/delivery-number.cjs').createHandler(sdk);
     const cache = new Map();
@@ -284,6 +297,7 @@ function createHandler(sdk = admin) {
                 privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
             }) });
             const db = sdk.firestore(), now = Date.now();
+            if(lookupRequest)await checkLookupRate(db,req,publicSearch?'number':'link',now);
             if (lookupRequest && publicSearch) {
                 if (!/^[A-Za-z0-9]{5}$/.test(lookup)) throw problem('5자리 배송번호를 입력해 주세요.');
                 const numberLink=(await db.collection('delivery_tracking_numbers').doc(lookup).get()).data();
@@ -381,12 +395,14 @@ function createHandler(sdk = admin) {
             }
             return res.status(200).json({ links, expiresAt: publication.expiresAt });
         } catch (error) {
+            if(error.status===429)res.setHeader('Retry-After','60');
             return res.status(error.status || 500).json({ error: error.status ? error.message : '배송 정보를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.' });
         }
     };
 }
 module.exports = createHandler();
 module.exports.createHandler = createHandler;
+module.exports.checkLookupRate = checkLookupRate;
 module.exports.snapshotFor = snapshotFor;
 module.exports.projectTracking = projectTracking;
 module.exports.lookupPublicData = lookupPublicData;
