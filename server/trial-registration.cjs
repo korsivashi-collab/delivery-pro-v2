@@ -46,7 +46,7 @@ async function registerTrial(db, identity, input, now = Date.now(), offer = 'sta
     const expireDate = new Date(now + 9 * 3600000 + trialDays * 86400000).toISOString().slice(0, 10).replace(/-/g, '.');
     const chars = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
     const keyChars = Array.from({ length: 8 }, () => chars[randomInt(chars.length)]).join('');
-    const trialKey = `TRIAL-${keyChars.slice(0, 4)}-${keyChars.slice(4)}`;
+    const trialKey = keyChars;
     const routeOwnerId = randomUUID();
     return db.runTransaction(async tx => {
         const lock = await tx.get(lockRef);
@@ -54,7 +54,7 @@ async function registerTrial(db, identity, input, now = Date.now(), offer = 'sta
         if (licenses.docs.some(doc => doc.id === trialKey) || profiles.docs.some(doc => doc.id === trialKey)) throw problem('발급 키 충돌이 발생했습니다. 다시 시도해 주세요.', 409);
         const data = { key: trialKey, phone, routeOwnerId, deviceId, status: 'active', expireDate, allowTms: true, trialDays, trialSource: offer };
         tx.set(db.collection('licenses').doc(trialKey), { ...data, type: 'trial', dispatchKey: '', createdAt: now });
-        tx.set(db.collection('driver_profiles').doc(trialKey), data);
+        tx.set(db.collection('driver_profiles').doc(trialKey), { ...data, type: 'trial' });
         // Account deletion releases eligibility; replace any orphaned history.
         tx.set(historyRef, { trialKey, uid: identity.uid, createdAt: now, trialDays, trialSource: offer });
         tx.set(deviceHistoryRef, { trialKey, createdAt: now, trialDays, trialSource: offer });

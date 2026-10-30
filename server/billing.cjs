@@ -111,7 +111,7 @@ async function ensureAndroidAccount(db, identity, input, now) {
         if(web || manual)return {...owner,licenseKey:key,canPurchase:false,reason:web?'웹에서 구매한 이용권 또는 주문이 연결되어 있습니다. 기존 웹 결제 경로에서 확인해 주세요.':'현재 사용 중인 기존 이용권의 만료일은 '+(license.expireDate || '')+'입니다. 남은 기간을 확인해 주세요.'};
         if(!selectedKey){
             for(let i=0;i<10;i++){
-                const candidate=randomBytes(8).toString('hex').toUpperCase();
+                const candidate=randomBytes(4).toString('hex').toUpperCase();
                 const reserved=await Promise.all(['licenses','driver_profiles','billing_license_bindings'].map(c=>tx.get(db.collection(c).doc(candidate))));
                 if(!reserved.some(d=>d.exists)&&!accounts.docs.some(d=>d.data().licenseKey===candidate)){selectedKey=candidate;break;}
             }
