@@ -361,7 +361,7 @@ export function updateCustomerMessagePreview(invalidate=false){
  const counter=document.getElementById('customer-message-remaining');counter.textContent=total.bytes>80?`${total.bytes-80}바이트 초과 · 문구를 줄여 주세요`:`더 입력 가능 ${available}바이트 · 한글 약 ${Math.floor(available/2)}자`;counter.classList.toggle('is-over',total.bytes>80||total.unsupported);
  document.getElementById('customer-message-bytes').textContent=`전체 ${total.bytes} / 80바이트`;
  const help=document.getElementById('customer-message-validation');help.textContent=total.unsupported?'이모지 등 문자 전송 시 바뀔 수 있는 문자를 제거해 주세요.':total.bytes>80?'단문 한도를 넘었습니다. 자동으로 장문 전환하지 않습니다.':`배송번호와 고객별 전용 주소, 줄바꿈을 포함한 길이입니다. 최종 확인 시 실제 고객별 문구를 다시 검증합니다.`;help.classList.toggle('is-error',total.unsupported||total.bytes>80);
- updateCustomerSelectionSummary();
+ renderCustomerSmsMode();updateCustomerSelectionSummary();
 }
 function renderCustomerSavedTemplate(body,fixed){
  const key=customerDispatchKey();let saved=null,unavailable=false;
@@ -503,7 +503,11 @@ function customerSelectedMessageGroups(){const groups=new Map();for(const stop o
  const key=customerSmsMode()==='per-address'?JSON.stringify([stop.phone,stop.address]):stop.deliveryNumber;
  if(!groups.has(key))groups.set(key,[]);groups.get(key).push(stop);
 }return [...groups.values()];}
-export function changeCustomerSmsMode(){if(customerSendBusy)return;customerPreparedBatch=null;updateCustomerMessagePreview();}
+function renderCustomerSmsMode(){
+ const mode=customerSmsMode();document.querySelectorAll('[data-customer-sms-mode]').forEach(button=>{button.setAttribute('aria-pressed',String(button.dataset.customerSmsMode===mode));button.disabled=customerSendBusy;});
+ const description=document.getElementById('customer-mode-description');if(description)description.textContent=mode==='per-address'?'같은 주소·같은 연락처의 선택 주문들을 문자 한 건으로 안내합니다.':'선택한 주문의 배송번호마다 각각 문자 한 건을 발송합니다.';
+}
+export function changeCustomerSmsMode(mode){if(customerSendBusy)return;const input=document.getElementById('customer-sms-mode');if(input&&['per-address','per-delivery'].includes(mode))input.value=mode;customerPreparedBatch=null;updateCustomerMessagePreview();}
 function updateCustomerSelectionSummary(){const count=customerSelectedNumbers.size,smsCount=customerSelectedMessageGroups().length,number=document.getElementById('customer-selected-count');if(number)number.textContent=count;const cost=document.getElementById('customer-selected-cost');if(cost)cost.textContent=`문자 ${smsCount}건 · 예상 ${customerMoney(smsCount*CUSTOMER_SMS_PRICE)} · 부가세 포함`;const summary=document.getElementById('customer-list-selection');if(summary)summary.textContent=`배송번호 ${count}건 선택 · 문자 ${smsCount}건 · 예상 ${customerMoney(smsCount*CUSTOMER_SMS_PRICE)}`;const button=document.getElementById('customer-review-button');if(button)button.textContent=smsCount?`문자 발송 확인 (${smsCount}건)`:'문자 발송 확인';}
 function openCustomerDialog(title,html){const dialog=document.getElementById('customer-action-dialog');if(!dialog)return;customerDialogFocus=document.activeElement;document.getElementById('customer-dialog-heading').textContent=title;document.getElementById('customer-dialog-body').innerHTML=html;if(!dialog.open)dialog.showModal();}
 export function closeCustomerDialog(){const dialog=document.getElementById('customer-action-dialog');if(dialog?.open){dialog.close();if(customerDialogFocus?.isConnected)customerDialogFocus.focus();}}
@@ -544,7 +548,7 @@ export async function reviewCustomerSend(){
 async function sendPreparedCustomerSms(){
  if(customerSendBusy||!customerPreparedBatch)return;
  const owner=customerDispatchKey(),date=customerPreparedBatch.date,batchId=customerPreparedBatch.batchId;let failed=false;
- customerSendBusy=true;for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=true;}const button=document.getElementById('customer-confirm-send');if(button)button.disabled=true;
+ customerSendBusy=true;renderCustomerSmsMode();for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=true;}const button=document.getElementById('customer-confirm-send');if(button)button.disabled=true;
  try{
   for(let part=0;part<customerPreparedBatch.parts.length;part++){
    if(customerPreparedBatch.parts[part].status!=='prepared')continue;
@@ -554,7 +558,7 @@ async function sendPreparedCustomerSms(){
   }
   await refreshCustomerSmsResults();
  }catch(e){failed=true;openCustomerDialog('발송 결과 확인 필요',`<p>${escapeMessage(e.message)}</p><p>이미 접수된 문자가 있을 수 있습니다. 재발송하지 말고 발송 결과 확인을 눌러 주세요.</p><button type="button" id="customer-recover-status">발송 결과 확인</button>`);document.getElementById('customer-recover-status').onclick=refreshCustomerSmsResults;}
- finally{customerSendBusy=false;for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=false;}if(!failed&&customerPreparedBatch&&owner===customerDispatchKey())renderCustomerSendReview(customerPreparedBatch);renderCustomerDeliveryList();refreshDispatchWallet();}
+ finally{customerSendBusy=false;renderCustomerSmsMode();for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=false;}if(!failed&&customerPreparedBatch&&owner===customerDispatchKey())renderCustomerSendReview(customerPreparedBatch);renderCustomerDeliveryList();refreshDispatchWallet();}
 }
 export async function refreshCustomerSmsResults(showDialog=true){
  const key='customerSmsBatches:'+encodeURIComponent(customerDispatchKey())+':'+document.getElementById('customer-delivery-date').value;
