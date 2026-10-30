@@ -357,9 +357,10 @@ export function renderDriverDetailView(devId) {
                     : `<span class="w-5 h-5 bg-blue-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>`;
                 
                 let addressHtml = isDone 
-                    ? `<span class="font-bold text-gray-400 whitespace-normal break-words line-through decoration-emerald-500 decoration-2">${storeBadge}${d.fullAddress || d.address}</span>` 
-                    : `<span class="font-bold text-gray-900 whitespace-normal break-words">${storeBadge}${d.fullAddress || d.address}</span>`;
+                    ? `<span class="font-bold text-gray-400 whitespace-normal break-words line-through decoration-emerald-500 decoration-2">${storeBadge}${d.fullAddress || d.address}<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span></span>` 
+                    : `<span class="font-bold text-gray-900 whitespace-normal break-words">${storeBadge}${d.fullAddress || d.address}<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span></span>`;
                 
+                addressHtml += `<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span>`;
                 let timeOnly = comp && comp.timeString ? comp.timeString.split(' ')[1] : '';
                 let statusBadge = isDone 
                     ? `<span class="bg-emerald-100 text-emerald-800 text-[10px] font-black px-2 py-0.5 rounded shadow-2xs shrink-0 whitespace-nowrap">✓ 완료 ${timeOnly ? timeOnly + ' ' : ''}[${comp.tag || '완료'}]</span>` 
@@ -389,7 +390,7 @@ export function renderDriverDetailView(devId) {
                 <div onclick="window.focusMapPosition(${d.lat}, ${d.lng})" class="p-2.5 rounded-xl border bg-amber-50/40 border-amber-200 hover:border-amber-400 flex items-center justify-between text-xs shadow-xs cursor-pointer transition">
                     <div class="flex items-center gap-2 min-w-0 flex-1">
                         <span class="w-5 h-5 bg-amber-600 text-white rounded-full flex items-center justify-center font-black text-[10px] shrink-0 shadow-xs">${num}</span>
-                        <span class="font-bold text-gray-900 truncate">${storeBadge}${d.fullAddress || d.address}</span>
+                        <span class="font-bold text-gray-900 truncate">${storeBadge}${d.fullAddress || d.address}<span class="block text-[11px] text-blue-700 mt-1">배송번호 ${/^[A-Za-z0-9]{5}$/.test(d.deliveryNumber||'')?d.deliveryNumber:'서버 처리 중'}</span></span>
                     </div>
                     <div class="flex items-center gap-1.5 shrink-0 ml-2">
                         <span class="bg-amber-100 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded border border-amber-200 shrink-0">배송 대기</span>

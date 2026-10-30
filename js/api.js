@@ -1,5 +1,4 @@
 import { state } from './state.js';
-import { assignDeliveryNumbers } from './delivery-number.js';
 import { isNativeApp, apiFetch } from './native-platform.js';
 import { sendNativePhoneVerification } from './native-phone-auth.js';
 import { selectLatestOwnedRoute } from './route-owner.js';
@@ -57,13 +56,13 @@ export async function getDriverIdToken() {
     return auth.currentUser.getIdToken();
 }
 
-export async function registerDeliveryNumbers(items) {
- return assignDeliveryNumbers(items,async ids=>{
-  const response=await apiFetch('/api/delivery-number',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await getDriverIdToken()},
-   body:JSON.stringify({ids,key:localStorage.getItem('deliveryProKey'),deviceId:localStorage.getItem('deliveryProDeviceId')})});
-  const result=await response.json();if(!response.ok)throw Error(result.error||'배송번호 발급 실패');return result;
- });
+async function requestRouteNumbers(deviceId) {
+ const key=localStorage.getItem('deliveryProKey');
+ const response=await apiFetch('/api/delivery-number',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await getDriverIdToken()},
+  body:JSON.stringify({action:'number-route',key,deviceId})});
+ if(!response.ok){const result=await response.json();throw Error(result.error||'배송번호 처리 실패');}
 }
+
 
 // Account ownership survives key renames and is independent of the current phone/device.
 export function getLocalScanUsage() {
@@ -608,12 +607,23 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 // A newer dispatch/reset must survive an older delayed device write.
                 if (remote?.routeOwnerId === routeOwnerId && Number.isFinite(remote.updatedAt) &&
                     remote.updatedAt > payload.updatedAt) return false;
+                const previousNumbers=new Map((remote?.destinations||[]).filter(d=>d.deliveryNumber).map(d=>[String(d.id),d]));
+                payload.destinations=payload.destinations.map(d=>{
+                    const previous=previousNumbers.get(String(d.id));
+                    return !d.deliveryNumber&&previous?{...d,deliveryId:previous.deliveryId||'',deliveryNumber:previous.deliveryNumber}:d;
+                });
                 transaction.set(routeRef, payload);
                 return true;
             });
         });
         routeSaveTasks.set(revisionKey, task);
-        try { return await task; }
+        try {
+            const saved=await task;
+            if(saved===true&&state.getRouteOwnerId()===routeOwnerId&&payload.destinations.some(d=>!d.deliveryNumber)) {
+                requestRouteNumbers(deviceId).catch(error=>console.warn('서버 배송번호 처리 지연:',error.message));
+            }
+            return saved;
+        }
         finally { if (routeSaveTasks.get(revisionKey) === task) routeSaveTasks.delete(revisionKey); }
     } catch (e) {
         if (routeSaveRevisions.get(revisionKey) === revision) routeSaveRevisions.delete(revisionKey);

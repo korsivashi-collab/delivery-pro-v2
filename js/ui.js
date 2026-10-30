@@ -164,7 +164,6 @@ export function renderDestinationList(preloadBatchMemosCallback, renderMemoPrevi
             const navLat = needsLocation ? 0 : dest.lat;
             const navLng = needsLocation ? 0 : dest.lng;
             if (!formatted.cleanAddr && !formatted.storeName) displayAddressHTML = '<span>주소 정보 없음 · 주소 수정 필요</span>';
-            if (/^[A-Za-z0-9]{5}$/.test(dest.deliveryNumber || '')) displayAddressHTML += `<span class="block text-[11px] text-slate-500 mt-1">배송번호 ${state.escapeHtml(dest.deliveryNumber)}</span>`;
             if (needsLocation) displayAddressHTML += '<span class="block text-xs text-amber-700">위치 확인 필요 · 주소 수정</span>';
             const isFirst = index === 0;
             const isLast = index === destinations.length - 1;
