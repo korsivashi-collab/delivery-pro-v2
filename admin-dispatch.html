@@ -260,7 +260,7 @@
                     <i class="fa-solid fa-robot text-sm"></i> 자동할당 실행
                 </button>
                 <button type="button" id="btn-send-routes-to-drivers" onclick="window.sendRoutesToDrivers()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-black px-4 py-2.5 rounded-xl transition shadow-sm active:scale-95 flex items-center gap-1.5 whitespace-nowrap" title="좌측 목록에서 체크(토글)된 기사들에게 배송 동선을 전송합니다">
-                    <i class="fa-solid fa-paper-plane text-sm"></i> 동선 전송
+                    <i class="fa-solid fa-hourglass-half text-sm"></i><span>동선 전송<br><small>(배송번호 부여)</small></span>
                 </button>
                 </div>
             </div>
@@ -637,8 +637,9 @@
         </div>
     </div>
 
+    <div id="dispatch-work-status" role="status" aria-live="polite" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3"><i class="fa-solid fa-hourglass-half fa-spin" aria-hidden="true"></i><span id="dispatch-work-text">작업 중…</span></div>
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261030-delivery-number-display","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261022-sms-routes-pricing","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261022-sms-link-only","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-delivery-number-display","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261030-delivery-number-display"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261030-send-number-progress","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261022-sms-routes-pricing","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261022-sms-link-only","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261030-send-number-progress"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261022-dispatch-signup"></script>
 </body>
 </html>
