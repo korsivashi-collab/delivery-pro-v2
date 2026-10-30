@@ -97,7 +97,7 @@ function projectTracking(publication, phone, liveRoutes, deliveryNumber = '') {
     return { company: publication.company, date: publication.date, expiresAt: publication.expiresAt,
         updatedAt: Date.now(), stops: ownStops.map(stop => {
             const plan = publication.plans[stop.driver];
-            if (!plan || !stop.ids.length) return { address: stop.address, orders: stop.orders,
+            if (!plan || !stop.ids.length) return { address: stop.address, orders: stop.orders, ...(stop.deliveryNumber?{deliveryNumber:stop.deliveryNumber}:{}),
                 status: 'preparing', sequence: [], route: [] };
             const route = latestRoute(liveRoutes, plan.owner);
             const sameDay = route && routeDay(route) === publication.date;
@@ -172,12 +172,18 @@ async function ownerCompletions(db, owners, date) {
     return snapshots.flatMap((s,i) => s.docs.map(d => d.data()).filter(r =>
         r.routeOwnerId === owners[i] && r.completedAt >= start && r.completedAt < start + DAY));
 }
-async function livePublications(db, date, now, lookup, expandPhone = true) {
+async function livePublications(db, date, now, lookup, expandPhone = true, seed = {}) {
     const start = Date.parse(date + 'T00:00:00+09:00'), key = lookupKey(date,lookup);
-    const phone = phoneOf(lookup), matches = item => phone ? phoneOf(item.customerPhone || item.phone) === phone : clean(item.orderNo) === clean(lookup);
+    const phone = phoneOf(lookup), number=/^[A-Za-z0-9]{5}$/.test(lookup)?lookup:'';
+    const matches = item => number ? item.deliveryNumber===number : phone ? phoneOf(item.customerPhone || item.phone) === phone : clean(item.orderNo) === clean(lookup);
     const [foundRoutes, orders, foundCompletions] = await Promise.all(
         ['routes','dispatch_orders','completions'].map(name => db.collection(name).where('trackingLookupKeys','array-contains',key).get()));
     const owners = new Set(foundRoutes.docs.map(d => d.data().routeOwnerId));
+    if(seed.owner)owners.add(seed.owner);
+    if(seed.company){
+        const stored=await db.collection('dispatch_orders').doc(`${date}_${seed.company}`).get();
+        if(stored.exists)orders.docs.push(stored);
+    }
     for (const d of foundCompletions.docs) if (matches(d.data())) owners.add(d.data().routeOwnerId);
     owners.delete(undefined); owners.delete('');
     const assignedKeys = new Set(orders.docs.flatMap(d => (d.data().orders || []).filter(matches).map(o => o.assignedDriver)).filter(Boolean));
@@ -188,6 +194,7 @@ async function livePublications(db, date, now, lookup, expandPhone = true) {
     const driverMap = new Map([...ownerLicenses.flatMap(s => s.docs),...assignedLicenses]
         .filter(d => d.exists).map(d => [d.id,{...d.data(),key:d.id}]));
     const companyKeys = new Set([...driverMap.values()].map(d => d.dispatchKey).filter(Boolean));
+    if(seed.company)companyKeys.add(seed.company);
     for (const d of orders.docs) if ((d.data().orders || []).some(matches)) companyKeys.add(d.data().dispatchKey || d.id.slice(date.length + 1));
     const companies = await Promise.all([...companyKeys].filter(Boolean).map(key => db.collection('licenses').doc(key).get()));
     const allLicenses = [...driverMap.values(),...companies.filter(d => d.exists).map(d => ({...d.data(),key:d.id}))];
@@ -234,7 +241,7 @@ async function livePublications(db, date, now, lookup, expandPhone = true) {
             date, expiresAt: start + 8 * DAY });
     }
     const index = {publications,routes};
-    if (!phone && expandPhone) {
+    if (!phone && expandPhone && !/^[A-Za-z0-9]{5}$/.test(lookup)) {
         // An order search still shows all of that customer's stops in the matching companies.
         const matched = publications.flatMap(p => p.stops.filter(s => s.orders.includes(clean(lookup))).map(s => ({company:p.dispatchKey,phone:s.phone})));
         if (matched.length) {
@@ -248,13 +255,14 @@ async function livePublications(db, date, now, lookup, expandPhone = true) {
 }
 function lookupPublicData(index, lookup, now) {
     const phone = phoneOf(lookup);
+    const number=/^[A-Za-z0-9]{5}$/.test(lookup)?lookup:'';
     const matches = index.publications.flatMap(publication => publication.stops
-        .filter(stop => phone ? stop.phone === phone : stop.orders.includes(lookup))
+        .filter(stop => number ? stop.deliveryNumber===number : phone ? stop.phone === phone : stop.orders.includes(lookup))
         .map(stop => ({ publication, phone: stop.phone })));
     if (!matches.length) throw problem('입력한 정보와 일치하는 배송이 없습니다. 배송일과 받는 분의 전화번호 또는 주문번호를 확인해 주세요.', 404);
     if (!phone && new Set(matches.map(m => m.phone)).size !== 1) throw problem('같은 주문번호가 여러 고객에게 등록되어 있습니다. 받는 분의 전화번호로 조회해 주세요.', 409);
     const selectedPhone = phone || matches[0].phone, selected = [...new Set(matches.map(m => m.publication))];
-    const results = selected.map(p => projectTracking(p, selectedPhone, index.routes));
+    const results = selected.map(p => projectTracking(p, selectedPhone, index.routes,number));
     const companyNames = [...new Set(selected.map(p => p.company))];
     return { company: companyNames.length === 1 ? companyNames[0] : '내 배송', date: selected[0].date,
         expiresAt: Math.min(...selected.map(p => p.expiresAt)), updatedAt: now,
@@ -300,6 +308,23 @@ function createHandler(sdk = admin) {
             if(lookupRequest)await checkLookupRate(db,req,publicSearch?'number':'link',now);
             if (lookupRequest && publicSearch) {
                 if (!/^[A-Za-z0-9]{5}$/.test(lookup)) throw problem('5자리 배송번호를 입력해 주세요.');
+                const reservation=(await db.collection('delivery_number_registry').doc('number_'+lookup).get()).data();
+                if(reservation?.scope){
+                    const seed={};let date=dayOf(now);
+                    if(reservation.scope.startsWith('route:'))seed.owner=reservation.scope.slice(6);
+                    else if(reservation.scope.startsWith('driver:')){
+                        const driver=(await db.collection('licenses').doc(reservation.scope.slice(7)).get()).data();seed.owner=driver?.routeOwnerId;
+                    }else if(reservation.scope.startsWith('dispatch:'))seed.company=reservation.scope.slice(9);
+                    if(seed.owner){
+                        const routes=await db.collection('routes').where('routeOwnerId','==',seed.owner).get();
+                        const route=latestRoute(routes.docs.map(d=>({...d.data(),documentId:d.id})),seed.owner);
+                        if(route)date=routeDay(route);
+                    }
+                    if(seed.owner||seed.company){
+                        const index=await livePublications(db,date,now,lookup,false,seed);
+                        if(index.publications.some(p=>p.stops.some(s=>s.deliveryNumber===lookup)))return res.status(200).json(lookupPublicData(index,lookup,now));
+                    }
+                }
                 const numberLink=(await db.collection('delivery_tracking_numbers').doc(lookup).get()).data();
                 if(!numberLink || numberLink.expiresAt<=now)throw problem('조회 가능한 배송이 없습니다. 배송번호를 확인해 주세요.',404);
                 code=numberLink.code;
