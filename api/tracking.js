@@ -177,7 +177,7 @@ async function ownerCompletions(db, owners, date) {
 async function livePublications(db, date, now, lookup, expandPhone = true, seed = {}) {
     const start = Date.parse(date + 'T00:00:00+09:00'), key = lookupKey(date,lookup);
     const phone = phoneOf(lookup), number=/^[A-Za-z0-9]{5}$/.test(lookup)?lookup:'';
-    const matches = item => number ? item.deliveryNumber===number : phone ? phoneOf(item.customerPhone || item.phone) === phone : clean(item.orderNo) === clean(lookup);
+    const matches = item => number ? (seed.numbers || [number]).includes(item.deliveryNumber) : phone ? phoneOf(item.customerPhone || item.phone) === phone : clean(item.orderNo) === clean(lookup);
     const [foundRoutes, orders, foundCompletions] = await Promise.all(
         ['routes','dispatch_orders','completions'].map(name => db.collection(name).where('trackingLookupKeys','array-contains',key).get()));
     const owners = new Set(foundRoutes.docs.map(d => d.data().routeOwnerId));
@@ -233,7 +233,7 @@ async function livePublications(db, date, now, lookup, expandPhone = true, seed 
             const active = route && routeItems(route).some(d => String(d.id) === id);
             if (active) continue;
             // The driver need not wait for background number allocation. Resolve its stable ID on the server.
-            const number = record.deliveryNumber || (record.deliveryId && record.deliveryId === seed.deliveryId ? seed.number : '');
+            const number = record.deliveryNumber || seed.numberById?.[record.deliveryId] || (record.deliveryId && record.deliveryId === seed.deliveryId ? seed.number : '');
             if (match) { match._destinationId = id; if (number) match.deliveryNumber = number; }
             else if (phoneOf(record.customerPhone) || number) rows.push({ phone: record.customerPhone, fullAddress: record.fullAddress || record.address,
                 deliveryId: record.deliveryId || '', deliveryNumber: number || '',
@@ -287,7 +287,7 @@ async function checkLookupRate(db, req, kind, now) {
         tx.set(ref,{...previous,[kind]:{window,count:count+1},expireAt:new Date(now+3600000)});
     });
 }
-function createHandler(sdk = admin) {
+function createHandler(sdk = admin, options = {}) {
     const numberHandler = require('../server/delivery-number.cjs').createHandler(sdk);
     const cache = new Map();
     const searchCache = new Map();
@@ -342,6 +342,21 @@ function createHandler(sdk = admin) {
                 if (!token || token.expiresAt <= now) throw problem('배송조회 기간이 끝났거나 사용할 수 없는 링크입니다.', 404);
                 const publication = (await db.collection('delivery_tracking_publications').doc(token.publication).get()).data();
                 if (!publication || publication.expiresAt <= now) throw problem('배송조회 기간이 끝났습니다.', 404);
+                if (Array.isArray(token.deliveryNumbers) && token.deliveryNumbers.length > 1) {
+                    const reservations = await Promise.all(token.deliveryNumbers.map(n=>db.collection('delivery_number_registry').doc('number_'+n).get()));
+                    const numberById = {};
+                    reservations.forEach((r,i)=>{if(r.data()?.deliveryId)numberById[r.data().deliveryId]=token.deliveryNumbers[i];});
+                    const index = await livePublications(db, publication.date, now, token.deliveryNumbers[0], false, {
+                        company: publication.dispatchKey, owners: Object.values(publication.plans).map(p=>p.owner),
+                        numbers: token.deliveryNumbers, numberById
+                    });
+                    index.publications = index.publications.filter(p=>p.dispatchKey===publication.dispatchKey);
+                    const results = token.deliveryNumbers.flatMap(number=>{
+                        try{return lookupPublicData(index,number,now).stops;}catch(error){if(error.status!==404)throw error;return [];}
+                    });
+                    if(!results.length)throw problem('조회 가능한 배송이 없습니다.',404);
+                    return res.status(200).json({company:publication.company,date:publication.date,expiresAt:publication.expiresAt,updatedAt:now,stops:results});
+                }
                 if (token.deliveryNumber) {
                     // Keep the original token, but project the current assignment within the issuing company.
                     const reservation = (await db.collection('delivery_number_registry').doc('number_' + token.deliveryNumber).get()).data();
@@ -390,10 +405,19 @@ function createHandler(sdk = admin) {
             const date = String(body.date || ''), dayStart = Date.parse(date + 'T00:00:00+09:00');
             if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(dayStart) || dayOf(dayStart) !== date || Math.abs(dayStart - now) > 7 * DAY)
                 throw problem('배송일은 오늘 기준 7일 이내로 선택해 주세요.');
-            if (!Array.isArray(body.phones) || !body.phones.length || body.phones.length > 1000 || body.phones.some(p => !phoneOf(p))) throw problem('선택한 수신번호를 확인해 주세요.');
+            if (!['send-sms','sms-status','sms-receipts'].includes(body.action) && (!Array.isArray(body.phones) || !body.phones.length || body.phones.length > 1000 || body.phones.some(p => !phoneOf(p)))) throw problem('선택한 수신번호를 확인해 주세요.');
             const account = (await db.collection('licenses').doc(dispatchKey).get()).data();
             if (account?.type !== 'dispatch' || !isActive(account, dayOf(now), now)) throw problem('사용 중인 관제 이용권이 필요합니다.', 403);
             if (!master) assertDispatchSession(account, identity);
+            if (['send-sms','sms-status','sms-receipts'].includes(body.action)) {
+                const result = await require('../server/customer-sms.cjs').createSmsService(options).execute(db, identity, dispatchKey, body);
+                return res.status(200).json(result);
+            }
+            const selectedNumbers = body.deliveryNumbers;
+            if (selectedNumbers !== undefined && (!Array.isArray(selectedNumbers) || !selectedNumbers.length || selectedNumbers.length > 1000 || new Set(selectedNumbers).size !== selectedNumbers.length || selectedNumbers.some(n=>!/^[A-Za-z0-9]{5}$/.test(n)))) throw problem('선택한 배송번호를 확인해 주세요.');
+            if(body.action==='prepare-sms'&&!['per-address','per-delivery'].includes(body.smsMode))throw problem('문자 발송 방식을 선택해 주세요.');
+            if(body.action === 'prepare-sms' && !selectedNumbers)throw problem('배송번호별 발송 대상을 선택해 주세요.');
+
             const [licenseSnapshot, orderDoc] = await Promise.all([
                 db.collection('licenses').where('dispatchKey', '==', dispatchKey).get(),
                 db.collection('dispatch_orders').doc(`${date}_${dispatchKey}`).get()
@@ -403,6 +427,11 @@ function createHandler(sdk = admin) {
             const routes = routeSnapshots.flatMap(s => s.docs.map(d => ({ ...d.data(), documentId: d.id })));
             const sourceOrders = orderDoc.data()?.orders;
             const snapshot = snapshotFor(Array.isArray(sourceOrders) ? sourceOrders : [], drivers, routes, date);
+            if(selectedNumbers){
+                snapshot.stops = snapshot.stops.filter(s=>selectedNumbers.includes(s.deliveryNumber));
+                if(selectedNumbers.some(n=>snapshot.stops.filter(s=>s.deliveryNumber===n).length!==1))throw problem('배송번호가 없거나 배송 정보가 변경되었습니다. 목록을 새로고침해 주세요.',409);
+                if(snapshot.stops.some(s=>!body.phones.map(phoneOf).includes(s.phone)))throw problem('배송번호의 수신번호를 확인해 주세요.',409);
+            }
             const phones = [...new Set(body.phones.map(phoneOf))];
             for (const phone of phones) {
                 const stops = snapshot.stops.filter(s => s.phone === phone);
@@ -418,21 +447,31 @@ function createHandler(sdk = admin) {
             // One shared immutable route snapshot keeps full route data out of each customer token.
             await db.runTransaction(async tx => { const old = await tx.get(publicationRef); if (!old.exists) tx.set(publicationRef, publication); });
             const links = phones.flatMap(phone => {
-                const numbers=[...new Set(snapshot.stops.filter(s=>s.phone===phone).map(s=>s.deliveryNumber||''))];
-                return numbers.map(deliveryNumber=>{
-                    const parts=deliveryNumber?[publicationId,phone,deliveryNumber]:[publicationId,phone];
+                const stops=snapshot.stops.filter(s=>s.phone===phone);
+                const groups=new Map();
+                for(const stop of stops){
+                    const groupKey=body.smsMode==='per-address'?JSON.stringify([phone,stop.address]):stop.deliveryNumber||'';
+                    if(!groups.has(groupKey))groups.set(groupKey,new Set());groups.get(groupKey).add(stop.deliveryNumber||'');
+                }
+                return [...groups.values()].map(group=>{
+                    const numbers=[...group].sort(),deliveryNumber=numbers[0];
+                    const parts=numbers.length>1?[publicationId,phone,numbers]:deliveryNumber?[publicationId,phone,deliveryNumber]:[publicationId,phone];
                     const code=crypto.createHmac('sha256',secret).update(JSON.stringify(parts)).digest().subarray(0,12).toString('base64url');
-                    return {phone,code,...(deliveryNumber?{deliveryNumber}:{}),url:`https://mtsk.co.kr/t/${code}`};
+                    return {phone,code,...(deliveryNumber?{deliveryNumber}:{}),...(numbers.length>1?{deliveryNumbers:numbers}:{}),url:`https://mtsk.co.kr/t/${code}`};
                 });
             });
             for (let offset = 0; offset < links.length; offset += 200) {
                 const batch = db.batch();
                 for (const link of links.slice(offset, offset + 200)) {
                     batch.set(db.collection('delivery_tracking_tokens').doc(link.code),
-                        { publication: publicationId, phone: link.phone, ...(link.deliveryNumber?{deliveryNumber:link.deliveryNumber}:{}), expiresAt: publication.expiresAt });
-                    if(link.deliveryNumber)batch.set(db.collection('delivery_tracking_numbers').doc(link.deliveryNumber),{code:link.code,expiresAt:publication.expiresAt});
+                        { publication: publicationId, phone: link.phone, ...(link.deliveryNumber?{deliveryNumber:link.deliveryNumber}:{}), ...(link.deliveryNumbers?{deliveryNumbers:link.deliveryNumbers}:{}), expiresAt: publication.expiresAt });
+                    if(link.deliveryNumber&&!link.deliveryNumbers)batch.set(db.collection('delivery_tracking_numbers').doc(link.deliveryNumber),{code:link.code,expiresAt:publication.expiresAt});
                 }
                 await batch.commit();
+            }
+            if(body.action==='prepare-sms'){
+                const prepared=await require('../server/customer-sms.cjs').prepareSms(db,dispatchKey,date,links,body.message,body.requestId,now);
+                return res.status(200).json(prepared);
             }
             return res.status(200).json({ links, expiresAt: publication.expiresAt });
         } catch (error) {
