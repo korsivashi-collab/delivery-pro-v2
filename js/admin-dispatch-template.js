@@ -538,6 +538,9 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
 // 5. [양식 저장] 버튼 클릭 시 동작 로직
 // ==========================================
 export async function saveCurrentDocumentTemplate() {
+    if(templateBuilderState.activeTemplateId==='BUILTIN-SIKBOM-V1'){
+        try{const forms=ensureBuiltInForm(),form=forms.find(f=>f.id==='BUILTIN-SIKBOM-V1');form.templateHtml=templateBuilderState.currentDocHtml||form.templateHtml;localStorage.setItem('deliveryPro_savedForms',JSON.stringify(forms));alert('식봄 기본양식을 저장했습니다.');}catch(e){alert(e.message);}return;
+    }
     if (!templateBuilderState.activeTemplateId) { alert('먼저 양식 PDF를 등록해 주세요.'); return; }
     const title = prompt('양식 이름', templateBuilderState.activeTemplateTitle);
     if (!title?.trim()) return;
@@ -581,6 +584,9 @@ function pdfBytes(base64){return Uint8Array.from(atob(base64),c=>c.charCodeAt(0)
 export async function previewPdfOrder(order){
     if(invoicePrinting)return;
     const id=templateBuilderState.activeTemplateId;if(!id)return;
+    if(id==='BUILTIN-SIKBOM-V1'){
+        invoicePreviewVersion++;const form=ensureBuiltInForm().find(f=>f.id===id);const base=templateBuilderState.currentDocHtml||form.templateHtml;templateBuilderState.currentDocHtml=base;renderEditableDocument(order?fillTemplateWithOrderData(base,order):base,!!order);return;
+    }
     const version=++invoicePreviewVersion;showInvoiceProgress(order?'주문 내용 적용 중…':'저장된 원본 양식 불러오는 중…');
     const result=await invoiceRequest({action:order?'render':'original',id,...(order?{orders:[order]}:{})});
     if(version!==invoicePreviewVersion||id!==templateBuilderState.activeTemplateId)return;
@@ -595,6 +601,11 @@ export async function previewPdfOrder(order){
 export async function printPdfOrders(orders){
     if(invoiceBusy)return;
     const id=templateBuilderState.activeTemplateId;if(!id){alert('먼저 양식 PDF를 등록하거나 선택해 주세요.');return;}
+    if(id==='BUILTIN-SIKBOM-V1'){
+        const popup=window.open('about:blank','_blank');if(!popup){alert('인쇄 창을 열 수 없습니다. 팝업을 허용해 주세요.');return;}
+        const base=templateBuilderState.currentDocHtml||ensureBuiltInForm().find(f=>f.id===id).templateHtml;
+        popup.document.open();popup.document.write('<!doctype html><html lang="ko"><meta charset="utf-8"><title>식봄 주문서 인쇄</title><style>@page{size:A4;margin:0}body{margin:0;font-family:Arial,"Malgun Gothic",sans-serif}.print-order{break-after:page}.print-order:last-child{break-after:auto}*{box-sizing:border-box}</style><body>'+orders.map((o,i)=>'<section class="print-order">'+fillTemplateWithOrderData(base,o,i)+'</section>').join('')+'</body></html>');popup.document.close();await popup.document.fonts?.ready;popup.focus();popup.print();return;
+    }
     if(!window.PDFLib){alert('PDF 출력 도구를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');return;}
     invoiceBusy=true;invoicePrinting=true;invoicePreviewVersion++;
     const buttons=['btn-batch-print','btn-batch-print-top'].map(id=>document.getElementById(id));buttons.forEach(b=>{if(b)b.disabled=true;});
