@@ -272,29 +272,23 @@ function createHandler(sdk = admin) {
         if (!['GET', 'POST'].includes(req.method)) return res.status(405).json({ error: '지원하지 않는 요청입니다.' });
         try {
             const lookupRequest = req.method === 'POST' && req.body?.action === 'lookup';
-            const code = String(lookupRequest ? req.body.code || '' : req.query?.code || '');
+            let code = String(lookupRequest ? req.body.code || '' : req.query?.code || '');
             // Old preview URLs now resolve to the same real public search as /t.
             const publicSearch = ['', 'Ab3dE5fG', 'Ab3dE5fGh7Jk9LmN'].includes(code);
             if ((req.method === 'GET' || lookupRequest) && !publicSearch && !/^[A-Za-z0-9_-]{16}$/.test(code)) throw problem('올바른 배송조회 링크가 아닙니다.', 404);
-            if (req.method === 'GET') throw problem('전화번호 또는 주문번호를 입력해 조회해 주세요.', 400);
+            if (req.method === 'GET') throw problem('5자리 배송번호를 입력해 조회해 주세요.', 400);
             const lookup = lookupRequest ? String(req.body.lookup || '').trim() : '';
-            if (lookupRequest && ((publicSearch && !lookup) || lookup.length > 150)) throw problem('전화번호 또는 주문번호를 입력해 주세요.');
+            if (lookupRequest && ((publicSearch && !lookup) || lookup.length > 150)) throw problem('5자리 배송번호를 입력해 주세요.');
             if (!sdk.apps.length) sdk.initializeApp({ credential: sdk.credential.cert({
                 projectId: process.env.FIREBASE_PROJECT_ID, clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
                 privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n')
             }) });
             const db = sdk.firestore(), now = Date.now();
             if (lookupRequest && publicSearch) {
-                const date = String(req.body.date || dayOf(now)), start = Date.parse(date + 'T00:00:00+09:00');
-                if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !Number.isFinite(start) || dayOf(start) !== date || Math.abs(start - now) > 7 * DAY)
-                    throw problem('배송일은 오늘 기준 7일 이내로 선택해 주세요.');
-                const searchKey = lookupKey(date,lookup), cached = searchCache.get(searchKey);
-                if (cached && cached.until > now) return res.status(200).json(cached.data);
-                const index = await livePublications(db,date,now,lookup);
-                const data = lookupPublicData(index,clean(lookup),now);
-                if (searchCache.size >= 500) searchCache.delete(searchCache.keys().next().value);
-                searchCache.set(searchKey,{until:now + 30000,data});
-                return res.status(200).json(data);
+                if (!/^[A-Za-z0-9]{5}$/.test(lookup)) throw problem('5자리 배송번호를 입력해 주세요.');
+                const numberLink=(await db.collection('delivery_tracking_numbers').doc(lookup).get()).data();
+                if(!numberLink || numberLink.expiresAt<=now)throw problem('조회 가능한 배송이 없습니다. 배송번호를 확인해 주세요.',404);
+                code=numberLink.code;
             }
             if (lookupRequest) {
                 const cached = cache.get(code);
@@ -376,10 +370,13 @@ function createHandler(sdk = admin) {
                     return {phone,code,...(deliveryNumber?{deliveryNumber}:{}),url:`https://mtsk.co.kr/t/${code}`};
                 });
             });
-            for (let offset = 0; offset < links.length; offset += 400) {
+            for (let offset = 0; offset < links.length; offset += 200) {
                 const batch = db.batch();
-                for (const link of links.slice(offset, offset + 400)) batch.set(db.collection('delivery_tracking_tokens').doc(link.code),
-                    { publication: publicationId, phone: link.phone, ...(link.deliveryNumber?{deliveryNumber:link.deliveryNumber}:{}), expiresAt: publication.expiresAt });
+                for (const link of links.slice(offset, offset + 200)) {
+                    batch.set(db.collection('delivery_tracking_tokens').doc(link.code),
+                        { publication: publicationId, phone: link.phone, ...(link.deliveryNumber?{deliveryNumber:link.deliveryNumber}:{}), expiresAt: publication.expiresAt });
+                    if(link.deliveryNumber)batch.set(db.collection('delivery_tracking_numbers').doc(link.deliveryNumber),{code:link.code,expiresAt:publication.expiresAt});
+                }
                 await batch.commit();
             }
             return res.status(200).json({ links, expiresAt: publication.expiresAt });
@@ -407,9 +404,9 @@ async function reindexTracking(db) {
     const counts = {};
     for (const name of ['routes','dispatch_orders','completions']) {
         const snapshot = await db.collection(name).get(); let changed = 0;
-        for (let offset = 0; offset < snapshot.docs.length; offset += 400) {
+        for (let offset = 0; offset < snapshot.docs.length; offset += 200) {
             const batch = db.batch(); let writes = 0;
-            for (const d of snapshot.docs.slice(offset,offset + 400)) {
+            for (const d of snapshot.docs.slice(offset,offset + 200)) {
                 const data = d.data(), keys = trackingKeysForDocument(name,data);
                 if (JSON.stringify(data.trackingLookupKeys) === JSON.stringify(keys)) continue;
                 batch.update(d.ref,{trackingLookupKeys:keys}); writes++; changed++;
