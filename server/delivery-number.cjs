@@ -45,7 +45,7 @@ async function numberRoute(db,identity,key,deviceId){
  const ref=db.collection('routes').doc(owner),initial=(await ref.get()).data();
  if(!initial||initial.routeOwnerId!==owner||initial.cleared)return {updated:0};
  const pending=(initial.destinations||[]).filter(d=>!d.deliveryNumber);
- const idFor=d=>{const hex=createHash('sha256').update(JSON.stringify([owner,initial.resetId||'',String(d.id)])).digest('hex').slice(0,32);return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);};
+ const idFor=d=>{if(/^[a-f0-9-]{36}$/.test(d.deliveryId||''))return d.deliveryId;const hex=createHash('sha256').update(JSON.stringify([owner,initial.resetId||'',String(d.id)])).digest('hex').slice(0,32);return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);};
  const mappings=new Map();
  for(let offset=0;offset<pending.length;offset+=100){
   const items=pending.slice(offset,offset+100),numbers=await allocate(db,'route:'+owner,items.map(idFor));
@@ -59,7 +59,7 @@ async function numberRoute(db,identity,key,deviceId){
   if(!route||route.cleared||route.routeOwnerId!==owner||route.resetId!==initial.resetId)return {updated:0};
   let updated=0;
   const destinations=(route.destinations||[]).map(d=>{
-   const entry=mappings.get(String(d.id));if(d.deliveryNumber||!entry)return d;updated++;
+   const entry=mappings.get(String(d.id));if(d.deliveryNumber||!entry||idFor(d)!==entry.deliveryId)return d;updated++;
    return {...d,...entry};
   });
   if(updated)tx.set(ref,{...route,destinations});
