@@ -131,7 +131,8 @@ function projectTracking(publication, phone, liveRoutes, deliveryNumber = '') {
                     const phone = phoneOf(item.phone), address = addressOf(item);
                     if (phone && address) groupForId.set(String(item.id), JSON.stringify([phone, address]));
                 }
-                const ordered = [...new Set([...route.routePlan.orderIds.map(String), ...routeItems(route).map(d => String(d.id)), ...savedSlots.flat()])];
+                const ordered = [...new Set([...route.routePlan.orderIds.map(String), ...routeItems(route).map(d => String(d.id)), ...savedSlots.flat()])]
+                    .filter(id=>activeIds.has(id)||['completed','cancelled'].includes(states.get(id)));
                 const grouped = new Map();
                 for (const id of ordered) {
                     const key = groupForId.get(id) || 'id:' + id;
