@@ -453,11 +453,11 @@ function applyVerifiedLogin(result) {
     localStorage.setItem('deliveryProExpiresAt', String(result.expiresAt || ''));
     localStorage.setItem('deliveryProBillingManaged', String(result.billingManaged === true));
     localStorage.setItem('deliveryProDriverSession', result.driverSessionId);
-    startActiveServices(getOrCreateDeviceId(), result.phone, result.actualKey, result.expireDate, result.dispatchKey, result.routeOwnerId);
+    startActiveServices(getOrCreateDeviceId(), result.phone, result.actualKey, result.expireDate, result.dispatchKey, result.routeOwnerId, result.testSmsBypass === true);
     scheduleLicenseExpiry(result);
 }
 
-export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey, routeOwnerId) {
+export function startActiveServices(deviceId, phone, key, expireDate, dispatchKey, routeOwnerId, testSession = false) {
     const version = ++serviceVersion;
     clearTimeout(deferredServices);
     for (const unsubscribe of [licenseWatcherUnsub, dispatchMsgWatcherUnsub, activeRoutesWatcherUnsub]) {
@@ -478,7 +478,7 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
         syncScanUsage(true).catch(error => console.warn(error.message));
         applyGpsPreference();
         // [기여도 동기화] 마스터 센터에 집계된 전화번호 기반 작성 메모 전체 동기화 실행
-        if (typeof syncMyParkingMemosFromServer === 'function') {
+        if (!testSession && typeof syncMyParkingMemosFromServer === 'function') {
             Promise.resolve(syncMyParkingMemosFromServer(phone, deviceId, key)).catch(error => console.warn('공용 메모 동기화 실패:',error.message));
         }
 
