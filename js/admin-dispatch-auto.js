@@ -401,6 +401,7 @@ export function renderDispatchDriverDetail() {
             <td class="font-bold text-gray-800 whitespace-normal break-keep" title="${tooltipAddress}">
                 ${item.storeName ? `<span class="bg-gray-100 text-gray-700 text-[10px] px-1.5 py-0.5 rounded font-black mr-1">${item.storeName}</span>` : ''}
                 ${item.fullAddress || item.address || '-'}
+                <span class="block text-[11px] text-blue-700">배송번호 ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?item.deliveryNumber:'미발급'}</span>
                 ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}
             </td>
             <td class="text-center w-36" onclick="event.stopPropagation()">

@@ -199,7 +199,7 @@ export function renderExcelTable() {
                     ${driverSelectOptions}
                 </select>
                 ${courseBadge}
-                ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?`<span class="text-[10px] text-slate-500" title="배송번호">${item.deliveryNumber}</span>`:''}
+                
             </div>
         `;
 
@@ -228,7 +228,7 @@ export function renderExcelTable() {
                     <div class="min-w-0 flex-1">
                         <div class="flex items-center gap-1 flex-wrap mb-0.5">
                             ${item.storeName ? `<span class="bg-gray-100 text-gray-800 text-[10px] px-1.5 py-0.5 rounded font-black border border-gray-200">${item.storeName}</span>` : ''}
-                            ${itemCountBadge}
+                            ${itemCountBadge}<span class="text-[11px] font-bold text-blue-700">배송번호 ${/^[A-Za-z0-9]{5}$/.test(item.deliveryNumber||'')?item.deliveryNumber:'미발급'}</span>
                         </div>
                         <span class="text-xs text-gray-900 block font-bold">${item.fullAddress || item.address || '-'}${!dispatchOrderReady(item) ? '<span class="block text-red-600">주소·좌표 확인 필요</span>' : ''}</span>
                         ${item.phone ? `<span class="text-[10px] text-gray-400 font-normal block mt-0.5"><i class="fa-solid fa-phone text-[9px] mr-1 text-blue-500"></i>${item.phone}</span>` : ''}

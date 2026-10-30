@@ -177,7 +177,7 @@ export async function parsePdfToEditableDocument(file) {
 
         renderEditableDocument(formHtml);
 
-        alert(`[PDF 양식 인식 완료]\n\n1. 공급자/공급받는자 표는 정돈된 원래 규격으로 유지되고, 상품 목록 표만 넓게 최적화되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(주문번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
+        alert(`[PDF 양식 인식 완료]\n\n1. 공급자/공급받는자 표는 정돈된 원래 규격으로 유지되고, 상품 목록 표만 넓게 최적화되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(배송번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
     } catch (e) {
         console.error("PDF 서식 파싱 오류:", e);
         alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
@@ -286,7 +286,7 @@ function generateSingleInvoiceBlock(cfg, partName) {
             <!-- 하단 메타 정보 -->
             <div style="display: flex; justify-content: space-between; align-items: flex-end; font-size: 9.5px; font-weight: bold; margin-top: 3px;">
                 <span>주문일자: <b class="tpl-bind-date" contenteditable="true">{{주문일자}}</b></span>
-                <span>주문번호: <b class="tpl-bind-orderno" contenteditable="true">{{주문번호}}</b></span>
+                <span>배송번호: <b class="tpl-bind-orderno" contenteditable="true">{{배송번호}}</b></span>
             </div>
         </div>
 
@@ -465,7 +465,8 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
                .replace(/text-overflow:\s*ellipsis;?/gi, '');
 
     const today = getLocalDateString();
-    const orderNo = order.orderNo || `ORD-${idx + 1}`;
+    const orderNo = /^[A-Za-z0-9]{5}$/.test(order.deliveryNumber || '') ? order.deliveryNumber : '미발급';
+    html = html.replace(/주문번호\s*:/g, '배송번호:');
     const bizNo = order.bizNo || '';
     const storeName = order.storeName || order.senderName || '-';
     const senderName = order.senderName || order.storeName || '-';
@@ -491,7 +492,7 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
     html = html.replace(/\{\{\s*담당기사\s*\}\}/g, () => escapeTemplateText(driverName))
                .replace(/\{\{\s*기사명\s*\}\}/g, () => escapeTemplateText(driverName))
                .replace(/\{\{\s*주문일자\s*\}\}/g, () => escapeTemplateText(today))
-               .replace(/\{\{\s*주문번호\s*\}\}/g, () => escapeTemplateText(orderNo))
+               .replace(/\{\{\s*(?:배송번호|주문번호)\s*\}\}/g, () => escapeTemplateText(orderNo))
                .replace(/\{\{\s*사업자번호\s*\}\}/g, () => escapeTemplateText(bizNo))
                .replace(/\{\{\s*상호명\s*\}\}/g, () => escapeTemplateText(storeName))
                .replace(/\{\{\s*구매자명\s*\}\}/g, () => escapeTemplateText(buyerName)) 
