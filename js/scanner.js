@@ -363,6 +363,7 @@ export function initCameraScan() {
         const currentDests = state.getDestinations();
         const nextNum = currentDests.length > 0 ? Math.max(...currentDests.map(d => d.displayNumber)) + 1 : 1;
         const destination=buildGeminiDestination({ ...fields, phone: extractedPhone },coords,idCounter++,nextNum,manualAddress);
+        destination.deliveryId = crypto.randomUUID();
         const added = state.addDestination(destination, { prepend: true });
         if (!state.saveActiveData()) { scan.diagnostics.errorCode = 'LOCAL_SAVE_FAILED'; return; }
         scan.diagnostics.deliveryAdded = true;

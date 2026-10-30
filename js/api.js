@@ -610,7 +610,8 @@ export async function saveRouteToFirestore(deviceId, phone, destinations, requir
                 const previousNumbers=new Map((remote?.destinations||[]).filter(d=>d.deliveryNumber).map(d=>[String(d.id),d]));
                 payload.destinations=payload.destinations.map(d=>{
                     const previous=previousNumbers.get(String(d.id));
-                    return !d.deliveryNumber&&previous?{...d,deliveryId:previous.deliveryId||'',deliveryNumber:previous.deliveryNumber}:d;
+                    const sameDelivery=previous && (!d.deliveryId || d.deliveryId===previous.deliveryId);
+                    return !d.deliveryNumber&&sameDelivery?{...d,deliveryId:previous.deliveryId||'',deliveryNumber:previous.deliveryNumber}:d;
                 });
                 transaction.set(routeRef, payload);
                 return true;
