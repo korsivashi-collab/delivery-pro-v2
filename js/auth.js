@@ -533,10 +533,21 @@ export function startActiveServices(deviceId, phone, key, expireDate, dispatchKe
 // ==========================================
 // 7. 자동 로그인 (부팅 시 기존 저장된 키 검증)
 // ==========================================
+let savedAuthAttempt = null;
 export async function checkSavedAuth() {
+    getOrCreateDeviceId();
+    // Share only an in-flight check for this exact local session; never cache approval.
+    const identity = JSON.stringify(['deliveryProKey', 'deliveryProUserPhone', 'deliveryProDeviceId', 'deliveryProDriverSession'].map(k => localStorage.getItem(k)));
+    if (savedAuthAttempt?.identity === identity && savedAuthAttempt.version === serviceVersion) return savedAuthAttempt.promise;
+    const attempt = {identity, version:serviceVersion};
     const perf = globalThis.performance, started = perf?.now();
-    try { return await restoreSavedAuth(); }
-    finally { try { if (perf?.measure && started !== undefined) perf.measure('deliverypro-license', { start: started, end: perf.now() }); } catch {} }
+    attempt.promise = restoreSavedAuth();
+    savedAuthAttempt = attempt;
+    try { return await attempt.promise; }
+    finally {
+        if (savedAuthAttempt === attempt) savedAuthAttempt = null;
+        try { if (perf?.measure && started !== undefined) perf.measure('deliverypro-license', { start: started, end: perf.now() }); } catch {}
+    }
 }
 async function restoreSavedAuth() {
     const version = serviceVersion;
