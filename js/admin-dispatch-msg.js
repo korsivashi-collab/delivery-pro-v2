@@ -348,19 +348,46 @@ function customerCompanyHeading(){const account=customerAccount(),company=String
 function customerFixedMessage(){const groups=customerSelectedMessageGroups();return (groups.length&&groups.every(g=>g.length>1)?'배송조회':'배송번호:Ab234')+'\n'+CUSTOMER_TRACKING_LINK;}
 function customerDefaultBody(){const heading=customerCompanyHeading().replace(/ 배송조회$/,'');return measureCustomerSms(heading+'\n'+customerFixedMessage()).bytes<=80?heading:'배송 안내';}
 function customerMessage(){const body=document.getElementById('customer-message-input')?.value.replace(/\r\n?/g,'\n')||'';return (body?body+'\n':'')+customerFixedMessage();}
-export function updateCustomerMessagePreview(){
- const input=document.getElementById('customer-message-input');if(!input)return;
+export function updateCustomerMessagePreview(invalidate=false){
+ const input=document.getElementById('customer-message-input');if(!input)return;if(invalidate&&!customerSendBusy)customerPreparedBatch=null;
  const fixed=customerFixedMessage(),body=input.value.replace(/\r\n?/g,'\n'),fixedSize=measureCustomerSms(fixed).bytes,total=measureCustomerSms(customerMessage()),available=Math.max(0,80-total.bytes-(body?0:1));
  document.getElementById('customer-fixed-preview').textContent=fixed;input.style.height='auto';input.style.height=Math.min(260,Math.max(110,input.scrollHeight))+'px';
+ const flow=document.querySelector('.customer-template-flow');if(flow)flow.style.setProperty('--customer-message-body-height',input.style.height);
+ const preview=document.getElementById('customer-message-preview');if(preview)preview.textContent=body;
+ const previewFixed=document.getElementById('customer-preview-fixed');if(previewFixed)previewFixed.textContent=fixed;
+ const mode=document.getElementById('customer-compose-mode');if(mode)mode.textContent=customerSmsMode()==='per-address'?'동일 주소 1건 발송 · 같은 주소·연락처의 선택 배송을 한 문자로 묶습니다. 여러 배송을 묶으면 배송번호는 조회 화면에서 확인합니다.':'배송건수 전체 발송 · 배송번호마다 각각 문자 한 건과 전용 링크를 안내합니다.';
+ renderCustomerSavedTemplate(body,fixed);
+ const save=document.getElementById('customer-draft-save');if(save)save.disabled=!customerDispatchKey()||total.bytes>80||total.unsupported;
  const counter=document.getElementById('customer-message-remaining');counter.textContent=total.bytes>80?`${total.bytes-80}바이트 초과 · 문구를 줄여 주세요`:`더 입력 가능 ${available}바이트 · 한글 약 ${Math.floor(available/2)}자`;counter.classList.toggle('is-over',total.bytes>80||total.unsupported);
  document.getElementById('customer-message-bytes').textContent=`전체 ${total.bytes} / 80바이트`;
  const help=document.getElementById('customer-message-validation');help.textContent=total.unsupported?'이모지 등 문자 전송 시 바뀔 수 있는 문자를 제거해 주세요.':total.bytes>80?'단문 한도를 넘었습니다. 자동으로 장문 전환하지 않습니다.':`배송번호와 고객별 전용 주소, 줄바꿈을 포함한 길이입니다. 최종 확인 시 실제 고객별 문구를 다시 검증합니다.`;help.classList.toggle('is-error',total.unsupported||total.bytes>80);
  updateCustomerSelectionSummary();
 }
-export function saveCustomerMessageDraft(){const key=customerDispatchKey(),input=document.getElementById('customer-message-input');if(!key||!input)return;const note=document.getElementById('customer-draft-notice'),size=measureCustomerSms(customerMessage());if(size.bytes>80||size.unsupported){note.textContent='단문 한도와 지원 문자를 확인한 뒤 저장해 주세요.';return;}try{localStorage.setItem('customerDeliveryDraft:'+encodeURIComponent(key),JSON.stringify({version:2,text:input.value}));note.textContent='현재 브라우저에 안내 문구를 저장했습니다.';}catch(_){note.textContent='저장 공간을 사용할 수 없습니다. 입력 문구는 현재 화면에서 유지됩니다.';}}
+function renderCustomerSavedTemplate(body,fixed){
+ const key=customerDispatchKey();let saved=null,unavailable=false;
+ try{if(key&&localStorage.getItem('customerDeliveryDraft:'+encodeURIComponent(key))!==null)saved=readCustomerMessageDraft(key);}catch{unavailable=true;}
+ const preview=document.getElementById('customer-saved-preview');if(preview)preview.textContent=saved===null?(unavailable?'저장 공간을 사용할 수 없습니다.':'저장된 기본틀이 없습니다.'):saved;
+ const suffix=document.getElementById('customer-saved-fixed');if(suffix)suffix.textContent=saved===null?'':fixed;
+ const load=document.getElementById('customer-draft-load');if(load)load.disabled=saved===null;
+ const changed=document.getElementById('customer-draft-changed');if(changed)changed.textContent=saved===null?'아직 저장하지 않았습니다.':body===saved?'저장된 기본틀과 같습니다.':'저장 전 변경사항이 있습니다.';
+}
+export function saveCustomerMessageDraft(){
+ const key=customerDispatchKey(),input=document.getElementById('customer-message-input');if(!key||!input)return;
+ const note=document.getElementById('customer-draft-notice'),size=measureCustomerSms(customerMessage());
+ if(size.bytes>80||size.unsupported){note.textContent='단문 한도와 지원 문자를 확인한 뒤 저장해 주세요.';return;}
+ try{localStorage.setItem('customerDeliveryDraft:'+encodeURIComponent(key),JSON.stringify({version:2,text:input.value.replace(/\r\n?/g,'\n')}));
+  renderCustomerSavedTemplate(input.value.replace(/\r\n?/g,'\n'),customerFixedMessage());note.textContent='현재 브라우저의 업체 기본틀을 저장했습니다. 오른쪽에서 저장된 내용을 확인하세요.';
+ }catch{note.textContent='저장 공간을 사용할 수 없습니다. 입력 문구는 현재 화면에서 유지됩니다.';}
+}
+export function loadCustomerMessageDraft(){
+ if(customerSendBusy)return;
+ const key=customerDispatchKey(),input=document.getElementById('customer-message-input');if(!key||!input)return;
+ try{if(localStorage.getItem('customerDeliveryDraft:'+encodeURIComponent(key))===null)return;input.value=readCustomerMessageDraft(key);updateCustomerMessagePreview(true);document.getElementById('customer-draft-notice').textContent='저장된 기본틀을 입력창에 불러왔습니다. 현재 발송 방식의 미리보기를 확인하세요.';}
+ catch{document.getElementById('customer-draft-notice').textContent='기본틀을 불러오지 못했습니다. 현재 입력 문구는 유지됩니다.';}
+}
 function readCustomerMessageDraft(key){
  const raw=localStorage.getItem('customerDeliveryDraft:'+encodeURIComponent(key));if(raw===null)return customerDefaultBody();
- try{const draft=JSON.parse(raw);if(draft?.version===2&&typeof draft.text==='string')return draft.text;}catch(_){}
+ try{const draft=JSON.parse(raw);if(draft?.version===2&&typeof draft.text==='string')return draft.text.replace(/\r\n?/g,'\n');}catch(_){}
  // Older drafts contain only the editable intro; bring the company line into the editable body once.
  const heading=customerCompanyHeading();return raw.split(/\r?\n/).includes(heading)?raw:(raw?raw+'\n':'')+heading;
 }
@@ -517,7 +544,7 @@ export async function reviewCustomerSend(){
 async function sendPreparedCustomerSms(){
  if(customerSendBusy||!customerPreparedBatch)return;
  const owner=customerDispatchKey(),date=customerPreparedBatch.date,batchId=customerPreparedBatch.batchId;let failed=false;
- customerSendBusy=true;for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode']){const el=document.getElementById(id);if(el)el.disabled=true;}const button=document.getElementById('customer-confirm-send');if(button)button.disabled=true;
+ customerSendBusy=true;for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=true;}const button=document.getElementById('customer-confirm-send');if(button)button.disabled=true;
  try{
   for(let part=0;part<customerPreparedBatch.parts.length;part++){
    if(customerPreparedBatch.parts[part].status!=='prepared')continue;
@@ -527,7 +554,7 @@ async function sendPreparedCustomerSms(){
   }
   await refreshCustomerSmsResults();
  }catch(e){failed=true;openCustomerDialog('발송 결과 확인 필요',`<p>${escapeMessage(e.message)}</p><p>이미 접수된 문자가 있을 수 있습니다. 재발송하지 말고 발송 결과 확인을 눌러 주세요.</p><button type="button" id="customer-recover-status">발송 결과 확인</button>`);document.getElementById('customer-recover-status').onclick=refreshCustomerSmsResults;}
- finally{customerSendBusy=false;for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode']){const el=document.getElementById(id);if(el)el.disabled=false;}if(!failed&&customerPreparedBatch&&owner===customerDispatchKey())renderCustomerSendReview(customerPreparedBatch);renderCustomerDeliveryList();refreshDispatchWallet();}
+ finally{customerSendBusy=false;for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=false;}if(!failed&&customerPreparedBatch&&owner===customerDispatchKey())renderCustomerSendReview(customerPreparedBatch);renderCustomerDeliveryList();refreshDispatchWallet();}
 }
 export async function refreshCustomerSmsResults(showDialog=true){
  const key='customerSmsBatches:'+encodeURIComponent(customerDispatchKey())+':'+document.getElementById('customer-delivery-date').value;
@@ -801,6 +828,6 @@ export function openLoginBilling(){
  const dialog=document.getElementById('login-billing-dialog');if(!dialog)return;
  renderDispatchAccount('BILLING');if(!dialog.open)dialog.showModal();
 }
-Object.assign(window,{openLoginBilling,changeCustomerSmsMode,refreshCustomerSmsResults,createCustomerTrackingLinks,copyCustomerTrackingLink,openCustomerDeliveryPage,refreshCustomerDeliveryList,renderCustomerDeliveryList,updateCustomerMessagePreview,saveCustomerMessageDraft,filterCustomerDeliveries,changeCustomerDeliveryPage,renderDispatchAccount,setCustomerDeliveryFilter,toggleCustomerRecipient,selectAllCustomerRecipients,showCustomerDeliveryIssue,reviewCustomerSend,closeCustomerDialog,openCustomerContactGuide,setDispatchBillingTab,changeDispatchBilling,reviewDispatchBilling,chooseCustomerSmsPack,reviewCustomerExtension,changeDispatchProduct});
+Object.assign(window,{openLoginBilling,changeCustomerSmsMode,refreshCustomerSmsResults,createCustomerTrackingLinks,copyCustomerTrackingLink,openCustomerDeliveryPage,refreshCustomerDeliveryList,renderCustomerDeliveryList,updateCustomerMessagePreview,saveCustomerMessageDraft,loadCustomerMessageDraft,filterCustomerDeliveries,changeCustomerDeliveryPage,renderDispatchAccount,setCustomerDeliveryFilter,toggleCustomerRecipient,selectAllCustomerRecipients,showCustomerDeliveryIssue,reviewCustomerSend,closeCustomerDialog,openCustomerContactGuide,setDispatchBillingTab,changeDispatchBilling,reviewDispatchBilling,chooseCustomerSmsPack,reviewCustomerExtension,changeDispatchProduct});
 
 if(window.location?.search&&document.getElementById('login-billing-dialog')&&new URLSearchParams(window.location.search).get('view')==='billing')openLoginBilling();
