@@ -652,6 +652,8 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             routeOwnerId: ownership.routeOwnerId,
             licenseKey: ownership.licenseKey,
             destinationId: item.id ?? null,
+            ...(item.deliveryId ? { deliveryId: item.deliveryId } : {}),
+            ...(item.deliveryNumber ? { deliveryNumber: item.deliveryNumber } : {}),
             deviceId: deviceId,
             phone: driverPhone || "",
             customerPhone: item.phone || "",
@@ -678,8 +680,18 @@ export async function saveCompletionToFirestore(deviceId, driverPhone, item, tag
             await runTransaction(db, async transaction => {
                 const operation = await transaction.get(operationRef);
                 if (operation.exists() && operation.data().action === 'delete') return;
+                const existing = await transaction.get(completionRef);
+                const payload = { ...data };
+                if (existing.exists()) {
+                    // Keep immutable metadata on retries, including records written before this release.
+                    const saved = existing.data();
+                    for (const field of ['deliveryId', 'deliveryNumber']) {
+                        if (Object.prototype.hasOwnProperty.call(saved, field)) payload[field] = saved[field];
+                        else delete payload[field];
+                    }
+                }
                 transaction.set(operationRef, { routeOwnerId: ownership.routeOwnerId, action: 'complete' });
-                transaction.set(completionRef, data);
+                transaction.set(completionRef, payload);
             });
             return transmission.id;
         }
