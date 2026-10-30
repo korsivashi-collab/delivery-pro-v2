@@ -57,7 +57,9 @@ export function dispatchOrderReady(order) {
 // Without a recognizable road/parcel number, retain the address rather than guessing.
 export function normalizeDeliveryBaseAddress(rawAddress) {
     if (typeof rawAddress !== 'string') return null;
-    const text = rawAddress.replace(/\s+/g, ' ').trim();
+    // A leading five-digit postcode is not part of the road/parcel address.
+    const text = rawAddress.replace(/\s+/g, ' ').trim()
+        .replace(/^(?:\d{5}|\(\d{5}\)|\[\d{5}\])\s+(?=[가-힣])/u, '');
     if (!text) return null;
     const road = /(?:^|\s)([^\s,()]+(?:대로|로|길))\s*(\d+(?:\s*-\s*\d+)?)(?=$|[\s,.(])/u.exec(text);
     const parcel = /(?:^|\s)([^\s,()]+(?:동|리|가|읍|면))\s*(산\s*)?(\d+(?:\s*-\s*\d+)?)(?=$|[\s,.(])/u.exec(text);
