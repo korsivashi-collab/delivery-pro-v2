@@ -1,5 +1,5 @@
 const admin = require('firebase-admin');
-const {randomInt}=require('node:crypto');
+const {randomInt,createHash}=require('node:crypto');
 const {assertDriverSession,assertDispatchSession,isActive,problem} = require('./license-integrity.cjs');
 const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function encodeNumber(value){
@@ -39,15 +39,47 @@ async function allocate(db,scope,ids,draw=()=>randomInt(alphabet.length**5)){
  });
 }
 
+async function numberRoute(db,identity,key,deviceId){
+ const license=await assertDriverSession(db,identity,key,deviceId),owner=license.routeOwnerId;
+ if(!owner)throw problem('배송 자료 연결 정보를 확인해 주세요.',409);
+ const ref=db.collection('routes').doc(owner),initial=(await ref.get()).data();
+ if(!initial||initial.routeOwnerId!==owner||initial.cleared)return {updated:0};
+ const pending=(initial.destinations||[]).filter(d=>!d.deliveryNumber);
+ const idFor=d=>{const hex=createHash('sha256').update(JSON.stringify([owner,initial.resetId||'',String(d.id)])).digest('hex').slice(0,32);return hex.slice(0,8)+'-'+hex.slice(8,12)+'-'+hex.slice(12,16)+'-'+hex.slice(16,20)+'-'+hex.slice(20);};
+ const mappings=new Map();
+ for(let offset=0;offset<pending.length;offset+=100){
+  const items=pending.slice(offset,offset+100),numbers=await allocate(db,'route:'+owner,items.map(idFor));
+  items.forEach((item,i)=>mappings.set(String(item.id),numbers[i]));
+ }
+ if(!mappings.size)return {updated:0};
+ return db.runTransaction(async tx=>{
+  const [routeSnap,licenseSnap]=await Promise.all([tx.get(ref),tx.get(db.collection('licenses').doc(key))]);
+  const route=routeSnap.data(),current=licenseSnap.data();
+  if(current?.driverSessionId!==identity.driverSessionId||current?.routeOwnerId!==owner)throw problem('접속이 해제되었습니다.',401);
+  if(!route||route.cleared||route.routeOwnerId!==owner||route.resetId!==initial.resetId)return {updated:0};
+  let updated=0;
+  const destinations=(route.destinations||[]).map(d=>{
+   const entry=mappings.get(String(d.id));if(d.deliveryNumber||!entry)return d;updated++;
+   return {...d,...entry};
+  });
+  if(updated)tx.set(ref,{...route,destinations});
+  return {updated};
+ });
+}
 function createHandler(sdk=admin){return async(req,res)=>{
  res.setHeader('Cache-Control','no-store');
  try{
   if(req.method!=='POST')throw problem('POST 요청만 가능합니다.',405);
   const body=req.body||{},ids=body.ids;
-  if(!Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!/^[a-f0-9-]{36}$/.test(id)))throw problem('배송 등록 정보를 확인해 주세요.');
+  const routeRequest=body.action==='number-route';
+  if(!routeRequest&&(!Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!/^[a-f0-9-]{36}$/.test(id))))throw problem('배송 등록 정보를 확인해 주세요.');
   if(!sdk.apps.length)sdk.initializeApp({credential:sdk.credential.cert({projectId:process.env.FIREBASE_PROJECT_ID,clientEmail:process.env.FIREBASE_CLIENT_EMAIL,privateKey:process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')})});
   let identity;try{const bearer=/^Bearer (.+)$/.exec(req.headers?.authorization||'')?.[1];if(!bearer)throw Error();identity=await sdk.auth().verifyIdToken(bearer,true);}catch{throw problem('로그인 후 배송을 등록해 주세요.',401);}
   const db=sdk.firestore();let scope;
+  if(routeRequest){
+   if(identity.role==='MASTER'||identity.role==='DISPATCH')throw problem('기사 접속이 필요합니다.',403);
+   return res.status(200).json(await numberRoute(db,identity,body.key,body.deviceId));
+  }
   if(identity.role==='DISPATCH'||identity.role==='MASTER'){
    const key=identity.role==='DISPATCH'?identity.uid:body.dispatchKey;
    if(typeof key!=='string'||!key||key.includes('/'))throw problem('관제 계정을 확인해 주세요.',403);
@@ -62,3 +94,4 @@ function createHandler(sdk=admin){return async(req,res)=>{
  }catch(error){return res.status(error.status||500).json({error:error.status?error.message:'배송번호를 발급하지 못했습니다. 다시 시도해 주세요.'});}
 };}
 module.exports=createHandler();module.exports.createHandler=createHandler;module.exports.allocate=allocate;module.exports.encodeNumber=encodeNumber;
+module.exports.numberRoute=numberRoute;
