@@ -144,6 +144,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
     // 유효한 텍스트 토큰 추출 및 좌표 정규화
     const validTokens = items.filter(it => it.str && it.str.trim() !== '').map(it => ({
         text: it.str.trim(),
+        width: Number(it.width)||0,
         x: Math.round(it.transform[4]),
         y: Math.round(it.transform[5])
     }));
@@ -286,6 +287,9 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
 
     const sortedYKeys = Array.from(lineMap.keys()).sort((a, b) => b - a);
     const rawOrderItems = [];
+    const invoiceHeaders={상품명:'name',품목명:'name',품명:'name','규격(단위)':'unit',규격:'unit',단위:'unit','제조사(원산지)':'origin',원산지:'origin',제조사:'origin',수량:'qty',단가:'price',공급가액:'supplyAmount',세액:'taxAmount',총액:'total','No.':'no',번호:'no'};
+    const headerRows=[...lineMap.entries()].map(([y,ts])=>({y,columns:ts.filter(t=>invoiceHeaders[t.text.replace(/\s/g,'')]).map(t=>({key:invoiceHeaders[t.text.replace(/\s/g,'')],center:t.x+t.width/2})).sort((a,b)=>a.center-b.center)})).filter(h=>['name','qty','price'].every(k=>h.columns.some(c=>c.key===k)));
+
 
     sortedYKeys.forEach(yKey => {
         const lineTokens = lineMap.get(yKey).sort((a, b) => a.x - b.x);
@@ -303,7 +307,7 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
                 if (numCount > 5) numCount = 5;
                 
                 if (numCount >= 2) {
-                    const total = parseInt(tokens[tokens.length - 1].replace(/,/g, ''), 10);
+                    const total = Number(tokens[tokens.length - 1].replace(/,/g, ''));
                     let qty = 1, price = 0;
                     
                     if (numCount === 2) {
@@ -311,13 +315,15 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
                         price = total;
                     } else {
                         qty = Number(tokens[tokens.length - numCount].replace(/,/g, ''));
-                        price = parseInt(tokens[tokens.length - numCount + 1].replace(/,/g, ''), 10);
+                        price = Number(tokens[tokens.length - numCount + 1].replace(/,/g, ''));
                     }
                     
                     const nameTokens = tokens.slice(1, tokens.length - numCount);
                     let pName = nameTokens.join(' ').replace(/^\s+|\s+$/g, '');
                     
-                    rawOrderItems.push({ sourceRow: tokens[0], ...(numCount === 5 ? {supplyAmount:Number(tokens[tokens.length-3].replace(/,/g,'')),taxAmount:Number(tokens[tokens.length-2].replace(/,/g,''))} : {}), name: pName, qty: qty, unit: '개', price: price, total: total });
+                    const header=headerRows.filter(h=>h.y>yKey).sort((a,b)=>a.y-b.y)[0],invoiceValues={};
+                    if(header){for(const key of ['name','unit','origin']){const ci=header.columns.findIndex(c=>c.key===key);if(ci<0)continue;const c=header.columns[ci],left=ci?(header.columns[ci-1].center+c.center)/2:0,right=ci+1<header.columns.length?(c.center+header.columns[ci+1].center)/2:pageWidth;const value=lineTokens.filter(t=>t.x+t.width/2>=left&&t.x+t.width/2<right).map(t=>t.text).join(' ');if(value)invoiceValues[key]=value;}}
+                    rawOrderItems.push({ invoiceValues, sourceRow: tokens[0], ...(numCount === 5 ? {supplyAmount:Number(tokens[tokens.length-3].replace(/,/g,'')),taxAmount:Number(tokens[tokens.length-2].replace(/,/g,''))} : {}), name: pName, qty: qty, unit: '개', price: price, total: total });
                 }
             }
         }
@@ -353,6 +359,11 @@ function parseSinglePageOrder(items, pageNum, pageWidth, pageHeight, fileName) {
         senderName: senderName,
         buyerName: buyerName,
         orderNo: orderNo,
+        sourcePage: pageNum,
+        invoiceValues: {total:(allTextJoined.match(/총\s*주문금액\s*[:：]?\s*([\d,]+(?:\.\d+)?)/)||[])[1] ?? totalAmt},
+        orderDate: (allTextJoined.match(/(?:주문일자|거래일자)\s*[:：]?\s*(\d{4}[-./]\d{1,2}[-./]\d{1,2})/) || [])[1]?.replace(/[./]/g, '-') || '',
+        payMethod: payMethod,
+        shippingFee: (allTextJoined.match(/배송비\s*[:：]?\s*([\d,]+(?:\.\d+)?)/) || [])[1]?.replace(/,/g, '') ?? '',
         bizNo: bizNo,
         address: address,
         fullAddress: fullAddress || address,

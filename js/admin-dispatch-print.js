@@ -2,7 +2,7 @@
 
 import { state } from "./admin-state.js";
 import {
-    parsePdfToEditableDocument,
+    parsePdfToEditableDocument, previewPdfOrder, printPdfOrders,
     templateBuilderState,
     fillTemplateWithOrderData
 } from "./admin-dispatch-template.js";
@@ -416,25 +416,7 @@ export function previewInvoiceRow(idx) {
         labelEl.innerText = `#${idx + 1} ${sName}${item.storeName || item.address || ''}${driverCourse}`;
     }
 
-    const docCanvas = document.getElementById('editable-doc-canvas');
-    const placeholder = document.getElementById('preview-placeholder');
-    const baseTemplate = templateBuilderState.currentDocHtml;
-
-    if (docCanvas && baseTemplate && typeof fillTemplateWithOrderData === 'function') {
-        const previewItem = {
-            ...item,
-            assignedDriver: item.assignedDriver ? item.assignedDriver : '미배정'
-        };
-        let filledHtml = fillTemplateWithOrderData(baseTemplate, previewItem, idx);
-        
-        // 🌟 안전장치: 구버전 서식의 잔여 nowrap 및 ellipsis 인라인 속성 실시간 완전 소거
-        filledHtml = filledHtml.replace(/white-space:\s*nowrap;?/gi, '')
-                               .replace(/text-overflow:\s*ellipsis;?/gi, '');
-
-        templateBuilderState.filledPreview = true;
-        docCanvas.innerHTML = filledHtml;
-        if (placeholder) placeholder.classList.add('hidden');
-    }
+    previewPdfOrder(item).catch(e=>alert(e.message));
 
     renderInvoiceOrderList();
 }
@@ -502,179 +484,7 @@ export function executeBatchPrint() {
         return driverA.localeCompare(driverB, 'ko');
     });
 
-    const baseTemplateHtml = templateBuilderState.currentDocHtml || document.getElementById('editable-doc-canvas')?.innerHTML;
-
-    if (!baseTemplateHtml || !baseTemplateHtml.trim()) {
-        alert("등록된 주문서 서식이 없습니다. 먼저 양식용 PDF를 업로드하거나 저장된 양식을 선택해 주세요.");
-        return;
-    }
-
-    const btn1 = document.getElementById('btn-batch-print');
-    const btn2 = document.getElementById('btn-batch-print-top');
-    [btn1, btn2].forEach(btn => {
-        if (btn) {
-            btn.disabled = true;
-            btn.innerHTML = '<i class="fa-solid fa-circle-notch fa-spin"></i> 인쇄 문서 생성 중...';
-        }
-    });
-
-    let printPagesHtml = '';
-
-    selectedOrders.forEach((item, idx) => {
-        const printItem = {
-            ...item,
-            assignedDriver: item.assignedDriver ? item.assignedDriver : '미배정'
-        };
-        let filledPageHtml = fillTemplateWithOrderData(baseTemplateHtml, printItem, idx);
-        
-        // 🌟 상품명 잘림 잔여 인라인 속성 완전 소거 및 contenteditable 비활성화
-        filledPageHtml = filledPageHtml.replace(/white-space:\s*nowrap;?/gi, '')
-                                       .replace(/text-overflow:\s*ellipsis;?/gi, '')
-                                       .replace(/contenteditable="true"/g, 'contenteditable="false"');
-
-        printPagesHtml += `
-        <div class="print-page-wrapper">
-            <div class="print-sheet-content">
-                ${filledPageHtml}
-            </div>
-        </div>`;
-    });
-
-    const iframe = document.createElement('iframe');
-    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;z-index:-1;'; 
-    document.body.appendChild(iframe);
-    
-    const doc = iframe.contentWindow.document; 
-    doc.open();
-    doc.write(`<!DOCTYPE html><html lang="ko"><head><meta charset="UTF-8"><title>배송 경로 PRO - 주문서 출력</title><style>
-        * { box-sizing: border-box; }
-        @media print { 
-            @page { 
-                size: A4 portrait; 
-                margin: 0; 
-            } 
-            html, body { 
-                margin: 0 !important; 
-                padding: 0 !important; 
-                width: 210mm !important; 
-                height: 297mm !important; 
-                background: white !important; 
-                -webkit-print-color-adjust: exact !important; 
-                print-color-adjust: exact !important; 
-            } 
-            .print-page-wrapper { 
-                width: 210mm !important; 
-                height: 297mm !important; 
-                max-height: 297mm !important; 
-                margin: 0 !important; 
-                padding: 0 !important; 
-                page-break-after: always !important; 
-                page-break-inside: avoid !important; 
-                break-after: page !important; 
-                overflow: hidden !important; 
-                box-sizing: border-box !important; 
-                display: flex !important; 
-                flex-direction: column !important; 
-                align-items: center !important; 
-                justify-content: flex-start !important; 
-            }
-            .print-page-wrapper:last-child { 
-                page-break-after: auto !important; 
-                break-after: auto !important; 
-            }
-        }
-        body { 
-            margin: 0; 
-            padding: 0; 
-            font-family: 'Malgun Gothic', 'Dotum', sans-serif; 
-            background: white; 
-            color: #000; 
-        }
-        .print-page-wrapper { 
-            width: 210mm; 
-            height: 297mm; 
-            max-height: 297mm; 
-            margin: 0 auto; 
-            padding: 0; 
-            overflow: hidden; 
-            box-sizing: border-box; 
-            display: flex; 
-            flex-direction: column; 
-            align-items: center; 
-        }
-        .print-sheet-content { 
-            width: 210mm; 
-            height: 297mm; 
-            max-height: 297mm; 
-            overflow: hidden; 
-            box-sizing: border-box; 
-            position: relative; 
-        }
-        .doc-sheet { 
-            width: 210mm !important; 
-            height: 297mm !important; 
-            max-height: 297mm !important; 
-            background: #fff; 
-            color: #000; 
-            box-sizing: border-box; 
-        }
-        .invoice-box-part { 
-            width: 100% !important; 
-            height: 148.5mm !important; 
-            max-height: 148.5mm !important; 
-            box-sizing: border-box !important; 
-            overflow: hidden !important; 
-        }
-        .invoice-cut-line { 
-            border-top: 1.5px dashed #4b5563 !important; 
-            width: 100% !important; 
-            margin: 0 !important; 
-            height: 0 !important; 
-            box-sizing: border-box !important; 
-            flex-shrink: 0 !important; 
-        }
-
-        /* 🌟 인쇄 엔진 핵심: 상품명 컬럼 절대 잘림 방지 (강제 자동 줄바꿈 및 전체 표시) */
-        .item-table {
-            table-layout: fixed !important;
-            width: 100% !important;
-        }
-        .item-table th, 
-        .item-table td {
-            word-break: break-all !important;
-            white-space: normal !important;
-            text-overflow: clip !important;
-            line-height: 1.18 !important;
-        }
-        .item-row td {
-            word-break: break-all !important;
-            white-space: normal !important;
-        }
-        .item-row td div {
-            white-space: normal !important;
-            text-overflow: clip !important;
-            overflow: visible !important;
-            max-height: none !important;
-            line-height: 1.18 !important;
-        }
-    </style></head><body>${printPagesHtml}</body></html>`);
-    doc.close();
-
-    iframe.onload = function() {
-        setTimeout(() => {
-            iframe.contentWindow.focus();  
-            iframe.contentWindow.print();
-            setTimeout(() => { 
-                document.body.removeChild(iframe); 
-                [btn1, btn2].forEach(btn => {
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.innerHTML = `<i class="fa-solid fa-print text-sm"></i> 선택 주문서 일괄 출력`;
-                    }
-                });
-            }, 1000);
-        }, 800); 
-    };
+    return printPdfOrders(selectedOrders);
 }
 
 // ==========================================

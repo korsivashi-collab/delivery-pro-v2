@@ -2,6 +2,7 @@
 
 import { state, getLocalDateString } from "./admin-state.js";
 import { formatNumber } from "./admin-dispatch-core.js";
+import { auth } from "./admin-api.js";
 
 const escapeTemplateText = value => String(value ?? '').replace(/[&<>"']/g,
     char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
@@ -96,92 +97,20 @@ export function buildDynamicColgroup(cols) {
 // 1. PDF 분석 및 [양식 보존 + 내용 자동 소거/템플릿화] 알고리즘
 // ==========================================
 export async function parsePdfToEditableDocument(file) {
-    if (!/\.pdf$/i.test(file.name)) { alert("기본 양식은 PDF 파일로 업로드해 주세요."); return; }
-    if (!window.pdfjsLib) {
-        alert("PDF 처리 라이브러리가 로드되지 않았습니다. 새로고침 후 다시 시도해 주세요.");
-        return;
-    }
-
+    if (!/\.pdf$/i.test(file.name) || file.size > 3 * 1024 * 1024) { alert('3MB 이내 PDF 양식을 등록해 주세요.'); return; }
+    if (invoiceBusy) return;
+    invoiceBusy = true;
+    showInvoiceProgress('원본 양식 분석·저장 중… 처음 등록할 때만 분석하며, 저장 후 계속 재사용합니다.');
     try {
-        const arrayBuffer = await file.arrayBuffer();
-        const loadingTask = window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) });
-        const pdf = await loadingTask.promise;
-
-        if (pdf.numPages < 1) {
-            alert("유효한 페이지를 찾을 수 없는 PDF 파일입니다.");
-            return;
-        }
-
-        const page1 = await pdf.getPage(1);
-        const textContent = await page1.getTextContent({ normalizeWhitespace: true });
-        const items = textContent.items;
-
-        if (!items || items.length === 0) {
-            alert("PDF 파일에서 텍스트 정보를 감지하지 못했습니다.");
-            return;
-        }
-
-        const rawText = items.map(it => it.str.trim()).filter(Boolean).join(' ');
-
-        // 서식 명칭 및 2등분(공급자/공급받는자용) 파악
-        const isTwoPart = rawText.includes('공급자 보관용') || rawText.includes('공급받는자용') || rawText.includes('공급받는 자 보관용');
-        let docTitle = '거래명세표';
-        if (/주문서/i.test(rawText)) docTitle = '주문서';
-        else if (/출고전표/i.test(rawText)) docTitle = '출고전표';
-        else if (/발주서/i.test(rawText)) docTitle = '발주서';
-
-        let provRegno = '';
-        let provName = '';
-        let provAddr = '';
-        let provTel = '';
-        let provAddTel = '';
-
-        const bizMatch = rawText.match(/\b\d{3}[-\s]?\d{2}[-\s]?\d{5}\b/);
-        if (bizMatch) provRegno = bizMatch[0].replace(/\s+/g, '-');
-
-        // 공급자 상호명(법인명) 정밀 파싱
-        const storeMatch = rawText.match(/(?:상호\(법인명\)|상호명|상호|법인명|공급자)[\s:|]*([가-힣A-Za-z0-9\(\)주식회사]+)/);
-        if (storeMatch) {
-            let val = storeMatch[1].trim();
-            val = val.split(/(?:구매자|주문자|보관용|공급받는|주문일자)/)[0].trim();
-            provName = val.replace(/^[)|\]}>\s]+/, '').trim();
-        }
-
-        const addrMatch = rawText.match(/(?:서울|부산|대구|인천|광주|대전|울산|세종|경기|강원|충북|충남|전북|전남|경북|경남|제주)[^\n\r]*?(?:로|길|동|읍|면|가)\s*[\d\-]+(?:\s*[가-힣0-9\(\)\,\-\.]*)?/);
-        if (addrMatch) provAddr = addrMatch[0].trim();
-
-        const telMatches = rawText.match(/(?:0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})/g);
-        if (telMatches && telMatches.length > 0) {
-            provTel = telMatches[0];
-            if (telMatches.length > 1) provAddTel = telMatches[1];
-        }
-
-        // 실제 상품 테이블 컬럼(열) 구조 분석
-        const detectedColumns = extractItemTableColumns(rawText);
-        templateBuilderState.detectedColumns = detectedColumns;
-
-        // 양식(칸/테두리/라벨)은 유지하고 개별 주문 데이터는 치환 태그로 구성된 HTML 생성
-        const formHtml = buildCleanTemplatedHtml({
-            docTitle,
-            isTwoPart,
-            provRegno,
-            provName,
-            provAddr,
-            provTel,
-            provAddTel,
-            columns: detectedColumns
-        });
-
-        templateBuilderState.activeTemplateTitle = file.name.replace(/\.[^/.]+$/, '').trim() || docTitle;
-        templateBuilderState.currentDocHtml = formHtml;
-
-        renderEditableDocument(formHtml);
-
-        alert(`[PDF 양식 인식 완료]\n\n1. 공급자/공급받는자 표는 정돈된 원래 규격으로 유지되고, 상품 목록 표만 넓게 최적화되었습니다.\n2. 담당기사가 전표 분류에 최적화된 [우측 상단(배송번호 위)]으로 깔끔하게 배치되었습니다.\n3. 확인 후 상단 [양식 저장]을 눌러 저장해 주세요.`);
-    } catch (e) {
-        console.error("PDF 서식 파싱 오류:", e);
-        alert("PDF 서식 분석 중 오류가 발생했습니다: " + e.message);
-    }
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        let binary = ''; for (const b of bytes) binary += String.fromCharCode(b);
+        const result = await invoiceRequest({action:'register', pdf:btoa(binary), title:file.name.replace(/\.pdf$/i,'')});
+        templateBuilderState.activeTemplateId = result.id;
+        templateBuilderState.activeTemplateTitle = result.title;
+        await window.loadSavedForms?.();
+        await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex || 0]);
+    } catch (e) { showInvoiceProgress(e.message); alert(e.message); }
+    finally { invoiceBusy = false; }
 }
 
 function extractItemTableColumns(rawText) {
@@ -608,43 +537,12 @@ export function fillTemplateWithOrderData(baseTemplateHtml, order, idx = 0) {
 // ==========================================
 // 5. [양식 저장] 버튼 클릭 시 동작 로직
 // ==========================================
-export function saveCurrentDocumentTemplate() {
-    const docCanvas = document.getElementById('editable-doc-canvas');
-    if (!docCanvas) {
-        alert("저장할 서식 내용이 없습니다. 먼저 양식 PDF를 업로드해 주세요.");
-        return;
-    }
-
-    const defaultTitle = templateBuilderState.activeTemplateTitle || '새 주문서 양식';
-    const title = prompt("저장할 주문서 서식의 이름을 입력하세요:", defaultTitle);
-    if (!title || !title.trim()) return;
-
-    const trimmedTitle = title.trim();
-    const templateHtml = templateBuilderState.filledPreview ? templateBuilderState.currentDocHtml : docCanvas.innerHTML;
-    const savedForms = JSON.parse(localStorage.getItem('deliveryPro_savedForms') || '[]');
-
-    const newTemplate = {
-        id: 'TPL-' + Date.now(),
-        title: trimmedTitle,
-        templateHtml: templateHtml,
-        savedAt: Date.now(),
-        isDefault: savedForms.length === 0
-    };
-
-    const existingIdx = savedForms.findIndex(f => f.title === trimmedTitle);
-    if (existingIdx >= 0 && savedForms[existingIdx].builtIn) { alert('기본 원본은 덮어쓸 수 없습니다. 다른 이름으로 저장해 주세요.'); return; }
-    if (existingIdx >= 0) {
-        if (!confirm(`'${trimmedTitle}'(으)로 이미 저장된 서식이 있습니다. 덮어쓰시겠습니까?`)) return;
-        newTemplate.isDefault = savedForms[existingIdx].isDefault;
-        savedForms[existingIdx] = newTemplate;
-    } else {
-        savedForms.push(newTemplate);
-    }
-
-    localStorage.setItem('deliveryPro_savedForms', JSON.stringify(savedForms));
-    alert(`[${trimmedTitle}] 서식이 성공적으로 저장되었습니다.\n우측 '저장된 주문서 양식 목록'에 등록되었습니다.`);
-
-    if (window.loadSavedForms) window.loadSavedForms();
+export async function saveCurrentDocumentTemplate() {
+    if (!templateBuilderState.activeTemplateId) { alert('먼저 양식 PDF를 등록해 주세요.'); return; }
+    const title = prompt('양식 이름', templateBuilderState.activeTemplateTitle);
+    if (!title?.trim()) return;
+    try { await invoiceRequest({action:'rename',id:templateBuilderState.activeTemplateId,title:title.trim()}); templateBuilderState.activeTemplateTitle=title.trim(); await window.loadSavedForms?.(); }
+    catch(e) { alert(e.message); }
 }
 
 // ==========================================
@@ -657,5 +555,58 @@ window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 window.fillTemplateWithOrderData = fillTemplateWithOrderData;
 window.buildDynamicColgroup = buildDynamicColgroup;
 window.editOriginalDocumentTemplate = () => {
-    if (templateBuilderState.currentDocHtml) renderEditableDocument(templateBuilderState.currentDocHtml, false);
+    previewPdfOrder(null).catch(e=>alert(e.message));
 };
+
+let invoiceBusy=false,invoicePrinting=false,invoicePreviewVersion=0,invoicePdfUrl=null;
+const invoiceOwner=()=>sessionStorage.getItem('deliveryProDispatchKey')||'';
+export async function invoiceRequest(body){
+    const owner=invoiceOwner();
+    if(!owner||!auth.currentUser)throw Error('관제 계정으로 로그인해 주세요.');
+    const response=await fetch('/api/tracking?operation=invoice-template',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify({...body,dispatchKey:owner}),signal:AbortSignal.timeout(58000)});
+    const result=await response.json();
+    if(owner!==invoiceOwner())throw Error('업체가 변경되었습니다. 다시 열어 주세요.');
+    if(!response.ok)throw Error(result.error||'명세서를 처리하지 못했습니다.');return result;
+}
+export function showInvoiceProgress(message){
+    const wrapper=document.getElementById('doc-editor-wrapper');if(wrapper){wrapper.replaceChildren();const text=document.createElement('p');text.className='p-6 bg-white rounded-xl';text.textContent=message;wrapper.appendChild(text);}
+    document.getElementById('preview-placeholder')?.classList.add('hidden');
+}
+export function clearPdfTemplate(){
+    invoicePreviewVersion++;templateBuilderState.activeTemplateId=null;templateBuilderState.currentDocHtml='';
+    if(invoicePdfUrl){URL.revokeObjectURL(invoicePdfUrl);invoicePdfUrl=null;}
+    showInvoiceProgress('양식 PDF를 등록하거나 저장된 양식을 선택해 주세요.');
+}
+function pdfBytes(base64){return Uint8Array.from(atob(base64),c=>c.charCodeAt(0));}
+export async function previewPdfOrder(order){
+    if(invoicePrinting)return;
+    const id=templateBuilderState.activeTemplateId;if(!id)return;
+    const version=++invoicePreviewVersion;showInvoiceProgress(order?'주문 내용 적용 중…':'저장된 원본 양식 불러오는 중…');
+    const result=await invoiceRequest({action:order?'render':'original',id,...(order?{orders:[order]}:{})});
+    if(version!==invoicePreviewVersion||id!==templateBuilderState.activeTemplateId)return;
+    if(invoicePdfUrl)URL.revokeObjectURL(invoicePdfUrl);invoicePdfUrl=URL.createObjectURL(new Blob([pdfBytes(result.pdf)],{type:'application/pdf'}));
+    const wrapper=document.getElementById('doc-editor-wrapper');if(!wrapper)return;wrapper.replaceChildren();
+    const toolbar=document.createElement('div');toolbar.className='flex gap-3 items-center p-3 bg-white rounded-xl w-full';
+    const title=document.createElement('span');title.textContent=templateBuilderState.activeTemplateTitle+' · 원본 양식 유지';toolbar.appendChild(title);
+    const rename=document.createElement('button');rename.textContent='양식 이름 저장';rename.onclick=saveCurrentDocumentTemplate;toolbar.appendChild(rename);
+    const link=document.createElement('a');link.href=invoicePdfUrl;link.download=order?'주문서.pdf':'원본양식.pdf';link.textContent='PDF 저장';toolbar.appendChild(link);wrapper.appendChild(toolbar);
+    const frame=document.createElement('iframe');frame.title='주문서 PDF 미리보기';frame.src=invoicePdfUrl;frame.style.cssText='width:100%;height:78vh;border:0;background:white';wrapper.appendChild(frame);
+}
+export async function printPdfOrders(orders){
+    if(invoiceBusy)return;
+    const id=templateBuilderState.activeTemplateId;if(!id){alert('먼저 양식 PDF를 등록하거나 선택해 주세요.');return;}
+    if(!window.PDFLib){alert('PDF 출력 도구를 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.');return;}
+    invoiceBusy=true;invoicePrinting=true;invoicePreviewVersion++;
+    const buttons=['btn-batch-print','btn-batch-print-top'].map(id=>document.getElementById(id));buttons.forEach(b=>{if(b)b.disabled=true;});
+    // Open while still in the user gesture; failures never expose a partial print document.
+    const popup=window.open('about:blank','_blank');if(popup)popup.document.body.textContent='주문서를 준비하고 있습니다…';
+    try{
+        const documentPdf=await window.PDFLib.PDFDocument.create();
+        for(let i=0;i<orders.length;i+=10){showInvoiceProgress(`주문서 생성 중… ${i} / ${orders.length}건`);const result=await invoiceRequest({action:'render',id,orders:orders.slice(i,i+10)});const part=await window.PDFLib.PDFDocument.load(pdfBytes(result.pdf));const pages=await documentPdf.copyPages(part,part.getPageIndices());pages.forEach(p=>documentPdf.addPage(p));}
+        const url=URL.createObjectURL(new Blob([await documentPdf.save()],{type:'application/pdf'}));
+        if(popup)popup.location.href=url;else{const a=document.createElement('a');a.href=url;a.download='주문서-일괄.pdf';a.click();}
+        setTimeout(()=>URL.revokeObjectURL(url),600000);
+        invoicePrinting=false;await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex||0]);
+    }catch(e){popup?.close();showInvoiceProgress(e.message);alert(e.message);}
+    finally{invoiceBusy=false;invoicePrinting=false;buttons.forEach(b=>{if(b)b.disabled=false;});}
+}

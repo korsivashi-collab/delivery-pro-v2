@@ -494,7 +494,11 @@ export function processExcelData(jsonData, fileName = '') {
         const orderKey = `${senderName}___${orderNo || address}___${address}___${storeName}`;
         const taxKey = keys.find(k => /^(과세구분|과세여부|세금구분)$/.test(k.replace(/\s+/g,'')));
         const taxType = taxKey ? String(row[taxKey] || '').trim() : '';
+        const invoiceValue = pattern => {const k=keys.find(k=>pattern.test(k.replace(/\s+/g,'')));return k===undefined?'':String(row[k]??'').trim();};
+        const invoiceValues={orderDate:invoiceValue(/^(주문일자|주문일|거래일자|배송일자)$/),payMethod:invoiceValue(/^(결제수단|결제방법)$/),shippingFee:invoiceValue(/^(배송비|운송료)$/)};
+        const invoiceGrandTotal=invoiceValue(/^(총주문금액|총결제금액|결제금액|합계금액)$/);if(invoiceGrandTotal!=='')invoiceValues.total=invoiceGrandTotal;
         const itemObj = { 
+            invoiceValues: {price:invoiceValue(/^(단가|상품가격|판매가)$/),supplyAmount:invoiceValue(/^(공급가액|공급금액)$/),taxAmount:invoiceValue(/^(세액|부가세|부가세액)$/),total:invoiceValue(/^(총액|상품금액|품목금액|금액)$/)},
             name: itemName || '상품명 미지정',
             // Preserve legacy unit (= first 규격/단위 column) for invoices and exports.
             // Picking uses separate source fields without changing those consumers.
@@ -544,6 +548,7 @@ export function processExcelData(jsonData, fileName = '') {
                 memo: memo,
                 lat: null,
                 lng: null,
+                invoiceValues,
                 items: [itemObj]
             };
         }
