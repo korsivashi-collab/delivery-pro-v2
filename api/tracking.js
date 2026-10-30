@@ -292,6 +292,7 @@ function createHandler(sdk = admin, options = {}) {
     const cache = new Map();
     const searchCache = new Map();
     return async function handler(req, res) {
+        if (req.query?.operation === 'invoice-template') return require('../server/invoice-template.cjs').createHandler(sdk, options)(req, res);
         if (req.query?.operation === 'delivery-number') return numberHandler(req, res);
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
