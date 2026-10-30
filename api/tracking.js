@@ -261,9 +261,11 @@ function lookupPublicData(index, lookup, now) {
         stops: results.flatMap((result, i) => result.stops.map(stop => ({ ...stop, companyName: selected[i].company }))) };
 }
 function createHandler(sdk = admin) {
+    const numberHandler = require('../server/delivery-number.cjs').createHandler(sdk);
     const cache = new Map();
     const searchCache = new Map();
     return async function handler(req, res) {
+        if (req.query?.operation === 'delivery-number') return numberHandler(req, res);
         res.setHeader('Cache-Control', 'no-store');
         res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
         res.setHeader('Referrer-Policy', 'no-referrer');
