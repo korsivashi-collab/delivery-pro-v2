@@ -15,6 +15,7 @@ import { getOrCreateDeviceId } from './auth.js';
 
 // 내부 상태 변수
 let currentActiveAlertMsgId = null;
+let pendingDispatchAlerts = [];
 let pendingTmsState = null;
 let onRestoreDestinationCallback = null;
 let onGpsToggleCallback = null;
@@ -124,10 +125,24 @@ export function playBeepSound() {
 }
 
 let volatileNotices = [];
+let clearedNoticeIds = new Set();
+let acknowledgedNoticeIds = new Set();
 let volatileNoticeOwner = null;
 function noticesStorageKey() {
     const owner = state.getRouteOwnerId() || '';
-    if (volatileNoticeOwner !== owner) { volatileNotices=[]; volatileNoticeOwner=owner; }
+    if (volatileNoticeOwner !== owner) {
+        volatileNotices=[]; volatileNoticeOwner=owner;
+        currentActiveAlertMsgId=null; pendingDispatchAlerts=[];
+        document.getElementById('dispatch-alert-modal')?.classList.add('hidden');
+        try {
+            const saved = JSON.parse(localStorage.getItem('deliveryPro_clearedNotices:' + owner) || '[]');
+            clearedNoticeIds = new Set(Array.isArray(saved) ? saved : []);
+        } catch (_) { clearedNoticeIds = new Set(); }
+        try {
+            const saved = JSON.parse(localStorage.getItem('deliveryPro_noticeRead:' + owner) || '[]');
+            acknowledgedNoticeIds = new Set(Array.isArray(saved) ? saved : []);
+        } catch (_) { acknowledgedNoticeIds = new Set(); }
+    }
     return 'deliveryPro_notices:' + owner;
 }
 function readNotices() {
@@ -140,6 +155,7 @@ function readNotices() {
 }
 export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, senderTitle, senderType) {
     let notices = readNotices();
+    if (clearedNoticeIds.has(msgId)) return false;
     const isMaster = (senderType === 'MASTER' || senderTitle === '운영사 알림');
     const finalTitle = senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
 
@@ -160,16 +176,35 @@ export function saveMessageToLocalHistory(msgId, content, dateStr, timeStr, send
     }
 }
 
+function isNoticeAcknowledged(msgId) {
+    noticesStorageKey();
+    if (clearedNoticeIds.has(msgId) || acknowledgedNoticeIds.has(msgId)) return true;
+    // Keep confirmations written by previous app/web versions.
+    try { return localStorage.getItem(`acked_msg_${msgId}`) === 'true'; }
+    catch (_) { return false; }
+}
+
 export function checkUnreadNotices() {
     const dot = document.getElementById('notice-unread-dot');
     if (!dot) return;
     const notices = readNotices();
-    const unread = notices.some(n => !localStorage.getItem(`acked_msg_${n.msgId}`));
+    const unread = notices.some(n => !isNoticeAcknowledged(n.msgId));
     if (unread) dot.classList.remove('hidden');
     else dot.classList.add('hidden');
 }
 
 export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, senderType) {
+    if (!msgId || isNoticeAcknowledged(msgId)) return;
+    // Logout hides the dialog without confirming it. A new session must not retain its queue.
+    if (currentActiveAlertMsgId && document.getElementById('dispatch-alert-modal')?.classList.contains('hidden')) {
+        currentActiveAlertMsgId = null;
+        pendingDispatchAlerts = [];
+    }
+    if (currentActiveAlertMsgId === msgId || pendingDispatchAlerts.some(n => n.msgId === msgId)) return;
+    if (currentActiveAlertMsgId) {
+        pendingDispatchAlerts.push({content, timeStr, msgId, senderTitle, senderType});
+        return;
+    }
     currentActiveAlertMsgId = msgId;
     const isMaster = (senderType === 'MASTER' || senderTitle === '운영사 알림');
     const title = senderTitle || (isMaster ? '운영사 알림' : '회사 알림');
@@ -202,11 +237,27 @@ export function showDispatchAlertPopup(content, timeStr, msgId, senderTitle, sen
 }
 
 export function closeDispatchAlertModal() {
+    noticesStorageKey();
     if (currentActiveAlertMsgId) {
-        localStorage.setItem(`acked_msg_${currentActiveAlertMsgId}`, "true");
+        const confirmed = new Set(acknowledgedNoticeIds);
+        confirmed.add(currentActiveAlertMsgId);
+        try {
+            localStorage.setItem('deliveryPro_noticeRead:' + volatileNoticeOwner, JSON.stringify([...confirmed]));
+        } catch (error) {
+            alert('알림 확인 기록을 저장하지 못했습니다. 기기 저장 공간과 브라우저 저장 권한을 확인한 뒤 다시 눌러 주세요.');
+            return;
+        }
+        acknowledgedNoticeIds = confirmed;
     }
+    currentActiveAlertMsgId = null;
     document.getElementById('dispatch-alert-modal')?.classList.add('hidden');
     checkUnreadNotices();
+    while (pendingDispatchAlerts.length) {
+        const next = pendingDispatchAlerts.shift();
+        if (isNoticeAcknowledged(next.msgId)) continue;
+        showDispatchAlertPopup(next.content, next.timeStr, next.msgId, next.senderTitle, next.senderType);
+        break;
+    }
 }
 
 export async function openNoticeHistoryModal(refresh = true) {
@@ -252,8 +303,20 @@ export function closeNoticeHistoryModal() {
 
 export function clearLocalNotices() {
     if (!confirm("알림 보관함을 모두 비우시겠습니까?")) return;
-    localStorage.removeItem('deliveryPro_notices');
+    const key = noticesStorageKey();
+    for (const notice of readNotices()) clearedNoticeIds.add(notice.msgId);
+    try {
+        // Persist the dismissal before removing history so a replay after login stays cleared.
+        localStorage.setItem('deliveryPro_clearedNotices:' + volatileNoticeOwner, JSON.stringify([...clearedNoticeIds]));
+        localStorage.removeItem(key);
+    } catch (error) {
+        alert('알림함을 비우지 못했습니다. 기기 저장 공간과 브라우저 저장 권한을 확인해 주세요.');
+        return;
+    }
     volatileNotices = [];
+    currentActiveAlertMsgId = null;
+    pendingDispatchAlerts = [];
+    document.getElementById('dispatch-alert-modal')?.classList.add('hidden');
     openNoticeHistoryModal(false);
     checkUnreadNotices();
 }
