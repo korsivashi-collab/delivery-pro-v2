@@ -12,7 +12,7 @@
 
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261031-address-route">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261031-header-address">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -51,8 +51,8 @@
                 <div class="dispatch-search">
                     <div class="relative w-full flex items-center">
                         <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400"></i>
-                        <input type="search" id="global-search-input" onkeydown="if(event.key==='Enter'){window.handleGlobalSearch(this.value)}" placeholder="기사·주소·연락처 검색" aria-label="기사 주소 연락처 통합 검색" class="w-full pl-9 pr-16 border outline-none">
-                        <div class="absolute right-2 flex items-center"><button type="button" onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden" aria-label="검색어 지우기"><i class="fa-solid fa-circle-xmark"></i></button><button type="button" onclick="window.handleGlobalSearch(document.getElementById('global-search-input').value)">검색</button></div>
+                        <input type="search" id="global-search-input" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();window.searchAddressFromHeader()}" placeholder="주소·상호 / 기사·연락처" aria-label="주소 검색 또는 배송 기록 검색" class="w-full pl-9 pr-16 border outline-none">
+                        <div class="absolute right-2 flex items-center"><button type="button" onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden" aria-label="검색어 지우기"><i class="fa-solid fa-circle-xmark"></i></button><button type="button" id="header-address-search" onclick="window.searchAddressFromHeader()">주소 검색</button><button type="button" id="header-record-search" onclick="window.closeAddressRouteSearch();window.handleGlobalSearch(document.getElementById('global-search-input').value)">기록 검색</button></div>
                     </div>
                 </div>
             </div>
@@ -647,7 +647,7 @@
 
     <div id="dispatch-work-status" role="status" aria-live="polite" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3"><i class="fa-solid fa-hourglass-half fa-spin" aria-hidden="true"></i><span id="dispatch-work-text">작업 중…</span></div>
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-dispatch-pdf.js":"./js/admin-dispatch-pdf.js?v=20261031-native-document-v3","./js/admin-dispatch-forms.js":"./js/admin-dispatch-forms.js?v=20261031-manual-request","./js/admin-dispatch-print.js":"./js/admin-dispatch-print.js?v=20261031-manual-request","./js/address.js":"./js/address.js?v=20261030-postcode","./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261031-manual-request","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-search.js":"./js/admin-dispatch-search.js?v=20261031-address-route","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261031-address-route","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261031-sms-visible-modes","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261031-native-document-v3"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-dispatch-pdf.js":"./js/admin-dispatch-pdf.js?v=20261031-native-document-v3","./js/admin-dispatch-forms.js":"./js/admin-dispatch-forms.js?v=20261031-manual-request","./js/admin-dispatch-print.js":"./js/admin-dispatch-print.js?v=20261031-manual-request","./js/address.js":"./js/address.js?v=20261030-postcode","./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261031-manual-request","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-search.js":"./js/admin-dispatch-search.js?v=20261031-header-address","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261031-header-address","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261031-sms-visible-modes","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261031-native-document-v3"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261031-first-login-owner"></script>
 </body>
 </html>

@@ -44,6 +44,7 @@ export function closeSearchSidePanel() {
 }
 
 export function clearSearchInput() {
+    closeAddressRouteSearch();
     const input = document.getElementById('global-search-input');
     if (input) input.value = '';
     const sidePanel = document.getElementById('search-result-side-panel');
@@ -501,6 +502,12 @@ function addressRoutePanel(){
     panel.innerHTML='<div class="address-route-heading"><strong>주소 검색 · 가까운 기사 동선</strong><button type="button" id="address-route-close" aria-label="주소 검색 닫기">✕</button></div><form id="address-route-form"><label for="address-route-query">추가 배송·회수 주소 또는 상호</label><div class="address-route-input"><input id="address-route-query" type="search" maxlength="200" autocomplete="off" placeholder="도로명 주소 또는 가게명" required><button id="address-route-submit" type="submit">검색</button></div></form><p id="address-route-status" role="status" aria-live="polite"></p><div id="address-route-matches"></div><div id="address-route-nearby"></div>';
     section.appendChild(panel);panel.querySelector('#address-route-close').onclick=closeAddressRouteSearch;panel.querySelector('#address-route-form').onsubmit=event=>{event.preventDefault();searchAddressRoutes();};return panel;
 }
+export function searchAddressFromHeader(){
+    const query=document.getElementById('global-search-input')?.value?.trim()||'';
+    if(!query){openAddressRouteSearch();return;}
+    openAddressRouteSearch();
+    const input=document.getElementById('address-route-query');if(input){input.value=query;searchAddressRoutes();}
+}
 export function openAddressRouteSearch(){
     setDispatchMode('DELIVERY',true);const panel=addressRoutePanel();if(!panel)return;panel.hidden=false;
     document.getElementById('search-result-side-panel')?.classList.add('translate-x-full');
@@ -545,6 +552,7 @@ export function refreshAddressRouteSearch(){
     const explanation=document.createElement('p');explanation.textContent='지도 동선까지 직선거리 기준입니다. 실제 도로의 이동·우회거리는 다를 수 있습니다.';target.appendChild(explanation);
     rows.slice(0,5).forEach((row,index)=>{const line=document.createElement('button');line.type='button';line.className='address-route-result';const title=document.createElement('strong'),detail=document.createElement('span');title.textContent=(index+1)+'. '+row.phone;detail.textContent=(row.distance<1000?Math.round(row.distance)+'m':(row.distance/1000).toFixed(1)+'km')+' · 미처리 '+row.remaining+'건 · 기사 목록 보기';line.append(title,detail);line.onclick=()=>selectDriver(row.driverId);target.appendChild(line);});
 }
+window.searchAddressFromHeader=searchAddressFromHeader;
 window.openAddressRouteSearch=openAddressRouteSearch;
 window.closeAddressRouteSearch=closeAddressRouteSearch;
 window.refreshAddressRouteSearch=refreshAddressRouteSearch;
