@@ -107,6 +107,9 @@ export async function parsePdfToEditableDocument(file) {
         const result = await invoiceRequest({action:'register', pdf:btoa(binary), title:file.name.replace(/\.pdf$/i,'')});
         templateBuilderState.activeTemplateId = result.id;
         templateBuilderState.activeTemplateTitle = result.title;
+        templateBuilderState.documentId = null;
+        templateBuilderState.document = null;
+        templateBuilderState.documentEdits = {};
         await window.loadSavedForms?.();
         await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex || 0]);
         alert('양식 등록이 완료되었습니다.');
@@ -674,8 +677,16 @@ function syncNativeFixedPass(root){
 const pairedFieldNames={...documentFieldNames,name:'상품명',unit:'규격',origin:'원산지',price:'단가',supplyAmount:'공급가액',taxAmount:'세액',no:'순번',qty:'총수량',totalWords:'한글총액',count:'건수',option:'옵션',note:'비고',note1:'비고1',note2:'비고2'};
 function validCompanyDocument(d){return !!d&&!(('background') in d)&&((d.version===2&&Array.isArray(d.blocks))||(d.version===3&&d.pipeline==='paired-native-v1'&&Array.isArray(d.nodes)&&Array.isArray(d.bodies)&&d.ready&&d.sourceFixedPass?.version===1));}
 function pairedDocumentHtml(order,editing){
- const model=JSON.parse(JSON.stringify(templateBuilderState.document)),edits=templateBuilderState.documentEdits||{};
- for(const n of model.nodes)if(Object.hasOwn(edits,n.id)){n.text=edits[n.id].replace(/{{([^{}]+)}}/g,(token,label)=>{const key=label==='수량'?'qty':Object.keys(pairedFieldNames).find(k=>pairedFieldNames[k]===label);return key?'{{'+key+'}}':token;});n.bindings=[...n.text.matchAll(/{{([A-Za-z]+)}}/g)].map(m=>({...n.bindings.find(b=>b.key===m[1]),key:m[1],sourceCell:n.id}));}
+ const model=JSON.parse(JSON.stringify(templateBuilderState.document)),edits=templateBuilderState.documentEdits||{},pass=model.sourceFixedPass;
+ const canonical=text=>String(text).replace(/{{([^{}]+)}}/g,(token,label)=>{const key=label==='수량'?'qty':Object.keys(pairedFieldNames).find(k=>pairedFieldNames[k]===label);return key?'{{'+key+'}}':token;}).replace(/({{([A-Za-z]+)}})(?:[ \t]+{{\2}})+/g,'$1');
+ const keys=text=>[...text.matchAll(/{{([A-Za-z]+)}}/g)].map(m=>m[1]),fixed=text=>text.replace(/{{[^{}]+}}/g,'').replace(/\s+/g,'');
+ for(const n of model.nodes){const before=canonical(n.text),after=canonical(Object.hasOwn(edits,n.id)?edits[n.id]:n.text),baseline=pass&&canonical(pass.baseline[n.id]??'');
+  // Editing a data tag does not edit the original labels or their placement.
+  if(pass&&baseline===before&&fixed(before)===fixed(after)){const oldKeys=keys(before),newKeys=keys(after),remap=new Map(oldKeys.map((key,i)=>[key,newKeys[i]]));if(oldKeys.length===newKeys.length&&oldKeys.every((key,i)=>remap.get(key)===newKeys[i])&&newKeys.every(Boolean)){for(const f of pass.fields.filter(f=>f.ownerId===n.id))if(remap.has(f.key)){const key=remap.get(f.key);if(key!==f.key)f.format=undefined;f.key=key;}pass.baseline[n.id]=after;}}
+  n.text=after;n.bindings=keys(after).map(key=>({...n.bindings.find(b=>b.key===key),key,sourceCell:n.id}));
+ }
+ // One output owner per physical source slot; repeated copies elsewhere stay distinct.
+ if(pass){const area=r=>Math.max(0,r[2]-r[0])*Math.max(0,r[3]-r[1]),overlap=(a,b)=>Math.max(0,Math.min(a[2],b[2])-Math.max(a[0],b[0]))*Math.max(0,Math.min(a[3],b[3])-Math.max(a[1],b[1]));pass.fields=pass.fields.filter((f,i,all)=>!all.slice(0,i).some(q=>q.key===f.key&&overlap(q.sourceRect,f.sourceRect)>=Math.max(area(q.sourceRect),area(f.sourceRect))*.9));}
  const o=order?{...order,...nonemptyInvoiceValues(order)}:null;
  if(o){o.date=o.orderDate||o.date||getLocalDateString();o.buyerName=o.buyerName||o.storeName;o.phone=o.phone||o.customerPhone||'';o.driverName=o.assignedDriver||o.driverName||'';o.senderName=o.senderName||o.supplier||'';o.items=(o.items||[]).map(x=>({...x}));}
  const html=baseNativeHtml(model,o,true),paper=model.sourceFixedPass?.paperSrc;
