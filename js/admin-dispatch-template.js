@@ -111,10 +111,12 @@ export async function parsePdfToEditableDocument(file) {
         templateBuilderState.document = null;
         templateBuilderState.documentEdits = {};
         await window.loadSavedForms?.();
+        updateInvoiceWork({stage:'preview'});
         await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex || 0]);
+        finishInvoiceWork();
         alert('양식 등록이 완료되었습니다.');
     } catch (e) { showInvoiceProgress(e.message);if(globalThis.requestAnimationFrame)await new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));alert(e.message); }
-    finally { invoiceBusy = false; const wrapper=globalThis.document?.getElementById('doc-editor-wrapper');wrapper?.setAttribute('aria-busy','false');wrapper?.querySelector('[data-invoice-spinner]')?.remove(); }
+    finally { stopInvoiceWorkClock();invoiceBusy = false; const wrapper=globalThis.document?.getElementById('doc-editor-wrapper');wrapper?.setAttribute('aria-busy','false');wrapper?.querySelector('[data-invoice-spinner]')?.remove(); }
 }
 
 function extractItemTableColumns(rawText) {
@@ -566,16 +568,40 @@ window.editOriginalDocumentTemplate = () => {
 };
 
 let invoiceBusy=false,invoicePrinting=false,invoicePreviewVersion=0,invoicePdfUrl=null;
+const invoiceStepLabels={upload:'PDF 전송·접수',pdf:'PDF 페이지 확인',compare:'서로 다른 주문 비교',roles:'고정 정보·입력 항목 분류',base:'공통 양식 생성',mapping:'문서 항목 분석',review:'항목·반복 표 검토',transcribe:'칸별 내용 정밀 인식',audit:'입력 영역 연결 검증',repair:'미연결 항목 보완',appearance:'원본 양식 복원',saving:'서버 저장',preview:'저장 양식·미리보기 확인'};
+let invoiceWork=null,invoiceWorkTimer=null;
+function stopInvoiceWorkClock(){if(invoiceWorkTimer!==null){clearInterval(invoiceWorkTimer);invoiceWorkTimer=null;}}
+function startInvoiceWork(){stopInvoiceWorkClock();invoiceWork={started:Date.now(),updated:Date.now(),active:true,events:[],details:{}};updateInvoiceWork({stage:'upload'});invoiceWorkTimer=setInterval(()=>renderInvoiceWork(),1000);}
+function updateInvoiceWork(event){if(!invoiceWork||!invoiceStepLabels[event?.stage])return;const last=invoiceWork.events.at(-1);if(last?.stage!==event.stage){if(last)last.state='done';invoiceWork.events.push({stage:event.stage,state:'running'});}invoiceWork.updated=Date.now();for(const name of ['pages','comparisonPage','llmCalls','unresolvedRegions'])if(Number.isInteger(event[name])&&event[name]>=0)invoiceWork.details[name]=event[name];renderInvoiceWork();}
+function finishInvoiceWork(){if(!invoiceWork)return;invoiceWork.active=false;invoiceWork.complete=true;invoiceWork.finished=Date.now();for(const event of invoiceWork.events)event.state='done';stopInvoiceWorkClock();renderInvoiceWork();}
+function failInvoiceWork(message){if(!invoiceWork)return;const event=invoiceWork.failureEvent;if(event?.stage&&invoiceStepLabels[event.stage])updateInvoiceWork(event);invoiceWork.active=false;invoiceWork.finished=Date.now();invoiceWork.error=message;invoiceWork.reasonCode=event?.reasonCode;invoiceWork.unresolvedRegions=event?.unresolvedRegions;const last=invoiceWork.events.at(-1);if(last)last.state='failed';stopInvoiceWorkClock();renderInvoiceWork(true);}
+function renderInvoiceWork(replace=false){
+ if(!invoiceWork)return;const wrapper=document.getElementById('doc-editor-wrapper');if(!wrapper)return;const panel=document.createElement('section');panel.id='invoice-work-panel';panel.setAttribute('data-invoice-progress','true');panel.setAttribute('role','status');panel.setAttribute('aria-live','polite');panel.style.cssText='background:white;border:1px solid #dbeafe;border-radius:12px;padding:20px;margin-bottom:16px;color:#102342;font-size:14px;line-height:1.6';
+ const title=document.createElement('strong');title.textContent=invoiceWork.complete?'양식 등록이 완료되었습니다.':invoiceWork.error?'양식 등록이 중단되었습니다.':'양식 등록 진행 상황';panel.appendChild(title);
+ const elapsed=Math.floor(((invoiceWork.finished||Date.now())-invoiceWork.started)/1000),last=invoiceWork.events.at(-1),summary=document.createElement('div');summary.textContent='경과 '+Math.floor(elapsed/60)+'분 '+elapsed%60+'초'+(last?' · '+invoiceStepLabels[last.stage]:'');panel.appendChild(summary);
+ const list=document.createElement('ol');list.style.cssText='list-style:none;padding:0;margin:12px 0';const style=document.createElement('style');style.textContent='@keyframes invoice-work-spin{to{transform:rotate(360deg)}}';panel.appendChild(style);
+ for(const event of invoiceWork.events){const row=document.createElement('li');row.style.cssText='display:flex;gap:10px;align-items:center;padding:3px 0';const icon=document.createElement('span');if(event.state==='running'&&invoiceWork.active){icon.dataset.invoiceSpinner='true';icon.style.cssText='display:inline-block;width:15px;height:15px;flex-shrink:0;border:2px solid #dbeafe;border-top-color:#2563eb;border-radius:50%;animation:invoice-work-spin .8s linear infinite';}else icon.textContent=event.state==='failed'?'✕':'✓';const label=document.createElement('span');label.textContent=invoiceStepLabels[event.stage]+' · '+(event.state==='failed'?'실패':event.state==='done'?'완료':'진행 중');if(event.state==='failed')row.style.color='#b91c1c';row.append(icon,label);list.appendChild(row);}panel.appendChild(list);
+ const detail=document.createElement('div'),d=invoiceWork.details;detail.style.cssText='color:#64748b;font-size:12px';detail.textContent=[Number.isInteger(d.pages)?'PDF '+d.pages+'페이지':'',Number.isInteger(d.comparisonPage)?'비교 페이지 1·'+d.comparisonPage:'',Number.isInteger(d.llmCalls)?'분석 요청 '+d.llmCalls+'회':'',invoiceWork.active?'마지막 서버 응답 '+Math.max(0,Math.floor((Date.now()-invoiceWork.updated)/1000))+'초 전 · 현재 단계 처리 결과를 기다리고 있습니다.':''].filter(Boolean).join(' · ');panel.appendChild(detail);
+ if(invoiceWork.error){const error=document.createElement('div');error.style.cssText='margin-top:12px;padding:12px;background:#fff1f2;color:#9f1239;border-radius:8px;white-space:pre-wrap';error.textContent=invoiceWork.error+(invoiceWork.reasonCode?'\n진단 코드: '+invoiceWork.reasonCode:'')+(Number.isInteger(invoiceWork.unresolvedRegions)?'\n미연결 영역: '+invoiceWork.unresolvedRegions+'개':'');panel.appendChild(error);}
+ const previous=document.getElementById('invoice-work-panel');if(replace)wrapper.replaceChildren(panel);else if(previous)previous.replaceWith(panel);else wrapper.prepend(panel);wrapper.setAttribute('aria-busy',String(invoiceWork.active));document.getElementById('preview-placeholder')?.classList.add('hidden');
+}
+async function readInvoiceProgress(response,owner){
+ const reader=response.body?.getReader();if(!reader)throw Error('진행 상황을 수신하지 못했습니다. 서버 저장 결과를 확인해 주세요.');const decoder=new TextDecoder();let buffer='',result=null,terminal=false;
+ const receive=line=>{if(!line.trim())return;if(owner!==invoiceOwner())throw Error('업체가 변경되었습니다. 다시 열어 주세요.');const event=JSON.parse(line);if(event.type==='progress'){if(terminal)throw Error('잘못된 진행 응답입니다.');updateInvoiceWork(event);}else if(event.type==='error'){const error=Error(event.error||'양식을 등록하지 못했습니다.');error.progressEvent=event;throw error;}else if(event.type==='result'){if(terminal||!event.result?.id)throw Error('등록 결과를 확인하지 못했습니다.');result=event.result;terminal=true;}else throw Error('알 수 없는 진행 응답입니다.');};
+ try{while(true){const {done,value}=await reader.read();buffer+=done?decoder.decode():decoder.decode(value,{stream:true});if(buffer.length>1000000)throw Error('진행 응답 크기가 올바르지 않습니다.');let at;while((at=buffer.indexOf('\n'))>=0){receive(buffer.slice(0,at));buffer=buffer.slice(at+1);}if(done){if(buffer.trim())receive(buffer);break;}}if(!terminal)throw Error('서버 응답이 중단되었습니다. 마지막 단계와 저장 결과를 확인해 주세요.');return result;}finally{reader.releaseLock();}
+}
 const invoiceOwner=()=>sessionStorage.getItem('deliveryProDispatchKey')||'';
 export async function invoiceRequest(body){
     const owner=invoiceOwner();
     if(!owner||!auth.currentUser)throw Error('관제 계정으로 로그인해 주세요.');
-    const response=await fetch('/api/invoice-template',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify({...body,dispatchKey:owner}),signal:AbortSignal.timeout(body.action==='register'?305000:58000)});
-    const result=await response.json();
+    if(body.action==='register')startInvoiceWork();
+    try{const response=await fetch('/api/invoice-template',{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+await auth.currentUser.getIdToken()},body:JSON.stringify({...body,...(body.action==='register'?{streamProgress:true}:{}),dispatchKey:owner}),signal:AbortSignal.timeout(body.action==='register'?305000:58000)});
+    const result=response.ok&&response.headers?.get('content-type')?.includes('application/x-ndjson')?await readInvoiceProgress(response,owner):await response.json();
     if(owner!==invoiceOwner())throw Error('업체가 변경되었습니다. 다시 열어 주세요.');
-    if(!response.ok)throw Error(result.error||'명세서를 처리하지 못했습니다.');return result;
+    if(!response.ok)throw Error(result.error||'명세서를 처리하지 못했습니다.');return result;}catch(error){if(body.action==='register'&&invoiceWork)invoiceWork.failureEvent=error.progressEvent||null;throw error;}
 }
 export function showInvoiceProgress(message,busy=false){
+    if(invoiceBusy&&invoiceWork){if(!busy)failInvoiceWork(message);else renderInvoiceWork(true);return;}
     const wrapper=document.getElementById('doc-editor-wrapper');
     if(wrapper){
         wrapper.replaceChildren();wrapper.setAttribute('aria-busy',String(busy));
@@ -587,6 +613,7 @@ export function showInvoiceProgress(message,busy=false){
     document.getElementById('preview-placeholder')?.classList.add('hidden');
 }
 export function clearPdfTemplate(){
+    stopInvoiceWorkClock();invoiceWork=null;
     invoicePreviewVersion++;templateBuilderState.documentId=null;templateBuilderState.document=null;templateBuilderState.documentEdits={};templateBuilderState.activeTemplateId=null;templateBuilderState.currentDocHtml='';
     if(invoicePdfUrl){URL.revokeObjectURL(invoicePdfUrl);invoicePdfUrl=null;}
     showInvoiceProgress('양식 PDF를 등록하거나 저장된 양식을 선택해 주세요.');
