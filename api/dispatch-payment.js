@@ -20,7 +20,8 @@ function quote(input) {
 }
 function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}) {
  const test=()=>String(env.TOSS_CLIENT_KEY||'').startsWith('test_');
- const ready=()=>env.WEB_PAYMENT_ENABLED==='true'&&/^(test|live)_gck_/.test(env.TOSS_CLIENT_KEY||'')&&/^(test|live)_gsk_/.test(env.TOSS_SECRET_KEY||'')&&test()===env.TOSS_SECRET_KEY.startsWith('test_')&&(!test()||env.WEB_PAYMENT_ALLOW_TEST==='true');
+ // Production web checkout never accepts test keys, even when the legacy opt-in remains set.
+ const ready=()=>env.WEB_PAYMENT_ENABLED==='true'&&/^live_gck_/.test(env.TOSS_CLIENT_KEY||'')&&/^live_gsk_/.test(env.TOSS_SECRET_KEY||'');
  const config=()=>({enabled:ready(),test:test(),clientKey:ready()?env.TOSS_CLIENT_KEY:null});
  function signupPhone(identity){
   if(identity.role||identity.testDriverSession)throw problem('신규 관제 가입을 위한 휴대폰 인증이 필요합니다.',403);
@@ -128,7 +129,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
     tx.create(eventRef,event);tx.set(walletRef,updated);return updated;
    });
   }
-  if(!ready())throw problem('토스 결제 설정이 필요합니다. 결제 키와 WEB_PAYMENT_ENABLED / WEB_PAYMENT_ALLOW_TEST 설정을 확인해 주세요.',503);
+  if(!ready())throw problem('실결제 설정이 필요합니다. 테스트 결제는 사용할 수 없습니다.',503);
   if(input.action==='create-order') {
    const q=quote(input);if(c.signup&&(q.kind!=='service'||c.draft.completed))throw problem('신규 관제 가입은 관제 이용료 결제로 진행해 주세요. 발급된 계정은 관제 키로 로그인해 주세요.',409);if(!test()&&!c.signup)checkService(c.l,q);
    return db.runTransaction(async tx=>{

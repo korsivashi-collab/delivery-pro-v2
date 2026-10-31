@@ -13,7 +13,8 @@ function addMonths(stamp,months){
 function legacyExpiry(data){if(Number.isFinite(data.expiresAt))return data.expiresAt;const m=/^(\d{4})[.-](\d{2})[.-](\d{2})$/.exec(data.expireDate||'');return m?Date.UTC(+m[1],+m[2]-1,+m[3]+1)-9*3600000-1:0;}
 function result(account,license,now){const expiresAt=effectivePeriod(license,account.webExpiresAt,now).expiresAt;return {active:expiresAt>now&&!['suspended','revoked'].includes(license.status),valid:expiresAt>now&&!['suspended','revoked'].includes(license.status),status:license.status,billingManaged:true,actualKey:account.licenseKey,phone:account.phone,expiresAt,expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'),routeOwnerId:license.routeOwnerId,dispatchKey:license.dispatchKey||'',allowTms:license.allowTms??true,msg:expiresAt>now?'':'이용기간이 만료되었습니다.'};}
 function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...args),now=Date.now}={}){
- const ready=()=>/^(test|live)_(gck|ck)_/.test(env.TOSS_CLIENT_KEY||'')&&/^(test|live)_(gsk|sk)_/.test(env.TOSS_SECRET_KEY||'')&&(env.TOSS_CLIENT_KEY.startsWith('test_')===env.TOSS_SECRET_KEY.startsWith('test_'))&&(env.WEB_PAYMENT_ENABLED==='true')&&(!env.TOSS_CLIENT_KEY.startsWith('test_')||env.WEB_PAYMENT_ALLOW_TEST==='true');
+ // Released service: test keys cannot grant access, regardless of old test opt-in settings.
+ const ready=()=>/^live_(gck|ck)_/.test(env.TOSS_CLIENT_KEY||'')&&/^live_(gsk|sk)_/.test(env.TOSS_SECRET_KEY||'')&&env.WEB_PAYMENT_ENABLED==='true';
  async function provider(path,body,id){const response=await fetchImpl('https://api.tosspayments.com/v1/payments'+path,{method:body?'POST':'GET',headers:{Authorization:'Basic '+Buffer.from(env.TOSS_SECRET_KEY+':').toString('base64'),'Content-Type':'application/json',...(id?{'Idempotency-Key':id}:{})},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(15000)});let data;try{data=await response.json();}catch{throw problem('결제 상태를 확인하지 못했습니다. 재결제하지 말고 다시 확인해 주세요.',502);}return {ok:response.ok,data};}
  function validate(payment,order){if(payment.orderId!==order.orderId||payment.totalAmount!==order.amount||payment.currency!=='KRW'||payment.paymentKey!==order.paymentKey||!Number.isFinite(Date.parse(payment.approvedAt)))throw problem('결제 금액 또는 주문 정보가 일치하지 않습니다.',409);}
  async function reconcile(db,uid,payments=[],device=null,cancellation=null,expectedCustomer=null){const known=(await db.collection('billing_accounts').doc(uid).get()).data();if(known?.licenseKey)await releaseInactiveDriverConnections(db,now(),known.licenseKey);return db.runTransaction(async tx=>{
@@ -53,6 +54,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   for(let i=0;i<entries.length;i+=4){
    const batch=await Promise.allSettled(orders.slice(i,i+4).map(async snapshot=>{
     const saved=snapshot.data();
+    if(saved?.test!==false)throw problem('테스트 결제는 이용기간에 반영할 수 없습니다.',409);
     if(!saved?.paymentKey)throw problem('결제 이력을 확인해 주세요.',409);
     const r=await provider('/'+encodeURIComponent(saved.paymentKey));
     if(!r.ok)throw problem('결제 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.',502);
@@ -146,6 +148,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   if(input.action!=='confirm')throw problem('지원하지 않는 요청입니다.');
   if(!/^WEB_[a-f0-9-]{36}$/.test(input.orderId||'')||typeof input.paymentKey!=='string'||!/^[\w-]{1,200}$/.test(input.paymentKey))throw problem('결제 정보가 올바르지 않습니다.');
   const ref=db.collection('payment_orders').doc(input.orderId),order=(await ref.get()).data();if(!order||order.uid!==identity.uid||order.licenseKey!==account.licenseKey)throw problem('본인의 주문만 확인할 수 있습니다.',403);
+  if(order.test!==false)throw problem('테스트 주문은 승인할 수 없습니다. 실결제로 다시 진행해 주세요.',409);
   if(!Number.isSafeInteger(input.amount)||input.amount!==order.amount)throw problem('결제 금액이 일치하지 않습니다.',409);
   if(order.paymentKey&&order.paymentKey!==input.paymentKey)throw problem('결제 정보가 일치하지 않습니다.',409);
   let r=await provider('/'+encodeURIComponent(input.paymentKey));
@@ -158,6 +161,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   const payment=r.data;validate(payment,{...order,paymentKey:input.paymentKey});if(payment.status!=='DONE'||payment.balanceAmount!==order.amount)throw problem('완료된 결제가 아닙니다. 결제 내역을 확인해 주세요.',409);
   await db.runTransaction(async tx=>{const aRef=db.collection('billing_accounts').doc(identity.uid),a=(await tx.get(aRef)).data(),current=(await tx.get(ref)).data(),l=(await tx.get(db.collection('licenses').doc(a.licenseKey))).data()||{},lockRef=db.collection('admin_license_controls').doc('phone_integrity'),lock=await tx.get(lockRef);
    if(a.deletedAt!=null || a.rcUserId!==account.rcUserId)throw problem('계정이 변경되었습니다. 다시 확인해 주세요.',409);
+   if(current.test!==false)throw problem('테스트 주문은 승인할 수 없습니다.',409);
    if(current.status==='completed')return;
    if(a.pendingWebOrder!==order.orderId||l.billingManaged&&!l.webManaged)throw problem('계정 상태가 변경되었습니다. 재결제하지 말고 고객센터에 주문번호를 알려 주세요.',409);
    const history=[...(a.webHistory||[]),{orderId:order.orderId,amount:order.amount,months:order.months,approvedAt:Date.parse(payment.approvedAt),cancelled:false}];
