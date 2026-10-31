@@ -59,7 +59,7 @@
     "api/invoice-template.js": {
       "maxDuration": 300,
       "memory": 2048,
-      "includeFiles": "{server/invoice-document.cjs,server/NanumGothic*,node_modules/pdfjs-dist/{package.json,legacy/build/**,standard_fonts/**,cmaps/**},node_modules/@napi-rs/canvas*/**/*,node_modules/tesseract.js/{src/**,package.json,LICENSE.md},node_modules/tesseract.js-core/**,node_modules/@tesseract.js-data/{kor,eng}/4.0.0_best_int/**}"
+      "includeFiles": "{server/{NanumGothic*,invoice-document.cjs},node_modules/{pdfjs-dist/{legacy/build/**,standard_fonts/**,cmaps/**},@napi-rs/canvas*/**,tesseract.js/{src/**,LICENSE.md},tesseract.js-core/**,@tesseract.js-data/{kor,eng}/4.0.0_best_int/**}}"
     }
   },
   "rewrites": [
