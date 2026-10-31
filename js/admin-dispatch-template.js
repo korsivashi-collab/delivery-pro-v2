@@ -109,6 +109,7 @@ export async function parsePdfToEditableDocument(file) {
         templateBuilderState.activeTemplateTitle = result.title;
         await window.loadSavedForms?.();
         await previewPdfOrder(state.printReadyList?.[state.currentPreviewInvoiceIndex || 0]);
+        alert('양식 등록이 완료되었습니다.');
     } catch (e) { showInvoiceProgress(e.message); alert(e.message); }
     finally { invoiceBusy = false; }
 }
