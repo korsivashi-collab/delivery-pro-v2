@@ -86,7 +86,7 @@ import {
 import {
     exportToInvoiceModal, previewInvoiceRow, executeBatchPrint,
     filterInvoicePrintList, toggleAllInvoiceSelection, toggleSingleInvoiceItem,
-    handleHeaderCheckAll, renderInvoiceOrderList, initTemplatePdfDropZone,
+    handleHeaderCheckAll, renderInvoiceOrderList,
     populateSenderFilterDropdown, filterBySender,
     sortPrintList, initInvoiceResizer
 } from "./admin-dispatch-print.js";
@@ -106,7 +106,7 @@ import {
 
 // 서식 빌더 모듈
 import {
-    parsePdfToEditableDocument, renderEditableDocument,
+    renderEditableDocument,
     saveCurrentDocumentTemplate
 } from "./admin-dispatch-template.js";
 
@@ -185,7 +185,6 @@ window.onload = async () => {
     // 모듈 초기화 (해당 요소가 있는 페이지에서만 실행)
     if (document.getElementById('pro-invoice-modal') && typeof loadSavedForms === 'function') loadSavedForms();
     if (document.getElementById('excel-drop-zone') && typeof initExcelDropZone === 'function') initExcelDropZone(); 
-    if (document.getElementById('template-pdf-dropzone') && typeof initTemplatePdfDropZone === 'function') initTemplatePdfDropZone();
 
     // 모니터링 전용 URL 파라미터 (?monitor=KEY) 감지
     const urlParams = new URLSearchParams(window.location.search);
@@ -1046,7 +1045,6 @@ window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
 window.previewInvoiceRow = previewInvoiceRow;
 window.executeBatchPrint = executeBatchPrint;
-window.initTemplatePdfDropZone = initTemplatePdfDropZone;
 window.filterBySender = filterBySender;
 window.sortPrintList = sortPrintList;
 window.initInvoiceResizer = initInvoiceResizer;
@@ -1072,7 +1070,6 @@ window.executePickingListPrint = executePickingListPrint;
 window.printAggregatedItemList = openPickingDriverModal;
 
 // [관제 신규 서식 빌더/에디터(Template)]
-window.parsePdfToEditableDocument = parsePdfToEditableDocument;
 window.renderEditableDocument = renderEditableDocument;
 window.saveCurrentDocumentTemplate = saveCurrentDocumentTemplate;
 

@@ -1,5 +1,5 @@
 {
-  "buildCommand": "node scripts/build-native.cjs --web",
+  "buildCommand": "node scripts/build-web.cjs",
   "outputDirectory": "web-dist",
   "crons": [
     {
@@ -57,9 +57,9 @@
       "memory": 1024
     },
     "api/invoice-template.js": {
-      "maxDuration": 300,
-      "memory": 2048,
-      "includeFiles": "{server/{NanumGothic*,invoice-document.cjs},node_modules/{pdfjs-dist/{legacy/build/**,standard_fonts/**,cmaps/**},@napi-rs/canvas*/**,tesseract.js/{src/**,LICENSE.md},tesseract.js-core/**,@tesseract.js-data/{kor,eng}/4.0.0_best_int/**}}"
+      "maxDuration": 60,
+      "memory": 1024,
+      "includeFiles": "{server/NanumGothic*,node_modules/{pdfjs-dist/{legacy/build/**,standard_fonts/**,cmaps/**},@napi-rs/canvas*/**}}"
     }
   },
   "rewrites": [
@@ -199,5 +199,6 @@
         }
       ]
     }
-  ]
+  ],
+  "installCommand": "npm ci --ignore-scripts"
 }

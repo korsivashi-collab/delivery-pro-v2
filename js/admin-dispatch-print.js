@@ -2,7 +2,7 @@
 
 import { state } from "./admin-state.js";
 import {
-    parsePdfToEditableDocument, previewPdfOrder, printPdfOrders,
+    previewPdfOrder, printPdfOrders,
     templateBuilderState,
     fillTemplateWithOrderData
 } from "./admin-dispatch-template.js";
@@ -63,7 +63,6 @@ export function exportToInvoiceModal() {
     if (searchInput) searchInput.value = '';
 
     populateSenderFilterDropdown();
-    initTemplatePdfDropZone();
     initInvoiceResizer(); // 목록 패널 폭 조절 리사이저 초기화
     loadSavedForms(); 
     renderInvoiceOrderList();
@@ -342,7 +341,7 @@ export function renderInvoiceOrderList() {
     };
 
     if (!filtered || filtered.length === 0) {
-        listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">출력할 주문 데이터가 없습니다.<br><span class="text-[10px] text-gray-400 font-normal">우측에서 서식 PDF 업로드 및 양식 편집이 가능합니다.</span></div>`;
+        listEl.innerHTML = `<div class="text-center text-gray-400 py-16 text-xs font-bold">출력할 주문 데이터가 없습니다.<br><span class="text-[10px] text-gray-400 font-normal">저장된 양식을 선택하거나 주문서 통합 요청하기로 문의해 주세요.</span></div>`;
         updateInvoiceCountBadge();
         clearInvoicePreviewCanvas();
         return;
@@ -422,47 +421,8 @@ export function previewInvoiceRow(idx) {
 }
 
 // ==========================================
-// 4. 양식 제작용 PDF 드롭존 초기화
+// 저장된 양식 인쇄
 // ==========================================
-export function initTemplatePdfDropZone() {
-    const dropzone = document.getElementById('template-pdf-dropzone');
-    const fileInput = document.getElementById('template-pdf-file-input');
-    if (!dropzone || dropzone.dataset.bound === 'true') return;
-
-    dropzone.addEventListener('click', () => {
-        if (fileInput) fileInput.click();
-    });
-
-    if (fileInput) {
-        fileInput.addEventListener('change', async (e) => {
-            const file = e.target.files?.[0];
-            if (file) await parsePdfToEditableDocument(file);
-            e.target.value = '';
-        });
-    }
-
-    dropzone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        dropzone.classList.add('bg-red-100', 'border-red-500');
-    });
-    dropzone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('bg-red-100', 'border-red-500');
-    });
-    dropzone.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        dropzone.classList.remove('bg-red-100', 'border-red-500');
-        const file = e.dataTransfer.files?.[0];
-        if (file && (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf'))) {
-            await parsePdfToEditableDocument(file);
-        } else if (file) {
-            alert("양식 제작용 파일은 PDF 파일만 지원합니다.");
-        }
-    });
-
-    dropzone.dataset.bound = 'true';
-}
-
 // ==========================================
 // 5. 주문서 일괄 출력 (인쇄 엔진 레벨 상품명 자동 줄바꿈 및 절대 안 잘림 강제 주입)
 // ==========================================
@@ -498,7 +458,6 @@ window.toggleSingleInvoiceItem = toggleSingleInvoiceItem;
 window.renderInvoiceOrderList = renderInvoiceOrderList;
 window.previewInvoiceRow = previewInvoiceRow;
 window.executeBatchPrint = executeBatchPrint;
-window.initTemplatePdfDropZone = initTemplatePdfDropZone;
 window.filterBySender = filterBySender;
 window.sortPrintList = sortPrintList;
 window.initInvoiceResizer = initInvoiceResizer;

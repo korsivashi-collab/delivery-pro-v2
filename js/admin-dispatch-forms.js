@@ -5,7 +5,7 @@ let forms=[],owner='',generation=0;
 const account=()=>sessionStorage.getItem('deliveryProDispatchKey')||'';
 function drawForms(){
  const list=document.getElementById('saved-forms-list');if(!list)return;list.replaceChildren();
- if(!forms.length){list.textContent=localStorage.getItem('deliveryPro_savedForms')?'기존 양식은 원본 PDF를 한 번 다시 등록해 주세요. 이전 저장 자료는 유지됩니다.':'저장된 양식이 없습니다. 원본 PDF를 등록해 주세요.';return;}
+ if(!forms.length){list.textContent=localStorage.getItem('deliveryPro_savedForms')?'기존 저장 자료는 유지됩니다. 양식 등록은 주문서 통합 요청하기로 문의해 주세요.':'저장된 양식이 없습니다. 주문서 통합 요청하기로 문의해 주세요.';return;}
  forms.forEach((form,idx)=>{const row=document.createElement('div');row.className='border rounded-xl p-3 flex gap-2 items-center bg-white';
   const select=document.createElement('button');select.className='flex-1 text-left text-xs';select.textContent=(form.id===templateBuilderState.activeTemplateId?'✓ ':'')+form.title+(form.isDefault?' · 기본양식':'');select.onclick=()=>applySavedForm(idx);row.appendChild(select);
   for(const [label,handler] of (form.builtIn?[['★',()=>setAsDefaultForm(idx)]]:[['★',()=>setAsDefaultForm(idx)],['삭제',()=>deleteSavedForm(idx)]])){const button=document.createElement('button');button.textContent=label;button.className='text-xs p-1';button.onclick=handler;row.appendChild(button);}list.appendChild(row);
