@@ -100,7 +100,7 @@ export async function parsePdfToEditableDocument(file) {
     if (!/\.pdf$/i.test(file.name) || file.size > 3 * 1024 * 1024) { alert('3MB 이내 PDF 양식을 등록해 주세요.'); return; }
     if (invoiceBusy) return;
     invoiceBusy = true;
-    showInvoiceProgress('두 주문 비교 → 문서 항목 연결 → 고정 양식 복원·저장 중… 처음 등록에는 몇 분 걸릴 수 있습니다. 저장 후 재사용합니다.');
+    showInvoiceProgress('⏳ 두 주문 비교 → 문서 항목 연결 → 고정 양식 복원·저장 중… 처음 등록에는 몇 분 걸릴 수 있습니다. 저장 후 재사용합니다.');
     try {
         const bytes = new Uint8Array(await file.arrayBuffer());
         let binary = ''; for (const b of bytes) binary += String.fromCharCode(b);
@@ -591,7 +591,7 @@ export async function previewPdfOrder(order){
         invoicePreviewVersion++;const form=ensureBuiltInForm().find(f=>f.id===id);const base=templateBuilderState.currentDocHtml||form.templateHtml;templateBuilderState.currentDocHtml=base;renderEditableDocument(order?fillTemplateWithOrderData(base,order):base,!!order);return;
     }
     const version=++invoicePreviewVersion;
-    if(templateBuilderState.documentId!==id){showInvoiceProgress('편집 양식 불러오는 중…');const result=await invoiceRequest({action:'document',id});if(version!==invoicePreviewVersion||id!==templateBuilderState.activeTemplateId)return;if(!validCompanyDocument(result.document))throw Error('양식 화면과 서버 버전이 다릅니다. 새로고침 후 다시 열어 주세요.');templateBuilderState.document=result.document;templateBuilderState.documentEdits=result.edits;templateBuilderState.documentId=id;}
+    if(templateBuilderState.documentId!==id){showInvoiceProgress('⏳ 편집 양식 불러오는 중…');const result=await invoiceRequest({action:'document',id});if(version!==invoicePreviewVersion||id!==templateBuilderState.activeTemplateId)return;if(!validCompanyDocument(result.document))throw Error('양식 화면과 서버 버전이 다릅니다. 새로고침 후 다시 열어 주세요.');templateBuilderState.document=result.document;templateBuilderState.documentEdits=result.edits;templateBuilderState.documentId=id;}
     renderCompanyDocument(order);
 
 }
