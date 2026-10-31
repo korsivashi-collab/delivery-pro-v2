@@ -4,15 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>배송 경로 PRO - 실시간 웹 관제 센터</title>
-    <link rel="icon" type="image/png" sizes="900x900" href="./icons/site-icon.png?v=20261014-3">
-    <link rel="apple-touch-icon" sizes="900x900" href="./icons/site-icon.png?v=20261014-3">
+    <link rel="icon" type="image/png" sizes="1024x1024" href="./icons/site-icon.png?v=20261031-brand">
+    <link rel="apple-touch-icon" sizes="192x192" href="./icons/icon-pro-192.png?v=20261031-brand">
     <!-- Tailwind CSS & Font Awesome -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261031-sms-visible-modes">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261031-address-route">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -33,7 +33,7 @@
         <header class="dispatch-header">
             <div class="dispatch-header-left">
                 <div onclick="window.location.reload()" class="dispatch-brand" title="배송 관제 새로고침">
-                    <img src="./icons/header-logo-06-640.png?v=20261030-brand" alt="배송경로PRO" width="640" height="357">
+                    <img src="./icons/header-logo-06-640.png?v=20261031-brand" alt="배송경로PRO" width="1280" height="714">
                     <div class="dispatch-brand-copy"><h1>배송 관제</h1><span id="dispatch-sub-title">실시간 관제</span></div>
                 </div>
                 <nav class="dispatch-primary-nav" aria-label="관제 기능">
@@ -103,6 +103,7 @@
 
                 <!-- 필터 컨트롤 -->
                 <div id="map-filter-controls" class="absolute top-4 right-4 z-20 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5 flex items-center gap-1 text-xs font-black">
+                    <button type="button" id="btn-address-route-search" onclick="window.openAddressRouteSearch()" class="px-3 py-1.5 rounded-lg text-blue-700 hover:bg-blue-50"><i class="fa-solid fa-location-dot mr-1"></i>주소 검색</button>
                     <button onclick="window.setMapPolylineMode('all')" id="btn-mode-all" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black">전체 경로</button>
                     <button onclick="window.setMapPolylineMode('planned')" id="btn-mode-planned" class="px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black"><span class="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white shadow-sm"></span> 배송 경로</button>
                     <button onclick="window.setMapPolylineMode('completed')" id="btn-mode-completed" class="px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white shadow-sm"></span> 완료 경로</button>
@@ -646,7 +647,7 @@
 
     <div id="dispatch-work-status" role="status" aria-live="polite" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3"><i class="fa-solid fa-hourglass-half fa-spin" aria-hidden="true"></i><span id="dispatch-work-text">작업 중…</span></div>
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-dispatch-pdf.js":"./js/admin-dispatch-pdf.js?v=20261031-native-document-v3","./js/admin-dispatch-forms.js":"./js/admin-dispatch-forms.js?v=20261031-manual-request","./js/admin-dispatch-print.js":"./js/admin-dispatch-print.js?v=20261031-manual-request","./js/address.js":"./js/address.js?v=20261030-postcode","./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261031-manual-request","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261030-scan-server-number","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261031-sms-visible-modes","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261031-native-document-v3"}}</script>
-    <script type="module" src="./js/admin-app.js?v=20261031-manual-request"></script>
+    <script type="importmap">{"imports":{"./js/admin-dispatch-pdf.js":"./js/admin-dispatch-pdf.js?v=20261031-native-document-v3","./js/admin-dispatch-forms.js":"./js/admin-dispatch-forms.js?v=20261031-manual-request","./js/admin-dispatch-print.js":"./js/admin-dispatch-print.js?v=20261031-manual-request","./js/address.js":"./js/address.js?v=20261030-postcode","./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261031-manual-request","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-search.js":"./js/admin-dispatch-search.js?v=20261031-address-route","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261031-address-route","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261031-sms-visible-modes","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261031-native-document-v3"}}</script>
+    <script type="module" src="./js/admin-app.js?v=20261031-first-login-owner"></script>
 </body>
 </html>

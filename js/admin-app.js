@@ -506,6 +506,15 @@ window.initMasterDataSync = function() {
         try {
             const owners = await prepareDispatchAccess(drivers.map(l => l.id));
             if (stopped || version !== ownerVersion) return;
+            // Apply the authenticated preparation result before route snapshots arrive.
+            // The updated license snapshot can arrive later than the route snapshot.
+            for (const license of state.allLicenses) {
+                const owner = owners[license.id];
+                if (license.type !== 'dispatch' && license.dispatchKey === currentKey &&
+                    !license.routeOwnerId && typeof owner === 'string' && owner && !owner.includes('/')) {
+                    license.routeOwnerId = owner;
+                }
+            }
             for (const [name, callback] of [['routes', routesChanged], ['completions', completionsChanged]]) {
                 const buckets = new Map();
                 for (const owner of new Set(Object.values(owners))) {

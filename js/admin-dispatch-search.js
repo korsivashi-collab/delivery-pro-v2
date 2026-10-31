@@ -1,8 +1,8 @@
 // js/admin-dispatch-search.js
 
 import { state, getLocalDateString, todayStr } from "./admin-state.js";
-import { setDispatchMode, selectDriver } from "./admin-dispatch-core.js";
-import { focusMapPosition } from "./admin-map.js";
+import { setDispatchMode, selectDriver, getFilteredVisibleDrivers, getDriverRouteData, getDriverDeliverySummary } from "./admin-dispatch-core.js";
+import { map, focusMapPosition } from "./admin-map.js";
 
 let currentSearchQuery = '';
 let currentSearchRangeMode = 'today'; 
@@ -471,3 +471,80 @@ window.setSearchRangeMode = setSearchRangeMode;
 window.applyCustomSearchRange = applyCustomSearchRange;
 window.resetSearchToToday = resetSearchToToday;
 window.handleGlobalSearch = handleGlobalSearch;
+// Address lookup is read-only: compare a searched location with the currently visible pending routes.
+let addressRouteVersion=0,addressRouteOverlay=null,addressRouteTarget=null;
+const validRoutePoint=p=>p&&p.lat!==null&&p.lng!==null&&String(p.lat).trim()!==''&&String(p.lng).trim()!==''&&Number.isFinite(Number(p.lat))&&Number.isFinite(Number(p.lng))&&Math.abs(Number(p.lat))<=90&&Math.abs(Number(p.lng))<=180;
+export function distanceToDeliveryPath(target,points){
+    if(!validRoutePoint(target))return Infinity;
+    const list=points.filter(validRoutePoint),rad=Math.PI/180,R=6371000,lat=Number(target.lat)*rad;
+    const xy=p=>[(Number(p.lng)-Number(target.lng))*rad*R*Math.cos(lat),(Number(p.lat)-Number(target.lat))*rad*R];
+    let best=Infinity,previous=null;
+    for(const point of list){const p=xy(point);best=Math.min(best,Math.hypot(...p));if(previous){const dx=p[0]-previous[0],dy=p[1]-previous[1],length=dx*dx+dy*dy,t=length?Math.max(0,Math.min(1,-(previous[0]*dx+previous[1]*dy)/length)):0;best=Math.min(best,Math.hypot(previous[0]+t*dx,previous[1]+t*dy));}previous=p;}
+    return best;
+}
+export function nearbyDeliveryRoutes(target){
+    const date=document.getElementById('dispatch-date-picker')?.value||getLocalDateString();
+    // Historical completion lines do not represent a driver's remaining delivery route.
+    if(date!==getLocalDateString())return [];
+    let base=null;try{base=JSON.parse(localStorage.getItem('deliveryProCompanyBase')||'null');}catch{}
+    return getFilteredVisibleDrivers().map(driver=>{
+        const route=getDriverRouteData(driver,date),summary=getDriverDeliverySummary(driver,route,date);
+        const points=summary.remainingDests.filter(validRoutePoint);if(!points.length)return null;
+        const path=validRoutePoint(base)?[base,...points]:points;
+        return {driverId:driver.routeOwnerId||driver.deviceId||driver.key,phone:driver.phone||'연락처 미등록',distance:distanceToDeliveryPath(target,path),remaining:summary.remainingDests.length};
+    }).filter(row=>row&&Number.isFinite(row.distance)).sort((a,b)=>a.distance-b.distance||String(a.driverId).localeCompare(String(b.driverId)));
+}
+function addressRoutePanel(){
+    let panel=document.getElementById('address-route-panel');if(panel)return panel;
+    const section=document.getElementById('map-section');if(!section)return null;
+    panel=document.createElement('aside');panel.id='address-route-panel';panel.className='address-route-panel';panel.setAttribute('aria-label','주소 검색 및 가까운 기사 동선');panel.hidden=true;
+    panel.innerHTML='<div class="address-route-heading"><strong>주소 검색 · 가까운 기사 동선</strong><button type="button" id="address-route-close" aria-label="주소 검색 닫기">✕</button></div><form id="address-route-form"><label for="address-route-query">추가 배송·회수 주소 또는 상호</label><div class="address-route-input"><input id="address-route-query" type="search" maxlength="200" autocomplete="off" placeholder="도로명 주소 또는 가게명" required><button id="address-route-submit" type="submit">검색</button></div></form><p id="address-route-status" role="status" aria-live="polite"></p><div id="address-route-matches"></div><div id="address-route-nearby"></div>';
+    section.appendChild(panel);panel.querySelector('#address-route-close').onclick=closeAddressRouteSearch;panel.querySelector('#address-route-form').onsubmit=event=>{event.preventDefault();searchAddressRoutes();};return panel;
+}
+export function openAddressRouteSearch(){
+    setDispatchMode('DELIVERY',true);const panel=addressRoutePanel();if(!panel)return;panel.hidden=false;
+    document.getElementById('search-result-side-panel')?.classList.add('translate-x-full');
+    const input=panel.querySelector('#address-route-query');if(!input.value)input.value=document.getElementById('global-search-input')?.value?.trim()||'';
+    input.focus();refreshAddressRouteSearch();
+}
+export function closeAddressRouteSearch(){
+    addressRouteVersion++;addressRouteTarget=null;addressRouteOverlay?.setMap(null);addressRouteOverlay=null;
+    const panel=document.getElementById('address-route-panel');if(panel){panel.hidden=true;panel.querySelector('#address-route-submit').disabled=false;panel.querySelector('#address-route-submit').textContent='검색';panel.querySelector('#address-route-status').textContent='';panel.querySelector('#address-route-matches').replaceChildren();panel.querySelector('#address-route-nearby').replaceChildren();}
+}
+function addressServiceRequest(service,method,query){
+    return new Promise((resolve,reject)=>{const timeout=setTimeout(()=>reject(Error('주소 검색 응답이 늦습니다. 잠시 후 다시 검색해 주세요.')),12000);service[method](query,(rows,status)=>{clearTimeout(timeout);if(status===kakao.maps.services.Status.OK)resolve(rows);else if(status===kakao.maps.services.Status.ZERO_RESULT)resolve([]);else reject(Error('주소 검색에 연결하지 못했습니다. 잠시 후 다시 검색해 주세요.'));});});
+}
+export async function searchAddressRoutes(){
+    const panel=addressRoutePanel();if(!panel||panel.hidden)return;const query=panel.querySelector('#address-route-query').value.trim();if(!query)return;
+    const version=++addressRouteVersion,button=panel.querySelector('#address-route-submit'),status=panel.querySelector('#address-route-status'),matches=panel.querySelector('#address-route-matches');
+    addressRouteTarget=null;addressRouteOverlay?.setMap(null);addressRouteOverlay=null;matches.replaceChildren();panel.querySelector('#address-route-nearby').replaceChildren();button.disabled=true;button.textContent='검색 중…';status.textContent='주소를 검색하고 있습니다.';
+    try{
+        if(typeof kakao==='undefined'||!kakao.maps?.services?.Geocoder)throw Error('지도 검색을 준비하지 못했습니다. 화면을 새로고침해 주세요.');
+        let rows=await addressServiceRequest(new kakao.maps.services.Geocoder(),'addressSearch',query);
+        if(version!==addressRouteVersion)return;
+        if(!rows.length)rows=await addressServiceRequest(new kakao.maps.services.Places(),'keywordSearch',query);
+        if(version!==addressRouteVersion)return;
+        rows=rows.filter(row=>validRoutePoint({lat:row.y,lng:row.x})).slice(0,7);
+        status.textContent=rows.length?'검색 결과에서 위치를 선택해 주세요.':'검색 결과가 없습니다. 도로명과 건물번호를 확인해 주세요.';
+        for(const row of rows){const result=document.createElement('button');result.type='button';result.className='address-route-result';const title=document.createElement('strong'),detail=document.createElement('span');title.textContent=row.place_name||row.road_address?.address_name||row.address_name;detail.textContent=row.road_address_name||row.address?.address_name||row.address_name||'';result.append(title,detail);result.onclick=()=>{
+            if(version!==addressRouteVersion)return;
+            addressRouteTarget={lat:Number(row.y),lng:Number(row.x),label:[title.textContent,detail.textContent].filter((v,i,a)=>v&&a.indexOf(v)===i).join(' · ')};
+            if(!state.showAllDeliveryRoutes)window.showAllDeliveryRoutes?.();
+            addressRouteOverlay?.setMap(null);const pin=document.createElement('div');pin.className='address-search-pin';pin.textContent='검색 위치';pin.title=addressRouteTarget.label;
+            addressRouteOverlay=new kakao.maps.CustomOverlay({position:new kakao.maps.LatLng(addressRouteTarget.lat,addressRouteTarget.lng),content:pin,yAnchor:1,zIndex:90});addressRouteOverlay.setMap(map);
+            if(map){const bounds=new kakao.maps.LatLngBounds();bounds.extend(new kakao.maps.LatLng(addressRouteTarget.lat,addressRouteTarget.lng));const best=nearbyDeliveryRoutes(addressRouteTarget)[0];if(best){const driver=getFilteredVisibleDrivers().find(d=>(d.routeOwnerId||d.deviceId||d.key)===best.driverId),summary=getDriverDeliverySummary(driver,getDriverRouteData(driver,getLocalDateString()),getLocalDateString());summary.remainingDests.filter(validRoutePoint).forEach(d=>bounds.extend(new kakao.maps.LatLng(Number(d.lat),Number(d.lng))));}map.setBounds(bounds);}
+            matches.replaceChildren();status.textContent=addressRouteTarget.label;refreshAddressRouteSearch();
+        };matches.appendChild(result);}
+    }catch(error){if(version===addressRouteVersion)status.textContent=error.message;}
+    finally{if(version===addressRouteVersion){button.disabled=false;button.textContent='검색';}}
+}
+export function refreshAddressRouteSearch(){
+    const panel=document.getElementById('address-route-panel');if(!panel||panel.hidden||!addressRouteTarget)return;
+    const target=panel.querySelector('#address-route-nearby');target.replaceChildren();const heading=document.createElement('strong');heading.textContent='가까운 배송 동선';target.appendChild(heading);
+    const rows=nearbyDeliveryRoutes(addressRouteTarget);if(!rows.length){const note=document.createElement('p');note.textContent='오늘의 미처리 배송 중 비교할 수 있는 기사 동선이 없습니다.';target.appendChild(note);return;}
+    const explanation=document.createElement('p');explanation.textContent='지도 동선까지 직선거리 기준입니다. 실제 도로의 이동·우회거리는 다를 수 있습니다.';target.appendChild(explanation);
+    rows.slice(0,5).forEach((row,index)=>{const line=document.createElement('button');line.type='button';line.className='address-route-result';const title=document.createElement('strong'),detail=document.createElement('span');title.textContent=(index+1)+'. '+row.phone;detail.textContent=(row.distance<1000?Math.round(row.distance)+'m':(row.distance/1000).toFixed(1)+'km')+' · 미처리 '+row.remaining+'건 · 기사 목록 보기';line.append(title,detail);line.onclick=()=>selectDriver(row.driverId);target.appendChild(line);});
+}
+window.openAddressRouteSearch=openAddressRouteSearch;
+window.closeAddressRouteSearch=closeAddressRouteSearch;
+window.refreshAddressRouteSearch=refreshAddressRouteSearch;

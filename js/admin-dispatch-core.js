@@ -143,6 +143,7 @@ export function getDriverRouteData(lic, selectedDate) {
 // 1. 관제 메인 네비게이션 및 사이드바 제어
 // ==========================================
 export function setDispatchMode(mode, keepSelected = false) {
+    if (mode !== 'DELIVERY') window.closeAddressRouteSearch?.();
     state.dispatchNavState = mode; 
     if (!keepSelected && mode === 'DELIVERY') state.selectedDeviceId = null;
     
@@ -211,6 +212,7 @@ export function renderSidebar() {
             renderDriverListView();
             if (state.showAllDeliveryRoutes) drawAllDeliveryRoutes();
         }
+        window.refreshAddressRouteSearch?.();
     } else if (state.dispatchNavState === 'MESSAGE') {
         if (window.renderMessageSidebar) window.renderMessageSidebar();
     } else if (state.dispatchNavState === 'LOCATION') {
@@ -461,7 +463,7 @@ export function drawAllDeliveryRoutes() {
         notice.setAttribute('role', 'status');
         document.getElementById('sidebar-content')?.prepend(notice);
     }
-    notice.textContent = group.points ? '기사별 색상으로 경로선만 표시합니다. 실선: 배송 · 점선: 완료. 배송지 번호는 기사 카드를 선택해 확인하세요.' : '선택한 날짜와 경로 조건에 표시할 배송지가 없습니다.';
+    notice.textContent = group.points ? '기사 전화번호와 색상으로 경로를 구분합니다. 실선: 배송 · 점선: 완료. 주소 검색으로 가까운 동선을 확인하세요.' : '선택한 날짜와 경로 조건에 표시할 배송지가 없습니다.';
 }
 window.showAllDeliveryRoutes = () => {
     const enabled = !state.showAllDeliveryRoutes;
@@ -573,6 +575,20 @@ export function drawDriverOnMap(devId, overview = null) {
         if (overview) window.myMapOverlays.push(window.mapCompletedPolyline);
     }
 
+    if (overview) {
+        const labelPoint = currentMode === 'completed' ? completedPath[0] : plannedPath.at(-1) || completedPath[0];
+        if (labelPoint) {
+            const content = document.createElement('button');
+            content.type = 'button';
+            content.className = 'driver-route-phone-label';
+            content.style.backgroundColor = overview.color;
+            content.textContent = licObj.phone || '연락처 미등록';
+            content.title = (licObj.phone || '연락처 미등록') + ' · 기사 배송 목록 보기';
+            content.onclick = event => { event?.stopPropagation?.(); selectDriver(devId); };
+            const label = new kakao.maps.CustomOverlay({position:labelPoint,content,yAnchor:1.3,zIndex:40});
+            label.customType = 'driver-label';label.setMap(map);window.myMapOverlays.push(label);
+        }
+    }
     if (overview) overview.group.points += pointsCount;
     else if (pointsCount > 0) map.setBounds(bounds);
 }
