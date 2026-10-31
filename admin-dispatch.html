@@ -9,7 +9,7 @@
     <!-- Tailwind CSS & Font Awesome -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
+
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
     <link rel="stylesheet" href="./css/admin-header.css?v=20261031-sms-visible-modes">
@@ -17,7 +17,7 @@
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
     <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=893c5c6ec8613974d84fa75fd6d0be11&libraries=services"></script>
-    
+
     <!-- 엑셀 파일(.xlsx) 생성 라이브러리 (SheetJS) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 
@@ -81,7 +81,7 @@
                     <h2 id="sidebar-title" class="text-xs font-black text-gray-700 uppercase tracking-wider flex items-center gap-1.5"><i class="fa-solid fa-truck text-blue-600"></i> 운행 기사 (<span id="driver-count">0</span>명)</h2>
                     <button onclick="window.openLinkDriverModal()" id="btn-add-driver" class="bg-blue-600 hover:bg-blue-700 text-white text-xs font-black px-3 py-1.5 rounded-xl transition flex items-center gap-1 shadow-sm active:scale-95"><i class="fa-solid fa-user-plus"></i> 기사 등록</button>
                 </div>
-                
+
                 <div id="sidebar-content" class="flex-1 overflow-y-auto p-3 space-y-2 hide-scrollbar bg-slate-50"></div>
 
                 <!-- 하단 고정 법적 고지 링크 바 -->
@@ -100,7 +100,7 @@
             <!-- 중앙: 카카오 지도 영역 -->
             <section id="map-section" class="flex-1 relative flex flex-col bg-gray-200 overflow-hidden">
                 <div id="map" class="w-full h-full"></div>
-                
+
                 <!-- 필터 컨트롤 -->
                 <div id="map-filter-controls" class="absolute top-4 right-4 z-20 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5 flex items-center gap-1 text-xs font-black">
                     <button onclick="window.setMapPolylineMode('all')" id="btn-mode-all" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black">전체 경로</button>
@@ -366,7 +366,7 @@
                 <h3 class="text-lg font-black text-gray-900"><i class="fa-solid fa-map-location-dot text-blue-600 mr-1.5"></i> 기사 배송 권역 설정</h3>
                 <button onclick="window.closeDriverTerritoryModal()" class="text-gray-400 hover:text-gray-600 transition"><i class="fa-solid fa-xmark text-2xl"></i></button>
             </div>
-            
+
             <div class="flex flex-1 overflow-hidden gap-5">
                 <div class="w-[360px] flex flex-col gap-4 flex-none overflow-y-auto hide-scrollbar">
                     <div class="bg-blue-50 p-4 rounded-2xl border border-blue-100 shadow-inner flex flex-col gap-3">
@@ -407,7 +407,7 @@
 
                 <div class="flex-1 relative rounded-2xl overflow-hidden shadow-inner border border-gray-300 bg-gray-200 flex flex-col">
                     <input type="hidden" id="territory-target-devid"><input type="hidden" id="input-territory-1"><input type="hidden" id="input-territory-2"><input type="hidden" id="input-territory-lat"><input type="hidden" id="input-territory-lng"><input type="hidden" id="input-territory-scale" value="dong">
-                    
+
                     <div class="absolute top-4 left-4 z-10 bg-white/95 backdrop-blur-sm p-1.5 rounded-xl border border-gray-200 shadow-lg flex flex-wrap gap-1.5" title="100% 크기의 기준 반경입니다. 행정구역 경계가 아닌 참고 범위이며, 배분에는 권역 중심을 사용합니다.">
                         <button type="button" onclick="window.setTerritoryScale('dong')" id="btn-scale-dong" class="px-5 py-2.5 rounded-lg bg-blue-600 text-white text-xs font-black shadow-sm transition active:scale-95">소권역 · 반경 1.5km</button>
                         <button type="button" onclick="window.setTerritoryScale('gu')" id="btn-scale-gu" class="px-5 py-2.5 rounded-lg text-gray-600 hover:bg-gray-100 text-xs font-black transition active:scale-95">중권역 · 반경 4.5km</button>
@@ -525,7 +525,7 @@
                         <input type="file" id="template-pdf-file-input" accept=".pdf" class="hidden">
                         <i class="fa-solid fa-cloud-arrow-up text-2xl text-red-400 group-hover:text-red-600 mb-1 transition"></i>
                         <p class="text-xs font-black text-gray-800">양식용 PDF 파일 끌어놓기</p>
-                        <p class="text-[10px] text-gray-500 font-bold mt-0.5">처음 등록할 때만 분석하여 업체별로 저장합니다. 원본 양식에 주문 내용을 자동 적용합니다.</p>
+                        <p class="text-[10px] text-gray-500 font-bold mt-0.5">같은 양식의 서로 다른 주문 2건 이상을 한 PDF(3MB 이내)에 넣어 주세요. 처음 두 주문으로 양식을 만들고 저장 후 재사용합니다.</p>
                     </div>
                 </div>
 
@@ -606,7 +606,7 @@
                 </h3>
                 <button onclick="window.closeExcelExportModal()" class="text-gray-400 hover:text-red-500 transition p-1"><i class="fa-solid fa-xmark text-lg"></i></button>
             </div>
-            
+
             <div class="mb-5">
                 <label class="block text-xs font-black text-gray-700 mb-2"><i class="fa-regular fa-calendar text-blue-600 mr-1"></i> 조회 기간 설정</label>
                 <div class="flex items-center gap-2 bg-gray-50 p-2 rounded-xl border border-gray-200 shadow-inner">
@@ -646,7 +646,7 @@
 
     <div id="dispatch-work-status" role="status" aria-live="polite" class="hidden fixed bottom-6 left-1/2 -translate-x-1/2 z-[200] bg-slate-900 text-white px-6 py-4 rounded-2xl shadow-xl flex items-center gap-3"><i class="fa-solid fa-hourglass-half fa-spin" aria-hidden="true"></i><span id="dispatch-work-text">작업 중…</span></div>
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-dispatch-pdf.js":"./js/admin-dispatch-pdf.js?v=20261031-native-document-v3","./js/admin-dispatch-forms.js":"./js/admin-dispatch-forms.js?v=20261031-native-document-v3","./js/admin-dispatch-print.js":"./js/admin-dispatch-print.js?v=20261031-native-document-v3","./js/address.js":"./js/address.js?v=20261030-postcode","./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261031-native-document-v3","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261030-scan-server-number","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261031-sms-visible-modes","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261031-native-document-v3"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-dispatch-pdf.js":"./js/admin-dispatch-pdf.js?v=20261031-native-document-v3","./js/admin-dispatch-forms.js":"./js/admin-dispatch-forms.js?v=20261031-native-document-v3","./js/admin-dispatch-print.js":"./js/admin-dispatch-print.js?v=20261031-native-document-v3","./js/address.js":"./js/address.js?v=20261030-postcode","./js/admin-dispatch-template.js":"./js/admin-dispatch-template.js?v=20261031-paired-document-v1","./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-admin-auth-isolation","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-admin-auth-isolation","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261030-scan-server-number","./js/admin-dispatch-msg.js":"./js/admin-dispatch-msg.js?v=20261031-sms-visible-modes","./js/admin-dispatch-auto.js":"./js/admin-dispatch-auto.js?v=20261030-send-number-progress","./js/admin-dispatch-algorithm.js":"./js/admin-dispatch-algorithm.js?v=20261020-dispatch-single","./js/admin-dispatch-picking.js":"./js/admin-dispatch-picking.js?v=20261021-picking-product-identity","./js/admin-dispatch-excel.js":"./js/admin-dispatch-excel.js?v=20261031-native-document-v3"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261022-dispatch-signup"></script>
 </body>
 </html>

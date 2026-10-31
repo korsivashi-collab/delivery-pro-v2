@@ -1,5 +1,6 @@
 node_modules/
 www/
+web-dist/
 .env
 .env.*
 !.env.example
