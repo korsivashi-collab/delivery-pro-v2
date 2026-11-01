@@ -248,7 +248,7 @@ export function renderAccountHistoryView() {
         let tableHtml = `
         <div class="border border-gray-200 rounded-2xl bg-white shadow-xs overflow-hidden flex flex-col">
             <div class="overflow-x-auto custom-scrollbar">
-                <table class="w-full text-left border-collapse text-xs whitespace-nowrap min-w-[1150px]">
+                <table class="master-account-table master-history-table w-full text-left border-collapse text-xs whitespace-nowrap min-w-[1150px]">
                     <thead>
                         <tr class="border-b border-gray-200 text-gray-600 font-black bg-gray-50/80">
                             ${checkHeaderTh}
@@ -274,7 +274,7 @@ export function renderAccountHistoryView() {
 
             const isChecked = state.historySelectedAccountKeys.has(item.key);
             let checkRowTd = state.historyNoticeMode
-                ? `<td class="py-3.5 px-3 text-center bg-amber-50/30 border-r border-amber-100" onclick="event.stopPropagation()">
+                ? `<td data-label="알림 대상 선택" class="py-3.5 px-3 text-center bg-amber-50/30 border-r border-amber-100" onclick="event.stopPropagation()">
                     <input type="checkbox" onchange="window.toggleHistoryItemSelection('${item.key}', this.checked)" ${isChecked ? 'checked' : ''} class="w-4 h-4 text-amber-600 rounded border-gray-300 focus:ring-amber-500 cursor-pointer">
                    </td>`
                 : '';
@@ -282,16 +282,16 @@ export function renderAccountHistoryView() {
             tableHtml += `
             <tr onclick="window.selectAccountDirectly('${item.key}')" class="hover:bg-blue-50/60 cursor-pointer transition ${isChecked ? 'bg-amber-50/50' : ''}">
                 ${checkRowTd}
-                <td class="py-3.5 px-3 font-bold text-gray-400 text-center">${item.originalIndex}</td>
-                <td class="py-3.5 px-3">${typeBadge}</td>
-                <td class="py-3.5 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
-                <td class="py-3.5 px-3 font-black text-gray-900">${item.phone ? `<i class="fa-solid fa-phone text-blue-500 mr-1 text-[10px]"></i>${item.phone}` : '<span class="text-gray-400 text-[11px] font-normal">미등록</span>'}</td>
-                <td class="py-3.5 px-3 font-mono text-gray-600 text-[11px]">${item.deviceId || '<span class="text-amber-500 font-bold">미등록</span>'}</td>
-                <td class="py-3.5 px-3 text-center font-black ${item.type === 'dispatch' ? 'text-gray-400' : 'text-blue-600 bg-blue-50/30'}">${item.type === 'dispatch' ? '-' : item.routeCount + '일(건)'}</td>
-                <td class="py-3.5 px-3 text-center font-black ${item.compCount > 0 ? 'text-emerald-600 bg-emerald-50/30' : 'text-gray-400'}">${item.compCount}건</td>
-                <td class="py-3.5 px-3 text-center font-bold text-yellow-600">${item.memoCount}건</td>
-                <td class="py-3.5 px-3 font-bold text-gray-500">${item.expireDate || '-'}</td>
-                <td class="py-3.5 px-4 text-center whitespace-nowrap space-x-1.5">
+                <td data-label="순번" class="py-3.5 px-3 font-bold text-gray-400 text-center">${item.originalIndex}</td>
+                <td data-label="계정 유형" class="py-3.5 px-3">${typeBadge}</td>
+                <td data-label="라이선스 키" class="py-3.5 px-3 font-mono font-black text-blue-600 select-all">${item.key}</td>
+                <td data-label="전화번호" class="py-3.5 px-3 font-black text-gray-900">${item.phone ? `<i class="fa-solid fa-phone text-blue-500 mr-1 text-[10px]"></i>${item.phone}` : '<span class="text-gray-400 text-[11px] font-normal">미등록</span>'}</td>
+                <td data-label="기기 고유번호 (deviceId)" class="py-3.5 px-3 font-mono text-gray-600 text-[11px]">${item.deviceId || '<span class="text-amber-500 font-bold">미등록</span>'}</td>
+                <td data-label="배송 리스트 등록 건수" class="py-3.5 px-3 text-center font-black ${item.type === 'dispatch' ? 'text-gray-400' : 'text-blue-600 bg-blue-50/30'}">${item.type === 'dispatch' ? '-' : item.routeCount + '일(건)'}</td>
+                <td data-label="총 완료 건수" class="py-3.5 px-3 text-center font-black ${item.compCount > 0 ? 'text-emerald-600 bg-emerald-50/30' : 'text-gray-400'}">${item.compCount}건</td>
+                <td data-label="작성 메모" class="py-3.5 px-3 text-center font-bold text-yellow-600">${item.memoCount}건</td>
+                <td data-label="만료일" class="py-3.5 px-3 font-bold text-gray-500">${item.expireDate || '-'}</td>
+                <td data-label="관리 / 삭제" class="py-3.5 px-4 text-center whitespace-nowrap space-x-1.5">
                     <button onclick="event.stopPropagation(); window.selectAccountDirectly('${item.key}')" class="px-3 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-black rounded-lg text-[11px] transition shadow-2xs active:scale-95">내역 조회</button>
                     <button onclick="event.stopPropagation(); window.deleteLicense('${item.key}')" class="px-3 py-1 bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 font-bold rounded-lg text-[11px] transition shadow-2xs active:scale-95">삭제</button>
                 </td>

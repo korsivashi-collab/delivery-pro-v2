@@ -415,3 +415,134 @@
     #message-section .message-main { flex: 1 0 100%; height: min(780px, 90vh); }
     #message-section .message-templates { width: 100%; height: auto; min-height: 260px; }
 }
+
+/* 통합 마스터 센터: 기기 종류 대신 사용 가능한 화면 폭에 맞춘 배치.
+   다른 관리자/관제 화면에는 적용하지 않는다. */
+body.master-center { width: 100%; height: 100vh; height: 100dvh; }
+.master-center #master-panel, .master-center .master-main,
+.master-center .master-tabs-panel, .master-center [id^="tab-content-"],
+.master-center #account-history-main-content { min-width: 0; min-height: 0; }
+.master-center .master-main { overscroll-behavior: contain; }
+.master-center .master-actions { flex-wrap: wrap; }
+.master-center > [id$="-modal"] { padding: 16px; }
+.master-center > [id$="-modal"] > div {
+    min-width: 0;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+.master-center > [id$="-modal"] .flex-1 { min-height: 0; min-width: 0; }
+.master-center #photo-preview-modal img { max-height: 60dvh; }
+.master-center button:focus-visible, .master-center a:focus-visible {
+    outline: 3px solid #60a5fa;
+    outline-offset: 2px;
+}
+
+@media screen and (max-width: 1199px) {
+    .master-center .master-header { padding: 16px 20px; gap: 16px; flex-wrap: wrap; }
+    .master-center .master-main { padding: 20px; }
+    .master-center .master-toolbar { align-items: stretch; }
+    .master-center .master-actions { width: 100%; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); }
+    .master-center .master-actions button { justify-content: center; }
+    .master-center .master-tabs { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .master-center .master-tabs > button { min-width: 0; }
+    .master-center #history-top-filter-bar > div { width: 100%; }
+    .master-center #history-type-filter-group { flex-wrap: wrap; }
+    .master-center #account-back-bar { flex-wrap: wrap; gap: 12px; }
+    .master-center #account-profile-card .flex { flex-wrap: wrap; }
+    .master-center #account-profile-card span { overflow-wrap: anywhere; }
+    .master-center #tab-content-blocked input { min-width: 0; max-width: 100%; }
+}
+
+@media screen and (max-width: 767px) {
+    .master-center .master-header { padding: 12px; gap: 12px; }
+    .master-center .master-header > div { min-width: 0; }
+    .master-center .master-header > div:last-child { width: 100%; justify-content: space-between; gap: 8px; }
+    .master-center .master-header a { display: inline-flex; align-items: center; }
+    .master-center .master-header h1 { flex-wrap: wrap; line-height: 1.4; }
+    .master-center .master-header img { width: 64px !important; }
+    .master-center .master-main { padding: 12px; }
+    .master-center .master-toolbar { padding: 16px; }
+    .master-center .master-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .master-center .master-actions button { padding: 10px 8px; }
+    .master-center .master-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .master-center button, .master-center input:not([type="checkbox"]):not([type="hidden"]),
+    .master-center select, .master-center a { min-height: 44px; }
+    .master-center input:not([type="checkbox"]), .master-center select, .master-center textarea {
+        min-width: 0; max-width: 100%; font-size: 16px;
+    }
+    .master-center input[type="checkbox"] { flex-shrink: 0; }
+    .master-center #tab-content-history, .master-center #tab-content-blocked { padding: 12px; }
+    .master-center #history-top-filter-bar { padding: 12px; }
+    .master-center #history-top-filter-bar > div > div { width: 100%; min-width: 0; }
+    .master-center #history-driver-search, .master-center #history-driver-select { width: 100%; min-width: 0; }
+    .master-center #history-type-filter-group { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .master-center #history-type-filter-group button { padding: 8px 4px; }
+    .master-center #account-back-bar, .master-center #account-profile-card { padding: 12px; }
+    .master-center #account-profile-card > div > div { min-width: 0; max-width: 100%; }
+    .master-center #account-profile-card .shrink-0 { flex-shrink: 1; }
+    .master-center #history-notice-send-bar > div:first-child { flex-wrap: wrap; gap: 8px; }
+    .master-center #account-history-main-content > .flex { flex-wrap: wrap; }
+    .master-center #account-history-main-content > .flex > button { flex: 1 1 40%; }
+    .master-center #account-history-main-content .justify-between { flex-wrap: wrap; gap: 8px; }
+    .master-center #account-history-main-content .truncate { white-space: normal; overflow-wrap: anywhere; }
+    .master-center #account-history-main-content .shrink-0 { flex-wrap: wrap; }
+    .master-center [id^="pagination-"] > div,
+    .master-center [id^="pagination-"] > div > div,
+    .master-center #account-history-main-content .border-t > .flex { flex-wrap: wrap; }
+    .master-center [id^="pagination-"] > div { padding: 12px; }
+    .master-center #tab-content-memos > div:first-child { flex-wrap: wrap; gap: 8px; }
+    .master-center #tab-content-blocked .justify-between { flex-wrap: wrap; gap: 8px; }
+    .master-center #tab-content-blocked input { width: 100%; }
+
+    /* 같은 행과 조작 버튼을 유지하면서 계정 정보를 카드로 표시한다. */
+    .master-center .master-account-table { display: block; min-width: 0; width: 100%; white-space: normal; }
+    .master-center .master-account-table tbody { display: grid; gap: 12px; padding: 2px; }
+    .master-center .master-account-table tbody > tr {
+        display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+        border: 1px solid #e2e8f0; border-radius: 14px; background: white; overflow: hidden;
+    }
+    .master-center .master-account-table td {
+        display: block; padding: 10px 12px; min-width: 0; text-align: left;
+        white-space: normal; overflow-wrap: anywhere; border: 0;
+    }
+    .master-center .master-account-table td::before {
+        content: attr(data-label); display: block; margin-bottom: 5px;
+        color: #64748b; font-size: 11px; font-weight: 700;
+    }
+    .master-center .master-account-table td[data-label="기기 고유번호"],
+    .master-center .master-account-table td[data-label="기기 고유번호 (deviceId)"],
+    .master-center .master-account-table td[data-label="기기 / 접속"],
+    .master-center .master-account-table td[data-label="관리"],
+    .master-center .master-account-table td[data-label="관리 / 삭제"],
+    .master-center .master-account-table td[colspan] { grid-column: 1 / -1; }
+    .master-center .master-account-table td[colspan]::before { display: none; }
+    .master-center .master-history-table thead { display: block; overflow-x: auto; margin-bottom: 12px; }
+    .master-center .master-history-table thead tr { display: flex; width: max-content; gap: 4px; border: 0; }
+    .master-center .master-history-table th { min-width: 0; padding: 10px; }
+
+    .master-center > [id$="-modal"] { padding: 8px; }
+    .master-center > [id$="-modal"] > div {
+        padding: 16px; border-radius: 18px;
+        max-height: calc(100vh - 16px); max-height: calc(100dvh - 16px);
+    }
+    .master-center > [id$="-modal"] h3 { flex-wrap: wrap; }
+    .master-center > [id$="-modal"] button { flex-shrink: 0; }
+    .master-center #photo-gallery-modal > div, .master-center #photo-preview-modal > div { padding: 0; }
+    .master-center #photo-gallery-modal > div > div { padding: 12px; }
+    .master-center #photo-gallery-modal .flex-wrap > .flex { flex-wrap: wrap; }
+    .master-center #photo-gallery-modal h3 { font-size: 14px; }
+    .master-center #photo-gallery-modal .w-10 { display: none; }
+    .master-center #photo-filter-driver-search { width: 100%; }
+    .master-center #photo-preview-modal .min-h-\[300px\] { min-height: 0; }
+    .master-center #photo-preview-sub { overflow-wrap: anywhere; }
+    .master-center #blocked-devices-modal .flex-nowrap { flex-wrap: wrap; }
+    .master-center #modal-blocked-device-id, .master-center #modal-blocked-device-memo { flex-basis: 100%; width: 100%; min-width: 0; }
+    .master-center #blocked-devices-modal table { min-width: 580px; }
+    .master-center #blocked-devices-modal .overflow-y-auto { overflow-x: auto; }
+    .master-center #export-start-date, .master-center #export-end-date { width: 100%; flex-basis: 100%; }
+    .master-center #excel-export-modal .items-center { flex-wrap: wrap; }
+    .master-center #excel-export-modal .grid-cols-3 { grid-template-columns: 1fr; }
+    .master-center #edit-modal-card > .border-t { flex-wrap: wrap; flex-shrink: 0; }
+}

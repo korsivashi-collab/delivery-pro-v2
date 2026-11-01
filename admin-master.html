@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     
     <!-- 공통 분리 스타일시트 -->
-    <link rel="stylesheet" href="./css/admin.css">
+    <link rel="stylesheet" href="./css/admin.css?v=20261101-master-responsive">
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
     <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=893c5c6ec8613974d84fa75fd6d0be11&libraries=services"></script>
@@ -19,12 +19,12 @@
     <!-- 엑셀 파일(.xlsx) 생성 라이브러리 (SheetJS) -->
     <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
-<body class="bg-slate-50 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
+<body class="master-center bg-slate-50 h-screen w-screen flex flex-col overflow-hidden text-gray-800 font-sans">
 
     <!-- 마스터 통합 대시보드 메인 패널 -->
     <div id="master-panel" style="display:none" class="flex flex-col h-full w-full bg-slate-50 overflow-hidden">
         <!-- 1. 마스터 상단 헤더 -->
-        <header class="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md flex-none">
+        <header class="master-header bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md flex-none">
             <div class="flex items-center gap-2.5">
                 <img src="./icons/header-logo-06-640.png?v=20261031-brand" alt="배송 경로 PRO" width="1280" height="714" style="display:block;width:88px;height:auto;object-fit:contain;flex-shrink:0;background:#fff;border-radius:8px;padding:6px;">
                 <div class="ml-1">
@@ -48,14 +48,14 @@
         </header>
 
         <!-- 2. 마스터 메인 작업 영역 -->
-        <div class="flex-1 overflow-y-auto p-6 max-w-[1650px] mx-auto w-full hide-scrollbar space-y-5">
+        <div class="master-main flex-1 overflow-y-auto p-6 max-w-[1650px] mx-auto w-full hide-scrollbar space-y-5">
             <!-- 상단 작업 바: 전체 데이터 추출, 접속 제한 등록/해제, 사진 데이터, 계정 생성 -->
-            <div class="bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex justify-between items-center flex-wrap gap-4">
+            <div class="master-toolbar bg-white p-5 rounded-2xl border border-gray-200 shadow-sm flex justify-between items-center flex-wrap gap-4">
                 <div>
                     <h3 class="text-sm font-black text-gray-800 flex items-center gap-2"><i class="fa-solid fa-server text-blue-600"></i> 시스템 및 데이터 통합 관리</h3>
                     <p class="text-[10px] text-gray-500 mt-1 font-bold">마스터 권한의 신규 키 발급, 전체 배송 기록 엑셀 추출, 기기 접속 차단/해제 및 사진 목록을 관리합니다.</p>
                 </div>
-                <div class="flex items-center gap-2">
+                <div class="master-actions flex items-center gap-2">
                     <button onclick="window.openExcelExportModal()" class="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl shadow transition active:scale-95 flex items-center gap-1.5">
                         <i class="fa-solid fa-file-excel"></i> 전체 데이터 추출 (엑셀)
                     </button>
@@ -72,8 +72,8 @@
             </div>
 
             <!-- 마스터 탭 패널 컨테이너 -->
-            <div class="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[560px]">
-                <div class="flex border-b border-gray-200 bg-gray-50/70 p-2 gap-1.5 flex-wrap">
+            <div class="master-tabs-panel bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden flex flex-col min-h-[560px]">
+                <div class="master-tabs flex border-b border-gray-200 bg-gray-50/70 p-2 gap-1.5 flex-wrap">
                     <button onclick="window.switchMasterTab('regular')" id="tab-btn-regular" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition bg-white text-blue-600 shadow-sm border border-gray-200"><i class="fa-solid fa-user mr-1 text-blue-600"></i> 일반 계정 (<span id="count-regular">0</span>)</button>
                     <button onclick="window.switchMasterTab('trial')" id="tab-btn-trial" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-clock mr-1 text-emerald-500"></i> 무료체험 계정 (<span id="count-trial">0</span>)</button>
                     <button onclick="window.switchMasterTab('dispatch')" id="tab-btn-dispatch" class="flex-1 min-w-[130px] py-2.5 text-xs font-black rounded-xl transition text-gray-500 hover:bg-white/60"><i class="fa-solid fa-building mr-1 text-purple-500"></i> 관제 계정 (<span id="count-dispatch">0</span>)</button>
@@ -84,19 +84,19 @@
 
                 <!-- 탭 1: 일반 계정 -->
                 <div id="tab-content-regular" class="flex flex-col flex-1">
-                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-regular"></tbody></table></div>
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="master-account-table w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-regular"></tbody></table></div>
                     <div id="pagination-regular"></div>
                 </div>
 
                 <!-- 탭 2: 무료체험 계정 -->
                 <div id="tab-content-trial" class="hidden flex-col flex-1">
-                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-trial"></tbody></table></div>
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="master-account-table w-full text-left border-collapse text-xs min-w-[950px]"><tbody id="table-body-trial"></tbody></table></div>
                     <div id="pagination-trial"></div>
                 </div>
 
                 <!-- 탭 3: 관제 계정 -->
                 <div id="tab-content-dispatch" class="hidden flex-col flex-1">
-                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="w-full text-left border-collapse text-xs min-w-[1000px]"><tbody id="table-body-dispatch"></tbody></table></div>
+                    <div class="p-4 overflow-x-auto custom-scrollbar flex-1"><table class="master-account-table w-full text-left border-collapse text-xs min-w-[1000px]"><tbody id="table-body-dispatch"></tbody></table></div>
                     <div id="pagination-dispatch"></div>
                 </div>
                 
@@ -579,7 +579,7 @@
     </div>
 
     <!-- ES Modules 방식의 관리자 메인 컨트롤러 연결 -->
-    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-trial-sms-precheck","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261017-trial-sms-precheck","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261022-sms-add-reset","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link"}}</script>
+    <script type="importmap">{"imports":{"./js/admin-api.js":"./js/admin-api.js?v=20261022-dispatch-signup","./js/admin-license-save.js":"./js/admin-license-save.js?v=20261017-trial-sms-precheck","./js/admin-master-history.js":"./js/admin-master-history.js?v=20261101-master-responsive","./js/admin-master-licenses.js":"./js/admin-master-licenses.js?v=20261101-master-responsive","./js/admin-dispatch-core.js":"./js/admin-dispatch-core.js?v=20261017-dispatch-trial-link"}}</script>
     <script type="module" src="./js/admin-app.js?v=20261022-dispatch-signup"></script>
 </body>
 </html>

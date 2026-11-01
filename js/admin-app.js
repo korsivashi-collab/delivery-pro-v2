@@ -353,12 +353,34 @@ window.handleSingleKeyLogin = async function() {
             body: JSON.stringify({ key: keyInput })
         });
         
-        const result = await response.json();
+        const result = await response.json().catch(() => null);
 
         if (!response.ok) {
-            msgEl.innerText = result.error === 'suspended'
-                ? "사용이 정지된 관제 계정입니다. 관리자에게 문의하세요." 
-                : "등록되지 않았거나 권한이 없는 관리자 키입니다.";
+            const accountErrors = {
+                suspended: '사용이 정지된 관제 계정입니다. 관리자에게 문의하세요.',
+                expired: '계정의 이용기간이 만료되었습니다. 관리자에게 문의하세요.',
+                revoked: '이용권이 회수된 계정입니다. 관리자에게 문의하세요.'
+            };
+            if (response.status >= 500) {
+                msgEl.innerText = `로그인 서버 오류가 발생했습니다. 잠시 후 다시 시도해 주세요. (HTTP ${response.status})`;
+            } else if (response.status === 404) {
+                msgEl.innerText = '로그인 서버를 찾을 수 없습니다. 접속 주소와 서버 배포 상태를 확인해 주세요. (HTTP 404)';
+            } else if (response.status === 429) {
+                msgEl.innerText = '로그인 요청이 많습니다. 잠시 후 다시 시도해 주세요. (HTTP 429)';
+            } else if (response.status === 403 && accountErrors[result?.error]) {
+                msgEl.innerText = accountErrors[result.error];
+            } else if (response.status === 401 && result?.error === 'invalid') {
+                msgEl.innerText = '등록되지 않았거나 권한이 없는 관리자 키입니다. 영문 대소문자를 확인해 주세요.';
+            } else if (response.status === 400) {
+                msgEl.innerText = '관리자 키 입력 형식을 확인해 주세요.';
+            } else {
+                msgEl.innerText = `로그인 요청을 처리할 수 없습니다. 접속 주소와 서버 상태를 확인해 주세요. (HTTP ${response.status})`;
+            }
+            return;
+        }
+
+        if (!result || typeof result !== 'object') {
+            msgEl.innerText = '로그인 서버 응답을 확인할 수 없습니다. 접속 주소와 서버 배포 상태를 확인해 주세요.';
             return;
         }
 

@@ -180,7 +180,17 @@ function renderPagedTableTab(tabKey, list, tbodyId, paginationId, rowRenderer) {
     const start = (curPage - 1) * PAGE_SIZE_MASTER;
     const pagedList = list.slice(start, start + PAGE_SIZE_MASTER);
 
-    tbody.innerHTML = pagedList.map((item, idx) => rowRenderer(item, start + idx + 1)).join('');
+    // Keep the same controls and data when account tables become phone cards.
+    const cardLabels = {
+        regular: ['순번', '라이선스 키', '전화번호', '기기 고유번호', '만료일', '상태', '관리'],
+        trial: ['순번', '라이선스 키', '전화번호', '기기 고유번호', '만료일', '체험 유형', '관리'],
+        dispatch: ['순번', '라이선스 키', '전화번호', '기기 / 접속', '연결 기사', '만료일', '이용 유형', '관리']
+    };
+    tbody.innerHTML = pagedList.map((item, idx) => {
+        let column = 0;
+        return rowRenderer(item, start + idx + 1).replace(/<td\b/g, match =>
+            cardLabels[tabKey] ? `${match} data-label="${cardLabels[tabKey][column++]}"` : match);
+    }).join('');
     if (pagEl) {
         pagEl.innerHTML = renderPaginationControls(tabKey, curPage, total, PAGE_SIZE_MASTER, 'window.changeMasterTabPagination');
     }
