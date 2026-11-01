@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const {randomUUID} = require('node:crypto');
-const {registerDispatchSession, releaseDispatchSession} = require('../server/license-integrity.cjs');
+const {registerDispatchSession, releaseDispatchSession, assertMasterSession, releaseMasterSession} = require('../server/license-integrity.cjs');
 
 // Vercel 환경 변수에서 비공개 키를 불러와 파이어베이스에 한 번만 연결합니다.
 if (!admin.apps.length) {
@@ -21,6 +21,21 @@ module.exports = async function handler(req, res) {
   // 웹에서 POST 방식으로 키를 받아옵니다.
   if (req.method !== 'POST') return res.status(405).json({ error: 'POST 요청만 가능합니다.' });
   res.setHeader('Cache-Control', 'no-store');
+
+  if (['check-master-session', 'logout-master'].includes(req.body?.action)) {
+    try {
+      const bearer = /^Bearer (.+)$/.exec(req.headers.authorization || '')?.[1];
+      if (!bearer) return res.status(401).json({error:'마스터 로그인이 필요합니다.'});
+      let identity;
+      try { identity = await admin.auth().verifyIdToken(bearer, true); }
+      catch (_) { return res.status(401).json({error:'마스터 인증이 만료되었습니다. 다시 로그인해 주세요.'}); }
+      if (req.body.action === 'logout-master') return res.status(200).json(await releaseMasterSession(db, identity));
+      await assertMasterSession(db, identity);
+      return res.status(200).json({success:true});
+    } catch (error) {
+      return res.status(error.status || 503).json({error:error.status ? error.message : '마스터 접속 확인 서버에 일시적인 오류가 발생했습니다.', ...(error.code === 'MASTER_SESSION_REPLACED' ? {code:error.code} : {})});
+    }
+  }
 
   if (req.body?.action === 'logout-dispatch') {
     try {
@@ -57,9 +72,11 @@ module.exports = async function handler(req, res) {
           !Number.isInteger(identity.auth_time) || now - identity.auth_time > 300 || identity.auth_time > now + 30) {
         return res.status(403).json({ error: '지정된 관리자 번호의 최근 SMS 인증이 필요합니다.' });
       }
+      const masterSessionId = randomUUID();
       const token = await admin.auth().createCustomToken('admin_master', {
-        role: 'MASTER', masterSmsVerified: true, masterSessionExpiresAt: now + MASTER_SESSION_SECONDS
+        role: 'MASTER', masterSmsVerified: true, masterSessionExpiresAt: now + MASTER_SESSION_SECONDS, masterSessionId
       });
+      await db.collection('master_sessions').doc('admin_master').set({sessionId:masterSessionId, expiresAt:(now + MASTER_SESSION_SECONDS) * 1000, createdAt:Date.now()});
       return res.status(200).json({ token, role: 'MASTER', data: { name: adminDoc.data().name || '마스터' } });
     }
 

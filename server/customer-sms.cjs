@@ -1,5 +1,5 @@
 const crypto = require('node:crypto');
-const {problem,assertDispatchSession,isActive} = require('./license-integrity.cjs');
+const {assertMasterSession,problem,assertDispatchSession,isActive} = require('./license-integrity.cjs');
 let supported;
 function measureSms(value) {
  if(!supported){supported=new Set();const decoder=new TextDecoder('euc-kr');
@@ -58,6 +58,7 @@ function createSmsService({env=process.env,fetchImpl=(...args)=>fetch(...args),n
   const data=await response.json();return {ok:response.ok,data};
  }
  async function execute(db,identity,key,input){
+  if(identity.role==='MASTER')await assertMasterSession(db,identity,now());
   const account=(await db.collection('licenses').doc(key).get()).data();authorize(account,identity,key);
   if(input.action==='sms-receipts'){
    if(!Array.isArray(input.deliveryNumbers)||input.deliveryNumbers.length>1000||input.deliveryNumbers.some(n=>!/^[A-Za-z0-9]{5}$/.test(n)))throw problem('배송번호를 확인해 주세요.');

@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const {randomInt,createHash}=require('node:crypto');
-const {assertDriverSession,assertDispatchSession,isActive,problem} = require('./license-integrity.cjs');
+const {assertMasterSession,assertDriverSession,assertDispatchSession,isActive,problem} = require('./license-integrity.cjs');
 const alphabet='23456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 function encodeNumber(value){
  let result='';for(let i=0;i<5;i++){result=alphabet[value%alphabet.length]+result;value=Math.floor(value/alphabet.length);}
@@ -75,7 +75,7 @@ function createHandler(sdk=admin){return async(req,res)=>{
   if(!routeRequest&&(!Array.isArray(ids)||!ids.length||ids.length>100||new Set(ids).size!==ids.length||ids.some(id=>typeof id!=='string'||!/^[a-f0-9-]{36}$/.test(id))))throw problem('배송 등록 정보를 확인해 주세요.');
   if(!sdk.apps.length)sdk.initializeApp({credential:sdk.credential.cert({projectId:process.env.FIREBASE_PROJECT_ID,clientEmail:process.env.FIREBASE_CLIENT_EMAIL,privateKey:process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g,'\n')})});
   let identity;try{const bearer=/^Bearer (.+)$/.exec(req.headers?.authorization||'')?.[1];if(!bearer)throw Error();identity=await sdk.auth().verifyIdToken(bearer,true);}catch{throw problem('로그인 후 배송을 등록해 주세요.',401);}
-  const db=sdk.firestore();let scope;
+  const db=sdk.firestore();if(identity.role==='MASTER')await assertMasterSession(db,identity);let scope;
   if(routeRequest){
    if(identity.role==='MASTER'||identity.role==='DISPATCH')throw problem('기사 접속이 필요합니다.',403);
    return res.status(200).json(await numberRoute(db,identity,body.key,body.deviceId));

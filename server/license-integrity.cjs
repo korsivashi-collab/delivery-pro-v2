@@ -1,5 +1,28 @@
 const { randomUUID } = require('node:crypto');
 
+async function assertMasterSession(db, identity, now = Date.now()) {
+    if (identity?.role !== 'MASTER' || identity.uid !== 'admin_master' || identity.masterSmsVerified !== true ||
+        !(identity.masterSessionExpiresAt > now / 1000) || typeof identity.masterSessionId !== 'string' || !identity.masterSessionId) {
+        throw problem('마스터 인증이 만료되었습니다. 다시 로그인해 주세요.', 401);
+    }
+    const session = (await db.collection('master_sessions').doc('admin_master').get()).data();
+    if (!session || session.sessionId !== identity.masterSessionId) {
+        throw Object.assign(problem('다른 기기에서 접속했습니다. 현재 접속은 로그아웃됩니다.', 401), {code:'MASTER_SESSION_REPLACED'});
+    }
+    if (!(session.expiresAt > now)) throw problem('마스터 인증이 만료되었습니다. 다시 로그인해 주세요.', 401);
+    return true;
+}
+
+async function releaseMasterSession(db, identity) {
+    if (identity?.role !== 'MASTER' || identity.uid !== 'admin_master' || !identity.masterSessionId) throw problem('마스터 로그인이 필요합니다.', 401);
+    return db.runTransaction(async tx => {
+        const ref = db.collection('master_sessions').doc('admin_master'), session = (await tx.get(ref)).data();
+        // A delayed logout from the previous device must never revoke the new login.
+        if (session?.sessionId === identity.masterSessionId) tx.set(ref, {sessionId:'', expiresAt:0});
+        return {success:true};
+    });
+}
+
 // A browser cannot restore its access by copying another browser's session ID.
 function assertDispatchSession(account, identity) {
     if (identity?.role !== 'DISPATCH' || account?.type !== 'dispatch' ||
@@ -460,7 +483,7 @@ async function deleteLicenseAccount(db, request, now = Date.now()) {
 }
 
 async function linkDispatchDriver(db, identity, request, now = Date.now()) {
-    const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
+    const master = identity?.role === 'MASTER' && await assertMasterSession(db, identity, now);
     if (!master && identity?.role !== 'DISPATCH') throw problem('관제 또는 마스터 로그인이 필요합니다.', 403);
     const dispatchKey = validateKey(master ? request.dispatchKey : identity.uid);
     if (!master && request.dispatchKey && request.dispatchKey !== dispatchKey) throw problem('다른 관제소로 연결할 수 없습니다.', 403);
@@ -505,7 +528,7 @@ async function dispatchAccessAction(db, identity, request, now = Date.now()) {
     if (request.action === 'prepareNoticeInbox') return prepareNoticeInbox(db, identity, request, now);
     if (request.action === 'sendDispatchMessage') return sendPrivateNotice(db, identity, request, now);
     if (request.action === 'deleteDispatchMessage') return deletePrivateNotice(db, identity, request, now);
-    const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
+    const master = identity?.role === 'MASTER' && await assertMasterSession(db, identity, now);
     if (!master && identity?.role !== 'DISPATCH') throw problem('관제 로그인이 필요합니다.', 403);
     const keys = [...new Set((Array.isArray(request.keys) ? request.keys : []).map(validateKey))];
     if (!keys.length || (request.action !== 'sendDispatchMessage' && keys.length > 50)) throw problem('기사 계정을 1~50개씩 선택해 주세요.');
@@ -558,7 +581,7 @@ function noticeBody(message) {
         dateStr:String(message.dateStr || ''), timeStr:String(message.timeStr || '')};
 }
 async function assertNoticeSender(db, tx, identity, request, now) {
-    const master = identity?.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
+    const master = identity?.role === 'MASTER' && await assertMasterSession(db, identity, now);
     if (master) return 'MASTER';
     if (identity?.role !== 'DISPATCH') throw problem('관제 로그인이 필요합니다.', 403);
     const account = (await tx.get(db.collection('licenses').doc(identity.uid))).data();
@@ -681,4 +704,4 @@ function effectivePeriod(license, paidExpiresAt, now) {
     const status = ['suspended','revoked'].includes(license.status) ? license.status : expiresAt > now ? 'active' : 'expired';
     return { expiresAt, expireDate:new Date(expiresAt+9*3600000).toISOString().slice(0,10).replace(/-/g,'.'), status };
 }
-module.exports = { assertDispatchSession, registerDispatchSession, releaseDispatchSession, migrateNoticeInboxes, dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };
+module.exports = { assertMasterSession, releaseMasterSession, assertDispatchSession, registerDispatchSession, releaseDispatchSession, migrateNoticeInboxes, dispatchAccessAction, withoutDriverConnection, releaseInactiveDriverConnections, effectivePeriod, normalizePhone, phoneDigits, saveLicenses, repairLicensePhones, deleteLicenseAccount, linkDispatchDriver, problem, isActive, assertNotBlocked, assertDriverSession };

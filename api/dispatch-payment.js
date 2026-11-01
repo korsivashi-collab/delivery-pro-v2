@@ -1,7 +1,7 @@
 // Dispatch commerce is isolated from phone-authenticated driver purchases.
 const admin = require('firebase-admin');
 const {randomUUID,randomBytes} = require('node:crypto');
-const {problem,phoneDigits,assertNotBlocked,assertDispatchSession} = require('../server/license-integrity.cjs');
+const {assertMasterSession,problem,phoneDigits,assertNotBlocked,assertDispatchSession} = require('../server/license-integrity.cjs');
 const {verifiedPhone} = require('../server/billing.cjs');
 const {addMonths} = require('./payment-confirm.js');
 const dateOf = n => new Date(n + 9*3600000).toISOString().slice(0,10).replace(/-/g,'.');
@@ -98,6 +98,7 @@ function createService({sdk=admin,env=process.env,fetchImpl=(...args)=>fetch(...
   return {ok:r.ok,data:await r.json()};
  }
  async function execute(db,identity,input) {
+  if(identity.role==='MASTER')await assertMasterSession(db,identity,now());
   if(input.action==='prepare-signup')return prepareSignup(db,identity,input);
   const c=await (input.signup===true?signupContext(db,identity,input):context(db,identity,input)),{ref,walletRef,id}=c;
   const authorizeCurrent=l=>{if(!c.signup)return authorize(l,identity,input);signupPhone(identity);if(l&&l.dispatchBillingId!==id)throw problem('계정 정보가 변경되었습니다.',409);};

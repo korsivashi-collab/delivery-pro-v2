@@ -24,10 +24,23 @@ service cloud.firestore {
       return exists(/databases/$(database)/documents/billing_license_bindings/$(key));
     }
 
-    function isVerifiedMaster() {
+    function hasMasterIdentity() {
       return request.auth != null && request.auth.token.get('role', '') == 'MASTER' &&
+        request.auth.uid == 'admin_master' &&
         request.auth.token.get('masterSmsVerified', false) == true &&
         request.auth.token.get('masterSessionExpiresAt', 0) > request.time.toMillis() / 1000;
+    }
+
+    // Replaced sessions may observe this one document to show the logout reason.
+    match /master_sessions/{id} {
+      allow get: if id == 'admin_master' && hasMasterIdentity();
+      allow list, create, update, delete: if false;
+    }
+
+    function isVerifiedMaster() {
+      return hasMasterIdentity() && request.auth.token.get('masterSessionId', '') != '' &&
+        get(/databases/$(database)/documents/master_sessions/admin_master).data.get('sessionId', '') == request.auth.token.masterSessionId &&
+        get(/databases/$(database)/documents/master_sessions/admin_master).data.get('expiresAt', 0) > request.time.toMillis();
     }
 
     // MASTER는 키 + SMS 검증이 완료된 유효 세션만 인정합니다.
@@ -50,6 +63,8 @@ service cloud.firestore {
       let dispatcher = get(/databases/$(database)/documents/licenses/$(request.auth.uid)).data;
       return request.auth.token.get('role', '') == 'DISPATCH' &&
         dispatcher.get('type', '') == 'dispatch' &&
+        request.auth.token.get('dispatchSessionId', '') != '' &&
+        request.auth.token.dispatchSessionId in dispatcher.get('activeSessions', []) &&
         !(dispatcher.get('status', '') in ['suspended', 'revoked', 'expired']) &&
         (!('expiresAt' in dispatcher) || dispatcher.expiresAt == null ||
           (dispatcher.expiresAt is int && dispatcher.expiresAt > request.time.toMillis()) ||
@@ -120,30 +135,11 @@ service cloud.firestore {
       let key = get(/databases/$(database)/documents/access_owners/$(owner)).data.licenseKey;
       return dispatchOwnsLicense(key) && get(/databases/$(database)/documents/licenses/$(key)).data.routeOwnerId == owner;
     }
-    function dispatchOwnsDevice(id) {
-      let mapping = get(/databases/$(database)/documents/access_devices/$(id)).data;
-      let account = get(/databases/$(database)/documents/licenses/$(mapping.licenseKey)).data;
-      return dispatchOwnsLicense(mapping.licenseKey) && account.routeOwnerId == mapping.routeOwnerId &&
-        (id == mapping.licenseKey || id == account.get('deviceId', ''));
-    }
-    function driverDevice(id) {
-      return isActiveDriver() && (request.auth.token.driverDeviceId == id || request.auth.token.driverKey == id);
-    }
     function readsOwnLicense(key) {
       return request.auth != null && ((request.auth.token.get('driverKey', '') == key &&
         (!exists(/databases/$(database)/documents/licenses/$(key)) ||
           get(/databases/$(database)/documents/licenses/$(key)).data.get('driverUid', '') == request.auth.uid)) ||
-        (request.auth.token.get('role', '') == 'DISPATCH' && request.auth.uid == key));
-    }
-    function ownDispatchSession(key) {
-      let configured = resource.data.get('maxSessions', 0);
-      let maximum = configured is int && configured > 0 ? configured :
-        (configured is string && configured.matches('^[1-9][0-9]*$') ? int(configured) :
-          (resource.data.get('isPro', false) ? 2 : 1));
-      return request.auth != null && request.auth.uid == key && isCurrentDispatcher() &&
-        request.resource.data.diff(resource.data).affectedKeys().hasOnly(['currentSessionToken', 'activeSessions', 'lastLoginAt']) &&
-        request.resource.data.get('activeSessions', []) is list &&
-        request.resource.data.get('activeSessions', []).size() <= maximum;
+        (request.auth.token.get('role', '') == 'DISPATCH' && request.auth.uid == key && isCurrentDispatcher()));
     }
     function readsOwner(owner) { return isVerifiedMaster() || driverOwns(owner) || dispatchOwnsOwner(owner); }
 
@@ -211,7 +207,6 @@ service cloud.firestore {
       // SMS 검증과 중복 판정을 우회한 클라이언트 직접 체험 발급을 차단합니다.
       allow create: if isVerifiedMaster();
       allow update: if driverSettings(licenseKey) || paidOperationalUpdate(licenseKey) ||
-        ownDispatchSession(licenseKey) ||
         (!isStoreLicense(licenseKey) && isVerifiedMaster() &&
           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['driverUid', 'driverSessionId', 'testSmsBypass', 'dispatchBillingId']) &&
           (!('routeOwnerId' in resource.data) || request.resource.data.routeOwnerId == resource.data.routeOwnerId));
@@ -239,42 +234,49 @@ service cloud.firestore {
     // 4. 배송 경로, GPS 보고, 위치 요청: 기사와 관제 실시간 통신
     match /routes/{docId} {
       allow get: if isVerifiedMaster() || (!exists(/databases/$(database)/documents/routes/$(docId)) &&
-        (driverDevice(docId) || dispatchOwnsDevice(docId))) || readsOwner(resource.data.routeOwnerId);
+        (driverOwns(docId) || dispatchOwnsOwner(docId))) || readsOwner(resource.data.routeOwnerId);
       allow list: if readsOwner(resource.data.routeOwnerId);
-      allow create, update: if request.resource.data.deviceId == docId &&
-        (isVerifiedMaster() || (driverOwns(request.resource.data.routeOwnerId) && request.auth.token.driverDeviceId == docId) ||
-          (dispatchOwnsOwner(request.resource.data.routeOwnerId) &&
-            ((dispatchOwnsDevice(docId) && get(/databases/$(database)/documents/access_devices/$(docId)).data.routeOwnerId == request.resource.data.routeOwnerId) ||
-              (exists(/databases/$(database)/documents/routes/$(docId)) && resource.data.routeOwnerId == request.resource.data.routeOwnerId))));
+      allow create, update: if request.resource.data.routeOwnerId == docId &&
+        (!exists(/databases/$(database)/documents/routes/$(docId)) || resource.data.routeOwnerId == docId) &&
+        (isVerifiedMaster() || (driverOwns(docId) && request.resource.data.deviceId == request.auth.token.driverDeviceId) ||
+          dispatchOwnsOwner(docId));
       allow delete: if isVerifiedMaster() || dispatchOwnsOwner(resource.data.routeOwnerId);
     }
     match /gps_reports/{docId} {
-      allow get: if isVerifiedMaster() || driverDevice(docId) || dispatchOwnsDevice(docId);
+      allow get: if readsOwner(docId);
       allow list: if isVerifiedMaster();
-      allow create, update: if isVerifiedMaster() || (isActiveDriver() && request.auth.token.driverDeviceId == docId && request.resource.data.deviceId == docId);
+      allow create, update: if request.resource.data.routeOwnerId == docId &&
+        (isVerifiedMaster() || (driverOwns(docId) && request.resource.data.deviceId == request.auth.token.driverDeviceId));
       allow delete: if isVerifiedMaster();
     }
     match /gps_requests/{docId} {
-      allow get: if isVerifiedMaster() || driverDevice(docId) || dispatchOwnsDevice(docId);
+      allow get: if readsOwner(docId);
       allow list: if isVerifiedMaster();
-      allow create, update: if isVerifiedMaster() || (dispatchOwnsDevice(docId) && request.resource.data.deviceId == docId &&
-        request.resource.data.keys().hasOnly(['requestId', 'deviceId', 'requestedAt']));
+      allow create, update: if request.resource.data.routeOwnerId == docId &&
+        (isVerifiedMaster() || (dispatchOwnsOwner(docId) &&
+        request.resource.data.keys().hasOnly(['requestId', 'deviceId', 'routeOwnerId', 'requestedAt'])));
       allow delete: if isVerifiedMaster();
     }
     match /dispatch_messages/{msgId} {
+      // Recipient lists are private sender records. Recipients read only their sanitized inbox.
       allow read: if isVerifiedMaster() || (request.auth != null && isCurrentDispatcher() &&
-        (resource.data.get('senderKey', '') == request.auth.uid || resource.data.get('targetDispatchKey', '') == request.auth.uid ||
-         request.auth.uid in resource.data.get('targetLicenseKeys', []))) ||
-        (isActiveDriver() && request.auth.token.driverKey in resource.data.get('targetLicenseKeys', []));
+        (resource.data.get('senderKey', '') == request.auth.uid || resource.data.get('targetDispatchKey', '') == request.auth.uid));
       // Dispatcher broadcasts are validated server-side against every selected license.
-      allow create: if isVerifiedMaster() || (isActiveDriver() && request.resource.data.senderType == 'DRIVER' &&
+      allow create: if (isActiveDriver() && request.resource.data.senderType == 'DRIVER' &&
         request.resource.data.senderKey == request.auth.token.driverKey &&
         request.resource.data.targetDispatchKey != '' &&
         request.resource.data.targetDispatchKey == get(/databases/$(database)/documents/licenses/$(request.auth.token.driverKey)).data.get('dispatchKey', '') &&
         request.resource.data.content is string && request.resource.data.content.size() > 0 && request.resource.data.content.size() <= 300 &&
         request.resource.data.keys().hasOnly(['senderType','senderKey','senderPhone','senderTitle','targetDispatchKey','targetDeviceIds','targetPhones','content','createdAt','dateStr','timeStr','acknowledged']));
       allow update: if false;
-      allow delete: if isVerifiedMaster() || (request.auth != null && isCurrentDispatcher() && resource.data.senderKey == request.auth.uid);
+      // Server deletion also removes inbox copies.
+      allow delete: if false;
+    }
+    match /dispatch_inboxes/{inboxId}/messages/{msgId} {
+      allow read: if isVerifiedMaster() ||
+        (request.auth != null && isCurrentDispatcher() && inboxId == 'dispatch_' + get(/databases/$(database)/documents/licenses/$(request.auth.uid)).data.routeOwnerId) ||
+        (isActiveDriver() && inboxId == 'driver_' + get(/databases/$(database)/documents/licenses/$(request.auth.token.driverKey)).data.routeOwnerId);
+      allow write: if false;
     }
     match /dispatch_templates/{docId} {
       allow read: if isVerifiedMaster() || (request.auth != null && isCurrentDispatcher() && resource.data.dispatchKey in [request.auth.uid, 'MASTER', 'SYSTEM']);

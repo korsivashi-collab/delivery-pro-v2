@@ -1,6 +1,6 @@
 const admin = require('firebase-admin');
 const crypto = require('node:crypto');
-const { isActive, problem, assertDispatchSession } = require('../server/license-integrity.cjs');
+const { assertMasterSession, isActive, problem, assertDispatchSession } = require('../server/license-integrity.cjs');
 
 // Public clients receive a projection, never Firestore documents or driver contact data.
 const DAY = 86400000;
@@ -399,6 +399,7 @@ function createHandler(sdk = admin, options = {}) {
             let identity;
             try { identity = await sdk.auth().verifyIdToken(bearer, true); }
             catch (_) { throw problem('로그인이 만료되었습니다.', 401); }
+            if (identity.role === 'MASTER') await assertMasterSession(db, identity, now);
             const master = identity.role === 'MASTER' && identity.masterSmsVerified === true && identity.masterSessionExpiresAt > now / 1000;
             if (!master && identity.role !== 'DISPATCH') throw problem('관제 계정으로 로그인해 주세요.', 403);
             const body = req.body || {}, dispatchKey = master ? String(body.dispatchKey || '') : identity.uid;

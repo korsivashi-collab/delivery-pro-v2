@@ -128,6 +128,7 @@ import {
 // 1. 초기화 및 페이지 라우팅 제어 (Lifecycle)
 // ==========================================
 window.addEventListener('admin-auth-required', () => {
+    if (window.masterSessionGuard) { void window.masterSessionGuard.recheck(); return; }
     sessionStorage.removeItem('deliveryProRole');
     sessionStorage.removeItem('deliveryProAdminName');
     window.location.replace('admin.html');
@@ -137,9 +138,71 @@ async function hasVerifiedMasterSession() {
     try {
         await auth.authStateReady();
         const result = await auth.currentUser?.getIdTokenResult();
-        return result?.claims.role === 'MASTER' && result.claims.masterSmsVerified === true &&
-            result.claims.masterSessionExpiresAt > Date.now() / 1000;
-    } catch (_) { return false; }
+        if (!(result?.claims.role === 'MASTER' && result.claims.masterSmsVerified === true &&
+            result.claims.masterSessionExpiresAt > Date.now() / 1000 && result.claims.masterSessionId)) return false;
+        await checkMasterSession();
+        startMasterSessionWatch(result.claims);
+        return true;
+    } catch (error) {
+        if (error.status === 401) await endMasterSession(error.message);
+        return false;
+    }
+}
+
+async function checkMasterSession() {
+    const token = await auth.currentUser?.getIdToken();
+    if (!token) throw Object.assign(new Error('마스터 로그인이 만료되었습니다.'), {status:401});
+    const response = await fetch('/api/login', {method:'POST',
+        headers:{'Content-Type':'application/json', Authorization:'Bearer ' + token},
+        body:JSON.stringify({action:'check-master-session'})});
+    const result = await response.json();
+    if (!response.ok) throw Object.assign(new Error(result.error || '마스터 접속을 확인해 주세요.'), {status:response.status});
+}
+
+function stopMasterSessionWatch() {
+    const guard = window.masterSessionGuard;
+    if (!guard) return;
+    guard.stopped = true;
+    guard.off?.(); clearInterval(guard.timer);
+    window.removeEventListener?.('focus', guard.recheck);
+    document.removeEventListener?.('visibilitychange', guard.recheck);
+    window.masterSessionGuard = null;
+}
+
+async function endMasterSession(message) {
+    if (window.masterSessionEnding) return;
+    window.masterSessionEnding = true;
+    stopMasterSessionWatch(); stopDataSync();
+    for (const id of ['master-panel', 'dispatch-panel']) {
+        const panel = document.getElementById(id); if (panel) panel.style.display = 'none';
+    }
+    for (const key of ['deliveryProRole', 'deliveryProAdminName', 'deliveryProDispatchKey', 'deliveryProSessionToken']) sessionStorage.removeItem(key);
+    try { await signOut(auth); } catch (_) {}
+    alert(message || '다른 기기에서 접속했습니다. 현재 접속은 로그아웃됩니다.');
+    window.location.replace('admin.html');
+}
+
+function startMasterSessionWatch(claims) {
+    if (window.masterSessionGuard?.id === claims.masterSessionId) return;
+    stopMasterSessionWatch();
+    const guard = {id:claims.masterSessionId, stopped:false, checking:false};
+    window.masterSessionGuard = guard;
+    guard.recheck = async () => {
+        if (guard.stopped || guard.checking) return;
+        guard.checking = true;
+        try { await checkMasterSession(); }
+        catch (error) { if (!guard.stopped && error.status === 401) await endMasterSession(error.message); }
+        finally { guard.checking = false; }
+    };
+    guard.off = onSnapshot(doc(db, 'master_sessions', 'admin_master'), {includeMetadataChanges:true}, snapshot => {
+        if (guard.stopped || snapshot.metadata?.fromCache) return;
+        const current = snapshot.data();
+        if (current?.sessionId !== guard.id) void endMasterSession('다른 기기에서 접속했습니다. 현재 접속은 로그아웃됩니다.');
+        else if (!(current.expiresAt > Date.now())) void endMasterSession('마스터 인증이 만료되었습니다. 다시 로그인해 주세요.');
+    }, () => { if (!guard.stopped) void guard.recheck(); });
+    guard.timer = setInterval(guard.recheck, 30000);
+    window.addEventListener?.('focus', guard.recheck);
+    document.addEventListener?.('visibilitychange', guard.recheck);
 }
 
 async function hasVerifiedDispatchSession() {
@@ -148,8 +211,7 @@ async function hasVerifiedDispatchSession() {
         const result = await auth.currentUser?.getIdTokenResult();
         if (!result) return false;
         const monitor = (sessionStorage.getItem('deliveryProSessionToken') || '').startsWith('MONITOR-');
-        if (monitor) return result.claims.role === 'MASTER' && result.claims.masterSmsVerified === true &&
-            result.claims.masterSessionExpiresAt > Date.now() / 1000;
+        if (monitor) return hasVerifiedMasterSession();
         return result.claims.role === 'DISPATCH' && auth.currentUser.uid === sessionStorage.getItem('deliveryProDispatchKey');
     } catch (_) { return false; }
 }
@@ -433,6 +495,7 @@ window.handleSingleKeyLogin = async function() {
 };
 
 window.systemLogout = async function() {
+    stopMasterSessionWatch(); stopDataSync();
     const isDispatchLogout=sessionStorage.getItem('deliveryProRole')==='DISPATCH';
     if(isDispatchLogout){
         if(dispatchLogoutPending)return;
@@ -441,6 +504,13 @@ window.systemLogout = async function() {
     }
     const currentKey = sessionStorage.getItem('deliveryProDispatchKey');
     const localToken = sessionStorage.getItem('deliveryProSessionToken');
+
+    if ((sessionStorage.getItem('deliveryProRole') === 'MASTER' || localToken?.startsWith('MONITOR-')) && auth.currentUser) {
+        try {
+            await fetch('/api/login', {method:'POST', headers:{'Content-Type':'application/json', Authorization:'Bearer ' + await auth.currentUser.getIdToken()},
+                body:JSON.stringify({action:'logout-master'})});
+        } catch (_) { console.warn('마스터 접속 해제 확인 실패'); }
+    }
     
     if (isDispatchLogout && currentKey && localToken && !localToken.startsWith('MONITOR-') && auth.currentUser) {
         try {
@@ -505,6 +575,7 @@ window.initMasterDataSync = function() {
     const subscriptions = [], ownerSubscriptions = [];
     const reportError = error => {
         if (stopped) return;
+        if (error?.code === 'permission-denied' && window.masterSessionGuard) { void window.masterSessionGuard.recheck(); return; }
         console.error('관리 데이터 동기화 실패:', error);
         if (!reportError.shown) { reportError.shown = true; alert('일부 데이터 접근 권한을 확인하지 못했습니다. 로그인 상태와 서버 배포를 확인한 뒤 새로고침해 주세요.'); }
     };
