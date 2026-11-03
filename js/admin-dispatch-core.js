@@ -663,29 +663,12 @@ export function updateProButtonsUI() {
     const btnAuto = document.getElementById('btn-pro-auto-dispatch');
     const btnInv = document.getElementById('btn-pro-invoice');
 
-    if (btnAuto) {
-        const badge = btnAuto.querySelector('span');
-        if (badge) {
-            if (isPro) {
-                badge.className = "absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
-                badge.innerHTML = "PRO";
-            } else {
-                badge.className = "absolute -top-1.5 -right-1.5 bg-gray-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
-                badge.innerHTML = '<i class="fa-solid fa-lock text-[8px]"></i> PRO';
-            }
-        }
-    }
-    if (btnInv) {
-        const badge = btnInv.querySelector('span');
-        if (badge) {
-            if (isPro) {
-                badge.className = "absolute -top-1.5 -right-1.5 bg-amber-400 text-slate-950 text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
-                badge.innerHTML = "PRO";
-            } else {
-                badge.className = "absolute -top-1.5 -right-1.5 bg-gray-500 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full border border-white leading-none shadow-sm";
-                badge.innerHTML = '<i class="fa-solid fa-lock text-[8px]"></i> PRO';
-            }
-        }
+    for (const button of [btnAuto, btnInv]) {
+        const badge = button?.querySelector('.dispatch-pro-badge') || button?.querySelector('span');
+        if (!badge) continue;
+        badge.className = 'dispatch-pro-badge' + (isPro ? '' : ' is-locked');
+        badge.textContent = isPro ? 'PRO' : 'PRO 잠금';
+        badge.title = isPro ? 'PRO 이용 중' : 'PRO 관제 전용 기능';
     }
 }
 
