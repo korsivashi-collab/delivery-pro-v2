@@ -7,3 +7,13 @@ fs.mkdirSync(target, { recursive: true });
 const runtime = fs.readFileSync(path.join(root, 'node_modules/@capacitor/core/dist/index.js'), 'utf8');
 fs.writeFileSync(path.join(target, 'capacitor.js'), runtime.replace(/^\/\/# sourceMappingURL=.*$/m, ''));
 fs.copyFileSync(path.join(root, 'node_modules/@capacitor/core/LICENSE'), path.join(target, 'capacitor.LICENSE'));
+
+// Bundle the official RevenueCat wrapper for this project's direct browser ES modules.
+const purchases = path.join(root, 'node_modules/@revenuecat/purchases-capacitor');
+if (fs.existsSync(purchases)) {
+    const result = require('esbuild').buildSync({ entryPoints: [path.join(purchases, 'dist/esm/index.js')],
+        bundle: true, format: 'esm', platform: 'browser', target: 'es2022', external: ['@capacitor/core'],
+        write: false, legalComments: 'inline' });
+    fs.writeFileSync(path.join(target, 'purchases.js'), result.outputFiles[0].text.replaceAll('from "@capacitor/core"', 'from "./capacitor.js"'));
+    fs.copyFileSync(path.join(purchases, 'LICENSE'), path.join(target, 'purchases.LICENSE'));
+}

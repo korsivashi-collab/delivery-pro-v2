@@ -6,6 +6,9 @@
     "androidScheme": "https"
   },
   "plugins": {
+    "SystemBars": {
+      "insetsHandling": "disable"
+    },
     "FirebaseAuthentication": {
       "skipNativeAuth": false,
       "providers": ["phone"]
