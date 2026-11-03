@@ -106,10 +106,81 @@
 @media(max-width:1100px){.customer-template-flow{grid-template-columns:minmax(0,1fr) 24px minmax(0,1fr);gap:14px}.customer-template-column:last-child{grid-column:3}.customer-template-arrow{padding-top:160px}}
 @media(max-width:650px){.customer-template-flow{grid-template-columns:minmax(0,1fr);gap:12px}.customer-template-column:last-child{grid-column:auto}.customer-template-arrow{padding:0;line-height:1;transform:rotate(90deg)}.customer-template-phone{max-width:none}.customer-template-flow+.customer-compose-guidance .customer-preview-note{align-items:flex-start;flex-direction:column}}
 
-.customer-template-actions .customer-primary-button,.customer-template-actions .customer-primary-button:hover:not(:disabled){background:#245bd4;border-color:#245bd4;color:#fff}
-
-.customer-send-mode-panel{margin:18px 22px;padding:18px;background:#f4f7fd;border:1px solid #d6e3f7;border-radius:10px}.customer-send-mode-panel>strong{display:block;font-size:14px;color:#294c7d;margin-bottom:12px}.customer-send-mode-buttons{display:flex;gap:10px;flex-wrap:wrap}.service-card .customer-send-mode-buttons button{padding:12px 22px;min-height:46px;border:1px solid #becfe8;border-radius:8px;background:white;color:#385b8b;font-size:14px;font-weight:800;cursor:pointer}.service-card .customer-send-mode-buttons button[aria-pressed=true],.service-card .customer-send-mode-buttons button[aria-pressed=true]:hover:not(:disabled){background:#245bd4;color:#fff;border-color:#245bd4}.customer-send-mode-panel p{font-size:12px;line-height:1.8;color:#647c9d;margin:10px 0 0}.customer-list-details{margin:12px 22px;color:#7a899d;font-size:11px}.customer-list-details>summary{cursor:pointer;padding:6px 0}.customer-list-details .customer-count-explanation{padding:8px 0}.customer-list-details .customer-diagnosis-summary{padding:4px 0}.customer-selection-tools{display:flex;gap:6px}.customer-selection-tools button{border:1px solid #d5dfec;border-radius:7px;background:white;padding:7px 10px;color:#405e87;cursor:pointer}.customer-list-search{flex-wrap:wrap}
-@media(max-width:650px){.customer-send-mode-panel{margin:16px;padding:14px}.customer-send-mode-buttons{display:grid;grid-template-columns:1fr 1fr;gap:8px}.service-card .customer-send-mode-buttons button{padding:11px 9px;font-size:12px}.customer-list-details{margin:10px 16px}}
+/* Keep the send action visible; settings use checks and neutral surfaces. */
+#customer-delivery-section .service-page-heading{margin-bottom:14px}
+#customer-delivery-section .service-page-heading h2{font-size:23px}
+#customer-delivery-section .customer-send-toolbar{position:sticky;top:0;z-index:20;gap:12px;margin-bottom:16px;padding:12px 16px;border-color:#dce2e9;box-shadow:0 3px 12px #1e293b08;flex-wrap:wrap}
+#customer-delivery-section .customer-wallet-summary{display:flex;gap:10px;align-items:center;white-space:nowrap}
+#customer-delivery-section .customer-wallet-summary strong{font-size:21px;color:#253347}
+.customer-toolbar-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+#customer-delivery-section .customer-toolbar-actions button{color:#475569;border-color:#d7dde5;padding:8px 10px;font-size:11px}
+#customer-delivery-section .customer-send-selection{margin-left:auto;color:#475569;font-size:11px}
+#customer-delivery-section .customer-send-selection strong{color:#253347;font-size:15px}
+#customer-delivery-section #customer-review-button{background:#245bd4;border-color:#245bd4;color:#fff;padding:12px 18px;white-space:nowrap}
+#customer-delivery-section #customer-review-button:hover:not(:disabled){background:#194bb9}
+#customer-delivery-section button:focus-visible,#customer-delivery-section summary:focus-visible{outline:2px solid #64748b;outline-offset:3px}
+#customer-delivery-section .customer-compose-grid{margin-bottom:14px}
+#customer-delivery-section .customer-compose-card{padding:18px 20px}
+#customer-delivery-section .service-card-heading{margin-bottom:12px}
+#customer-delivery-section .customer-template-column>h4{color:#334155;font-size:13px;margin-bottom:9px}
+#customer-delivery-section .customer-template-phone{padding:12px;background:#f1f3f5;border-radius:14px}
+#customer-delivery-section .customer-phone-sender{margin-bottom:8px;color:#64748b}
+#customer-delivery-section .customer-field-label{min-height:20px;margin-bottom:8px;color:#64748b}
+#customer-delivery-section .customer-fixed-content{background:#e9edf1;min-height:82px;padding:8px 12px}
+#customer-delivery-section .customer-template-arrow{color:#94a3b8;padding-top:140px}
+#customer-delivery-section .customer-template-actions{margin-top:8px;gap:8px}
+#customer-delivery-section .customer-template-actions button{padding:8px 12px;color:#475569;border-color:#cbd5e1;background:#fff;font-size:11px}
+#customer-delivery-section .customer-template-actions button:hover:not(:disabled){background:#f1f5f9}
+#customer-delivery-section .customer-compose-guidance{margin-top:12px;padding:10px 0 0}
+#customer-delivery-section .customer-byte-line{margin:0;align-items:center;color:#64748b}
+#customer-delivery-section .customer-byte-line strong{color:#475569}
+#customer-delivery-section .customer-byte-line strong.is-over{color:#b23838}
+#customer-delivery-section .customer-compose-guidance>.customer-help{margin:5px 0;color:#64748b;font-size:11px}
+#customer-delivery-section .customer-compose-guidance>.customer-help:empty{display:none}
+#customer-delivery-section .customer-compose-guidance>.is-error{color:#b23838}
+.customer-compose-details{font-size:11px;color:#64748b;margin-top:7px;line-height:1.7}
+.customer-compose-details summary{cursor:pointer;width:fit-content}
+.customer-compose-details p{margin:6px 0}
+#customer-delivery-section .customer-list-heading{padding:14px 20px 10px;flex-direction:row;align-items:center;flex-wrap:wrap}
+#customer-delivery-section .customer-list-tools{color:#475569}
+#customer-delivery-section .customer-list-summary{padding:9px 20px;gap:18px;background:#f8fafc}
+#customer-delivery-section .customer-list-summary button{color:#475569}
+.customer-send-mode-panel{display:flex;align-items:center;gap:10px 14px;flex-wrap:wrap;margin:0;padding:12px 20px;border-bottom:1px solid #e5e7eb;background:#fff}
+.customer-send-mode-panel>strong{font-size:12px;color:#475569;white-space:nowrap}
+.customer-send-mode-buttons{display:flex;gap:7px;flex-wrap:wrap}
+.service-card .customer-send-mode-buttons button{padding:8px 10px;border:1px solid #d1d9e0;border-radius:7px;background:#fff;color:#64748b;font-size:12px;cursor:pointer}
+.service-card .customer-send-mode-buttons button::before{content:'○';margin-right:6px}
+.service-card .customer-send-mode-buttons button[aria-pressed=true],.service-card .customer-send-mode-buttons button[aria-pressed=true]:hover:not(:disabled){background:#edf5f0;color:#285c43;border-color:#8cb69d}
+.service-card .customer-send-mode-buttons button[aria-pressed=true]::before{content:'✓'}
+.service-card .customer-send-mode-buttons button[aria-pressed=true]::after{content:'선택됨';margin-left:7px;font-size:10px;font-weight:500}
+.customer-send-mode-panel p{font-size:11px;line-height:1.6;color:#64748b;margin:0}
+#customer-delivery-section .customer-filter-tabs{padding:10px 20px 0;gap:6px}
+#customer-delivery-section .customer-filter-tabs button{color:#64748b;border-color:#d8dee6;background:#fff}
+#customer-delivery-section .customer-filter-tabs button[aria-pressed=true]{color:#334155;background:#e9edf2;border-color:#94a3b8;box-shadow:inset 0 -2px #64748b}
+.customer-list-details{margin:8px 20px;color:#64748b;font-size:11px}
+.customer-list-details>summary{cursor:pointer;padding:4px 0}
+.customer-list-details .customer-count-explanation{padding:8px 0}
+.customer-list-details .customer-diagnosis-summary{padding:4px 0}
+.customer-selection-tools{display:flex;gap:6px}
+.customer-selection-tools button{border:1px solid #d5dfec;border-radius:7px;background:white;padding:7px 10px;color:#475569;cursor:pointer}
+#customer-delivery-section .customer-list-search{flex-wrap:wrap;padding:10px 20px;color:#64748b}
+#customer-delivery-section .customer-list-footer{flex-wrap:wrap}
+#customer-delivery-section input[type=checkbox]{accent-color:#475569}
+@media(max-width:650px){
+ #customer-delivery-section .customer-send-toolbar{gap:9px;padding:10px;position:static}
+ #customer-delivery-section .customer-wallet-summary{flex:1}
+ #customer-delivery-section .customer-toolbar-actions{order:2;width:100%}
+ #customer-delivery-section .customer-send-selection{order:1;margin-left:auto;flex:initial;text-align:right}
+ #customer-delivery-section #customer-review-button{order:3;width:100%;padding:11px 12px;font-size:12px}
+ #customer-delivery-section .customer-compose-card{padding:14px}
+ #customer-delivery-section .customer-template-arrow{padding:0}
+ #customer-delivery-section .customer-list-heading{padding:12px 14px}
+ .customer-send-mode-panel{padding:10px 14px;gap:8px}
+ .customer-send-mode-buttons{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:6px}
+ .service-card .customer-send-mode-buttons button{padding:9px 6px;font-size:11px}
+ .service-card .customer-send-mode-buttons button[aria-pressed=true]::after{display:block;margin:3px 0 0}
+ .customer-list-details{margin:8px 14px}
+}
 
 /* Map address lookup and phone labels use only the existing dispatch map. */
 .driver-route-phone-label{border:2px solid #fff;border-radius:8px;padding:5px 9px;color:#fff;font:700 12px/1.3 Arial,sans-serif;white-space:nowrap;box-shadow:0 2px 7px #0004;cursor:pointer}
