@@ -12,7 +12,7 @@
 
     <!-- 공통 분리 스타일시트 -->
     <link rel="stylesheet" href="./css/admin.css">
-    <link rel="stylesheet" href="./css/admin-header.css?v=20261103-header-colors-video">
+    <link rel="stylesheet" href="./css/admin-header.css?v=20261103-map-search">
     <script src="./js/admin-header-ui.js" defer></script>
 
     <!-- 카카오 맵 API (services 라이브러리 포함) -->
@@ -45,16 +45,6 @@
                     <button type="button" id="btn-pro-auto-dispatch" onclick="window.handleProFeature('AUTO_DISPATCH')"><span class="dispatch-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h3c6 0 6 12 12 12h3M17 14l4 4-4 4M3 18h3c2 0 3-2 4-4m4-4c1-2 2-4 4-4h3M17 2l4 4-4 4"/></svg></span><span>자동할당</span><span class="dispatch-pro-badge">PRO</span></button>
                     <button type="button" id="btn-pro-invoice" onclick="window.handleProFeature('INVOICE')"><span class="dispatch-nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H5v20h14V7Z"/><path d="M14 2v5h5M8 11h8M8 15h8M8 19h5"/></svg></span><span>주문서 통합관리</span><span class="dispatch-pro-badge">PRO</span></button>
                 </nav>
-            </div>
-            <div class="dispatch-workspace-tools">
-                <div class="dispatch-search">
-                    <div class="relative w-full flex items-center">
-                        <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400" aria-hidden="true"></i>
-                        <input type="search" id="global-search-input" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();window.searchAddressFromHeader()}" placeholder="주소·상호 또는 기사명·연락처로 검색하세요" aria-label="주소 검색 또는 배송 기록 검색" class="w-full pl-9 pr-16 border outline-none">
-                        <div class="absolute right-2 flex items-center"><button type="button" onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden" aria-label="검색어 지우기"><i class="fa-solid fa-circle-xmark"></i></button><button type="button" id="header-address-search" onclick="window.searchAddressFromHeader()">주소 검색</button><button type="button" id="header-record-search" onclick="window.closeAddressRouteSearch();window.handleGlobalSearch(document.getElementById('global-search-input').value)">기록 검색</button></div>
-                    </div>
-                </div>
-                <details data-guide-videos="dispatch" class="guide-video-menu"><summary>사용 안내 영상</summary><nav aria-label="관제 안내 영상"><a href="https://www.youtube.com/watch?v=eLgW2m57bJs" title="선명하게 보려면 영상 설정 → 화질에서 가장 높은 해상도를 선택하세요" target="_blank" rel="noopener noreferrer" style="display:block;padding:10px 12px;color:#1d4ed8;text-decoration:underline;text-underline-offset:3px;font-size:13px;line-height:1.5">▶ 관제웹 기본기능</a><a href="https://www.youtube.com/watch?v=pfrSlxXyWkE" title="선명하게 보려면 영상 설정 → 화질에서 가장 높은 해상도를 선택하세요" target="_blank" rel="noopener noreferrer" style="display:block;padding:10px 12px;color:#1d4ed8;text-decoration:underline;text-underline-offset:3px;font-size:13px;line-height:1.5">▶ 관제웹 PRO기능</a><a href="https://www.youtube.com/watch?v=WRQz6fgF6lw" title="선명하게 보려면 영상 설정 → 화질에서 가장 높은 해상도를 선택하세요" target="_blank" rel="noopener noreferrer" style="display:block;padding:10px 12px;color:#1d4ed8;text-decoration:underline;text-underline-offset:3px;font-size:13px;line-height:1.5">▶ 배송안내 문자서비스</a><a href="https://www.youtube.com/watch?v=hU8bh4lJBH8" title="선명하게 보려면 영상 설정 → 화질에서 가장 높은 해상도를 선택하세요" target="_blank" rel="noopener noreferrer" style="display:block;padding:10px 12px;color:#1d4ed8;text-decoration:underline;text-underline-offset:3px;font-size:13px;line-height:1.5">▶ 도입효과와 요금안내</a><p class="guide-video-quality">화면이 흐리면 영상의 <strong>⚙ 설정 → 화질 → 가장 높은 해상도</strong>를 선택하세요.</p></nav></details>
             </div>
             <div class="dispatch-header-actions">
                 <button type="button" id="nav-btn-ACCOUNT" onclick="window.setDispatchMode('ACCOUNT')" aria-pressed="false" class="dispatch-account-button"><span>이용정보</span><small id="dispatch-expiry-label">사용기한 확인 중</small></button>
@@ -102,7 +92,14 @@
 
                 <!-- 필터 컨트롤 -->
                 <div id="map-filter-controls" class="absolute top-4 right-4 z-20 bg-white/95 backdrop-blur-sm border border-gray-200 rounded-xl shadow-lg p-1.5 flex items-center gap-1 text-xs font-black">
-                    <button type="button" id="btn-address-route-search" onclick="window.openAddressRouteSearch()" class="px-3 py-1.5 rounded-lg text-blue-700 hover:bg-blue-50"><i class="fa-solid fa-location-dot mr-1"></i>주소 검색</button>
+                    <div class="dispatch-search map-search" role="search">
+                        <div class="relative w-full flex items-center">
+                            <i class="fa-solid fa-magnifying-glass absolute left-3.5 text-gray-400" aria-hidden="true"></i>
+                            <input type="search" id="global-search-input" onkeydown="if(event.key==='Enter'&&!event.isComposing){event.preventDefault();window.searchAddressFromHeader()}" placeholder="주소·상호 또는 기사명·연락처로 검색하세요" aria-label="주소 검색 또는 배송 기록 검색" class="w-full pl-9 pr-16 border outline-none">
+                            <div class="absolute right-2 flex items-center"><button type="button" onclick="window.clearSearchInput()" id="search-clear-btn" class="hidden" aria-label="검색어 지우기"><i class="fa-solid fa-circle-xmark"></i></button><button type="button" id="header-record-search" onclick="window.closeAddressRouteSearch();window.handleGlobalSearch(document.getElementById('global-search-input').value)">기록 검색</button></div>
+                        </div>
+                    </div>
+                    <button type="button" id="btn-address-route-search" onclick="window.searchAddressFromHeader()" class="px-3 py-1.5 rounded-lg text-blue-700 hover:bg-blue-50"><i class="fa-solid fa-location-dot mr-1"></i>주소 검색</button>
                     <button onclick="window.setMapPolylineMode('all')" id="btn-mode-all" class="px-3 py-1.5 rounded-lg bg-blue-600 text-white transition shadow-sm font-black">전체 경로</button>
                     <button onclick="window.setMapPolylineMode('planned')" id="btn-mode-planned" class="px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black"><span class="w-2.5 h-2.5 rounded-full bg-blue-600 border border-white shadow-sm"></span> 배송 경로</button>
                     <button onclick="window.setMapPolylineMode('completed')" id="btn-mode-completed" class="px-3 py-1.5 rounded-lg text-gray-700 hover:bg-gray-100 transition flex items-center gap-1 font-black"><span class="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-white shadow-sm"></span> 완료 경로</button>
