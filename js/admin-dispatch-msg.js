@@ -474,7 +474,7 @@ export function renderCustomerDeliveryList(){
  customerSelectedNumbers=new Set([...customerSelectedNumbers].filter(n=>ready.has(n)));
  for(const [id,value]of [['customer-order-count',orders.length],['customer-stop-count',groups.length],['customer-phone-count',phones.size],['customer-invalid-count',groups.filter(g=>!g.phone).length]])document.getElementById(id).textContent=value.toLocaleString('ko-KR');
  const sourceNote=document.getElementById('customer-source-note');if(sourceNote)sourceNote.textContent=`통합주문 ${customerLoadedOrders.length}건 + 기사 경로 추가 ${added}건 · 일치 ${matched}건 · 연결 경로 ${routeCount}개. 배송번호별로 선택하며 번호·연락처·주소·기사 배정이 있어야 발송 가능합니다.`;
- document.getElementById('customer-count-explanation').textContent=`배송 ${groups.length}건 · 발송 가능 ${ready.size}건 · 휴대폰 번호 ${phones.size}개. 동일 주소 1건 발송은 주소·수신번호가 같은 선택 배송들을 문자 한 건으로 안내합니다. 전체 발송은 배송번호마다 문자 1건(35원)입니다.`;
+ document.getElementById('customer-count-explanation').textContent=`배송 ${groups.length}건 · 발송 가능 ${ready.size}건 · 목록 내 수신번호 ${phones.size}개(같은 번호는 1개로 계산). 실제 발송 문자 수와 다를 수 있습니다. 동일 주소 1건 발송은 주소·수신번호가 같은 선택 배송들을 문자 한 건으로 안내합니다. 전체 발송은 배송번호마다 문자 1건(35원)입니다.`;
  const frequencies=customerPhoneFrequencies(groups),diagnosis=document.getElementById('customer-diagnosis-summary');
  if(diagnosis)diagnosis.innerHTML=[['duplicate','동일 연락처 배송',groups.filter(g=>(frequencies.get(g.phone)||0)>1).length],['blocked','발송 제외',groups.filter(g=>!ready.has(g.deliveryNumber)).length],['invalid','연락처 확인',groups.filter(g=>!g.phone).length],['unassigned','미배정',groups.filter(g=>g.unassigned).length]].map(([filter,title,count])=>`<button type="button" onclick="window.setCustomerDeliveryFilter('${filter}')"><span>${title}</span><b>${count}건</b></button>`).join('');
  const all=document.getElementById('customer-select-all');if(all){all.checked=ready.size>0&&customerSelectedNumbers.size===ready.size;all.indeterminate=customerSelectedNumbers.size>0&&customerSelectedNumbers.size<ready.size;all.disabled=!ready.size||customerSendBusy;}
@@ -508,7 +508,7 @@ function renderCustomerSmsMode(){
  const description=document.getElementById('customer-mode-description');if(description)description.textContent=mode==='per-address'?'같은 주소·같은 연락처의 선택 주문들을 문자 한 건으로 안내합니다.':'선택한 주문의 배송번호마다 각각 문자 한 건을 발송합니다.';
 }
 export function changeCustomerSmsMode(mode){if(customerSendBusy)return;const input=document.getElementById('customer-sms-mode');if(input&&['per-address','per-delivery'].includes(mode))input.value=mode;customerPreparedBatch=null;updateCustomerMessagePreview();}
-function updateCustomerSelectionSummary(){const count=customerSelectedNumbers.size,smsCount=customerSelectedMessageGroups().length,number=document.getElementById('customer-selected-count');if(number)number.textContent=count;const cost=document.getElementById('customer-selected-cost');if(cost)cost.textContent=`문자 ${smsCount}건 · 예상 ${customerMoney(smsCount*CUSTOMER_SMS_PRICE)} · 부가세 포함`;const summary=document.getElementById('customer-list-selection');if(summary)summary.textContent=`배송번호 ${count}건 선택 · 문자 ${smsCount}건 · 예상 ${customerMoney(smsCount*CUSTOMER_SMS_PRICE)}`;const button=document.getElementById('customer-review-button');if(button)button.textContent=smsCount?`문자 메시지 보내기 (${smsCount}건)`:'문자 메시지 보내기';}
+function updateCustomerSelectionSummary(){const count=customerSelectedNumbers.size,smsCount=customerSelectedMessageGroups().length,number=document.getElementById('customer-selected-count');if(number)number.textContent=count;const cost=document.getElementById('customer-selected-cost');if(cost)cost.textContent=`발송 예정 문자 ${smsCount}건 · 예상 ${customerMoney(smsCount*CUSTOMER_SMS_PRICE)} · 부가세 포함`;const summary=document.getElementById('customer-list-selection');if(summary)summary.textContent=`선택 배송 ${count}건 · 발송 예정 문자 ${smsCount}건 · 예상 ${customerMoney(smsCount*CUSTOMER_SMS_PRICE)}`;const button=document.getElementById('customer-review-button');if(button)button.textContent=smsCount?`문자 메시지 보내기 (${smsCount}건)`:'문자 메시지 보내기';}
 function openCustomerDialog(title,html){const dialog=document.getElementById('customer-action-dialog');if(!dialog)return;customerDialogFocus=document.activeElement;document.getElementById('customer-dialog-heading').textContent=title;document.getElementById('customer-dialog-body').innerHTML=html;if(!dialog.open)dialog.showModal();}
 export function closeCustomerDialog(){const dialog=document.getElementById('customer-action-dialog');if(dialog?.open){dialog.close();if(customerDialogFocus?.isConnected)customerDialogFocus.focus();}}
 let customerTrackingBusy=false;
@@ -556,25 +556,95 @@ async function sendPreparedCustomerSms(){
    const progress=document.getElementById('customer-send-progress');if(progress)progress.textContent=`모래시계 · 발송 처리 중 ${part+1}/${customerPreparedBatch.parts.length}. 창을 닫아도 결과 확인 후 다시 진행해 주세요.`;
    customerPreparedBatch=await customerTrackingRequest({action:'send-sms',batchId,part,confirm:true});rememberCustomerBatch(customerPreparedBatch);
   }
+  if(customerResultsRefresh)await customerResultsRefresh.promise;
   await refreshCustomerSmsResults();
  }catch(e){failed=true;openCustomerDialog('발송 결과 확인 필요',`<p>${escapeMessage(e.message)}</p><p>이미 접수된 문자가 있을 수 있습니다. 재발송하지 말고 발송 결과 확인을 눌러 주세요.</p><button type="button" id="customer-recover-status">발송 결과 확인</button>`);document.getElementById('customer-recover-status').onclick=refreshCustomerSmsResults;}
- finally{customerSendBusy=false;renderCustomerSmsMode();for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=false;}if(!failed&&customerPreparedBatch&&owner===customerDispatchKey())renderCustomerSendReview(customerPreparedBatch);renderCustomerDeliveryList();refreshDispatchWallet();}
+ finally{customerSendBusy=false;renderCustomerSmsMode();for(const id of ['customer-delivery-date','customer-refresh-button','customer-sms-mode','customer-message-input','customer-draft-load','customer-draft-save']){const el=document.getElementById(id);if(el)el.disabled=false;}if(!failed&&customerPreparedBatch&&owner===customerDispatchKey()&&customerPreparedBatch.parts.some(p=>p.status==='prepared'))renderCustomerSendReview(customerPreparedBatch);renderCustomerDeliveryList();refreshDispatchWallet();}
 }
-export async function refreshCustomerSmsResults(showDialog=true){
- const key='customerSmsBatches:'+encodeURIComponent(customerDispatchKey())+':'+document.getElementById('customer-delivery-date').value;
- let ids=[];try{ids=JSON.parse(localStorage.getItem(key)||'[]');}catch{}
- try{
-  const numbers=currentCustomerGroups().groups.map(g=>g.deliveryNumber).filter(Boolean);
-  if(numbers.length){const receipts=await customerTrackingRequest({action:'sms-receipts',deliveryNumbers:numbers});
-   for(const [number,status]of Object.entries(receipts.states||{}))customerSendStates.set(number,status);
-   ids=[...new Set([...ids,...receipts.batchIds])];}
- }catch(e){const p=document.getElementById('customer-send-progress');if(p)p.textContent=e.message;}
- for(const batchId of ids){try{
-  let batch=await customerTrackingRequest({action:'sms-status',batchId});
-  for(let part=0;part<batch.parts.length;part++)if(batch.parts[part].status==='accepted')batch=await customerTrackingRequest({action:'sms-status',batchId,part});
-  rememberCustomerBatch(batch);if(!customerPreparedBatch||customerPreparedBatch.batchId===batchId)customerPreparedBatch=batch;
- }catch(e){const p=document.getElementById('customer-send-progress');if(p)p.textContent=e.message;}}
- renderCustomerDeliveryList();if(showDialog&&customerPreparedBatch&&!customerSendBusy)renderCustomerSendReview(customerPreparedBatch);refreshDispatchWallet();
+let customerResultsRefresh=null,customerResultsPage=1;
+function openCustomerResultsView(message){
+ customerResultsPage=1;
+ openCustomerDialog('문자 발송 결과',`<p>현재 배송일의 배송별 결과입니다. 같은 번호로 보낸 여러 배송도 각각 표시합니다.</p><div id="customer-results-summary" class="customer-results-summary" aria-live="polite"></div><p id="customer-results-progress" class="customer-dialog-note" role="status"></p><button type="button" id="customer-results-refresh">결과 다시 확인</button><details id="customer-results-details" class="customer-results-details"><summary>배송별 상세 결과 보기</summary><div id="customer-results-list"></div></details>`);
+ document.getElementById('customer-results-refresh').onclick=()=>refreshCustomerSmsResults();
+ document.getElementById('customer-results-details').ontoggle=()=>renderCustomerResultDetails();
+ updateCustomerResultsView(message);
+}
+function updateCustomerResultsView(message){
+ const summary=document.getElementById('customer-results-summary');if(!summary)return;
+ const counts={success:0,failed:0,pending:0,unsent:0};
+ for(const g of currentCustomerGroups().groups){const status=customerSendStates.get(g.deliveryNumber);counts[status==='success'?'success':status==='failed'?'failed':status?'pending':'unsent']++;}
+ summary.innerHTML=[['success','발송 완료'],['failed','발송 실패'],['pending','확인 중'],['unsent','미발송·기록 없음']].map(([status,label])=>`<div class="is-${status}"><span>${label}</span><strong>${counts[status]}<small>건</small></strong></div>`).join('');
+ if(message!==undefined)document.getElementById('customer-results-progress').textContent=message;
+ const refresh=document.getElementById('customer-results-refresh');refresh.disabled=!!customerResultsRefresh;refresh.textContent=customerResultsRefresh?'결과 확인 중…':'결과 다시 확인';
+ renderCustomerResultDetails();
+}
+function renderCustomerResultDetails(){
+ const details=document.getElementById('customer-results-details'),list=document.getElementById('customer-results-list');if(!details?.open||!list)return;
+ const groups=currentCustomerGroups().groups,pages=Math.max(1,Math.ceil(groups.length/50));customerResultsPage=Math.min(customerResultsPage,pages);
+ const start=(customerResultsPage-1)*50;
+ list.innerHTML=`<table class="customer-results-table"><thead><tr><th>배송번호</th><th>수신번호</th><th>발송 상태</th></tr></thead><tbody>${groups.slice(start,start+50).map(g=>`<tr><td>${escapeMessage(g.deliveryNumber||'미발급')}</td><td>${escapeMessage(g.phone||'번호 확인 필요')}</td><td>${customerStateLabel(g.deliveryNumber)}</td></tr>`).join('')||'<tr><td colspan="3">표시할 배송이 없습니다.</td></tr>'}</tbody></table><div class="customer-results-pagination"><span>${customerResultsPage} / ${pages} 페이지 · 배송 ${groups.length}건</span><button type="button" id="customer-results-prev" ${customerResultsPage===1?'disabled':''}>이전</button><button type="button" id="customer-results-next" ${customerResultsPage===pages?'disabled':''}>다음</button></div>`;
+ document.getElementById('customer-results-prev').onclick=()=>{customerResultsPage--;renderCustomerResultDetails();};
+ document.getElementById('customer-results-next').onclick=()=>{customerResultsPage++;renderCustomerResultDetails();};
+}
+function mergeCustomerResult(batch){
+ // Responses may finish out of order. A saved final result must never return to pending.
+ for(const [number,status]of Object.entries(batch.states||{}))if(!['success','failed'].includes(customerSendStates.get(number)))customerSendStates.set(number,status);
+ if(customerPreparedBatch&&customerPreparedBatch.batchId===batch.batchId){
+  customerPreparedBatch.states={...customerPreparedBatch.states,...Object.fromEntries(Object.keys(batch.states||{}).map(n=>[n,customerSendStates.get(n)]))};
+  if(batch.part!==undefined&&customerPreparedBatch.parts[batch.part])customerPreparedBatch.parts[batch.part].status=batch.partStatus;
+ }
+}
+async function runCustomerResultTasks(items,run){
+ let next=0;
+ await Promise.all(Array.from({length:Math.min(3,items.length)},async()=>{while(next<items.length){const item=items[next++];await run(item);}}));
+}
+export function refreshCustomerSmsResults(showDialog=true){
+ const owner=customerDispatchKey(),date=document.getElementById('customer-delivery-date')?.value,version=customerLoadVersion;
+ const same=customerResultsRefresh&&customerResultsRefresh.owner===owner&&customerResultsRefresh.date===date&&customerResultsRefresh.version===version;
+ if(showDialog)openCustomerResultsView(same?customerResultsRefresh.message:'저장된 발송 상태를 불러오는 중입니다.');
+ if(same)return customerResultsRefresh.promise;
+ const job={owner,date,version,message:'저장된 발송 상태를 불러오는 중입니다.',promise:null};customerResultsRefresh=job;
+ const active=()=>customerResultsRefresh===job&&owner===customerDispatchKey()&&date===document.getElementById('customer-delivery-date')?.value&&version===customerLoadVersion;
+ let timer=null,errors=0,completed=0,total=0;
+ const paint=()=>{timer=null;if(active()){renderCustomerDeliveryList();updateCustomerResultsView(job.message);}};
+ const schedule=()=>{if(timer===null)timer=setTimeout(paint,100);};
+ job.promise=(async()=>{
+  try{
+   const numbers=currentCustomerGroups().groups.map(g=>g.deliveryNumber).filter(Boolean);
+   const before=new Map(customerSendStates);
+   const receipts=numbers.length?await customerTrackingRequest({action:'sms-receipts',deliveryNumbers:numbers}):{states:{},batchIds:[]};
+   if(!active())return;
+   // Stored receipts are authoritative; old browser history must not trigger completed batches again.
+   for(const [number,status]of Object.entries(receipts.states||{}))if(customerSendStates.get(number)===before.get(number))customerSendStates.set(number,status);
+   job.message='저장된 결과를 표시했습니다. 확인 중인 발송만 갱신합니다.';paint();
+   const tasks=[];
+   await runCustomerResultTasks([...new Set(receipts.batchIds||[])],async batchId=>{
+    if(!active())return;
+    try{const batch=await customerTrackingRequest({action:'sms-status',batchId,summaryOnly:true});if(!active())return;mergeCustomerResult(batch);
+     (batch.parts||[]).forEach((part,index)=>{if(part.status==='accepted')tasks.push({batchId,part:index});});
+    }catch{if(active())errors++;}
+   });
+   total=tasks.length;
+   await runCustomerResultTasks(tasks,async task=>{
+    if(!active())return;
+    try{const batch=await customerTrackingRequest({action:'sms-status',...task,summaryOnly:true});if(active())mergeCustomerResult(batch);}catch{if(active())errors++;}
+    if(active()){completed++;job.message=`발송 묶음 확인 ${completed} / ${total} · 끝나는 대로 반영합니다.`;schedule();}
+   });
+   if(active()){
+    const pending=currentCustomerGroups().groups.some(g=>customerSendStates.get(g.deliveryNumber)==='pending');
+    job.message=errors?`일부 결과를 갱신하지 못했습니다(${errors}개 요청). 저장된 결과는 유지합니다. 확인 중인 건은 다시 보내지 말고 잠시 후 결과를 확인해 주세요.`:pending?'결과 확인을 마쳤습니다. 확인 중인 건은 아직 최종 결과가 나오지 않았습니다. 재발송하지 마세요.':'저장된 발송 결과를 모두 확인했습니다.';
+   }
+  }catch(e){if(active())job.message=`결과를 불러오지 못했습니다. 현재 표시된 상태를 유지합니다. ${e.message}`;}
+  finally{
+   if(timer!==null)clearTimeout(timer);
+   if(active()){
+    paint();customerResultsRefresh=null;updateCustomerResultsView(job.message);refreshDispatchWallet();
+    const button=document.getElementById('customer-results-button');if(button){button.textContent='발송 결과 확인';button.removeAttribute('aria-busy');}
+   }else if(customerResultsRefresh===job)customerResultsRefresh=null;
+  }
+ })();
+ const button=document.getElementById('customer-results-button');if(button){button.textContent='결과 확인 중 · 보기';button.setAttribute('aria-busy','true');}
+ return job.promise;
 }
 export function openCustomerContactGuide(){openCustomerDialog('배송 문의번호 운영 안내','<p><b>배송 문의는 각 배송업체 대표번호로 연결하는 방식을 권합니다.</b> 기사 개인번호는 노출하지 않고, 배송조회 화면 아래에 업체명·문의번호·응대시간을 안내합니다.</p><p>문자에는 짧은 조회 안내를 유지하고, 문의번호는 조회 화면에 표시하면 단문 입력 공간도 확보할 수 있습니다.</p><p class="customer-dialog-note">050 안심번호는 번호 보호·연결 서비스이고, 자동응답(ARS)은 별도 기능입니다. 필요할 때 업체별 문의 분배·응대시간 안내를 검토하되, SMS 발신번호로 사용할 수 있는지는 번호 상품과 SENS 등록 조건을 별도로 확인해야 합니다.</p>');}
 export function setDispatchBillingTab(tab){renderDispatchAccount('BILLING');document.getElementById(tab==='sms'?'dispatch-billing-sms':'dispatch-billing-service')?.scrollIntoView({block:'start'});}

@@ -62,8 +62,9 @@ function createSmsService({env=process.env,fetchImpl=(...args)=>fetch(...args),n
   const account=(await db.collection('licenses').doc(key).get()).data();authorize(account,identity,key);
   if(input.action==='sms-receipts'){
    if(!Array.isArray(input.deliveryNumbers)||input.deliveryNumbers.length>1000||input.deliveryNumbers.some(n=>!/^[A-Za-z0-9]{5}$/.test(n)))throw problem('배송번호를 확인해 주세요.');
-   const docs=await Promise.all([...new Set(input.deliveryNumbers)].map(n=>db.collection('delivery_sms_receipts').doc(receiptId(key,input.date,n)).get()));
-   const states={},ids=new Set();docs.forEach((d,i)=>{if(d.exists){states[[...new Set(input.deliveryNumbers)][i]]=d.data().status;if(d.data().batchId)ids.add(d.data().batchId);}});
+   const numbers=[...new Set(input.deliveryNumbers)],refs=numbers.map(n=>db.collection('delivery_sms_receipts').doc(receiptId(key,input.date,n)));
+   const docs=refs.length?await db.getAll(...refs):[];
+   const states={},ids=new Set();docs.forEach((d,i)=>{if(d.exists){const receipt=d.data();states[numbers[i]]=receipt.status;if(receipt.status==='pending'&&receipt.batchId)ids.add(receipt.batchId);}});
    return {states,batchIds:[...ids]};
   }
   if(!/^[a-f0-9]{64}$/.test(input.batchId||''))throw problem('발송 확인 화면을 다시 열어 주세요.');
@@ -91,7 +92,12 @@ function createSmsService({env=process.env,fetchImpl=(...args)=>fetch(...args),n
      tx.set(ref,{...current,parts,states});
     });
    }
-   return publicBatch((await ref.get()).data(),input.batchId);
+   const current=(await ref.get()).data();
+   if(input.summaryOnly===true){
+    const states=input.part===undefined?current.states||{}:Object.fromEntries(current.parts[input.part].indices.flatMap(i=>messageNumbers(current.messages[i])).filter(n=>current.states?.[n]).map(n=>[n,current.states[n]]));
+    return {batchId:input.batchId,date:current.date,states,...(input.part===undefined?{parts:current.parts.map(p=>({status:p.status,count:p.indices.length}))}:{part:input.part,partStatus:current.parts[input.part].status})};
+   }
+   return publicBatch(current,input.batchId);
   }
   if(input.action!=='send-sms'||input.confirm!==true||!Number.isInteger(input.part)||!batch.parts[input.part])throw problem('최종 발송 승인과 대상을 확인해 주세요.');
   config();
