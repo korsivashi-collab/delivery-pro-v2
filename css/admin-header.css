@@ -182,13 +182,17 @@
  .customer-list-details{margin:8px 14px}
 }
 
-/* Billing support remains visible at both ends of the page. */
-.billing-contact-banner{max-width:1480px;margin:0 auto 22px;padding:22px 28px;display:flex;align-items:center;justify-content:space-between;gap:20px;border:1px solid #cbd5e1;border-radius:14px;background:#fff;box-shadow:0 3px 12px #1e293b05;color:#24334b}
-.billing-contact-copy{display:flex;align-items:center;gap:15px;min-width:0}.billing-contact-icon{display:grid;place-items:center;flex-shrink:0;width:48px;height:48px;border-radius:50%;background:#eef2f6;color:#475569}.billing-contact-icon svg{width:25px;height:25px}
-.billing-contact-copy strong{font-size:19px;font-weight:800}.billing-contact-copy p{margin:5px 0 0;font-size:12px;line-height:1.6;color:#64748b}
-.billing-contact-banner>a{font-size:34px;font-weight:800;letter-spacing:-1px;line-height:1.3;color:#24334b;text-decoration:none;white-space:nowrap}.billing-contact-banner>a:hover{text-decoration:underline;text-underline-offset:6px}.billing-contact-banner>a:focus-visible{outline:2px solid #64748b;outline-offset:6px;border-radius:4px}
-#dispatch-account-content>.billing-contact-banner:last-child{margin-top:24px;margin-bottom:0}
-@media(max-width:650px){.billing-contact-banner{padding:20px;align-items:flex-start;flex-direction:column;gap:14px}.billing-contact-copy{gap:11px}.billing-contact-icon{width:40px;height:40px}.billing-contact-copy strong{font-size:17px}.billing-contact-copy p{font-size:11px}.billing-contact-banner>a{font-size:30px;letter-spacing:-.8px}}
+/* A full-size contact card occupies the empty right side of the billing introduction. */
+.billing-overview{display:grid;grid-template-columns:minmax(0,1fr) 430px;gap:36px;align-items:center;max-width:1480px;margin:0 auto 26px}
+.billing-overview-copy{min-width:0}.billing-overview-copy .service-page-heading{margin:0 0 24px;align-items:flex-start}.billing-overview-copy .dispatch-products-intro{margin:0}.billing-overview-copy .service-status-tag{display:none}
+.billing-contact-banner{width:430px;max-width:100%;min-height:178px;margin:0 0 24px auto;padding:26px;display:flex;align-items:flex-start;flex-direction:column;justify-content:center;gap:22px;border:1px solid #cbd5e1;border-radius:18px;background:#fff;box-shadow:0 5px 18px #1e293b08;color:#24334b}
+.billing-overview>.billing-contact-banner{margin:0}
+.billing-contact-copy{display:flex;align-items:center;gap:15px;min-width:0}.billing-contact-icon{display:grid;place-items:center;flex-shrink:0;width:50px;height:50px;border-radius:50%;background:#eef2f6;color:#475569}.billing-contact-icon svg{width:26px;height:26px}
+.billing-contact-copy strong{font-size:21px;font-weight:800}.billing-contact-copy p{margin:6px 0 0;font-size:12px;line-height:1.6;color:#64748b}
+.billing-contact-banner>a{font-size:40px;font-weight:800;letter-spacing:-1.2px;line-height:1.2;color:#24334b;text-decoration:none;white-space:nowrap}.billing-contact-banner>a:hover{text-decoration:underline;text-underline-offset:6px}.billing-contact-banner>a:focus-visible{outline:2px solid #64748b;outline-offset:6px;border-radius:4px}
+#dispatch-account-content>.billing-contact-banner:last-child{margin:24px max(0px,calc((100% - 1480px)/2)) 0 auto}
+@media(max-width:1000px){.billing-overview{grid-template-columns:minmax(0,1fr) 370px;gap:24px}.billing-contact-banner{width:370px;padding:24px}.billing-contact-banner>a{font-size:35px}.billing-contact-copy strong{font-size:19px}.billing-contact-copy{gap:11px}}
+@media(max-width:750px){.billing-overview{grid-template-columns:minmax(0,1fr);gap:20px}.billing-contact-banner{width:100%;padding:24px;min-height:168px}.billing-contact-banner>a{font-size:clamp(28px,8vw,38px);letter-spacing:-1px}.billing-contact-icon{width:44px;height:44px}.billing-contact-copy strong{font-size:19px}.billing-contact-copy p{font-size:11px}}
 
 /* Result summaries open before remote receipt refreshes finish. */
 .customer-results-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:18px 0}
